@@ -1,32 +1,37 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
-{% load static user_extras %}
+{% load static user_extras i18n %}
 <!DOCTYPE html>
 <html lang="en" class="theme-dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{{ page_title|default:"Documentation" }}{% endblock %} - Shifter</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
-    <link rel="stylesheet" href="{% static 'css/sidebar.css' %}">
-    <link rel="stylesheet" href="{% static 'css/documentation.css' %}">
-    <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
-    {% block extra_css %}{% endblock %}
-</head>
-<body class="theme-dark">
-    {% include "partials/icon_sidebar.html" %}
-
-    <div class="layout">
-        <main class="main docs-main">
-            {% block content %}{% endblock %}
-        </main>
-    </div>
-
-    <script src="{% static 'js/sidebar.js' %}"></script>
-    <script type="module">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1.0">
+        <title>
+            {% block title %}
+                {{ page_title|default:"Documentation" }}
+            {% endblock %}
+        {% trans "- Shifter" %}</title>
+        <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+        <link rel="stylesheet" href="{% static 'css/sidebar.css' %}">
+        <link rel="stylesheet"
+              href="{% static 'css/documentation.css' %}">
+        <link rel="icon"
+              type="image/svg+xml"
+              href="{% static 'images/favicon.svg' %}">
+        {% block extra_css %}
+        {% endblock %}
+    </head>
+    <body class="theme-dark">
+        {% include "partials/icon_sidebar.html" %}
+        <div class="layout">
+            <main class="main docs-main">
+                {% block content %}
+                {% endblock %}
+            </main>
+        </div>
+        <script src="{% static 'js/sidebar.js' %}"></script>
+        <script type="module">
         // Mermaid.js for diagram rendering
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
         mermaid.initialize({
@@ -72,8 +77,8 @@
                 pre.parentNode.replaceChild(div, pre);
             }
         });
-    </script>
-    <script>
+        </script>
+        <script>
         // Navigation tree toggle
         document.addEventListener('DOMContentLoaded', function() {
             const toggleButtons = document.querySelectorAll('.nav-tree-toggle');
@@ -98,7 +103,8 @@
                 }
             }
         });
-    </script>
-    {% block extra_js %}{% endblock %}
-</body>
+        </script>
+        {% block extra_js %}
+        {% endblock %}
+    </body>
 </html>

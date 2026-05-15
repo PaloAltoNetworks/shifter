@@ -1,96 +1,146 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "risk_register/base.html" %}
-
+{% load i18n %}
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Risk Register</h1>
-        <p class="page-subtitle">Security risks and threat tracking</p>
-    </div>
-    <a href="{% url 'risk_register:risk_create' %}" class="btn btn-primary">+ New Risk</a>
-</div>
-
-<div class="filters">
-    <form method="get" class="flex-row gap-md flex-wrap">
-        <label for="filter-severity" class="label-compact">Severity</label>
-        <select name="severity" id="filter-severity" class="filter-select" onchange="this.form.submit()">
-            <option value="">All Severities</option>
-            {% for value, label in severity_choices %}
-            <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        <label for="filter-status" class="label-compact">Status</label>
-        <select name="status" id="filter-status" class="filter-select" onchange="this.form.submit()">
-            <option value="">All Statuses</option>
-            {% for value, label in status_choices %}
-            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        <label class="checkbox-label">
-            <input type="checkbox" name="include_deleted" value="true"
-                   {% if include_deleted %}checked{% endif %} onchange="this.form.submit()">
-            <span>Show Deleted</span>
-        </label>
-    </form>
-</div>
-
-{% if risks %}
-<div class="card card-flush">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Title</th>
-                <th>Severity</th>
-                <th>Status</th>
-                <th>Risk Score</th>
-                <th>Updated</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for risk in risks %}
-            <tr {% if risk.is_deleted %}class="deleted"{% endif %}>
-                <td>
-                    <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}" class="link text-accent">
-                        {{ risk.title }}
-                    </a>
-                </td>
-                <td>
-                    <span class="badge badge-{{ risk.severity }}">{{ risk.severity }}</span>
-                </td>
-                <td>
-                    <span class="status-{{ risk.status }}">{{ risk.get_status_display }}</span>
-                </td>
-                <td>
-                    {% if risk.risk_score %}
-                    {{ risk.risk_score }}
-                    {% else %}
-                    <span class="text-muted">—</span>
-                    {% endif %}
-                </td>
-                <td class="text-muted">
-                    {{ risk.updated_at|date:"M d, Y H:i" }}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% else %}
-<div class="card empty-state">
-    <div class="empty-state-graphic">
-        <div class="empty-state-graphic-arc"></div>
-        <div class="empty-state-graphic-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                <path d="M12 8v4"/>
-                <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none"/>
-            </svg>
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                {% trans "Risk Register" %}
+            </h1>
+            <p class="page-subtitle">
+                {% trans "Security risks and threat tracking" %}
+            </p>
         </div>
+        <a href="{% url 'risk_register:risk_create' %}"
+           class="btn btn-primary">{% trans "+ New Risk" %}</a>
     </div>
-    <h3>No risks found</h3>
-    <p>No risks match your current filters</p>
-    <a href="{% url 'risk_register:risk_create' %}" class="btn btn-primary">Create First Risk</a>
-</div>
-{% endif %}
+    <div class="filters">
+        <form method="get" class="flex-row gap-md flex-wrap">
+            <label for="filter-severity" class="label-compact">
+                {% trans "Severity" %}
+            </label>
+            <select name="severity"
+                    id="filter-severity"
+                    class="filter-select"
+                    onchange="this.form.submit()">
+                <option value="">
+                    {% trans "All Severities" %}
+                </option>
+                {% for value, label in severity_choices %}
+                    <option value="{{ value }}"
+                            {% if severity_filter == value %}
+                                selected
+                            {% endif %}>
+                        {{ label }}
+                    </option>
+                {% endfor %}
+            </select>
+            <label for="filter-status" class="label-compact">
+                {% trans "Status" %}
+            </label>
+            <select name="status"
+                    id="filter-status"
+                    class="filter-select"
+                    onchange="this.form.submit()">
+                <option value="">
+                    {% trans "All Statuses" %}
+                </option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"
+                            {% if status_filter == value %}
+                                selected
+                            {% endif %}>
+                        {{ label }}
+                    </option>
+                {% endfor %}
+            </select>
+            <label class="checkbox-label">
+                <input type="checkbox"
+                       name="include_deleted"
+                       value="true"
+                       {% if include_deleted %}
+                           checked
+                       {% endif %}
+                       onchange="this.form.submit()">
+                <span>{% trans "Show Deleted" %}</span>
+            </label>
+        </form>
+    </div>
+    {% if risks %}
+        <div class="card card-flush">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Title" %}
+                        </th>
+                        <th>
+                            {% trans "Severity" %}
+                        </th>
+                        <th>
+                            {% trans "Status" %}
+                        </th>
+                        <th>
+                            {% trans "Risk Score" %}
+                        </th>
+                        <th>
+                            {% trans "Updated" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for risk in risks %}
+                        <tr {% if risk.is_deleted %}class="deleted"{% endif %}>
+                            <td>
+                                <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}"
+                                   class="link text-accent">{{ risk.title }}</a>
+                            </td>
+                            <td>
+                                <span class="badge badge-{{ risk.severity }}">{{ risk.severity }}</span>
+                            </td>
+                            <td>
+                                <span class="status-{{ risk.status }}">{{ risk.get_status_display }}</span>
+                            </td>
+                            <td>
+                                {% if risk.risk_score %}
+                                    {{ risk.risk_score }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-muted">
+                                {{ risk.updated_at|date:"M d, Y H:i" }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="card empty-state">
+            <div class="empty-state-graphic">
+                <div class="empty-state-graphic-arc">
+                </div>
+                <div class="empty-state-graphic-icon">
+                    <svg viewBox="0 0 24 24"
+                         fill="none"
+                         stroke="currentColor"
+                         stroke-width="1.5">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        <path d="M12 8v4" />
+                        <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none" />
+                    </svg>
+                </div>
+            </div>
+            <h3>
+                {% trans "No risks found" %}
+            </h3>
+            <p>
+                {% trans "No risks match your current filters" %}
+            </p>
+            <a href="{% url 'risk_register:risk_create' %}"
+               class="btn btn-primary">{% trans "Create First Risk" %}</a>
+        </div>
+    {% endif %}
 {% endblock %}

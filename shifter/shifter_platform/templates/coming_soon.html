@@ -1,18 +1,18 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
-{% load static %}
+{% load static i18n %}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SHIFTER // Coming Soon</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
-    <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
-    <style>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1.0">
+        <title>{% trans "SHIFTER // Coming Soon" %}</title>
+        <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+        <link rel="icon"
+              type="image/svg+xml"
+              href="{% static 'images/favicon.svg' %}">
+        <style>
         :root {
             --accent: #94a3b8;
             --accent-glow: rgba(148, 163, 184, 0.4);
@@ -210,25 +210,30 @@
                 font-size: 0.85rem;
             }
         }
-    </style>
-</head>
-<body>
-    <div class="bg-gradient"></div>
-
-    <div class="container">
-        <div class="logo" aria-label="Shifter logo">S</div>
-
-        <div class="wordmark-container">
-            <div class="wordmark">SHIFTER</div>
+        </style>
+    </head>
+    <body>
+        <div class="bg-gradient">
         </div>
-
-        <p class="tagline">
-            Autonomous AI adversaries. Real infrastructure. Controlled environments.<span class="cursor"></span>
-        </p>
-
-        <p class="launch-date">// December 18, 2025</p>
-    </div>
-
-    <footer class="footer">&copy; 2025 Brad Edwards</footer>
-</body>
+        <div class="container">
+            <div class="logo" aria-label='{% trans "Shifter logo" %}'>
+                {% trans "S" %}
+            </div>
+            <div class="wordmark-container">
+                <div class="wordmark">
+                    {% trans "SHIFTER" %}
+                </div>
+            </div>
+            <p class="tagline">
+                {% trans "Autonomous AI adversaries. Real infrastructure. Controlled environments." %}
+                <span class="cursor"></span>
+            </p>
+            <p class="launch-date">
+                {% trans "// December 18, 2025" %}
+            </p>
+        </div>
+        <footer class="footer">
+            {% trans "&copy; 2025 Brad Edwards" %}
+        </footer>
+    </body>
 </html>

@@ -632,5 +632,39 @@
       "docs/architecture/file-headers.md",
       "sonar-project.properties"
     ]
+  },
+  {
+    "id": "ADR-016",
+    "title": "Django templates use native gettext for user-facing literals",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Django-rendered user-facing template literals are routed through Django's native gettext template tags and the platform-owned English catalog. Shifter adopts the minimum i18n infrastructure needed for template analysis and future catalog growth: `LocaleMiddleware` sits between session and common middleware, `LOCALE_PATHS` points at `shifter/shifter_platform/locale`, templates use `{% trans %}` / `{% blocktrans %}`, and runtime startup compiles message catalogs before static collection. English remains the only catalog for now; URL locale prefixes, locale-switching UX, translator workflow, RTL support, and locale-aware formatting are explicitly out of scope until a separate requirement adopts them.",
+    "rules": [
+      {
+        "id": "ADR-016-R1",
+        "description": "Django templates with user-facing literals load `i18n` and wrap literal text or translatable attributes with Django-native `{% trans %}` / `{% blocktrans %}`. Custom translation helpers, JSON catalogs, frontend i18n abstractions, and SonarCloud false-positive scoping are not substitutes for the template convention.",
+        "checks": ["django-template-i18n-coverage"]
+      },
+      {
+        "id": "ADR-016-R2",
+        "description": "The platform keeps `LocaleMiddleware` after `SessionMiddleware` and before `CommonMiddleware`, and keeps `LOCALE_PATHS` pinned to the repo-owned platform locale directory. `i18n_patterns` is not used unless a future ADR explicitly accepts URL-shape changes.",
+        "checks": ["django-i18n-settings"]
+      },
+      {
+        "id": "ADR-016-R3",
+        "description": "Container startup compiles Django message catalogs before static collection or application startup so runtime `.mo` files are present without committing generated binaries.",
+        "checks": ["django-compilemessages-runtime"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["tests", "sonarcloud", "agent-policy"],
+    "evidence": [
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/entrypoint.sh",
+      "shifter/shifter_platform/locale/en/LC_MESSAGES/django.po",
+      "shifter/shifter_platform/tests/config/test_i18n_configuration.py",
+      "shifter/shifter_platform/templates",
+      "shifter/shifter_platform/cms/experiments/templates"
+    ]
   }
 ]

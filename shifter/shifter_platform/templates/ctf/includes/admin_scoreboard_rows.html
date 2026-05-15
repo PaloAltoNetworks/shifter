@@ -1,5 +1,6 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
+{% load i18n %}
 {% comment %}
 Reusable admin scoreboard ranking table rows.
 
@@ -8,22 +9,34 @@ Required context:
   - team_mode: boolean
 {% endcomment %}
 {% for entry in entries %}
-<tr>
-    <td>
-        {% if entry.rank <= 3 %}
-        <span class="rank-top">{{ entry.rank }}</span>
+    <tr>
+        <td>
+            {% if entry.rank <= 3 %}
+                <span class="rank-top">{{ entry.rank }}</span>
+            {% else %}
+                {{ entry.rank }}
+            {% endif %}
+        </td>
+        <td>
+            <strong>{{ entry.name }}</strong>
+        </td>
+        {% if team_mode %}
+            <td>
+                {{ entry.member_count }}
+            </td>
         {% else %}
-        {{ entry.rank }}
+            <td>
+                {{ entry.team_name|default:"-" }}
+            </td>
         {% endif %}
-    </td>
-    <td><strong>{{ entry.name }}</strong></td>
-    {% if team_mode %}
-    <td>{{ entry.member_count }}</td>
-    {% else %}
-    <td>{{ entry.team_name|default:"-" }}</td>
-    {% endif %}
-    <td><strong>{{ entry.score }}</strong></td>
-    <td>{{ entry.solve_count }}</td>
-    <td>{{ entry.last_solve|default:"-" }}</td>
-</tr>
+        <td>
+            <strong>{{ entry.score }}</strong>
+        </td>
+        <td>
+            {{ entry.solve_count }}
+        </td>
+        <td>
+            {{ entry.last_solve|default:"-" }}
+        </td>
+    </tr>
 {% endfor %}

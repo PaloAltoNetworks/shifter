@@ -1,10 +1,10 @@
 {% extends "experiments/base.html" %}
-{% load static %}
-
-{% block title %}Experiments{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    Experiments
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
     .experiment-table {
         width: 100%;
         border-collapse: collapse;
@@ -63,71 +63,120 @@
     .pagination a:hover {
         background: var(--xdr-hover);
     }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="page-header-row">
-    <div class="page-header-content">
-        <h1 class="page-title">Experiments</h1>
-        <p class="page-subtitle">Manage and monitor your experiment runs</p>
-    </div>
-    <a href="{% url 'experiments:experiment_create' %}" class="btn btn-primary">New Experiment</a>
-</div>
-
-{% if messages %}
-<div class="mb-lg">
-    {% for message in messages %}
-    <div class="message message-{{ message.tags }}">{{ message }}</div>
-    {% endfor %}
-</div>
-{% endif %}
-
-{% if experiments %}
-<div class="card">
-    <table class="experiment-table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Scenario</th>
-                <th>Status</th>
-                <th>Runs</th>
-                <th>Created</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for exp in experiments %}
-            <tr tabindex="0" role="button" onclick="window.location='{% url 'experiments:experiment_detail' exp.pk %}'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.location='{% url 'experiments:experiment_detail' exp.pk %}';}">
-                <td>{{ exp.name }}</td>
-                <td>{{ exp.scenario_id }}</td>
-                <td><span class="status-badge status-badge-{{ exp.status }}">{{ exp.status }}</span></td>
-                <td class="run-progress">{{ exp.completed_runs|default:0 }} / {{ exp.total_run_count|default:exp.total_runs }}</td>
-                <td class="text-muted text-small">{{ exp.created_at|date:"M d, Y H:i" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% if experiments.has_other_pages %}
-<div class="pagination">
-    {% if experiments.has_previous %}
-    <a href="?page={{ experiments.previous_page_number }}">&larr; Previous</a>
-    {% endif %}
-    <span>Page {{ experiments.number }} of {{ experiments.paginator.num_pages }}</span>
-    {% if experiments.has_next %}
-    <a href="?page={{ experiments.next_page_number }}">Next &rarr;</a>
-    {% endif %}
-</div>
-{% endif %}
-{% else %}
-<div class="card">
-    <div class="empty-state">
-        <h3>No experiments yet</h3>
-        <p>Create your first experiment to get started</p>
-        <div style="margin-top: 16px;">
-            <a href="{% url 'experiments:experiment_create' %}" class="btn btn-primary">New Experiment</a>
+    <div class="page-header-row">
+        <div class="page-header-content">
+            <h1 class="page-title">
+                {% trans "Experiments" %}
+            </h1>
+            <p class="page-subtitle">
+                {% trans "Manage and monitor your experiment runs" %}
+            </p>
         </div>
+        <a href="{% url 'experiments:experiment_create' %}"
+           class="btn btn-primary">{% trans "New Experiment" %}</a>
     </div>
-</div>
-{% endif %}
+    {% if messages %}
+        <div class="mb-lg">
+            {% for message in messages %}
+                <div class="message message-{{ message.tags }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if experiments %}
+        <div class="card">
+            <table class="experiment-table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Name" %}
+                        </th>
+                        <th>
+                            {% trans "Scenario" %}
+                        </th>
+                        <th>
+                            {% trans "Status" %}
+                        </th>
+                        <th>
+                            {% trans "Runs" %}
+                        </th>
+                        <th>
+                            {% trans "Created" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exp in experiments %}
+                        {% url 'experiments:experiment_detail' exp.pk as detail_url %}
+                        <tr tabindex="0"
+                            role="button"
+                            onclick="window.location='{{ detail_url }}'"
+                            onkeydown="handleExperimentRowKeydown(event, '{{ detail_url }}')">
+                            <td>
+                                {{ exp.name }}
+                            </td>
+                            <td>
+                                {{ exp.scenario_id }}
+                            </td>
+                            <td>
+                                <span class="status-badge status-badge-{{ exp.status }}">{{ exp.status }}</span>
+                            </td>
+                            <td class="run-progress">
+{% with done=exp.completed_runs|default:0 total=exp.total_run_count|default:exp.total_runs %}
+                                    {% blocktrans %}{{ done }} / {{ total }}{% endblocktrans %}
+{% endwith %}
+                            </td>
+                            <td class="text-muted text-small">
+                                {{ exp.created_at|date:"M d, Y H:i" }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if experiments.has_other_pages %}
+            <div class="pagination">
+                {% if experiments.has_previous %}
+                    <a href="?page={{ experiments.previous_page_number }}">{% trans "&larr; Previous" %}</a>
+                {% endif %}
+                <span>
+                    {% blocktrans with v1=experiments.number v2=experiments.paginator.num_pages %}
+                        Page {{ v1 }} of {{ v2 }}
+                    {% endblocktrans %}
+                </span>
+                {% if experiments.has_next %}
+                    <a href="?page={{ experiments.next_page_number }}">{% trans "Next &rarr;" %}</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="card">
+            <div class="empty-state">
+                <h3>
+                    {% trans "No experiments yet" %}
+                </h3>
+                <p>
+                    {% trans "Create your first experiment to get started" %}
+                </p>
+                <div style="margin-top: 16px;">
+                    <a href="{% url 'experiments:experiment_create' %}"
+                       class="btn btn-primary">{% trans "New Experiment" %}</a>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}
+{% block extra_js %}
+    <script>
+    function handleExperimentRowKeydown(event, detailUrl) {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            window.location = detailUrl;
+        }
+    }
+    </script>
 {% endblock %}

@@ -1,10 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Analytics - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Analytics - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
     color: var(--theme-text-secondary);
@@ -44,104 +46,165 @@
     color: var(--theme-text-secondary);
     margin-top: 4px;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="page-header">
-    <div class="breadcrumb">
-        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-        <span class="separator">/</span>
-        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
-        <span class="separator">/</span>
-        <span>Analytics</span>
+    <!-- Header -->
+    <div class="page-header">
+        <div class="breadcrumb">
+            <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+            <span class="separator">/</span>
+            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+            <span class="separator">/</span>
+            <span>{% trans "Analytics" %}</span>
+        </div>
+        <h1 class="page-title">
+            {% trans "Analytics" %}
+        </h1>
     </div>
-    <h1 class="page-title">Analytics</h1>
-</div>
-
-<!-- Statistics Cards -->
-<div class="stats-grid mb-lg">
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.participant_count }}</div>
-        <div class="stat-label">Participants</div>
+    <!-- Statistics Cards -->
+    <div class="stats-grid mb-lg">
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ event_stats.participant_count }}
+            </div>
+            <div class="stat-label">
+                {% trans "Participants" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ event_stats.active_participants }}
+            </div>
+            <div class="stat-label">
+                {% trans "Active Participants" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ event_stats.challenge_count }}
+            </div>
+            <div class="stat-label">
+                {% trans "Challenges" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ event_stats.challenges_with_zero_solves }}
+            </div>
+            <div class="stat-label">
+                {% trans "Zero-Solve Challenges" %}
+            </div>
+        </div>
     </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.active_participants }}</div>
-        <div class="stat-label">Active Participants</div>
+    <div class="stats-grid mb-lg">
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ event_stats.average_score }}
+            </div>
+            <div class="stat-label">
+                {% trans "Average Score" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ event_stats.median_score }}
+            </div>
+            <div class="stat-label">
+                {% trans "Median Score" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ event_stats.total_submissions }}
+            </div>
+            <div class="stat-label">
+                {% trans "Total Submissions" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {% blocktrans with v1=event_stats.event_duration_hours %}
+                    {{ v1 }}h
+                {% endblocktrans %}
+            </div>
+            <div class="stat-label">
+                {% trans "Event Duration" %}
+            </div>
+        </div>
     </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.challenge_count }}</div>
-        <div class="stat-label">Challenges</div>
+    <!-- Challenge Breakdown -->
+    <div class="card" style="padding: 0;">
+        <div style="padding: 16px;">
+            <div class="card-title" style="margin-bottom: 0;">
+                {% trans "Challenge Breakdown" %}
+            </div>
+        </div>
+        {% if challenge_stats %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Name" %}
+                        </th>
+                        <th>
+                            {% trans "Category" %}
+                        </th>
+                        <th>
+                            {% trans "Points" %}
+                        </th>
+                        <th>
+                            {% trans "Attempts" %}
+                        </th>
+                        <th>
+                            {% trans "Solves" %}
+                        </th>
+                        <th>
+                            {% trans "Solve Rate" %}
+                        </th>
+                        <th>
+                            {% trans "First Blood" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cs in challenge_stats %}
+                        <tr>
+                            <td>
+                                <strong>{{ cs.name }}</strong>
+                            </td>
+                            <td>
+                                {{ cs.category }}
+                            </td>
+                            <td>
+                                {{ cs.points }}
+                            </td>
+                            <td>
+                                {{ cs.total_attempts }}
+                            </td>
+                            <td>
+                                {{ cs.solve_count }}
+                            </td>
+                            <td>
+                                {% widthratio cs.solve_rate 1 100 %}%
+                            </td>
+                            <td>
+                                {% if cs.first_blood %}
+                                    {{ cs.first_blood.participant_name }}
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <p>
+                    {% trans "No challenges yet." %}
+                </p>
+            </div>
+        {% endif %}
     </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.challenges_with_zero_solves }}</div>
-        <div class="stat-label">Zero-Solve Challenges</div>
-    </div>
-</div>
-<div class="stats-grid mb-lg">
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.average_score }}</div>
-        <div class="stat-label">Average Score</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.median_score }}</div>
-        <div class="stat-label">Median Score</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.total_submissions }}</div>
-        <div class="stat-label">Total Submissions</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.event_duration_hours }}h</div>
-        <div class="stat-label">Event Duration</div>
-    </div>
-</div>
-
-<!-- Challenge Breakdown -->
-<div class="card" style="padding: 0;">
-    <div style="padding: 16px;">
-        <div class="card-title" style="margin-bottom: 0;">Challenge Breakdown</div>
-    </div>
-    {% if challenge_stats %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Category</th>
-                <th>Points</th>
-                <th>Attempts</th>
-                <th>Solves</th>
-                <th>Solve Rate</th>
-                <th>First Blood</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for cs in challenge_stats %}
-            <tr>
-                <td><strong>{{ cs.name }}</strong></td>
-                <td>{{ cs.category }}</td>
-                <td>{{ cs.points }}</td>
-                <td>{{ cs.total_attempts }}</td>
-                <td>{{ cs.solve_count }}</td>
-                <td>
-                    {% widthratio cs.solve_rate 1 100 %}%
-                </td>
-                <td>
-                    {% if cs.first_blood %}
-                    {{ cs.first_blood.participant_name }}
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        <p>No challenges yet.</p>
-    </div>
-    {% endif %}
-</div>
 {% endblock %}

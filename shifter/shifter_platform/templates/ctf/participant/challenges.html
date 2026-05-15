@@ -1,119 +1,240 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "ctf/base.html" %}
-{% block ctf_title %}Challenges{% endblock %}
-
+{% load i18n %}
+{% block ctf_title %}
+    Challenges
+{% endblock %}
 {% block ctf_content %}
-<div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">Challenges</h1>
-    </div>
-
-    <!-- Category Filter -->
-    <div class="mb-4">
-        <a href="{% url 'ctf:challenges' %}"
-           class="btn btn-sm {% if not category_filter %}btn-primary{% else %}btn-outline-primary{% endif %} me-1 mb-1">
-            All
-        </a>
-        {% for cat_value, cat_label in categories %}
-        <a href="{% url 'ctf:challenges' %}?category={{ cat_value }}"
-           class="btn btn-sm {% if category_filter == cat_value %}btn-primary{% else %}btn-outline-primary{% endif %} me-1 mb-1">
-            {{ cat_label }}
-        </a>
-        {% endfor %}
-    </div>
-
-    <!-- Tag Filter -->
-    {% if event_tags %}
-    <div class="mb-4">
-        <small class="text-muted me-2">Tags:</small>
-        <a href="{% url 'ctf:challenges' %}{% if category_filter %}?category={{ category_filter }}{% endif %}"
-           class="btn btn-sm {% if not tag_filter %}btn-secondary{% else %}btn-outline-secondary{% endif %} me-1 mb-1">
-            All
-        </a>
-        {% for tag in event_tags %}
-        <a href="{% url 'ctf:challenges' %}?tag={{ tag.name|urlencode }}{% if category_filter %}&category={{ category_filter }}{% endif %}"
-           class="btn btn-sm {% if tag_filter == tag.name %}btn-secondary{% else %}btn-outline-secondary{% endif %} me-1 mb-1">
-            {{ tag.name }}
-        </a>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    <!-- Topic Filter -->
-    {% if event_topics %}
-    <div class="mb-4">
-        <small class="text-muted me-2">Topics:</small>
-        <a href="{% url 'ctf:challenges' %}{% if category_filter %}?category={{ category_filter }}{% endif %}{% if tag_filter %}{% if category_filter %}&{% else %}?{% endif %}tag={{ tag_filter|urlencode }}{% endif %}"
-           class="btn btn-sm {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %} me-1 mb-1">
-            All
-        </a>
-        {% for topic in event_topics %}
-        <a href="{% url 'ctf:challenges' %}?topic={{ topic.name|urlencode }}{% if category_filter %}&category={{ category_filter }}{% endif %}{% if tag_filter %}&tag={{ tag_filter|urlencode }}{% endif %}"
-           class="btn btn-sm {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %} me-1 mb-1">
-            {{ topic.name }}
-        </a>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    <!-- Challenges by Category -->
-    {% for category, challenges in challenges_by_category.items %}
-    <div class="mb-4">
-        <h4 class="mb-3">{{ category }}</h4>
-        <div class="row">
-            {% for challenge in challenges %}
-            <div class="col-md-4 col-lg-3 mb-3">
-                <a href="{% url 'ctf:challenge_detail' challenge_id=challenge.pk %}" class="text-decoration-none">
-                    <div class="card h-100 {% if challenge.pk in solved_ids %}border-success{% elif challenge.is_locked %}opacity-50{% endif %}">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start mb-2">
-                                <h6 class="card-title mb-0">{{ challenge.name }}</h6>
-                                {% if challenge.pk in solved_ids %}
-                                <span class="text-success" title="Solved">&#10003;</span>
-                                {% elif challenge.is_locked %}
-                                <span class="text-secondary" title="Locked - prerequisites required">&#128274;</span>
-                                {% endif %}
-                            </div>
-                            <div class="mb-2">
-                                <span class="badge bg-primary">{{ challenge.points }} pts</span>
-                                {% if challenge.difficulty == 'easy' %}
-                                <span class="badge bg-success">Easy</span>
-                                {% elif challenge.difficulty == 'medium' %}
-                                <span class="badge bg-warning">Medium</span>
-                                {% elif challenge.difficulty == 'hard' %}
-                                <span class="badge bg-danger">Hard</span>
-                                {% elif challenge.difficulty == 'expert' %}
-                                <span class="badge bg-dark">Expert</span>
-                                {% endif %}
-                            </div>
-                            {% for tag in challenge.tags.all %}
-                            <span class="badge bg-secondary">{{ tag.name }}</span>
-                            {% endfor %}
-                            {% for topic in challenge.topics.all %}
-                            <span class="badge bg-info">{{ topic.name }}</span>
-                            {% endfor %}
-                            <small class="text-muted d-block mt-1">{{ challenge.solve_count }} solve{{ challenge.solve_count|pluralize }}</small>
-                            {% if challenge.is_locked %}
-                            <div class="mt-1">
-                                <small class="text-warning">
-                                    Requires: {% for req in challenge.required_challenges %}{{ req.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-                                </small>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
+    {% url 'ctf:challenges' as challenges_url %}
+    <div class="container-fluid py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h3 mb-0">
+                {% trans "Challenges" %}
+            </h1>
+        </div>
+        <!-- Category Filter -->
+        <div class="mb-4">
+            <a href="{% url 'ctf:challenges' %}"
+               class="btn btn-sm
+                      {% if not category_filter %}
+                          btn-primary
+                      {% else %}
+                          btn-outline-primary
+                      {% endif %}
+                      me-1 mb-1">
+                {% trans "All" %}
+            </a>
+            {% for cat_value, cat_label in categories %}
+                <a href="{% url 'ctf:challenges' %}?category={{ cat_value }}"
+                   class="btn btn-sm
+                          {% if category_filter == cat_value %}
+                              btn-primary
+                          {% else %}
+                              btn-outline-primary
+                          {% endif %}
+                          me-1 mb-1">
+                    {{ cat_label }}
                 </a>
-            </div>
             {% endfor %}
         </div>
+        <!-- Tag Filter -->
+        {% if event_tags %}
+            <div class="mb-4">
+                <small class="text-muted me-2">{% trans "Tags:" %}</small>
+                <a href="{{ challenges_url }}{% if category_filter %}?category={{ category_filter }}{% endif %}"
+                   class="btn btn-sm
+                          {% if not tag_filter %}
+                              btn-secondary
+                          {% else %}
+                              btn-outline-secondary
+                          {% endif %}
+                          me-1 mb-1">
+                    {% trans "All" %}
+                </a>
+                {% for tag in event_tags %}
+                    {% if category_filter %}
+                        <a href="{{ challenges_url }}?tag={{ tag.name|urlencode }}&category={{ category_filter }}"
+                           class="btn btn-sm
+                                  {% if tag_filter == tag.name %}
+                                      btn-secondary
+                                  {% else %}
+                                      btn-outline-secondary
+                                  {% endif %}
+                                  me-1 mb-1">
+                            {{ tag.name }}
+                        </a>
+                    {% else %}
+                        <a href="{{ challenges_url }}?tag={{ tag.name|urlencode }}"
+                           class="btn btn-sm
+                                  {% if tag_filter == tag.name %}
+                                      btn-secondary
+                                  {% else %}
+                                      btn-outline-secondary
+                                  {% endif %}
+                                  me-1 mb-1">
+                            {{ tag.name }}
+                        </a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% endif %}
+        <!-- Topic Filter -->
+        {% if event_topics %}
+            <div class="mb-4">
+                <small class="text-muted me-2">{% trans "Topics:" %}</small>
+                {% if category_filter and tag_filter %}
+                    <a href="{{ challenges_url }}?category={{ category_filter }}&tag={{ tag_filter|urlencode }}"
+                       class="btn btn-sm
+                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
+                              me-1 mb-1">
+                        {% trans "All" %}
+                    </a>
+                {% elif category_filter %}
+                    <a href="{{ challenges_url }}?category={{ category_filter }}"
+                       class="btn btn-sm
+                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
+                              me-1 mb-1">
+                        {% trans "All" %}
+                    </a>
+                {% elif tag_filter %}
+                    <a href="{{ challenges_url }}?tag={{ tag_filter|urlencode }}"
+                       class="btn btn-sm
+                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
+                              me-1 mb-1">
+                        {% trans "All" %}
+                    </a>
+                {% else %}
+                    <a href="{{ challenges_url }}"
+                       class="btn btn-sm
+                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
+                              me-1 mb-1">
+                        {% trans "All" %}
+                    </a>
+                {% endif %}
+                {% for topic in event_topics %}
+                    {% with topic_name=topic.name|urlencode tag_name=tag_filter|urlencode c=category_filter %}
+                    {% if category_filter and tag_filter %}
+                        <a href="{{ challenges_url }}?topic={{ topic_name }}&category={{ c }}&tag={{ tag_name }}"
+                           class="btn btn-sm
+                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
+                                  me-1 mb-1">
+                            {{ topic.name }}
+                        </a>
+                    {% elif category_filter %}
+                        <a href="{{ challenges_url }}?topic={{ topic_name }}&category={{ c }}"
+                           class="btn btn-sm
+                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
+                                  me-1 mb-1">
+                            {{ topic.name }}
+                        </a>
+                    {% elif tag_filter %}
+                        <a href="{{ challenges_url }}?topic={{ topic_name }}&tag={{ tag_name }}"
+                           class="btn btn-sm
+                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
+                                  me-1 mb-1">
+                            {{ topic.name }}
+                        </a>
+                    {% else %}
+                        <a href="{{ challenges_url }}?topic={{ topic_name }}"
+                           class="btn btn-sm
+                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
+                                  me-1 mb-1">
+                            {{ topic.name }}
+                        </a>
+                    {% endif %}
+                    {% endwith %}
+                {% endfor %}
+            </div>
+        {% endif %}
+        <!-- Challenges by Category -->
+        {% for category, challenges in challenges_by_category.items %}
+            <div class="mb-4">
+                <h4 class="mb-3">
+                    {{ category }}
+                </h4>
+                <div class="row">
+                    {% for challenge in challenges %}
+                        <div class="col-md-4 col-lg-3 mb-3">
+                            <a href="{% url 'ctf:challenge_detail' challenge_id=challenge.pk %}"
+                               class="text-decoration-none">
+                                <div class="card h-100
+                                            {% if challenge.pk in solved_ids %}
+                                                border-success
+                                            {% elif challenge.is_locked %}
+                                                opacity-50
+                                            {% endif %}">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-0">
+                                                {{ challenge.name }}
+                                            </h6>
+                                            {% if challenge.pk in solved_ids %}
+                                                <span class="text-success" title='{% trans "Solved" %}'>&#10003;</span>
+                                            {% elif challenge.is_locked %}
+                                                <span class="text-secondary"
+                                                      title='{% trans "Locked - prerequisites required" %}'>
+                                                    &#128274;
+                                                </span>
+                                            {% endif %}
+                                        </div>
+                                        <div class="mb-2">
+                                            <span class="badge bg-primary">
+                                                {% blocktrans with v1=challenge.points %}
+                                                    {{ v1 }} pts
+                                                {% endblocktrans %}
+                                            </span>
+                                            {% if challenge.difficulty == 'easy' %}
+                                                <span class="badge bg-success">{% trans "Easy" %}</span>
+                                            {% elif challenge.difficulty == 'medium' %}
+                                                <span class="badge bg-warning">{% trans "Medium" %}</span>
+                                            {% elif challenge.difficulty == 'hard' %}
+                                                <span class="badge bg-danger">{% trans "Hard" %}</span>
+                                            {% elif challenge.difficulty == 'expert' %}
+                                                <span class="badge bg-dark">{% trans "Expert" %}</span>
+                                            {% endif %}
+                                        </div>
+                                        {% for tag in challenge.tags.all %}
+                                            <span class="badge bg-secondary">{{ tag.name }}</span>
+                                        {% endfor %}
+                                        {% for topic in challenge.topics.all %}
+                                            <span class="badge bg-info">{{ topic.name }}</span>
+                                        {% endfor %}
+                                        <small class="text-muted d-block mt-1">
+                                            {% blocktrans count solve_count=challenge.solve_count %}
+                                                {{ solve_count }} solve
+                                            {% plural %}
+                                                {{ solve_count }} solves
+                                            {% endblocktrans %}
+                                        </small>
+                                        {% if challenge.is_locked %}
+                                            <div class="mt-1">
+                                                <small class="text-warning">
+                                                    {% trans "Requires:" %}
+                                                    {% for req in challenge.required_challenges %}
+                                                        {{ req.name }}
+                                                        {% if not forloop.last %}
+                                                            ,
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </small>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </a>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% empty %}
+            <div class="card">
+                <div class="card-body text-center text-muted py-5">
+                    <p class="mb-0">
+                        {% trans "No challenges available yet." %}
+                    </p>
+                </div>
+            </div>
+        {% endfor %}
     </div>
-    {% empty %}
-    <div class="card">
-        <div class="card-body text-center text-muted py-5">
-            <p class="mb-0">No challenges available yet.</p>
-        </div>
-    </div>
-    {% endfor %}
-</div>
 {% endblock %}

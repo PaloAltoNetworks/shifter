@@ -1,79 +1,157 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "ctf/base.html" %}
-{% block ctf_title %}Help{% endblock %}
-
+{% load i18n %}
+{% block ctf_title %}
+    Help
+{% endblock %}
 {% block ctf_content %}
-<div class="container-fluid py-4">
-    <div class="row justify-content-center">
-        <div class="col-lg-8">
-            <h1 class="h3 mb-4">CTF Help</h1>
-
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Getting Started</h5>
+    <div class="container-fluid py-4">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <h1 class="h3 mb-4">
+                    {% trans "CTF Help" %}
+                </h1>
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            {% trans "Getting Started" %}
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <ol>
+                            <li>
+                                {% trans "Check your email for an invitation link from your event organizer." %}
+                            </li>
+                            <li>
+                                {% trans "Click the link to register and set up your account." %}
+                            </li>
+                            <li>
+                                {% trans "Once the event starts, navigate to" %}
+                                <strong>{% trans "Challenges" %}</strong>
+                                {% trans "to see available tasks." %}
+                            </li>
+                            <li>
+                                {% trans "Solve challenges and submit flags to earn points." %}
+                            </li>
+                            <li>
+                                {% trans "Check the" %}
+                                <strong>{% trans "Scoreboard" %}</strong>
+                                {% trans "to see how you rank against other participants." %}
+                            </li>
+                        </ol>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <ol>
-                        <li>Check your email for an invitation link from your event organizer.</li>
-                        <li>Click the link to register and set up your account.</li>
-                        <li>Once the event starts, navigate to <strong>Challenges</strong> to see available tasks.</li>
-                        <li>Solve challenges and submit flags to earn points.</li>
-                        <li>Check the <strong>Scoreboard</strong> to see how you rank against other participants.</li>
-                    </ol>
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            {% trans "How to Submit Flags" %}
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <p>
+                            {% blocktrans trimmed %}
+                                Each challenge has a hidden flag that you need to find. Flags are typically formatted
+                                as:
+                            {% endblocktrans %}
+                        </p>
+                        <pre class="bg-dark text-light p-3 rounded">{% trans "FLAG{example_flag_value}" %}</pre>
+                        <p>
+                            {% trans "To submit a flag:" %}
+                        </p>
+                        <ol>
+                            <li>
+                                {% trans "Navigate to the challenge detail page." %}
+                            </li>
+                            <li>
+                                {% trans "Enter the flag exactly as you found it (flags are case-sensitive)." %}
+                            </li>
+                            <li>
+                                {% trans "Click" %} <strong>{% trans "Submit" %}</strong>.
+                            </li>
+                        </ol>
+                        <p class="mb-0">
+                            {% blocktrans trimmed %}
+                                Some challenges may have a maximum number of attempts. Check the challenge description
+                                for details.
+                            {% endblocktrans %}
+                        </p>
+                    </div>
                 </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">How to Submit Flags</h5>
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            {% trans "Scoring" %}
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <ul>
+                            <li>
+                                {% trans "Each challenge is worth a fixed number of points based on its difficulty." %}
+                            </li>
+                            <li>
+                                {% trans "Points are awarded on the first correct submission only." %}
+                            </li>
+                            <li>
+                                {% trans "Using a hint deducts a penalty from the points awarded for that challenge." %}
+                            </li>
+                            <li>
+                                {% blocktrans trimmed %}
+                                    Rankings are determined by total score. In case of a tie, the
+                                    participant who achieved their score first wins.
+                                {% endblocktrans %}
+                            </li>
+                        </ul>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <p>Each challenge has a hidden flag that you need to find. Flags are typically formatted as:</p>
-                    <pre class="bg-dark text-light p-3 rounded">FLAG{example_flag_value}</pre>
-                    <p>To submit a flag:</p>
-                    <ol>
-                        <li>Navigate to the challenge detail page.</li>
-                        <li>Enter the flag exactly as you found it (flags are case-sensitive).</li>
-                        <li>Click <strong>Submit</strong>.</li>
-                    </ol>
-                    <p class="mb-0">Some challenges may have a maximum number of attempts. Check the challenge description for details.</p>
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Scoring</h5>
-                </div>
-                <div class="card-body">
-                    <ul>
-                        <li>Each challenge is worth a fixed number of points based on its difficulty.</li>
-                        <li>Points are awarded on the first correct submission only.</li>
-                        <li>Using a hint deducts a penalty from the points awarded for that challenge.</li>
-                        <li>Rankings are determined by total score. In case of a tie, the participant who achieved their score first wins.</li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">FAQ</h5>
-                </div>
-                <div class="card-body">
-                    <h6>Can I use hints?</h6>
-                    <p>Yes, but hints have a point penalty. The penalty is shown before you reveal the hint, so you can decide if it's worth it.</p>
-
-                    <h6>What if I run out of attempts?</h6>
-                    <p>If a challenge has a maximum number of attempts and you've used them all, you won't be able to submit more flags for that challenge.</p>
-
-                    <h6>How do teams work?</h6>
-                    <p>If the event uses team mode, you can join a team using an invite code from your team captain. Team scores are the sum of all member scores.</p>
-
-                    <h6>What is a range?</h6>
-                    <p class="mb-0">A range is a dedicated lab environment provisioned for you during the event. It contains the systems you need to solve challenges. Access your range from the <strong>Range</strong> page in the sidebar.</p>
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            {% trans "FAQ" %}
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>
+                            {% trans "Can I use hints?" %}
+                        </h6>
+                        <p>
+                            {% blocktrans trimmed %}
+                                Yes, but hints have a point penalty. The penalty is shown before you reveal the hint, so
+                                you can decide if it's worth it.
+                            {% endblocktrans %}
+                        </p>
+                        <h6>
+                            {% trans "What if I run out of attempts?" %}
+                        </h6>
+                        <p>
+                            {% blocktrans trimmed %}
+                                If a challenge has a maximum number of attempts and you've used them all, you won't be
+                                able to submit more flags for that challenge.
+                            {% endblocktrans %}
+                        </p>
+                        <h6>
+                            {% trans "How do teams work?" %}
+                        </h6>
+                        <p>
+                            {% blocktrans trimmed %}
+                                If the event uses team mode, you can join a team using an invite code from your team
+                                captain. Team scores are the sum of all member scores.
+                            {% endblocktrans %}
+                        </p>
+                        <h6>
+                            {% trans "What is a range?" %}
+                        </h6>
+                        <p class="mb-0">
+                            {% blocktrans trimmed %}
+                                A range is a dedicated lab environment provisioned for you during the event. It contains
+                                the systems you need to solve challenges. Access your range from the
+                            {% endblocktrans %}
+                            <strong>{% trans "Range" %}</strong>
+                            {% trans "page in the sidebar." %}
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 {% endblock %}

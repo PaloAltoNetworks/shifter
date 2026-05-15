@@ -1,12 +1,16 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-
-{% block title %}{% if is_edit %}Edit Event{% else %}Create Event{% endif %}{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    {% if is_edit %}
+        Edit Event
+    {% else %}
+        Create Event
+    {% endif %}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .event-form {
     max-width: 720px;
 }
@@ -68,229 +72,367 @@ textarea.form-input {
 input[type="datetime-local"] {
     color-scheme: dark;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="event-form">
-    <div class="page-header">
-        <h1 class="page-title">{% if is_edit %}Edit Event{% else %}Create CTF Event{% endif %}</h1>
-        <p class="text-muted mt-sm">{% if is_edit %}Update event configuration.{% else %}Configure a new Capture The Flag event.{% endif %}</p>
-    </div>
-
-    <div class="form-alert" id="form-alert"></div>
-
-    <!-- Basic Information -->
-    <div class="card">
-        <div class="card-title">Basic Information</div>
-
-        <div class="form-group">
-            <label class="form-label" for="field-name">Event Name *</label>
-            <input type="text" id="field-name" class="form-input" maxlength="200" required>
-            <div class="field-error" id="error-name"></div>
+    <div class="event-form">
+        <div class="page-header">
+            <h1 class="page-title">
+                {% if is_edit %}
+                    {% trans "Edit Event" %}
+                {% else %}
+                    {% trans "Create CTF Event" %}
+                {% endif %}
+            </h1>
+            <p class="text-muted mt-sm">
+                {% if is_edit %}
+                    {% trans "Update event configuration." %}
+                {% else %}
+                    {% trans "Configure a new Capture The Flag event." %}
+                {% endif %}
+            </p>
         </div>
-
-        <div class="form-group">
-            <label class="form-label" for="field-description">Description</label>
-            <textarea id="field-description" class="form-input" rows="4"></textarea>
-            <div class="form-help">Supports Markdown formatting</div>
-            <div class="field-error" id="error-description"></div>
+        <div class="form-alert" id="form-alert">
         </div>
-    </div>
-
-    <!-- Schedule -->
-    <div class="card">
-        <div class="card-title">Schedule</div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label" for="field-event_start">Event Start *</label>
-                <input type="datetime-local" id="field-event_start" class="form-input" required>
-                <div class="field-error" id="error-event_start"></div>
+        <!-- Basic Information -->
+        <div class="card">
+            <div class="card-title">
+                {% trans "Basic Information" %}
             </div>
-
             <div class="form-group">
-                <label class="form-label" for="field-event_end">Event End *</label>
-                <input type="datetime-local" id="field-event_end" class="form-input" required>
-                <div class="field-error" id="error-event_end"></div>
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label class="form-label" for="field-registration_deadline">Registration Deadline</label>
-            <input type="datetime-local" id="field-registration_deadline" class="form-input">
-            <div class="form-help">Optional. Must be before event start.</div>
-            <div class="field-error" id="error-registration_deadline"></div>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-checkbox">
-                    <input type="checkbox" id="field-scoreboard_visible" checked>
-                    <div>
-                        <span class="form-checkbox-label">Scoreboard Visible</span>
-                        <div class="form-checkbox-help">When unchecked, participants cannot see the scoreboard</div>
-                    </div>
+                <label class="form-label" for="field-name">
+                    {% trans "Event Name *" %}
                 </label>
+                <input type="text"
+                       id="field-name"
+                       class="form-input"
+                       maxlength="200"
+                       required>
+                <div class="field-error" id="error-name">
+                </div>
             </div>
-
             <div class="form-group">
-                <label class="form-label" for="field-scoreboard_freeze_at">Scoreboard Freeze Time</label>
-                <input type="datetime-local" id="field-scoreboard_freeze_at" class="form-input">
-                <div class="form-help">Optional. Scoreboard freezes at this time. Participants see frozen standings; organizers see real-time.</div>
-                <div class="field-error" id="error-scoreboard_freeze_at"></div>
+                <label class="form-label" for="field-description">
+                    {% trans "Description" %}
+                </label>
+                <textarea id="field-description" class="form-input" rows="4"></textarea>
+                <div class="form-help">
+                    {% trans "Supports Markdown formatting" %}
+                </div>
+                <div class="field-error" id="error-description">
+                </div>
             </div>
         </div>
-    </div>
-
-    <!-- Range Settings -->
-    <div class="card">
-        <div class="card-title">Range Settings</div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Scenario Template</label>
-                <div class="shifter-dropdown full-width" id="scenario-dropdown">
-                    <input type="hidden" name="scenario_id" id="field-scenario_id" value="">
-                    <button type="button" class="shifter-dropdown-trigger">
-                        <span class="shifter-dropdown-value placeholder">-- Select a scenario --</span>
-                        <span class="shifter-dropdown-chevron"></span>
-                    </button>
-                    <div class="shifter-dropdown-panel">
-                        <ul class="shifter-dropdown-items" id="scenario-items">
-                            <!-- Populated by JS -->
-                        </ul>
+        <!-- Schedule -->
+        <div class="card">
+            <div class="card-title">
+                {% trans "Schedule" %}
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label" for="field-event_start">
+                        {% trans "Event Start *" %}
+                    </label>
+                    <input type="datetime-local"
+                           id="field-event_start"
+                           class="form-input"
+                           required>
+                    <div class="field-error" id="error-event_start">
                     </div>
                 </div>
-                <div class="field-error" id="error-scenario_id"></div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="field-range_spinup_minutes">Range Spinup (minutes)</label>
-                <input type="number" id="field-range_spinup_minutes" class="form-input" min="0" max="1440" value="30">
-                <div class="form-help">Minutes before event to start range provisioning (0 = at event start)</div>
-                <div class="field-error" id="error-range_spinup_minutes"></div>
-            </div>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-checkbox">
-                    <input type="checkbox" id="field-auto_cleanup" checked>
-                    <div>
-                        <span class="form-checkbox-label">Auto-cleanup ranges after event</span>
+                <div class="form-group">
+                    <label class="form-label" for="field-event_end">
+                        {% trans "Event End *" %}
+                    </label>
+                    <input type="datetime-local"
+                           id="field-event_end"
+                           class="form-input"
+                           required>
+                    <div class="field-error" id="error-event_end">
                     </div>
-                </label>
+                </div>
             </div>
-
             <div class="form-group">
-                <label class="form-checkbox">
-                    <input type="checkbox" id="field-ngfw_enabled">
-                    <div>
-                        <span class="form-checkbox-label">Enable NGFW</span>
-                        <div class="form-checkbox-help">Provision a Next-Generation Firewall per range</div>
+                <label class="form-label" for="field-registration_deadline">
+                    {% trans "Registration Deadline" %}
+                </label>
+                <input type="datetime-local"
+                       id="field-registration_deadline"
+                       class="form-input">
+                <div class="form-help">
+                    {% trans "Optional. Must be before event start." %}
+                </div>
+                <div class="field-error" id="error-registration_deadline">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="field-scoreboard_visible" checked>
+                        <div>
+                            <span class="form-checkbox-label">{% trans "Scoreboard Visible" %}</span>
+                            <div class="form-checkbox-help">
+                                {% trans "When unchecked, participants cannot see the scoreboard" %}
+                            </div>
+                        </div>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="field-scoreboard_freeze_at">
+                        {% trans "Scoreboard Freeze Time" %}
+                    </label>
+                    <input type="datetime-local"
+                           id="field-scoreboard_freeze_at"
+                           class="form-input">
+                    <div class="form-help">
+                        {% blocktrans trimmed %}
+                            Optional. Scoreboard freezes at this time. Participants see frozen standings; organizers
+                            see real-time.
+                        {% endblocktrans %}
                     </div>
-                </label>
-            </div>
-        </div>
-
-        <div class="form-group" style="max-width: 340px;">
-            <label class="form-label" for="field-cleanup_delay_hours">Cleanup Delay (hours)</label>
-            <input type="number" id="field-cleanup_delay_hours" class="form-input" min="0" value="24">
-            <div class="form-help">Hours after event end before cleanup</div>
-            <div class="field-error" id="error-cleanup_delay_hours"></div>
-        </div>
-    </div>
-
-    <!-- Participant Settings -->
-    <div class="card">
-        <div class="card-title">Participant Settings</div>
-
-        <div class="form-group" style="max-width: 340px;">
-            <label class="form-label" for="field-max_participants">Maximum Participants</label>
-            <input type="number" id="field-max_participants" class="form-input" min="1">
-            <div class="form-help">Leave blank for unlimited</div>
-            <div class="field-error" id="error-max_participants"></div>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-checkbox">
-                    <input type="checkbox" id="field-team_mode">
-                    <div>
-                        <span class="form-checkbox-label">Enable Team Mode</span>
+                    <div class="field-error" id="error-scoreboard_freeze_at">
                     </div>
+                </div>
+            </div>
+        </div>
+        <!-- Range Settings -->
+        <div class="card">
+            <div class="card-title">
+                {% trans "Range Settings" %}
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">
+                        {% trans "Scenario Template" %}
+                    </label>
+                    <div class="shifter-dropdown full-width" id="scenario-dropdown">
+                        <input type="hidden"
+                               name="scenario_id"
+                               id="field-scenario_id"
+                               value="">
+                        <button type="button" class="shifter-dropdown-trigger">
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        -- Select a scenario --
+    {% endblocktrans %}
+</span>
+                            <span class="shifter-dropdown-chevron"></span>
+                        </button>
+                        <div class="shifter-dropdown-panel">
+                            <ul class="shifter-dropdown-items" id="scenario-items">
+                                <!-- Populated by JS -->
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="field-error" id="error-scenario_id">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="field-range_spinup_minutes">
+                        {% trans "Range Spinup (minutes)" %}
+                    </label>
+                    <input type="number"
+                           id="field-range_spinup_minutes"
+                           class="form-input"
+                           min="0"
+                           max="1440"
+                           value="30">
+                    <div class="form-help">
+                        {% trans "Minutes before event to start range provisioning (0 = at event start)" %}
+                    </div>
+                    <div class="field-error" id="error-range_spinup_minutes">
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="field-auto_cleanup" checked>
+                        <div>
+                            <span class="form-checkbox-label">{% trans "Auto-cleanup ranges after event" %}</span>
+                        </div>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="field-ngfw_enabled">
+                        <div>
+                            <span class="form-checkbox-label">{% trans "Enable NGFW" %}</span>
+                            <div class="form-checkbox-help">
+                                {% trans "Provision a Next-Generation Firewall per range" %}
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="form-group" style="max-width: 340px;">
+                <label class="form-label" for="field-cleanup_delay_hours">
+                    {% trans "Cleanup Delay (hours)" %}
                 </label>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="field-team_size_limit">Team Size Limit</label>
-                <input type="number" id="field-team_size_limit" class="form-input" min="2" max="10">
-                <div class="form-help">Required if team mode is enabled (2-10)</div>
-                <div class="field-error" id="error-team_size_limit"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Submission Limits -->
-    <div class="form-section">
-        <h3 class="form-section-title">Submission Limits</h3>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label" for="field-submission_cooldown_seconds">Submission Cooldown (seconds)</label>
-                <input type="number" id="field-submission_cooldown_seconds" class="form-input" min="0" max="300" value="0">
-                <div class="form-help">Minimum seconds between submissions per participant per challenge (0 = no limit)</div>
-                <div class="field-error" id="error-submission_cooldown_seconds"></div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="field-attempt_limit_mode">Attempt Limit Behavior</label>
-                <select id="field-attempt_limit_mode" class="form-input">
-                    <option value="lockout">Lockout (permanent)</option>
-                    <option value="timeout">Timeout (temporary)</option>
-                </select>
-                <div class="form-help">What happens when a participant reaches max attempts on a challenge</div>
-                <div class="field-error" id="error-attempt_limit_mode"></div>
+                <input type="number"
+                       id="field-cleanup_delay_hours"
+                       class="form-input"
+                       min="0"
+                       value="24">
+                <div class="form-help">
+                    {% trans "Hours after event end before cleanup" %}
+                </div>
+                <div class="field-error" id="error-cleanup_delay_hours">
+                </div>
             </div>
         </div>
-
-        <div class="form-row">
-            <div class="form-group" id="cooldown-group">
-                <label class="form-label" for="field-attempt_limit_cooldown_seconds">Attempt Limit Cooldown (seconds)</label>
-                <input type="number" id="field-attempt_limit_cooldown_seconds" class="form-input" min="0" max="3600" value="300">
-                <div class="form-help">Seconds before attempts reset in timeout mode (0-3600)</div>
-                <div class="field-error" id="error-attempt_limit_cooldown_seconds"></div>
+        <!-- Participant Settings -->
+        <div class="card">
+            <div class="card-title">
+                {% trans "Participant Settings" %}
             </div>
-            <div class="form-group">
-                <label class="form-label" for="field-rating_visibility">Challenge Rating Visibility</label>
-                <select id="field-rating_visibility" class="form-input">
-                    <option value="public">Public (participants see ratings)</option>
-                    <option value="organizer">Organizer only</option>
-                    <option value="disabled">Disabled</option>
-                </select>
-                <div class="form-help">Whether participants can see and submit challenge ratings</div>
-                <div class="field-error" id="error-rating_visibility"></div>
+            <div class="form-group" style="max-width: 340px;">
+                <label class="form-label" for="field-max_participants">
+                    {% trans "Maximum Participants" %}
+                </label>
+                <input type="number"
+                       id="field-max_participants"
+                       class="form-input"
+                       min="1">
+                <div class="form-help">
+                    {% trans "Leave blank for unlimited" %}
+                </div>
+                <div class="field-error" id="error-max_participants">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="field-team_mode">
+                        <div>
+                            <span class="form-checkbox-label">{% trans "Enable Team Mode" %}</span>
+                        </div>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="field-team_size_limit">
+                        {% trans "Team Size Limit" %}
+                    </label>
+                    <input type="number"
+                           id="field-team_size_limit"
+                           class="form-input"
+                           min="2"
+                           max="10">
+                    <div class="form-help">
+                        {% trans "Required if team mode is enabled (2-10)" %}
+                    </div>
+                    <div class="field-error" id="error-team_size_limit">
+                    </div>
+                </div>
             </div>
         </div>
+        <!-- Submission Limits -->
+        <div class="form-section">
+            <h3 class="form-section-title">
+                {% trans "Submission Limits" %}
+            </h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label" for="field-submission_cooldown_seconds">
+                        {% trans "Submission Cooldown (seconds)" %}
+                    </label>
+                    <input type="number"
+                           id="field-submission_cooldown_seconds"
+                           class="form-input"
+                           min="0"
+                           max="300"
+                           value="0">
+                    <div class="form-help">
+                        {% trans "Minimum seconds between submissions per participant per challenge (0 = no limit)" %}
+                    </div>
+                    <div class="field-error" id="error-submission_cooldown_seconds">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="field-attempt_limit_mode">
+                        {% trans "Attempt Limit Behavior" %}
+                    </label>
+                    <select id="field-attempt_limit_mode" class="form-input">
+                        <option value='{% trans "lockout" %}'>
+                            {% trans "Lockout (permanent)" %}
+                        </option>
+                        <option value='{% trans "timeout" %}'>
+                            {% trans "Timeout (temporary)" %}
+                        </option>
+                    </select>
+                    <div class="form-help">
+                        {% trans "What happens when a participant reaches max attempts on a challenge" %}
+                    </div>
+                    <div class="field-error" id="error-attempt_limit_mode">
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group" id="cooldown-group">
+                    <label class="form-label"
+                           for="field-attempt_limit_cooldown_seconds">
+                        {% trans "Attempt Limit Cooldown (seconds)" %}
+                    </label>
+                    <input type="number"
+                           id="field-attempt_limit_cooldown_seconds"
+                           class="form-input"
+                           min="0"
+                           max="3600"
+                           value="300">
+                    <div class="form-help">
+                        {% trans "Seconds before attempts reset in timeout mode (0-3600)" %}
+                    </div>
+                    <div class="field-error"
+                         id="error-attempt_limit_cooldown_seconds">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="field-rating_visibility">
+                        {% trans "Challenge Rating Visibility" %}
+                    </label>
+                    <select id="field-rating_visibility" class="form-input">
+                        <option value='{% trans "public" %}'>
+                            {% trans "Public (participants see ratings)" %}
+                        </option>
+                        <option value='{% trans "organizer" %}'>
+                            {% trans "Organizer only" %}
+                        </option>
+                        <option value='{% trans "disabled" %}'>
+                            {% trans "Disabled" %}
+                        </option>
+                    </select>
+                    <div class="form-help">
+                        {% trans "Whether participants can see and submit challenge ratings" %}
+                    </div>
+                    <div class="field-error" id="error-rating_visibility">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Actions -->
+        <div class="form-actions">
+            {% if is_edit %}
+                <a id="cancel-link"
+                   href="{% url 'ctf:admin_event_detail' event_id=event_id %}"
+                   class="btn btn-cancel">{% trans "Cancel" %}</a>
+            {% else %}
+                <a id="cancel-link"
+                   href="{% url 'ctf:admin_event_list' %}"
+                   class="btn btn-cancel">{% trans "Cancel" %}</a>
+            {% endif %}
+            <button type="button" class="btn btn-primary" id="submit-btn">
+                {% if is_edit %}
+                    {% trans "Save Changes" %}
+                {% else %}
+                    {% trans "Create Event" %}
+                {% endif %}
+            </button>
+        </div>
     </div>
-
-    <!-- Actions -->
-    <div class="form-actions">
-        <a id="cancel-link" href="{% if is_edit %}{% url 'ctf:admin_event_detail' event_id=event_id %}{% else %}{% url 'ctf:admin_event_list' %}{% endif %}" class="btn btn-cancel">
-            Cancel
-        </a>
-        <button type="button" class="btn btn-primary" id="submit-btn">
-            {% if is_edit %}Save Changes{% else %}Create Event{% endif %}
-        </button>
-    </div>
-</div>
 {% endblock %}
-
 {{ scenarios_list|json_script:"scenarios-data" }}
-
 {% block extra_js %}
-<script>
+    <script>
 document.addEventListener('DOMContentLoaded', function() {
     var IS_EDIT = {{ is_edit|yesno:"true,false" }};
     var CSRF_TOKEN = '{{ csrf_token }}';
@@ -597,5 +739,5 @@ document.addEventListener('DOMContentLoaded', function() {
     populateForm();
     {% endif %}
 });
-</script>
+    </script>
 {% endblock %}

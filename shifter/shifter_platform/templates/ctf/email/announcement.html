@@ -1,15 +1,32 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
+{% load i18n %}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>{% if subject %}{{ subject }}{% else %}Announcement{% endif %}</title>
-</head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-<h2>{{ subject }}</h2>
-<p>Hi {{ participant.name }},</p>
-<p>{{ body }}</p>
-<p><em>— {{ event.name }} Organizers</em></p>
-</body>
+    <head>
+        <meta charset="utf-8">
+        <title>
+            {% if subject %}
+                {{ subject }}
+            {% else %}
+                {% trans "Announcement" %}
+            {% endif %}
+        </title>
+    </head>
+    <body style="font-family: Arial, sans-serif;
+                 max-width: 600px;
+                 margin: 0 auto">
+        <h2>
+            {{ subject }}
+        </h2>
+        <p>
+            {% blocktrans with v1=participant.name %}Hi {{ v1 }},{% endblocktrans %}
+        </p>
+        <p>
+            {{ body }}
+        </p>
+        <p>
+            <em>{% blocktrans with v1=event.name %}— {{ v1 }} Organizers{% endblocktrans %}</em>
+        </p>
+    </body>
 </html>

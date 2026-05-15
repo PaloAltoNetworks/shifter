@@ -1,10 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Brackets - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Brackets - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
     color: var(--theme-text-secondary);
@@ -40,60 +42,97 @@
     color: #ff4d4f;
     border-color: #ff4d4f;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="page-header">
-    <div class="breadcrumb">
-        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-        <span class="separator">/</span>
-        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
-        <span class="separator">/</span>
-        <span>Brackets</span>
+    <!-- Header -->
+    <div class="page-header">
+        <div class="breadcrumb">
+            <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+            <span class="separator">/</span>
+            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+            <span class="separator">/</span>
+            <span>{% trans "Brackets" %}</span>
+        </div>
+        <div style="display: flex;
+                    justify-content: space-between;
+                    align-items: center">
+            <h1 class="page-title">
+                {% trans "Brackets" %}
+            </h1>
+            <a href="{% url 'ctf:admin_bracket_create' event_id=event.pk %}"
+               class="btn btn-sm btn-primary">{% trans "Create Bracket" %}</a>
+        </div>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h1 class="page-title">Brackets</h1>
-        <a href="{% url 'ctf:admin_bracket_create' event_id=event.pk %}" class="btn btn-sm btn-primary">Create Bracket</a>
+    <!-- Brackets Table -->
+    <div class="card" style="padding: 0;">
+        {% if brackets %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Name" %}
+                        </th>
+                        <th>
+                            {% trans "Description" %}
+                        </th>
+                        <th>
+                            {% trans "Order" %}
+                        </th>
+                        <th>
+                            {% trans "Participants" %}
+                        </th>
+                        <th>
+                            {% trans "Actions" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bracket in brackets %}
+                        <tr>
+                            <td>
+                                <strong>{{ bracket.name }}</strong>
+                            </td>
+                            <td>
+                                {{ bracket.description|default:"-"|truncatewords:15 }}
+                            </td>
+                            <td>
+                                {{ bracket.display_order }}
+                            </td>
+                            <td>
+                                {{ bracket.participant_count }}
+                            </td>
+                            <td>
+                                <a href="{% url 'ctf:admin_bracket_edit' bracket_id=bracket.pk %}"
+                                   class="action-btn">{% trans "Edit" %}</a>
+                                <form method="post"
+                                      action="{% url 'ctf:admin_bracket_delete' bracket_id=bracket.pk %}"
+                                      style="display: inline">
+                                    {% csrf_token %}
+                                    <button type="submit"
+                                            class="action-btn danger"
+                                            data-bracket-name="{{ bracket.name }}"
+                                            onclick="return confirmDeleteBracket(this)">
+                                        {% trans "Delete" %}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <p>
+                    {% trans "No brackets configured. Create brackets to group participants by skill level." %}
+                </p>
+            </div>
+        {% endif %}
     </div>
-</div>
-
-<!-- Brackets Table -->
-<div class="card" style="padding: 0;">
-    {% if brackets %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th>Order</th>
-                <th>Participants</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for bracket in brackets %}
-            <tr>
-                <td><strong>{{ bracket.name }}</strong></td>
-                <td>{{ bracket.description|default:"-"|truncatewords:15 }}</td>
-                <td>{{ bracket.display_order }}</td>
-                <td>{{ bracket.participant_count }}</td>
-                <td>
-                    <a href="{% url 'ctf:admin_bracket_edit' bracket_id=bracket.pk %}" class="action-btn">Edit</a>
-                    <form method="post" action="{% url 'ctf:admin_bracket_delete' bracket_id=bracket.pk %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" class="action-btn danger" onclick="return confirm('Delete bracket {{ bracket.name|escapejs }}? Participants will be unassigned.')">Delete</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        <p>No brackets configured. Create brackets to group participants by skill level.</p>
-    </div>
-    {% endif %}
-</div>
+    <script>
+    function confirmDeleteBracket(button) {
+        const name = button.dataset.bracketName;
+        return confirm(`Delete bracket ${name}? Participants will be unassigned.`);
+    }
+    </script>
 {% endblock %}

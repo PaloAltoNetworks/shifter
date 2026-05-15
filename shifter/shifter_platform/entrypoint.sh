@@ -161,6 +161,9 @@ else
 fi
 
 # Collect static files
+echo "Compiling message catalogs..."
+python manage.py compilemessages
+
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 

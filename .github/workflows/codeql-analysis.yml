@@ -21,7 +21,7 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write

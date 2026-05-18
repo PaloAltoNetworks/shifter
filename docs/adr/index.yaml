@@ -120,6 +120,11 @@
         "id": "ADR-004-R9",
         "description": "Tracked *-secrets.env files under platform/k8s/ must contain only comments, blank lines, empty assignments (KEY=), or a small fixed synthetic-placeholder allowlist (REPLACE_AT_DEPLOY, CHANGE_ME, PLACEHOLDER, EXAMPLE, plus the matching bracketed forms <replace-at-deploy>, <change-me>, <placeholder>, <example>). The bracketed forms are an explicit fixed set, NOT a <...> pattern, to prevent hiding a real credential as <attacker-known-password>. Real runtime secrets must flow in at deploy time from GCP Secret Manager, a gitignored local env file, or a deploy-time Kubernetes Secret. Containment uses git ls-files so gitignored local-dev files (e.g. *.local.env) are intentionally not scanned. The parser splits on the first '=' so non-identifier key shapes (db.password=..., api-token=..., export DB_PASSWORD=...) still flow through the value check. Inline '# comment' is NOT honored (Kustomize env_file format treats '#' as a comment only at the start of a line). Non-comment lines without '=' are flagged as malformed. The blocked condition is centralized in scripts/adr_guard/adr_guard.py; violation messages name the repo-relative path and the variable name only, never the rejected value. Backstops gitleaks for low-entropy committed credentials it ignores and prevents reintroduction of the failure mode resolved by #1207 / #1195.",
         "checks": ["no-populated-secret-env-files"]
+      },
+      {
+        "id": "ADR-004-R10",
+        "description": "Every Terraform module that defines an `aws_iam_role` whose attached `aws_iam_role_policy` grants `secretsmanager:GetSecretValue` (or any wildcard that covers it — `secretsmanager:*`, `secretsmanager:Get*`, `*`) on a secret encrypted with the portal Secrets Manager CMK must also attach a single `aws_iam_role_policy` statement granting `kms:Decrypt` on that CMK. The grant must satisfy all three predicates in the SAME IAM Statement: Action covering `kms:Decrypt`; Resource set to `var.secrets_manager_kms_key_arn` or `var.secrets_kms_key_arn` (both are accepted module-input names referring to the portal CMK; preferred) or `\"*\"` (accepted when the same statement carries the service condition); Condition `StringEquals` (or `StringLike`) `kms:ViaService = \"secretsmanager.<region>.amazonaws.com\"`. Spreading the three predicates across separate statements does NOT satisfy IAM evaluation. Additionally, any IAM statement granting `kms:Decrypt` on `Resource=\"*\"` (or `[\"*\"]`) must carry a `kms:ViaService` condition pinning to some service — unconditioned wildcard `kms:Decrypt` is too broad. The check is implemented in `scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py` and wired as the `check-tf-kms-secrets-grant` pre-commit hook plus a CI step in `.github/workflows/_quality.yml`. Currently scoped to `platform/terraform/modules/engine-provisioner/iam.tf`, `platform/terraform/modules/portal/ec2/main.tf`, and `platform/terraform/modules/guacamole/iam.tf`; expand the hook's `files:` regex and the CI invocation when a new module starts reading portal Secrets Manager secrets. Backstops the silent failure mode resolved by #52 where a fresh Secrets Manager CMK rotation left multiple roles without `kms:Decrypt` and ECS task secrets injection aborted at startup with `AccessDeniedException: Access to KMS is not allowed`.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -131,7 +136,8 @@
       ".kube-linter.yaml",
       ".pre-commit-config.yaml",
       ".github/workflows/_quality.yml",
-      "scripts/adr_guard/adr_guard.py"
+      "scripts/adr_guard/adr_guard.py",
+      "scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py"
     ]
   },
   {

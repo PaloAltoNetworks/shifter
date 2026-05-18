@@ -70,7 +70,10 @@ jobs:
               - '.github/workflows/_range.yml'
             shifter_engine:
               - 'shifter/engine/provisioner/**'
-              - 'platform/terraform/modules/pulumi-provisioner/**'
+              # NB: module is `engine-provisioner`, not the historical
+              # `pulumi-provisioner` name; the latter was a stale typo
+              # the path filter inherited from before the rename.
+              - 'platform/terraform/modules/engine-provisioner/**'
               - 'platform/terraform/modules/ecr/**'
               - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_shifter-engine.yml'
@@ -79,12 +82,38 @@ jobs:
               - 'platform/terraform/modules/portal/**'
               - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
+              # The portal Docker image bundles `entrypoint.sh` + the
+              # sourced `entrypoint-lib.sh`; a change to either must
+              # trigger the AWS portal deploy so the rebuilt image
+              # actually ships. The `gcp` filter already lists both
+              # for the GCP deploy path.
+              - 'shifter/shifter_platform/entrypoint.sh'
+              - 'shifter/shifter_platform/entrypoint-lib.sh'
               - '.github/workflows/_shifter-platform.yml'
             shifter_app:
               - 'shifter/**'
             mcp:
               - 'mcp/**'
               - '.github/workflows/_quality.yml'
+              # Guardrail scripts that the Quality workflow invokes
+              # directly (their CI steps live in _quality.yml's
+              # terraform-lint job). A change to these scripts or their
+              # tests must re-run Quality so the guardrail's enforcement
+              # is verified, but it shouldn't trigger any deploy — the
+              # `mcp` filter is the existing "Quality-only" route.
+              - 'scripts/check_tf_iam_ec2_scope/**'
+              - 'scripts/check_tf_sg_cidrs/**'
+              - 'scripts/check_tf_kms_secrets_grant/**'
+              # Guardrail / ADR-registry surfaces. A change to any of
+              # these must re-run Quality so adr_guard catches a broken
+              # registry, malformed exception entry, or pre-commit hook
+              # wiring mismatch before it lands. Without this, a PR
+              # touching only ADR metadata or hook configuration would
+              # skip every architecture gate.
+              - '.pre-commit-config.yaml'
+              - 'docs/adr/**'
+              - 'scripts/adr_guard/**'
+              - 'shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md'
             gcp:
               - 'platform/terraform/gcp/**'
               - 'platform/k8s/gcp/**'
@@ -96,6 +125,7 @@ jobs:
               - 'shifter/shifter_platform/engine/ecs.py'
               - 'shifter/shifter_platform/cms/experiments/ecs.py'
               - 'shifter/shifter_platform/entrypoint.sh'
+              - 'shifter/shifter_platform/entrypoint-lib.sh'
               - 'shifter/shifter_platform/cms/experiments/events.py'
               - 'shifter/shifter_platform/shared/management/commands/run_worker.py'
               - 'shifter/shifter_platform/requirements-gcp.txt'

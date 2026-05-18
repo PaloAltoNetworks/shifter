@@ -97,6 +97,38 @@ resource "aws_iam_role_policy" "secrets_read" {
   })
 }
 
+# Allow the portal EC2 role to decrypt secrets encrypted with the portal
+# Secrets Manager CMK. The portal container reads values via boto3 from inside
+# the container, but the underlying Secrets Manager → KMS Decrypt call runs as
+# this EC2 instance role and needs kms:Decrypt on the CMK. Without it,
+# `entrypoint.sh::fetch_runtime_secret` fails the GetSecretValue call with
+# `AccessDeniedException: Access to KMS is not allowed`, and the existing
+# bug-fix to entrypoint.sh aborts container start (better than silently
+# exporting an empty env var). Scoped to the concrete CMK ARN and pinned to
+# Secrets Manager via kms:ViaService. See issue #52.
+resource "aws_iam_role_policy" "kms_secrets_decrypt" {
+  name = "kms-secrets-decrypt"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SecretsManagerKMSAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey"
+      ]
+      Resource = var.secrets_manager_kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "cloudwatch_logs" {
   name = "cloudwatch-logs"
   role = aws_iam_role.this.id

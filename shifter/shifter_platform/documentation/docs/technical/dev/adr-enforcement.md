@@ -347,6 +347,55 @@ The first slice intentionally stays small:
   and matching pre-commit hooks (ruff + pytest). Same pattern as
   `scripts/check_layer_imports/`.
 
+- `check-tf-kms-secrets-grant`
+  Pre-commit hook AND CI step (`.github/workflows/_quality.yml`'s
+  `terraform-lint` job) that fails when an IAM role whose attached
+  `aws_iam_role_policy` grants `secretsmanager:GetSecretValue` (or
+  any wildcard covering it — `secretsmanager:*`,
+  `secretsmanager:Get*`, `*`) lacks an attached IAM Statement
+  granting `kms:Decrypt` on the portal Secrets Manager CMK. The grant
+  must satisfy all three predicates in the SAME Statement: Action
+  covers `kms:Decrypt` (action wildcard matching is done with
+  `fnmatch`, so `kms:*` and `kms:De*` also satisfy); Resource is
+  `var.secrets_manager_kms_key_arn` or `var.secrets_kms_key_arn`
+  (both module-input names refer to the same physical portal CMK in
+  the environment modules — engine-provisioner and portal/ec2 use
+  the first, guacamole uses the second) or `"*"` / `["*"]` (accepted
+  when the same statement carries the service condition); Condition
+  `StringEquals` or `StringLike` with
+  `"kms:ViaService" = "secretsmanager.<region>.amazonaws.com"`. The
+  per-statement coexistence check matters because IAM evaluates each
+  Statement in isolation — spreading the predicates across separate
+  statements does not satisfy a single Decrypt call. Independently,
+  any IAM Statement granting `kms:Decrypt` on `Resource="*"` (or
+  `["*"]`) must carry a `kms:ViaService` condition pinning to some
+  service; unconditioned wildcard `kms:Decrypt` is too broad.
+  Existence is gated on `secretsmanager:GetSecretValue` (not file
+  layout) so unrelated roles that happen to live in the same file
+  are not forced to acquire unnecessary KMS grants. Currently scoped
+  via the pre-commit `files:` regex (and the matching CI invocation
+  list) to `platform/terraform/modules/engine-provisioner/iam.tf`,
+  `platform/terraform/modules/portal/ec2/main.tf`, and
+  `platform/terraform/modules/guacamole/iam.tf`; expand both when a
+  new module starts reading portal Secrets Manager secrets. The
+  check is implemented in
+  `scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py`
+  and tested in
+  `scripts/check_tf_kms_secrets_grant/test_check_tf_kms_secrets_grant.py`
+  with stdlib `unittest` (mirrors `check_tf_iam_ec2_scope`). The
+  test suite itself is run by the `check-tf-checker-tests` pre-commit
+  hook and a matching CI step so a parser regression cannot land
+  merely because the current live `.tf` files remain in the
+  happy-path shape. Enforces ADR-004-R10. Backstops the failure mode
+  resolved by #52 where a fresh Secrets Manager CMK rotation left
+  several roles without `kms:Decrypt` and ECS task secrets injection
+  aborted at startup with `AccessDeniedException: Access to KMS is
+  not allowed` (which in turn was silently masked at the portal
+  entrypoint by an `export VAR=$(fetch_runtime_secret …)` pattern
+  that swallowed the fetch failure; see
+  `shifter/shifter_platform/entrypoint-lib.sh` and
+  `shifter/shifter_platform/tests/test_entrypoint_lib.sh`).
+
 ## Local Usage
 
 Run the fast profile on the full repo:

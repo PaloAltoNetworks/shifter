@@ -456,9 +456,10 @@ module "ec2" {
     module.guacamole.json_auth_secret_arn,
     module.engine_provisioner.dc_domain_password_secret_arn,
   ]
-  s3_bucket_arn    = module.s3.bucket_arn
-  app_port         = var.app_port
-  root_volume_size = var.ec2_root_volume_size
+  secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
+  s3_bucket_arn               = module.s3.bucket_arn
+  app_port                    = var.app_port
+  root_volume_size            = var.ec2_root_volume_size
 
   # ECS permissions for engine provisioner
   ecs_cluster_arn            = module.engine_provisioner.ecs_cluster_arn

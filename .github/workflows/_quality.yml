@@ -83,6 +83,39 @@ jobs:
         working-directory: platform/terraform
         run: tflint --recursive --config "${GITHUB_WORKSPACE}/.tflint.hcl"
 
+      # ADR-004-R10 / issue #52: the kms:Decrypt grant for the portal
+      # Secrets Manager CMK on roles that read Secrets Manager. Wired
+      # alongside terraform-lint because the inputs are .tf files and
+      # this is the natural "terraform architecture" gate; runs in the
+      # same job to avoid an extra runner pool slot. Pre-commit also
+      # enforces it locally, but CI must enforce it independently so a
+      # commit that didn't run pre-commit cannot land the regression.
+      # Scope must mirror the pre-commit hook's `files:` regex —
+      # every module that defines an IAM role whose attached policies
+      # grant secretsmanager:GetSecretValue on a portal-CMK secret.
+      - name: Run check-tf-kms-secrets-grant
+        run: |
+          python3 scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py \
+            platform/terraform/modules/engine-provisioner/iam.tf \
+            platform/terraform/modules/portal/ec2/main.tf \
+            platform/terraform/modules/guacamole/iam.tf
+
+      # Pin the behavior of the check_tf_* IAM/security checkers
+      # themselves. The live-file invocations above only exercise the
+      # happy-path shape; the test suites cover wildcards, list
+      # resources, scoped conditions, missing grants, etc. Run them so
+      # a parser regression can't slip through merely because the
+      # current production .tf files happen to remain in the
+      # happy-path shape. Invoked as fully-qualified modules from the
+      # repo root because each test uses `from .check_tf_X import …`
+      # (relative imports require the package path, which
+      # `unittest discover` doesn't preserve).
+      - name: Run check_tf_* checker tests
+        run: |
+          python3 -m unittest scripts.check_tf_iam_ec2_scope.test_check_tf_iam_ec2_scope
+          python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs
+          python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
+
   shifter-platform-lint:
     permissions:
       contents: read

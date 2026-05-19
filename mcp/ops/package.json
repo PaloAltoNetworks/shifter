@@ -16,7 +16,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "eslint": "^9.39.2",
+    "eslint": "^10.4.0",
     "eslint-plugin-security": "^3.0.1"
   }
 }

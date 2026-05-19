@@ -90,13 +90,6 @@ jobs:
               - 'platform/terraform/modules/portal/**'
               - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
-              # The portal Docker image bundles `entrypoint.sh` + the
-              # sourced `entrypoint-lib.sh`; a change to either must
-              # trigger the AWS portal deploy so the rebuilt image
-              # actually ships. The `gcp` filter already lists both
-              # for the GCP deploy path.
-              - 'shifter/shifter_platform/entrypoint.sh'
-              - 'shifter/shifter_platform/entrypoint-lib.sh'
               - '.github/workflows/_shifter-platform.yml'
             shifter_app:
               - 'shifter/**'

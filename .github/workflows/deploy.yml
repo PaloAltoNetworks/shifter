@@ -259,6 +259,15 @@ jobs:
   gcp-dev:
     name: GCP Dev
     needs: [changes, quality]
+    # `_gcp-dev.yml::deploy` requests `id-token: write` (GCP OIDC via
+    # workload identity federation). Reusable workflows can't request
+    # higher GITHUB_TOKEN scopes than the caller grants — without this
+    # block the workflow fails at startup with
+    # `nested job 'deploy' is requesting 'id-token: write', but is only
+    # allowed 'id-token: none'`.
+    permissions:
+      contents: read
+      id-token: write
     if: |
       always() &&
       needs.changes.outputs.run_gcp == 'true' &&
@@ -287,6 +296,13 @@ jobs:
   core:
     name: Core
     needs: [changes, quality]
+    # `_core.yml::plan` + `apply` request `id-token: write` (AWS OIDC
+    # via configure-aws-credentials) and `pull-requests: write` (plan
+    # comments). Caller must grant the union.
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
@@ -304,6 +320,12 @@ jobs:
   range:
     name: Range
     needs: [changes, quality, core]
+    # Same OIDC + PR-comment scopes as `core` — `_range.yml::plan` and
+    # `apply` mirror the core workflow's permission requests.
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
@@ -322,6 +344,11 @@ jobs:
   shifter-engine:
     name: Shifter Engine
     needs: [changes, quality, core]
+    # `_shifter-engine.yml::build` + `deploy` request `id-token: write`
+    # (AWS OIDC for ECR + ECS task push).
+    permissions:
+      contents: read
+      id-token: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
@@ -340,6 +367,13 @@ jobs:
   shifter_platform:
     name: Shifter Platform
     needs: [changes, quality, core, range, shifter-engine]
+    # `_shifter-platform.yml` jobs (plan, push-guacamole-images, apply,
+    # build, deploy) all request `id-token: write` (AWS OIDC) and
+    # `pull-requests: write` (plan comments). Caller grants the union.
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&

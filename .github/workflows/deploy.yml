@@ -32,6 +32,14 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    # `dorny/paths-filter` calls the GitHub API to list files changed in
+    # the PR. The default GITHUB_TOKEN scopes under this repo's
+    # permissions policy don't include `pull-requests: read`, so without
+    # this block paths-filter fails with
+    # "Resource not accessible by integration" on every PR-event run.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}

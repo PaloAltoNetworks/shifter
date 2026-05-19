@@ -134,7 +134,7 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - uses: devops-actions/actionlint@467e2ce19b2310e93c9ffa0b50fe31f86b5a7f23 # v0.1.10
+      - uses: devops-actions/actionlint@9fb9c192862f19e684586ca84b500461bcd8a541 # v0.1.12
 
   terraform-lint:
     permissions:
@@ -1060,7 +1060,7 @@ jobs:
             ${{ runner.os }}-checkov-
 
       - name: Checkov IaC Security
-        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        uses: bridgecrewio/checkov-action@4048c972aae68d0b983a48bb3479aab2d877b898 # v12
         with:
           directory: platform/terraform/
           framework: terraform
@@ -1088,7 +1088,7 @@ jobs:
             ${{ runner.os }}-checkov-k8s-
 
       - name: Checkov k8s Security
-        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        uses: bridgecrewio/checkov-action@4048c972aae68d0b983a48bb3479aab2d877b898 # v12
         with:
           directory: platform/k8s/
           framework: kubernetes

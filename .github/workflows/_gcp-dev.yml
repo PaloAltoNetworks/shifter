@@ -47,7 +47,7 @@ permissions:
 jobs:
   validate:
     name: Validate (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       GCP_ENVIRONMENT: ${{ inputs.environment }}
       KUBECONFORM_VERSION: v0.7.0
@@ -80,7 +80,7 @@ jobs:
 
   deploy:
     name: Deploy (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: validate
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     permissions:

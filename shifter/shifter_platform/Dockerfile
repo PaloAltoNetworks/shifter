@@ -33,8 +33,11 @@ RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --shell /bin/bash appuser
 
 # Install runtime dependencies
+# gettext provides msgfmt, required by `manage.py compilemessages` in
+# entrypoint.sh (added in #1260, Django i18n adoption).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    gettext \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder

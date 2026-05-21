@@ -11,6 +11,7 @@ Generates the four PDFs served by A0:
 Output directory is argv[1]. Invoked from Dockerfile build stage.
 """
 
+import json
 import os
 import sys
 from reportlab.lib.pagesizes import letter
@@ -18,6 +19,56 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 
 FLAG_2 = "FLAG{d4e7b1f283a6c950}"
+
+
+def _default_challenges_path():
+    """Locate ctfd-challenges.json.
+
+    build/a0/Dockerfile copies the board next to this script in the a0
+    content-builder stage; in the repo it lives one level up under build/.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    sibling = os.path.join(here, "ctfd-challenges.json")
+    if os.path.exists(sibling):
+        return sibling
+    return os.path.join(os.path.dirname(here), "ctfd-challenges.json")
+
+
+def flag_for(challenge_id, challenges_path):
+    """Return the single static flag for a CTFd challenge id.
+
+    The CTFd board (ctfd-challenges.json) is the canonical flag source; the
+    generated PDFs must agree with it. Raises ValueError on missing,
+    duplicate, or non-static flag data so a bad board fails the bake loudly
+    instead of shipping a flagless artifact (regression #619).
+    """
+    with open(challenges_path, encoding="utf-8") as f:
+        board = json.load(f)
+    matches = [c for c in board.get("challenges", []) if c.get("id") == challenge_id]
+    if not matches:
+        raise ValueError(
+            f"challenge id {challenge_id} not found in {challenges_path}"
+        )
+    if len(matches) > 1:
+        raise ValueError(
+            f"duplicate challenge id {challenge_id} in {challenges_path}"
+        )
+    flags = matches[0].get("flags", [])
+    if len(flags) != 1:
+        raise ValueError(
+            f"challenge id {challenge_id} must have exactly one flag, "
+            f"found {len(flags)}"
+        )
+    flag = flags[0]
+    if flag.get("type") != "static":
+        raise ValueError(
+            f"challenge id {challenge_id} flag must be static, "
+            f"found {flag.get('type')!r}"
+        )
+    content = flag.get("content")
+    if not content:
+        raise ValueError(f"challenge id {challenge_id} static flag has no content")
+    return content
 
 
 def make_org_chart(path):
@@ -117,11 +168,14 @@ def make_quarterly(path, quarter, revenue_m, net_m, notes):
     c.save()
 
 
-def make_annual_report(path):
-    """Annual report with Kursk Heavy Industries $12M line buried in 40 expense items.
+def make_annual_report(path, flag6):
+    """Annual report with the Kursk Heavy Industries $12M line buried in 40
+    expense items.
 
-    Flag 6 (CTFd challenge) requires submitting the supplier name and dollar amount
-    in the format KURSK-12000000 after locating this PDF via filename fuzzing.
+    Flag 6 ("Follow the Money") is carried as a `PO ref:` annotation on the
+    Kursk line item, found after locating this PDF via filename fuzzing.
+    `flag6` is the canonical static flag from the CTFd board
+    (ctfd-challenges.json challenge 6) — keep the two identical.
     """
     c = canvas.Canvas(path, pagesize=letter)
     c.setTitle("Boreas Systems — Annual Report 2025")
@@ -206,6 +260,16 @@ def make_annual_report(path):
         line = f"  {desc:50s}  ${amount:>12,}"
         c.drawString(0.75 * inch, y, line)
         y -= 0.18 * inch
+        if desc.startswith("Kursk Heavy Industries"):
+            # Flag 6 payload: a buried "PO ref" annotation under the Kursk
+            # line item. Sourced from the CTFd board so the PDF and the
+            # board can never silently diverge (#619).
+            if y < 0.9 * inch:
+                c.showPage()
+                c.setFont("Courier", 8)
+                y = 10.5 * inch
+            c.drawString(0.75 * inch, y, f"    PO ref: {flag6}")
+            y -= 0.18 * inch
 
     y -= 0.1 * inch
     c.line(0.75 * inch, y, 7.75 * inch, y)
@@ -223,8 +287,11 @@ def make_annual_report(path):
     c.save()
 
 
-def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else "./out"
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    out = argv[0] if argv else "./out"
+    challenges_path = argv[1] if len(argv) > 1 else _default_challenges_path()
+    flag6 = flag_for(6, challenges_path)
     os.makedirs(f"{out}/internal", exist_ok=True)
 
     make_org_chart(f"{out}/internal/org_chart.pdf")
@@ -244,7 +311,7 @@ def main():
             "Two senior engineers hired into the Systems Integration group.",
         ],
     )
-    make_annual_report(f"{out}/internal/boreas-annual-2025.pdf")
+    make_annual_report(f"{out}/internal/boreas-annual-2025.pdf", flag6)
 
     for f in sorted(os.listdir(f"{out}/internal")):
         size = os.path.getsize(f"{out}/internal/{f}")

@@ -1,0 +1,215 @@
+name: Polaris Scenario Bake (Dev)
+
+# Operator-triggered bake of the Polaris polaris-vm AMI. Mirrors the
+# workflow_dispatch-only shape of packer.yml: it automates the deliberate
+# manual bake (build tarball -> stand up a golden range -> create-image ->
+# update SSM) and is never wired to push / pull_request / schedule
+# triggers. See docs/architecture/polaris-repo-to-ami-drift-audit.md and
+# docs/architecture/polaris-scenario-bake-preflight-618.md.
+#
+# Security posture: this is a privileged self-hosted workflow that assumes
+# the dev AWS role. The bake source `ref` is constrained to protected
+# branches (choice input) so a dispatcher cannot run unreviewed code with
+# the bake credentials. Free-form inputs are bound to environment
+# variables and validated against strict allowlists before any AWS step,
+# never interpolated into shell text — so a crafted input cannot inject
+# shell commands on the runner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Protected branch to bake from'
+        required: true
+        type: choice
+        options:
+          - dev
+          - main
+      s3_bucket:
+        description: 'S3 bucket for the Polaris build tarball'
+        required: false
+        type: string
+        default: 'shifter-polaris-bake-158151907940'
+      s3_key:
+        description: 'S3 key for the Polaris build tarball'
+        required: false
+        type: string
+        default: 'polaris/build-v1.tar.gz'
+      ssm_parameter:
+        description: 'SSM parameter to update (must be under /shifter/ami/)'
+        required: false
+        type: string
+        default: '/shifter/ami/polaris-vm'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  bake:
+    name: Bake polaris-vm AMI in dev
+    runs-on: self-hosted
+
+    env:
+      AWS_REGION: us-east-2
+      RANGE_DIR: scripts/polaris-aws-range
+      TARBALL: polaris-build.tar.gz
+      # Free-form inputs are bound here as plain environment variables.
+      # Env-var *values* are never re-parsed as shell code, so referencing
+      # them as "$S3_BUCKET" etc. in run blocks is injection-safe — unlike
+      # ${{ inputs.* }} which expands into the script text before bash.
+      S3_BUCKET: ${{ inputs.s3_bucket }}
+      S3_KEY: ${{ inputs.s3_key }}
+      SSM_PARAMETER: ${{ inputs.ssm_parameter }}
+      RUN_ID: ${{ github.run_id }}
+
+    steps:
+      - name: Validate operator inputs
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$S3_BUCKET" | grep -qE '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'; then
+            echo "::error::s3_bucket is not a valid S3 bucket name"
+            exit 1
+          fi
+          if ! printf '%s' "$S3_KEY" | grep -qE '^[A-Za-z0-9._/-]+$'; then
+            echo "::error::s3_key contains characters outside [A-Za-z0-9._/-]"
+            exit 1
+          fi
+          if ! printf '%s' "$SSM_PARAMETER" | grep -qE '^/shifter/ami/[A-Za-z0-9._-]+$'; then
+            echo "::error::ssm_parameter must match /shifter/ami/<name>"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify generated artifacts carry their flags (pre-bake gate)
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet reportlab
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+          out="$(mktemp -d)"
+          python scenario-dev/polaris/build/A0-boreas-website/build_pdfs.py "$out"
+          python scenario-dev/polaris/build/verify_flags_baked.py \
+            scenario-dev/polaris/build/ctfd-challenges.json "$out"
+
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-2
+
+      - name: Build and upload Polaris build tarball
+        run: |
+          set -euo pipefail
+          tar czf "$TARBALL" scenario-dev/polaris/build
+          aws s3 cp "$TARBALL" "s3://${S3_BUCKET}/${S3_KEY}"
+          echo "TARBALL_S3_URI=s3://${S3_BUCKET}/${S3_KEY}" >> "$GITHUB_ENV"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform apply — stand up golden bake range
+        working-directory: ${{ env.RANGE_DIR }}
+        run: |
+          set -euo pipefail
+          terraform init -input=false
+          terraform apply -input=false -auto-approve \
+            -var "build_tarball_s3_uri=${TARBALL_S3_URI}" \
+            -var "build_tarball_bucket=${S3_BUCKET}"
+          POLARIS_INSTANCE_ID="$(terraform output -json range_polaris_instance_ids | jq -r '."0"')"
+          echo "POLARIS_INSTANCE_ID=${POLARIS_INSTANCE_ID}" >> "$GITHUB_ENV"
+
+      - name: Wait for the range bootstrap to complete
+        run: |
+          set -euo pipefail
+          aws ec2 wait instance-status-ok --instance-ids "$POLARIS_INSTANCE_ID"
+          # user_data builds + starts the 17-container compose stack; poll
+          # the bootstrap log for the completion marker, bounded to 30 min.
+          deadline=$(( $(date +%s) + 1800 ))
+          while true; do
+            cmd_id="$(aws ssm send-command \
+              --instance-ids "$POLARIS_INSTANCE_ID" \
+              --document-name AWS-RunShellScript \
+              --parameters 'commands=["grep -c \"polaris bootstrap complete\" /var/log/polaris-bootstrap.log || true"]' \
+              --query 'Command.CommandId' --output text)"
+            sleep 10
+            hits="$(aws ssm get-command-invocation \
+              --command-id "$cmd_id" --instance-id "$POLARIS_INSTANCE_ID" \
+              --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]' || echo 0)"
+            if [ "${hits:-0}" != "0" ]; then
+              echo "range bootstrap complete"
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::range bootstrap did not complete within 30 minutes"
+              exit 1
+            fi
+            sleep 30
+          done
+
+      - name: Health-check the golden range
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet boto3
+          python "${RANGE_DIR}/check_range_health.py" \
+            --instance-ids "$POLARIS_INSTANCE_ID" \
+            --output range-health.md
+          cat range-health.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create AMI from the golden range
+        run: |
+          set -euo pipefail
+          ami_name="polaris-vm-${RUN_ID}"
+          AMI_ID="$(aws ec2 create-image \
+            --instance-id "$POLARIS_INSTANCE_ID" \
+            --name "$ami_name" \
+            --description "Polaris scenario AMI baked by GitHub Actions run ${RUN_ID}" \
+            --no-reboot \
+            --query 'ImageId' --output text)"
+          echo "AMI_ID=${AMI_ID}" >> "$GITHUB_ENV"
+          echo "waiting for AMI ${AMI_ID} to become available..."
+          aws ec2 wait image-available --image-ids "$AMI_ID"
+          {
+            echo "## Polaris AMI Bake Complete"
+            echo "- **AMI name:** \`${ami_name}\`"
+            echo "- **AMI ID:** \`${AMI_ID}\`"
+            echo "- **Region:** us-east-2"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update dev SSM parameter
+        run: |
+          set -euo pipefail
+          aws ssm put-parameter \
+            --name "$SSM_PARAMETER" \
+            --type String \
+            --value "$AMI_ID" \
+            --overwrite \
+            --description "Polaris AMI baked by GitHub Actions run ${RUN_ID}"
+          {
+            echo "- **SSM parameter:** \`${SSM_PARAMETER}\` updated"
+            echo ""
+            echo "**Next step:** test the new AMI in dev before promoting."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform destroy — tear down the bake range
+        if: always()
+        working-directory: ${{ env.RANGE_DIR }}
+        run: |
+          set -euo pipefail
+          if [ -f terraform.tfstate ] || [ -d .terraform ]; then
+            terraform destroy -input=false -auto-approve \
+              -var "build_tarball_s3_uri=${TARBALL_S3_URI:-s3://${S3_BUCKET}/${S3_KEY}}" \
+              -var "build_tarball_bucket=${S3_BUCKET}"
+          else
+            echo "no terraform state — nothing to destroy"
+          fi

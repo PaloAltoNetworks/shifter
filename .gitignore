@@ -460,4 +460,9 @@ CLAUDE.local.md
 # Claude Code scheduled-tasks runtime lock (per-session state)
 .claude/scheduled_tasks.lock
 
+# Ground Control /implement runtime artifacts (SonarCloud issue exports +
+# per-step telemetry). Tool-generated, ephemeral; .gc/plan-rules.md stays tracked.
+.gc/sonar/
+.gc/telemetry/
+
 temp/

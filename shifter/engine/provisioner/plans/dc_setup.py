@@ -418,6 +418,19 @@ class DCSetupPlan:
     same runtime settings and verification.
     """
 
+    # Render-context keys produced by get_context(); the single source of
+    # truth for both the per-attribute validation below and the CI plan-script
+    # token lint (tests/test_plan_template_tokens.py). get_context() builds its
+    # dict in a loop, so the keys cannot be inferred from a literal return.
+    TEMPLATE_CONTEXT_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "domain_name",
+            "netbios_name",
+            "dsrm_password",
+            "domain_admin_password",
+        }
+    )
+
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ad_running",
         script=VERIFY_AD_SCRIPT,
@@ -469,15 +482,8 @@ class DCSetupPlan:
         Raises:
             ValueError: If required attributes are missing or None
         """
-        required_attrs = [
-            "domain_name",
-            "netbios_name",
-            "dsrm_password",
-            "domain_admin_password",
-        ]
-
         context = {}
-        for attr in required_attrs:
+        for attr in self.TEMPLATE_CONTEXT_KEYS:
             value = getattr(instance, attr, None)
             if value is None:
                 raise ValueError(f"Instance missing required attribute '{attr}' for DC setup")

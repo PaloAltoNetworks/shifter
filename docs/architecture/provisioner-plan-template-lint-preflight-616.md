@@ -33,11 +33,14 @@ but `stdin_input` is rendered by the same runtime method and should not remain a
 blind spot.
 
 Plan context keys remain owned by each plan's existing `get_context()` contract.
-The implementation should derive keys from simple literal return shapes where
-that is reliable, and add a small explicit class-level key declaration only for
-plans whose context cannot be statically inferred, such as pass-through or
-dynamic contexts. Do not create a second validation schema for every plan by
-default.
+As shipped, the lint derives the keys directly from `get_context()` for every
+plan style — literal-return, loop-built dict, and input pass-through — by
+collecting the string literals that appear in a context-key position inside the
+method (dict-literal keys, subscript indices, `.get()` arguments, and elements of
+a literal list/set/tuple it iterates). This avoids a second per-plan validation
+schema and avoids any class-level key declaration: the existing `get_context()`
+body is the single source of truth. The lint never instantiates a plan or
+executes a script.
 
 ## Incumbents To Reuse
 
@@ -45,7 +48,7 @@ default.
 | --- | --- | --- |
 | Runtime rendering | `SetupOrchestrator._render_script` | The lint semantics must match this regex exactly unless the runtime renderer is intentionally changed in the same future implementation. |
 | Plan shape | `SetupPlan` and `SetupStep` in `shifter/engine/provisioner/plans/base.py` | Scan only fields that are rendered by the setup orchestrator. Do not conflate operation plans or executor params with setup script templates. |
-| Context validation | Existing `get_context()` methods in `shifter/engine/provisioner/plans/*.py` | Reuse the per-plan context contract. Add explicit static key metadata only where inference is not reliable. |
+| Context validation | Existing `get_context()` methods in `shifter/engine/provisioner/plans/*.py` | Reuse the per-plan context contract. Derive keys from the `get_context()` body itself; do not add a parallel schema or per-plan key declaration. |
 | Provisioner tests | `shifter/engine/provisioner/pytest.ini` and `tests/test_*.py` | Keep the check in the provisioner pytest suite so `.github/workflows/_quality.yml` already runs it in `shifter-engine-tests`. |
 | CI quality gates | `provisioner-lint`, `provisioner-sast`, and `shifter-engine-tests` in `.github/workflows/_quality.yml` | Do not weaken lint, SAST, coverage, or the `skip_tests` contract to land the check. |
 | Secret output masking | `SetupOrchestrator._mask_sensitive_output`, `SENSITIVE_CONTEXT_KEY_PARTS`, and `SENSITIVE_ENV_VARS` | Lint failures may name paths, classes, steps, fields, and token names. They must not print context values or full rendered scripts. |

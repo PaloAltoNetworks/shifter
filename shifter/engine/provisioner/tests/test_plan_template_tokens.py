@@ -8,12 +8,12 @@ is caught in CI instead of on a live range.
 Dot-prefixed Go/Docker template fields (``{{.Names}}``,
 ``{{json .NetworkSettings.Networks}}``) do not match the runtime matcher and are
 safe by construction. Bare word-only tokens (``{{end}}``, ``{{range}}``) do match
-and must correspond to a declared plan context key.
+and must correspond to a render-context key the plan's ``get_context()`` declares.
 
 The scan is purely static (AST only): no plan is instantiated and no script is
 executed. The placeholder matcher is not hard-coded here — it is extracted
-straight out of ``SetupOrchestrator._render_script``'s source so the lint
-always uses the exact runtime regex and can never drift from it.
+straight out of ``SetupOrchestrator._render_script``'s source so the lint always
+uses the exact runtime regex and can never drift from it.
 """
 
 import ast
@@ -24,6 +24,15 @@ import pytest
 
 PLANS_DIR = Path(__file__).resolve().parent.parent / "plans"
 _ORCHESTRATOR = PLANS_DIR.parent / "orchestrators" / "setup_orchestrator.py"
+
+# Modules under plans/ that define no SetupOrchestrator-rendered plan.
+_NON_PLAN_MODULES = {"base.py", "__init__.py"}
+
+# SetupStep dataclass fields that SetupOrchestrator renders through
+# _render_script, mapped to their positional index in the SetupStep signature
+# (name, script, timeout_seconds, requires_reboot, is_verification,
+#  stdin_input, poll_for_job).
+RENDERED_STEP_FIELDS = {"script": 1, "stdin_input": 5}
 
 
 def _orchestrator_placeholder_pattern():
@@ -57,20 +66,6 @@ def _orchestrator_placeholder_pattern():
 
 # The exact matcher SetupOrchestrator._render_script uses at provisioning time.
 TEMPLATE_PLACEHOLDER_PATTERN = _orchestrator_placeholder_pattern()
-
-# Modules under plans/ that define no SetupOrchestrator-rendered plan.
-_NON_PLAN_MODULES = {"base.py", "__init__.py"}
-
-# SetupStep dataclass fields that SetupOrchestrator renders through
-# _render_script, mapped to their positional index in the SetupStep signature
-# (name, script, timeout_seconds, requires_reboot, is_verification,
-#  stdin_input, poll_for_job).
-RENDERED_STEP_FIELDS = {"script": 1, "stdin_input": 5}
-
-# Optional class attribute: an explicit frozenset of render-context keys for
-# plans whose get_context() builds its dict dynamically and so cannot be
-# inferred from a literal return.
-CONTEXT_KEYS_ATTR = "TEMPLATE_CONTEXT_KEYS"
 
 
 def _static_text(node):
@@ -160,95 +155,69 @@ def _plan_classes(tree):
     ]
 
 
-def _literal_str_collection(node):
-    """Extract a set of string literals from a set/list/tuple literal, optionally
-    wrapped in frozenset()/set()/tuple()/list(). Returns None if the node is not
-    a pure literal collection of strings.
-    """
+def _subscript_or_get_key(node):
+    """The string index of ``ctx["k"]`` or the first arg of ``ctx.get("k")``, else None."""
+    if isinstance(node, ast.Subscript):
+        index = node.slice
+        if isinstance(index, ast.Constant) and isinstance(index.value, str):
+            return index.value
+        return None
     if (
         isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id in {"frozenset", "set", "tuple", "list"}
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
     ):
-        if len(node.args) != 1:
-            return None
-        node = node.args[0]
-    if not isinstance(node, ast.Set | ast.List | ast.Tuple):
-        return None
-    out = set()
-    for elt in node.elts:
-        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-            out.add(elt.value)
-        else:
-            return None
-    return out
-
-
-def _explicit_context_keys(classdef):
-    """Return the declared TEMPLATE_CONTEXT_KEYS set for a plan class, or None."""
-    for node in classdef.body:
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name) and target.id == CONTEXT_KEYS_ATTR:
-                return _literal_str_collection(value)
+        return node.args[0].value
     return None
 
 
-def _inferred_context_keys(classdef):
-    """Infer context keys from a get_context() literal-dict return.
+def _key_strings(node):
+    """String literals used in a context-key position within one AST node."""
+    if isinstance(node, ast.Dict):
+        return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+    if isinstance(node, ast.Set | ast.List | ast.Tuple):
+        return {e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    literal = _subscript_or_get_key(node)
+    return {literal} if literal is not None else set()
 
-    Returns (keys, reliable). Inference is reliable only when get_context()
-    returns one or more literal dicts whose keys are all string literals.
+
+def _declared_context_keys(classdef):
+    """Collect the render-context keys a plan's get_context() declares.
+
+    A context key always appears as a string literal in get_context() in a key
+    position: a dict-literal key, a subscript index (``ctx["k"]``), a
+    ``.get("k")`` argument, or an element of a literal list/set/tuple the method
+    iterates. Collecting those positions covers every plan style — literal
+    return, loop-built dict, and input pass-through — directly from the existing
+    get_context() contract, with no parallel per-plan schema.
     """
     get_ctx = next(
         (b for b in classdef.body if isinstance(b, ast.FunctionDef) and b.name == "get_context"),
         None,
     )
     if get_ctx is None:
-        return set(), False
-    returns = [n for n in ast.walk(get_ctx) if isinstance(n, ast.Return)]
-    if not returns:
-        return set(), False
+        return set()
     keys = set()
-    for ret in returns:
-        if not isinstance(ret.value, ast.Dict):
-            return set(), False
-        for key in ret.value.keys:
-            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
-                # A None key means dict-unpacking (**other); a non-literal key
-                # means the key set cannot be determined statically.
-                return set(), False
-            keys.add(key.value)
-    return keys, True
+    for node in ast.walk(get_ctx):
+        keys |= _key_strings(node)
+    return keys
 
 
 def _plan_context_keys(classes):
-    """Resolve the union of declared context keys across a module's plan classes.
+    """Union of declared context keys across a module's plan classes.
 
-    Returns (keys, resolvable). resolvable is False when the module has no plan
-    class, or when a plan class neither declares TEMPLATE_CONTEXT_KEYS nor has a
-    statically inferable get_context().
+    resolvable is False only when the module declares no plan class at all, so a
+    module with rendered tokens but no get_context() cannot pass silently.
     """
     if not classes:
         return set(), False
     keys = set()
-    resolvable = True
     for classdef in classes:
-        explicit = _explicit_context_keys(classdef)
-        if explicit is not None:
-            keys |= explicit
-            continue
-        inferred, reliable = _inferred_context_keys(classdef)
-        if reliable:
-            keys |= inferred
-        else:
-            resolvable = False
-    return keys, resolvable
+        keys |= _declared_context_keys(classdef)
+    return keys, True
 
 
 def _lint_tree(tree, label):
@@ -260,9 +229,9 @@ def _lint_tree(tree, label):
     keys, resolvable = _plan_context_keys(_plan_classes(tree))
     if not resolvable:
         return [
-            f"{label}: contains {{{{word}}}} template tokens but its plan context "
-            f"keys cannot be determined statically. Declare a `{CONTEXT_KEYS_ATTR}` "
-            f"frozenset of context keys on the plan class."
+            f"{label}: contains {{{{word}}}} template tokens but declares no plan "
+            f"class with a get_context() method, so the lint cannot determine the "
+            f"render-context keys."
         ]
     violations = []
     for field_name, step_name, token in tokens:
@@ -270,10 +239,10 @@ def _lint_tree(tree, label):
             violations.append(
                 f"{label}: step '{step_name}' field '{field_name}' references "
                 f"unrendered template token '{{{{{token}}}}}', which is not a "
-                f"declared plan context key. Declared keys: {sorted(keys)}. "
-                f"Either declare the key in get_context() or use a dot-prefixed "
-                f"Go/Docker token (e.g. '{{{{.{token}}}}}') if it is not a "
-                f"provisioner placeholder."
+                f"render-context key declared by get_context(). Declared keys: "
+                f"{sorted(keys)}. Either add the key to get_context() or, if it is "
+                f"not a provisioner placeholder, use a dot-prefixed Go/Docker token "
+                f"(e.g. '{{{{.{token}}}}}')."
             )
     return violations
 
@@ -322,20 +291,24 @@ class BadPlan:
         return {"hostname": instance.hostname}
 """
 
-_SYNTHETIC_DYNAMIC = """
-from typing import Any
-class DynamicPlan:
-    steps = [SetupStep(name="d", script="echo {{rdp_user}}")]
-    def get_context(self, ctx: Any) -> dict:
-        return ctx
+_SYNTHETIC_PASSTHROUGH = """
+class PassthroughPlan:
+    steps = [SetupStep(name="p", script="echo {{rdp_user}}")]
+    def get_context(self, context):
+        username = context.get("rdp_user")
+        if not username:
+            raise ValueError("missing rdp_user")
+        return context
 """
 
-_SYNTHETIC_DYNAMIC_DECLARED = """
-from typing import Any, ClassVar
-class DynamicPlan:
-    TEMPLATE_CONTEXT_KEYS: ClassVar[frozenset] = frozenset({"rdp_user"})
-    steps = [SetupStep(name="d", script="echo {{rdp_user}}")]
-    def get_context(self, ctx: Any) -> dict:
+_SYNTHETIC_LOOP_BUILT = """
+class LoopPlan:
+    steps = [SetupStep(name="l", script="echo {{alpha}} {{beta}}")]
+    def get_context(self, instance):
+        required = ["alpha", "beta"]
+        ctx = {}
+        for attr in required:
+            ctx[attr] = getattr(instance, attr)
         return ctx
 """
 
@@ -351,6 +324,11 @@ class StdinPlan:
     steps = [SetupStep(name="s", script="", stdin_input="set region {{missing}}")]
     def get_context(self, instance):
         return {"present": 1}
+"""
+
+_SYNTHETIC_NO_GET_CONTEXT = """
+class NoContextPlan:
+    steps = [SetupStep(name="s", script="echo {{stray}}")]
 """
 
 
@@ -371,14 +349,12 @@ def test_bad_token_is_flagged():
     assert "end" in joined
 
 
-def test_dynamic_context_without_declaration_is_flagged():
-    violations = _lint_tree(ast.parse(_SYNTHETIC_DYNAMIC), "dyn.py")
-    assert violations
-    assert CONTEXT_KEYS_ATTR in violations[0]
+def test_passthrough_get_context_keys_from_get_calls():
+    assert _lint_tree(ast.parse(_SYNTHETIC_PASSTHROUGH), "passthrough.py") == []
 
 
-def test_dynamic_context_with_declaration_passes():
-    assert _lint_tree(ast.parse(_SYNTHETIC_DYNAMIC_DECLARED), "dyn.py") == []
+def test_loop_built_get_context_keys_from_list_literal():
+    assert _lint_tree(ast.parse(_SYNTHETIC_LOOP_BUILT), "loop.py") == []
 
 
 def test_dot_prefixed_tokens_are_ignored():
@@ -390,3 +366,9 @@ def test_stdin_input_field_is_scanned():
     assert violations
     assert "stdin_input" in violations[0]
     assert "missing" in violations[0]
+
+
+def test_module_with_tokens_but_no_get_context_is_flagged():
+    violations = _lint_tree(ast.parse(_SYNTHETIC_NO_GET_CONTEXT), "nocontext.py")
+    assert violations
+    assert "get_context" in violations[0]

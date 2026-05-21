@@ -35,7 +35,7 @@ deployment-scoped ``DC_DOMAIN_PASSWORD`` value (not this plan).
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any
 
 from .base import SetupStep
 
@@ -150,12 +150,6 @@ class SetLocalPasswordPlan:
     flow through ``SetupOrchestrator`` masking because the key contains
     ``password``.
     """
-
-    # Render-context keys. get_context() passes its input dict through
-    # unchanged, so the keys cannot be inferred from a literal return; this
-    # explicit declaration is consumed by the CI plan-script token lint
-    # (tests/test_plan_template_tokens.py).
-    TEMPLATE_CONTEXT_KEYS: ClassVar[frozenset[str]] = frozenset({"rdp_username", "rdp_password"})
 
     def __init__(self, *, platform: str) -> None:
         if platform not in ("linux", "windows"):

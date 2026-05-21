@@ -21,14 +21,6 @@ from plans.base import SetupPlan, SetupStep
 
 logger = logging.getLogger(__name__)
 
-# Placeholder matcher for `{{ variable }}` template tokens. Bare word-only
-# tokens match (e.g. `{{end}}`, `{{word}}`); dot-prefixed Go/Docker template
-# fields (`{{.Names}}`) do not. `_render_script` raises `SetupError` for any
-# match not present in the plan context. Promoted to a module constant so the
-# CI-time plan-script lint can import the exact same matcher rather than
-# keeping a copy that could drift (see tests/test_plan_template_tokens.py).
-TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(\w+)\s*\}\}")
-
 
 class SetupError(Exception):
     """Raised when setup fails at any step."""
@@ -586,7 +578,8 @@ class SetupOrchestrator:
         result = script
 
         # Find all {{ variable }} patterns
-        matches = TEMPLATE_PLACEHOLDER_PATTERN.findall(script)
+        pattern = r"\{\{\s*(\w+)\s*\}\}"
+        matches = re.findall(pattern, script)
 
         for var_name in matches:
             if var_name not in context:

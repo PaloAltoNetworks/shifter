@@ -11,18 +11,52 @@ safe by construction. Bare word-only tokens (``{{end}}``, ``{{range}}``) do matc
 and must correspond to a declared plan context key.
 
 The scan is purely static (AST only): no plan is instantiated and no script is
-executed. It reuses the orchestrator's exact matcher by importing
-``TEMPLATE_PLACEHOLDER_PATTERN`` so the lint can never drift from runtime.
+executed. The placeholder matcher is not hard-coded here — it is extracted
+straight out of ``SetupOrchestrator._render_script``'s source so the lint
+always uses the exact runtime regex and can never drift from it.
 """
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
 
-from orchestrators.setup_orchestrator import TEMPLATE_PLACEHOLDER_PATTERN
-
 PLANS_DIR = Path(__file__).resolve().parent.parent / "plans"
+_ORCHESTRATOR = PLANS_DIR.parent / "orchestrators" / "setup_orchestrator.py"
+
+
+def _orchestrator_placeholder_pattern():
+    """Extract the ``{{ variable }}`` matcher regex from SetupOrchestrator.
+
+    `_render_script` assigns the matcher to a local named ``pattern``. Reading
+    that literal out of the source — rather than copying the regex here —
+    guarantees the lint matches the runtime renderer exactly. A rename or regex
+    change in the orchestrator surfaces as a loud test error, not silent drift.
+    """
+    tree = ast.parse(_ORCHESTRATOR.read_text(encoding="utf-8"), filename=str(_ORCHESTRATOR))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name == "_render_script"):
+            continue
+        for sub in ast.walk(node):
+            if (
+                isinstance(sub, ast.Assign)
+                and len(sub.targets) == 1
+                and isinstance(sub.targets[0], ast.Name)
+                and sub.targets[0].id == "pattern"
+                and isinstance(sub.value, ast.Constant)
+                and isinstance(sub.value.value, str)
+            ):
+                return re.compile(sub.value.value)
+    raise AssertionError(
+        "could not locate the `pattern` placeholder regex in "
+        "SetupOrchestrator._render_script — the lint cannot verify plan scripts "
+        "without the runtime matcher; update _orchestrator_placeholder_pattern()."
+    )
+
+
+# The exact matcher SetupOrchestrator._render_script uses at provisioning time.
+TEMPLATE_PLACEHOLDER_PATTERN = _orchestrator_placeholder_pattern()
 
 # Modules under plans/ that define no SetupOrchestrator-rendered plan.
 _NON_PLAN_MODULES = {"base.py", "__init__.py"}

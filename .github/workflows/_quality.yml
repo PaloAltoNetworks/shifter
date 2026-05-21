@@ -8,6 +8,10 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      SONAR_TOKEN:
+        description: 'SonarCloud analysis token (sonarcloud job)'
+        required: true
 
 jobs:
   # ===========================================================================
@@ -658,6 +662,14 @@ jobs:
           uv run python manage.py collectstatic --noinput
           uv run pytest tests/ --ignore=tests/documentation --cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov=ctf --cov=engine --cov=risk_register --cov-report=term-missing --cov-report=xml:coverage.xml
 
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shifter-platform
+          path: shifter/shifter_platform/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
+
   shifter-engine-tests:
     permissions:
       contents: read
@@ -679,7 +691,15 @@ jobs:
         working-directory: shifter/engine/provisioner
         env:
           TESTING: "1"
-        run: uv run pytest tests/
+        run: uv run --with pytest-cov pytest tests/ --cov=. --cov-report=xml:coverage.xml
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-provisioner
+          path: shifter/engine/provisioner/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
 
   packer-tests:
     permissions:
@@ -700,7 +720,15 @@ jobs:
 
       - name: Run tests
         working-directory: shifter/packer
-        run: uv run pytest tests/
+        run: uv run --with pytest-cov pytest tests/ --cov=. --cov-report=xml:coverage.xml
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-packer
+          path: shifter/packer/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
 
   bootstrap-tests:
     permissions:
@@ -721,7 +749,15 @@ jobs:
 
       - name: Run tests
         working-directory: scripts/bootstrap
-        run: uv run pytest tests/
+        run: uv run --with pytest-cov pytest tests/ --cov=. --cov-report=xml:coverage.xml
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-bootstrap
+          path: scripts/bootstrap/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
 
   gcp-scripts-tests:
     permissions:
@@ -763,7 +799,15 @@ jobs:
 
       - name: Run tests
         working-directory: scripts/check_layer_imports
-        run: uv run pytest tests/
+        run: uv run --with pytest-cov pytest tests/ --cov=. --cov-report=xml:coverage.xml
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-check-layer-imports
+          path: scripts/check_layer_imports/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
 
   check-rds-pending-modifications-tests:
     permissions:
@@ -805,7 +849,15 @@ jobs:
 
       - name: Run tests
         working-directory: shifter/installation
-        run: uv run pytest tests/
+        run: uv run --with pytest-cov pytest tests/ --cov=. --cov-report=xml:coverage.xml
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-installation
+          path: shifter/installation/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
 
   adr-guard-tests:
     permissions:
@@ -854,7 +906,15 @@ jobs:
 
       - name: Run JavaScript tests
         working-directory: shifter/shifter_platform
-        run: npm test
+        run: npm run test:coverage
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shifter-platform-js
+          path: shifter/shifter_platform/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 1
 
   mcp-lint:
     # Lint always runs, even when [skip tests] is set on the workflow
@@ -1043,3 +1103,83 @@ jobs:
           DB_USER: test
           DB_PASSWORD: test
         run: uv run python manage.py check_model_fks
+
+  # ===========================================================================
+  # Static analysis — SonarCloud
+  # ===========================================================================
+
+  sonarcloud:
+    permissions:
+      contents: read
+    name: SonarCloud
+    # Runs after the test jobs so their coverage reports can feed the scan.
+    # success() keeps the implicit needs-passed guard that a custom if:
+    # would otherwise drop; skipped when tests are skipped.
+    if: ${{ success() && !inputs.skip_tests }}
+    needs:
+      - shifter-platform-tests
+      - shifter-platform-js-tests
+      - shifter-engine-tests
+      - packer-tests
+      - bootstrap-tests
+      - check-layer-imports-tests
+      - installation-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so SonarCloud attributes new code accurately for
+          # pull-request (new-code) quality-gate analysis.
+          fetch-depth: 0
+
+      # Coverage reports are produced by the test jobs and passed as
+      # artifacts; restore each at the repo-relative path that
+      # sonar-project.properties references.
+      - name: Download shifter_platform coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-shifter-platform
+          path: shifter/shifter_platform
+      - name: Download shifter_platform JS coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-shifter-platform-js
+          path: shifter/shifter_platform/coverage
+      - name: Download provisioner coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-provisioner
+          path: shifter/engine/provisioner
+      - name: Download packer coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-packer
+          path: shifter/packer
+      - name: Download bootstrap coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-bootstrap
+          path: scripts/bootstrap
+      - name: Download check_layer_imports coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-check-layer-imports
+          path: scripts/check_layer_imports
+      - name: Download installation coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-installation
+          path: shifter/installation
+
+      - name: SonarQube Cloud scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # Project key, org, sources, exclusions, and coverage report
+          # paths come from the repo-root sonar-project.properties. On
+          # pull requests, wait for the SonarCloud quality gate so a
+          # failing new-code gate fails this job (and, via the Quality
+          # caller, the PR Gate check). Branch runs (push to dev) upload
+          # analysis without blocking on pre-existing debt.
+          args: ${{ github.event_name == 'pull_request' && '-Dsonar.qualitygate.wait=true' || '' }}

@@ -256,6 +256,8 @@ jobs:
     uses: ./.github/workflows/_quality.yml
     with:
       skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   # PR Gate — a single always-present aggregate check for branch
   # protection. `dev` protection requires this one context instead of the

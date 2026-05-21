@@ -301,10 +301,9 @@ exit 0
 # Smoke test: invoke `claude -p "reply ok"` from inside a14-kali. If
 # Bedrock isn't reachable or creds aren't flowing, the smoke test fails
 # and the engine reports the range as failed instead of marking it ready
-# and handing a broken environment to a participant. Earlier (BSides
-# Ottawa) this was a manual post-provision step run by the operator
-# (apply_kali_bedrock_shard.py); integrating it here makes provisioning
-# self-sufficient.
+# and handing a broken environment to a participant. This was once a
+# manual post-provision hotfix run by the operator; integrating it here
+# makes provisioning self-sufficient.
 KALI_BEDROCK_SHARD_SCRIPT = """#!/bin/bash
 set -euo pipefail
 

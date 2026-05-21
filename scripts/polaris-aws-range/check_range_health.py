@@ -3,8 +3,8 @@
 
 Runs a read-only inspection on every polaris-vm EC2 instance via SSM
 RunCommand and compiles a markdown report. Designed to catch anything
-the post-provision scripts (apply_splice_watcher.py +
-apply_kali_bedrock_shard.py) could have disturbed, as well as generic
+the PolarisRangeBootstrapPlan setup steps (splice watcher install +
+kali bedrock shard) could have disturbed, as well as generic
 provisioning misses.
 
 Checks (per range):
@@ -27,8 +27,8 @@ The bash hotfix emits a single-line pipe-delimited record per host so
 the Python side just splits & tallies. Never reads or logs secret
 values (keys are boolean-present only).
 
-Targeting: same AMI-based discovery as apply_splice_watcher.py.
-Alternatively pass --instance-ids.
+Targeting: AMI-based discovery against the /shifter/ami/polaris-vm SSM
+parameter. Alternatively pass --instance-ids.
 
 Usage::
 

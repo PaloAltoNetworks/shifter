@@ -5,7 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from common import CtfdClient
 
@@ -197,36 +197,108 @@ def upsert_challenge(
     return created
 
 
-def ensure_static_flag(
+def reconcile_rows(
+    *,
+    source_rows: list[dict[str, Any]],
+    live_rows: list[dict[str, Any]],
+    row_key: Callable[[dict[str, Any]], Any],
+    on_create: Callable[[dict[str, Any]], None],
+    on_match: Callable[[dict[str, Any], dict[str, Any]], None],
+    on_delete: Callable[[dict[str, Any]], None],
+) -> None:
+    """Reconcile a set of CTFd child rows against the source manifest.
+
+    Add-missing / patch-on-match / delete-stale, keyed by ``row_key``. This is
+    the shared seam so flags and hints follow the same expected-vs-live
+    discipline instead of one-off per-row helpers.
+    """
+    live_by_key: dict[Any, dict[str, Any]] = {}
+    for row in live_rows:
+        live_by_key.setdefault(row_key(row), row)
+
+    expected_keys: set[Any] = set()
+    for source in source_rows:
+        key = row_key(source)
+        expected_keys.add(key)
+        match = live_by_key.get(key)
+        if match is None:
+            on_create(source)
+        else:
+            on_match(match, source)
+
+    for key, row in live_by_key.items():
+        if key not in expected_keys:
+            on_delete(row)
+
+
+def normalize_flag(flag: dict[str, Any]) -> dict[str, Any]:
+    """Return a CTFd flag-row body from a source-JSON flag entry."""
+    return {
+        "type": flag.get("type", "static"),
+        "content": flag["content"],
+        "data": flag.get("data", ""),
+    }
+
+
+def normalize_hints(hints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return CTFd hint-row bodies, deriving default titles by position."""
+    normalized: list[dict[str, Any]] = []
+    for index, hint in enumerate(hints, start=1):
+        normalized.append(
+            {
+                "title": hint.get("title", f"Hint {index}"),
+                "content": hint["content"],
+                "cost": hint.get("cost", 0),
+                "requirements": hint.get("requirements", []),
+            }
+        )
+    return normalized
+
+
+def ensure_flags(
     client: CtfdClient,
     *,
     challenge_id: int | None,
     challenge_name: str,
-    flag_value: str,
+    flags: list[dict[str, Any]],
     dry_run: bool,
 ) -> None:
-    print(f"sync flag: {challenge_name}")
+    """Reconcile every source flag against the challenge's live CTFd flag rows.
+
+    Idempotent across re-syncs: flags are keyed by ``(type, content)``, missing
+    rows are created, stale rows removed. Flag content is never logged.
+    """
+    expected = [normalize_flag(flag) for flag in flags]
     if dry_run or challenge_id is None:
+        for flag in expected:
+            print(f"sync flag: {challenge_name} :: {flag['type']}")
         return
 
-    flags = client.get("/flags", {"challenge_id": challenge_id}).get("data", [])
-    payload = {
-        "challenge_id": challenge_id,
-        "type": "static",
-        "content": flag_value,
-        "data": "",
-    }
+    live_flags = client.get("/flags", {"challenge_id": challenge_id}).get("data", [])
 
-    keeper = None
-    for flag in flags:
-        if keeper is None:
-            keeper = flag
-            client.patch(f"/flags/{flag['id']}", payload)
+    def on_create(flag: dict[str, Any]) -> None:
+        print(f"create flag: {challenge_name} :: {flag['type']}")
+        client.post("/flags", {"challenge_id": challenge_id, **flag})
+
+    def on_match(live_flag: dict[str, Any], flag: dict[str, Any]) -> None:
+        if live_flag.get("data", "") != flag["data"]:
+            print(f"update flag: {challenge_name} :: {flag['type']}")
+            client.patch(f"/flags/{live_flag['id']}", {"challenge_id": challenge_id, **flag})
         else:
-            client.delete(f"/flags/{flag['id']}")
+            print(f"keep flag: {challenge_name} :: {flag['type']}")
 
-    if keeper is None:
-        client.post("/flags", payload)
+    def on_delete(live_flag: dict[str, Any]) -> None:
+        print(f"delete stale flag: {challenge_name} :: {live_flag.get('type')}")
+        client.delete(f"/flags/{live_flag['id']}")
+
+    reconcile_rows(
+        source_rows=expected,
+        live_rows=live_flags,
+        row_key=lambda flag: (flag.get("type", "static"), flag.get("content")),
+        on_create=on_create,
+        on_match=on_match,
+        on_delete=on_delete,
+    )
 
 
 def ensure_hints(
@@ -237,37 +309,49 @@ def ensure_hints(
     hints: list[dict[str, Any]],
     dry_run: bool,
 ) -> None:
+    """Reconcile source hints against the challenge's live CTFd hint rows.
+
+    Hint write payloads carry the polymorphic ``type: standard`` discriminator;
+    omitting it produced NULL hint types and participant-facing 500s.
+    """
+    expected = normalize_hints(hints)
     if dry_run or challenge_id is None:
-        for index, _hint in enumerate(hints, start=1):
-            print(f"sync hint: {challenge_name} :: Hint {index}")
+        for hint in expected:
+            print(f"sync hint: {challenge_name} :: {hint['title']}")
         return
 
-    existing_hints = client.get(f"/challenges/{challenge_id}/hints").get("data", [])
-    expected_titles: set[str] = set()
+    live_hints = client.get(f"/challenges/{challenge_id}/hints").get("data", [])
 
-    for index, hint in enumerate(hints, start=1):
-        title = hint.get("title", f"Hint {index}")
-        expected_titles.add(title)
-        payload = {
+    def body(hint: dict[str, Any]) -> dict[str, Any]:
+        return {
             "challenge_id": challenge_id,
-            "title": title,
+            "type": "standard",
+            "title": hint["title"],
             "content": hint["content"],
-            "cost": hint.get("cost", 0),
-            "requirements": hint.get("requirements", []),
+            "cost": hint["cost"],
+            "requirements": hint["requirements"],
         }
-        existing = find_by_key(existing_hints, key="title", value=title)
-        if existing:
-            print(f"sync hint: {challenge_name} :: {title}")
-            client.patch(f"/hints/{existing['id']}", payload)
-        else:
-            print(f"create hint: {challenge_name} :: {title}")
-            response = client.post("/hints", payload)
-            existing_hints.append(response["data"])
 
-    for hint in existing_hints:
-        if hint.get("title") not in expected_titles:
-            print(f"delete stale hint: {challenge_name} :: {hint.get('title')}")
-            client.delete(f"/hints/{hint['id']}")
+    def on_create(hint: dict[str, Any]) -> None:
+        print(f"create hint: {challenge_name} :: {hint['title']}")
+        client.post("/hints", body(hint))
+
+    def on_match(live_hint: dict[str, Any], hint: dict[str, Any]) -> None:
+        print(f"sync hint: {challenge_name} :: {hint['title']}")
+        client.patch(f"/hints/{live_hint['id']}", body(hint))
+
+    def on_delete(live_hint: dict[str, Any]) -> None:
+        print(f"delete stale hint: {challenge_name} :: {live_hint.get('title')}")
+        client.delete(f"/hints/{live_hint['id']}")
+
+    reconcile_rows(
+        source_rows=expected,
+        live_rows=live_hints,
+        row_key=lambda hint: hint["title"],
+        on_create=on_create,
+        on_match=on_match,
+        on_delete=on_delete,
+    )
 
 
 def main() -> int:
@@ -314,15 +398,13 @@ def main() -> int:
             payload=payload,
             dry_run=args.dry_run,
         )
-        flag_entries = challenge.get("flags", [])
-        if flag_entries:
-            ensure_static_flag(
-                client,
-                challenge_id=synced.get("id"),
-                challenge_name=payload["name"],
-                flag_value=flag_entries[0]["content"],
-                dry_run=args.dry_run,
-            )
+        ensure_flags(
+            client,
+            challenge_id=synced.get("id"),
+            challenge_name=payload["name"],
+            flags=challenge.get("flags", []),
+            dry_run=args.dry_run,
+        )
         ensure_hints(
             client,
             challenge_id=synced.get("id"),

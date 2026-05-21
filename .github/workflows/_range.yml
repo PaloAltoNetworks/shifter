@@ -30,7 +30,7 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/range
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -74,7 +74,7 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/range
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}

@@ -257,6 +257,36 @@ jobs:
     with:
       skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
 
+  # PR Gate — a single always-present aggregate check for branch
+  # protection. `dev` protection requires this one context instead of the
+  # individual Quality / * checks: those are only created when the
+  # `quality` job runs (it is conditional on quality-relevant paths), so
+  # requiring them directly leaves branch protection waiting forever on
+  # PRs that touch none of those paths. Scoped to pull_request events, so
+  # it never runs on aws-dev / gcp-dev / main pushes.
+  pr-gate:
+    name: PR Gate
+    needs: [changes, quality]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert required PR jobs passed
+        run: |
+          changes_result='${{ needs.changes.result }}'
+          quality_result='${{ needs.quality.result }}'
+          echo "changes=$changes_result quality=$quality_result"
+          if [ "$changes_result" != "success" ]; then
+            echo "::error::Detect Changes did not succeed (result=$changes_result)"
+            exit 1
+          fi
+          # `quality` is legitimately skipped when no quality-relevant
+          # paths changed; only a real failure or cancellation blocks.
+          if [ "$quality_result" != "success" ] && [ "$quality_result" != "skipped" ]; then
+            echo "::error::Quality did not pass (result=$quality_result)"
+            exit 1
+          fi
+          echo "PR gate passed"
+
   gcp-dev:
     name: GCP Dev
     needs: [changes, quality]

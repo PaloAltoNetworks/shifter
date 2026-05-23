@@ -11,19 +11,15 @@ from __future__ import annotations
 
 import unittest
 
-from sync_polaris_ctfd import (
+from ctfd_reconcile import ensure_flags, ensure_hints, reconcile_rows
+from polaris_manifest import (
     SUPPORTED_FLAG_TYPES,
     SyncError,
-    sync_challenges,
     validate_live_challenge_names,
     validate_manifest,
     verify_challenge_rows,
 )
-from sync_polaris_ctfd_onboarding import (
-    ensure_flags,
-    ensure_hints,
-    reconcile_rows,
-)
+from sync_polaris_ctfd import sync_challenges
 
 
 class FakeCtfdClient:

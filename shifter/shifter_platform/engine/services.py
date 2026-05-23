@@ -1205,7 +1205,8 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
         username="admin",
         private_key=ssh_key,
         port=22,
-        session_id=None,  # PAN-OS doesn't support tmux
+        # PAN-OS doesn't support tmux
+        session_id=None,
     )
 
 

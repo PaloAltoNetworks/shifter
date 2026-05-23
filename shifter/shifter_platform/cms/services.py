@@ -15,7 +15,13 @@ from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.assets.validation import get_allowed_extensions as _get_allowed_extensions
 from cms.exceptions import CMSError
+from cms.experiments.exceptions import ScriptUploadError as ScriptUploadError
+from cms.experiments.services import complete_script_upload as complete_script_upload
+from cms.experiments.services import delete_script as delete_script
+from cms.experiments.services import initiate_script_upload as initiate_script_upload
+from cms.experiments.services import list_scripts as list_scripts
 from cms.models import AgentConfig, RangeInstance
+from cms.signals import range_status_changed as range_status_changed
 from engine.services import cancel_range_by_request as engine_cancel_range_by_request
 from engine.services import create_range as engine_create_range
 from engine.services import destroy_range_by_request as engine_destroy_range_by_request
@@ -26,6 +32,19 @@ from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
+
+# Public re-exports kept on cms.services so the layer-imports gate
+# (scripts/check_layer_imports/layer_imports.yaml) can continue to allow
+# only `cms.services` from mission_control / ctf rather than reaching
+# into cms.experiments / cms.signals directly.
+__all__ = (
+    "ScriptUploadError",
+    "complete_script_upload",
+    "delete_script",
+    "initiate_script_upload",
+    "list_scripts",
+    "range_status_changed",
+)
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -1432,7 +1451,8 @@ def _audit_range_provision(
     """Write the audit-log entry for a successful create_range request."""
     audit_log(
         entity_type=AuditLog.EntityType.RANGE,
-        entity_id=0,  # Range ID not yet assigned at this point.
+        # Range ID not yet assigned at this point.
+        entity_id=0,
         action=AuditLog.Action.PROVISION,
         actor_type=AuditLog.ActorType.USER,
         actor_id=user.id,
@@ -1469,7 +1489,8 @@ def _build_range_context_for_create(
     agent_names = ", ".join(a.name for a in agents.values())
     return RangeContext(
         request_id=request_id,
-        range_id=None,  # Legacy field, use request_id for new ranges.
+        # Legacy field, use request_id for new ranges.
+        range_id=None,
         scenario_id=scenario,
         user_id=user.id,
         status=ResourceStatus.PROVISIONING,
@@ -3558,14 +3579,3 @@ def get_range_target_instances(user_id: int) -> list[dict[str, str]]:
     from engine.services import get_user_ready_range_instances
 
     return [inst for inst in get_user_ready_range_instances(user_id) if inst.get("role") != "attacker"]
-
-
-# ---------------------------------------------------------------------------
-# Re-exports: public API for external layers
-# ---------------------------------------------------------------------------
-from cms.experiments.exceptions import ScriptUploadError as ScriptUploadError  # noqa: E402
-from cms.experiments.services import complete_script_upload as complete_script_upload  # noqa: E402
-from cms.experiments.services import delete_script as delete_script  # noqa: E402
-from cms.experiments.services import initiate_script_upload as initiate_script_upload  # noqa: E402
-from cms.experiments.services import list_scripts as list_scripts  # noqa: E402
-from cms.signals import range_status_changed as range_status_changed  # noqa: E402

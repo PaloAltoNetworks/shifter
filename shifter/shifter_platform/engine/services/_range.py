@@ -36,7 +36,7 @@ def create_range(request_spec: RequestSpec) -> UUID:
     from engine.ecs import start_range_provisioning
     from engine.models import Range
 
-    User = get_user_model()
+    user_model = get_user_model()
 
     if not isinstance(request_spec, RequestSpec):
         raise TypeError(f"request_spec must be RequestSpec, got {type(request_spec).__name__}")
@@ -57,7 +57,7 @@ def create_range(request_spec: RequestSpec) -> UUID:
         len(range_spec.all_instances),
     )
 
-    range_obj = _persist_range_atomically(request_spec, range_spec, User, Range)
+    range_obj = _persist_range_atomically(request_spec, range_spec, user_model, Range)
 
     task_arn = start_range_provisioning(request_spec.request_id)
     if task_arn:

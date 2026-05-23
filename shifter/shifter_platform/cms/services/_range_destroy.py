@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Shared error message for "Range not found" so we don't duplicate the literal (python:S1192).
+_RANGE_NOT_FOUND_MSG = "Range not found"
+
 
 def _engine_destroy_range_by_request_call(request_id: Any) -> Any:
     """Late-bound call so test patches of cms.services.engine_destroy_range_by_request apply."""
@@ -224,7 +227,7 @@ def cancel_range(user: User, range_id: int) -> None:
                 user.id,
                 range_id,
             )
-            raise CMSError("Range not found")
+            raise CMSError(_RANGE_NOT_FOUND_MSG)
     except (TypeError, ValueError, CMSError):
         logger.error(
             "cancel_range: user and range mismatch for user_id=%s, range_id=%s",
@@ -322,7 +325,7 @@ def destroy_range_by_request_id(user: User, request_id: str) -> None:
             request_id,
             user.id,
         )
-        raise CMSError("Range not found")
+        raise CMSError(_RANGE_NOT_FOUND_MSG)
 
     if instance.request is None:
         raise CMSError("Range has no associated request")
@@ -413,7 +416,7 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
             request_id,
             user.id,
         )
-        raise CMSError("Range not found")
+        raise CMSError(_RANGE_NOT_FOUND_MSG)
 
     if instance.request is None:
         raise CMSError("Range has no associated request")

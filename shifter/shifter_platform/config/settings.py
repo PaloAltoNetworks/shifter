@@ -394,10 +394,10 @@ _oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "https://auth.example.tes
 _oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "https://issuer.example.test" if IS_TEST_RUN else "")
 
 # Always define OIDC_OP_* variables to avoid runtime errors
-OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 - not a password, placeholder URL
-OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105
-OIDC_OP_USER_ENDPOINT = ""  # nosec B105
-OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105
+OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 NOSONAR - placeholder URL, trailing comment required for bandit
+OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105 NOSONAR
+OIDC_OP_USER_ENDPOINT = ""  # nosec B105 NOSONAR
+OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105 NOSONAR
 
 if AUTH_PROVIDER == "oidc" and _oidc_auth_domain and _oidc_issuer:
     # OAuth endpoints use the auth domain

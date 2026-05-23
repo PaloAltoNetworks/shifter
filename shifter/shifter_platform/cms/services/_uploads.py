@@ -71,11 +71,7 @@ def _initiate_upload_inner(
     try:
         file_format = validate_file_extension(filename)
     except ValidationError as e:
-        logger.error(
-            "initiate_upload: validation error for user_id=%s - %s",
-            user.id,
-            str(e),
-        )
+        logger.exception("initiate_upload: validation error for user_id=%s", user.id)
         raise CMSError(str(e)) from e
 
     try:
@@ -84,11 +80,7 @@ def _initiate_upload_inner(
             filename=filename,
         )
     except S3Error as e:
-        logger.error(
-            "initiate_upload: S3 error for user_id=%s - %s",
-            user.id,
-            str(e),
-        )
+        logger.exception("initiate_upload: S3 error for user_id=%s", user.id)
         raise CMSError("Failed to initiate upload") from e
 
     # Agent installer formats always carry an os_slug — the shared FileFormat
@@ -223,14 +215,14 @@ def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_i
     try:
         expected_format = validate_file_extension(payload["filename"])
     except _AssetValidationError as exc:
-        logger.error("complete_upload: filename failed extension check user_id=%s", user_id)
+        logger.exception("complete_upload: filename failed extension check user_id=%s", user_id)
         _s3.delete_agent(s3_key)
         raise CMSError(f"Invalid upload filename: {exc}") from exc
 
     try:
         header = _s3.read_agent_header(s3_key, _settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES)
     except S3Error as exc:
-        logger.error("complete_upload: header read failed user_id=%s s3_key=%s", user_id, s3_key)
+        logger.exception("complete_upload: header read failed user_id=%s s3_key=%s", user_id, s3_key)
         raise CMSError("Upload content inspection failed") from exc
 
     try:

@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""Seed the standalone workshop CTFd with challenges, flags, and baseline config.
+
+Challenge upsert and the generic ``find_by_key`` lookup live in
+:mod:`ctfd_reconcile` and are shared with the Polaris sync paths. The
+single-flag "keeper" semantics and the standalone-only solution helper
+stay here because they're specific to this seeder (the Polaris board uses
+``ctfd_reconcile.ensure_flags`` instead).
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -6,6 +15,7 @@ import os
 from typing import Any
 
 from common import CtfdClient, load_event_config
+from ctfd_reconcile import build_challenge_payload, find_by_key, upsert_challenge
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,58 +40,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_challenge_payload(
+def _workshop_challenge_payload(
     *,
     challenge: dict[str, Any],
     category: str,
     requirements: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
-        "name": challenge["challenge_name"],
-        "description": challenge["description"],
-        "category": category,
-        "value": challenge["value"],
-        "type": "standard",
-        "state": "visible",
-        "max_attempts": 0,
-        "function": "static",
-        "logic": "any",
-        "position": challenge["position"],
-        "requirements": requirements,
-    }
+    """Workshop-shaped manifest -> CTFd payload (challenge_name key).
 
-
-def find_challenge(existing_challenges: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
-    for challenge in existing_challenges:
-        if challenge.get("name") == name:
-            return challenge
-    return None
-
-
-def upsert_challenge(
-    client: CtfdClient,
-    *,
-    existing_challenges: list[dict[str, Any]],
-    payload: dict[str, Any],
-    dry_run: bool,
-) -> dict[str, Any]:
-    existing = find_challenge(existing_challenges, payload["name"])
-    if existing:
-        print(f"update challenge: {payload['name']}")
-        if dry_run:
-            updated = dict(existing)
-            updated.update(payload)
-            return updated
-        response = client.patch(f"/challenges/{existing['id']}", payload)
-        return response["data"]
-
-    print(f"create challenge: {payload['name']}")
-    if dry_run:
-        return {"id": None, **payload}
-    response = client.post("/challenges", payload)
-    created = response["data"]
-    existing_challenges.append(created)
-    return created
+    The workshop manifest uses ``challenge_name`` where the Polaris manifest
+    uses ``name``, and stores ``category`` at the top of the event JSON
+    rather than per-challenge. ``build_challenge_payload`` expects both
+    ``name`` and ``category`` on the challenge dict, so we bridge them
+    here without forking the shared builder.
+    """
+    bridged = dict(challenge)
+    bridged["name"] = challenge["challenge_name"]
+    bridged["category"] = category
+    bridged.setdefault("type", "standard")
+    bridged.setdefault("state", "visible")
+    bridged.setdefault("max_attempts", 0)
+    bridged.setdefault("function", "static")
+    bridged.setdefault("logic", "any")
+    return build_challenge_payload(
+        challenge=bridged,
+        position=challenge["position"],
+        requirements=requirements,
+    )
 
 
 def ensure_static_flag(
@@ -92,6 +77,12 @@ def ensure_static_flag(
     flag_value: str,
     dry_run: bool,
 ) -> None:
+    """Keep one static flag per challenge.
+
+    Differs from ``ctfd_reconcile.ensure_flags`` deliberately: this preserves
+    the live flag row id by patching the first existing flag and deleting the
+    rest, instead of delete-then-create when the content changes.
+    """
     print(f"sync flag: {challenge_name}")
     if dry_run:
         return
@@ -116,13 +107,6 @@ def ensure_static_flag(
         client.post("/flags", payload)
 
 
-def find_hint(existing_hints: list[dict[str, Any]], title: str) -> dict[str, Any] | None:
-    for hint in existing_hints:
-        if hint.get("title") == title:
-            return hint
-    return None
-
-
 def ensure_hints(
     client: CtfdClient,
     *,
@@ -131,6 +115,9 @@ def ensure_hints(
     hints: list[dict[str, Any]],
     dry_run: bool,
 ) -> None:
+    """Workshop hint upsert. Does NOT delete stale hints (different from the
+    Polaris ``ctfd_reconcile.ensure_hints`` behavior, which is keyed by
+    ``title`` and removes anything not in the manifest)."""
     if not hints:
         return
 
@@ -146,7 +133,7 @@ def ensure_hints(
             "cost": hint.get("cost", 0),
             "requirements": hint.get("requirements", []),
         }
-        existing = find_hint(existing_hints, hint["title"])
+        existing = find_by_key(existing_hints, key="title", value=hint["title"])
         if existing:
             print(f"sync hint: {challenge_name} :: {hint['title']}")
             if not dry_run:
@@ -157,13 +144,6 @@ def ensure_hints(
         if not dry_run:
             response = client.post("/hints", payload)
             existing_hints.append(response["data"])
-
-
-def find_solution(existing_solutions: list[dict[str, Any]], challenge_id: int) -> dict[str, Any] | None:
-    for solution in existing_solutions:
-        if solution.get("challenge_id") == challenge_id:
-            return solution
-    return None
 
 
 def ensure_solution(
@@ -187,7 +167,7 @@ def ensure_solution(
         "content": solution["content"],
         "state": solution.get("state", "hidden"),
     }
-    existing = find_solution(existing_solutions, challenge_id)
+    existing = find_by_key(existing_solutions, key="challenge_id", value=challenge_id)
     if existing:
         response = client.patch(f"/solutions/{existing['id']}", payload)
         updated = response["data"]
@@ -224,7 +204,7 @@ def main() -> int:
 
     for box in event["boxes"]:
         user_challenge = box["user"]
-        payload = build_challenge_payload(
+        payload = _workshop_challenge_payload(
             challenge=user_challenge,
             category=category,
             requirements={"prerequisites": []},
@@ -264,7 +244,7 @@ def main() -> int:
         root_challenge = box["root"]
         prereq_id = user_ids[box["instance_name"]]
         requirements = {"prerequisites": [prereq_id], "anonymize": False}
-        payload = build_challenge_payload(
+        payload = _workshop_challenge_payload(
             challenge=root_challenge,
             category=category,
             requirements=requirements,

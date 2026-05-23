@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""Sync the live Polaris CTFd board, onboarding challenge, and pages.
+
+Generic CTFd reconciliation lives in :mod:`ctfd_reconcile`; Polaris-specific
+ordering, validation, prereq resolution, and stale-name policy live in
+:mod:`polaris_manifest`. This script wires the two layers together.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -7,181 +14,33 @@ from pathlib import Path
 from typing import Any
 
 from common import CtfdClient
-from sync_polaris_ctfd_onboarding import (
-    DEFAULT_ONBOARDING_PATH,
-    DEFAULT_PAGES_DIR,
+from ctfd_reconcile import (
+    build_challenge_payload,
     ensure_flags,
     ensure_hints,
-    find_by_key,
+    get_all_items,
     load_json,
     load_pages,
     upsert_challenge,
     upsert_page,
 )
+from polaris_manifest import (
+    STALE_CHALLENGE_NAMES,
+    SyncError,
+    build_manifest_id_to_name,
+    resolve_prerequisites,
+    sort_challenges,
+    validate_live_challenge_names,
+    validate_manifest,
+    verify_challenge_rows,
+)
+from sync_polaris_ctfd_onboarding import DEFAULT_ONBOARDING_PATH, DEFAULT_PAGES_DIR
 
+# Re-export so existing tests/imports keep working without churn.
+from polaris_manifest import SUPPORTED_FLAG_TYPES, ORDERED_CHALLENGE_NAMES  # noqa: F401
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CHALLENGE_PATH = REPO_ROOT / "scenario-dev/polaris/build/ctfd-challenges.json"
-SUPPORTED_FLAG_TYPES = {"static", "regex"}
-STALE_CHALLENGE_NAMES = {
-    "Mission 0 — Kali Warm-Up",
-}
-ORDERED_CHALLENGE_NAMES = [
-    "Start Here — Kali Warm-Up",
-    "Company Info",
-    "Employee Directory",
-    "Tech Stack Revealed",
-    "Client Contracts",
-    "DNS Reconnaissance",
-    "Follow the Money",
-    "Configuration Leak",
-    "Project Hints",
-    "Terminated Engineer",
-    "Password Reuse",
-    "Mundane File Share",
-    "The Project",
-    "Procurement Trail",
-    "Hidden Group",
-    "Lateral Movement",
-    "Unreliable Guard",
-    "Domain Admin",
-    "The Analyst's Desk",
-    "Old Defaults",
-    "Compartment A",
-    "Heavy Delivery",
-    "MIDNIGHT-7",
-    "What Git Remembers",
-    "After Hours",
-    "Balance Point",
-    "Compartment B",
-    "What's Built",
-    "What Was Erased",
-    "Full Run",
-    "On Call",
-    "Control Room",
-    "Lights Out",
-    "Underground Signals",
-    "First Motion",
-    "Walking Pattern",
-    "Response Window",
-    "Control Channel",
-    "Full Override",
-    "Q4 Risk Review",
-    "Redacted Minutes",
-    "Sanitized Diagram",
-    "Press Drop",
-    "Badge Clone",
-    "Mailbox Rule",
-    "Burner Visit",
-    "Report the Mole",
-    "Shipping Slot",
-    "Approval Client",
-    "Freeze Template",
-    "Delivery Halt",
-    "Maintenance Manual",
-    "Diagnostic Channel",
-    "Safe Mode Sequence",
-    "Cold Shutdown",
-]
-
-
-class SyncError(RuntimeError):
-    """Raised when the source manifest or live CTFd board fails validation."""
-
-
-def validate_manifest(challenges: list[dict[str, Any]]) -> None:
-    """Validate the merged source manifest before any CTFd mutation.
-
-    A malformed manifest must fail loudly here, before stale-row deletion can
-    remove event-critical live rows. Flag content is never echoed.
-    """
-    seen_ids: set[Any] = set()
-    seen_names: set[str] = set()
-    errors: list[str] = []
-
-    for challenge in challenges:
-        name = challenge.get("name")
-        if not name:
-            errors.append(
-                f"challenge missing name (category={challenge.get('category')!r})"
-            )
-            continue
-        if name in seen_names:
-            errors.append(f"duplicate challenge name {name!r}")
-        seen_names.add(name)
-
-        if not challenge.get("category"):
-            errors.append(f"challenge {name!r} missing category")
-
-        manifest_id = challenge.get("id")
-        if manifest_id is not None:
-            if manifest_id in seen_ids:
-                errors.append(f"duplicate manifest id {manifest_id!r} ({name})")
-            seen_ids.add(manifest_id)
-
-        flags = challenge.get("flags", [])
-        if not flags:
-            errors.append(f"challenge {name!r} has no flags — it would be unsubmittable")
-        for flag in flags:
-            flag_type = flag.get("type", "static")
-            if flag_type not in SUPPORTED_FLAG_TYPES:
-                errors.append(
-                    f"challenge {name!r} has unsupported flag type {flag_type!r}"
-                )
-            if not flag.get("content"):
-                errors.append(f"challenge {name!r} has a flag with empty content")
-
-    if errors:
-        raise SyncError("manifest validation failed:\n  " + "\n  ".join(errors))
-
-
-def validate_live_challenge_names(existing_challenges: list[dict[str, Any]]) -> None:
-    """Fail when the live board has duplicate challenge names.
-
-    Sync is name-keyed, so a duplicate live name makes every upsert ambiguous.
-    """
-    seen: set[str] = set()
-    duplicates: set[str] = set()
-    for challenge in existing_challenges:
-        name = challenge.get("name")
-        if name in seen:
-            duplicates.add(name)
-        seen.add(name)
-    if duplicates:
-        raise SyncError(
-            "duplicate live CTFd challenge names make name-keyed sync unsafe: "
-            + ", ".join(sorted(duplicates))
-        )
-
-
-def verify_challenge_rows(
-    client: CtfdClient,
-    *,
-    challenges: list[dict[str, Any]],
-    name_to_live_id: dict[str, int | None],
-) -> None:
-    """Read flag and hint rows back from CTFd after sync.
-
-    Raises if a challenge with source flags (or hints) shows zero live rows —
-    the exact regression that shipped 38/39 challenges unsubmittable.
-    """
-    failures: list[str] = []
-    for challenge in challenges:
-        name = challenge["name"]
-        live_id = name_to_live_id.get(name)
-        if live_id is None:
-            failures.append(f"{name}: no live challenge id after sync")
-            continue
-        if challenge.get("flags"):
-            rows = client.get(f"/challenges/{live_id}/flags").get("data", [])
-            if not rows:
-                failures.append(f"{name} (id {live_id}): 0 flag rows — unsubmittable")
-        if challenge.get("hints"):
-            rows = client.get(f"/challenges/{live_id}/hints").get("data", [])
-            if not rows:
-                failures.append(f"{name} (id {live_id}): 0 hint rows")
-    if failures:
-        raise SyncError("post-sync verification failed:\n  " + "\n  ".join(failures))
 
 
 def parse_args() -> argparse.Namespace:
@@ -222,97 +81,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_all_items(
-    client: CtfdClient,
-    path: str,
-    query: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    page = 1
-    items: list[dict[str, Any]] = []
-    base_query = dict(query or {})
-
-    while True:
-        payload = client.get(path, {**base_query, "page": page})
-        data = payload.get("data", [])
-        if not isinstance(data, list):
-            return data
-        items.extend(data)
-
-        pagination = payload.get("meta", {}).get("pagination", {})
-        total_pages = pagination.get("pages")
-        if not total_pages or page >= total_pages:
-            break
-        page += 1
-
-    return items
-
-
-def build_manifest_id_to_name(challenges: list[dict[str, Any]]) -> dict[int, str]:
-    return {challenge["id"]: challenge["name"] for challenge in challenges if "id" in challenge}
-
-
-def sort_challenges(challenges: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    name_order = {name: index for index, name in enumerate(ORDERED_CHALLENGE_NAMES, start=1)}
-    fallback_index = len(name_order) + 1000
-    return sorted(
-        challenges,
-        key=lambda challenge: (
-            name_order.get(challenge["name"], fallback_index),
-            challenge.get("category", ""),
-            challenge.get("id", 0),
-        ),
-    )
-
-
-def build_payload(
-    *,
-    challenge: dict[str, Any],
-    position: int,
-    requirements: dict[str, Any] | None = None,
-    next_id: int | None = None,
-) -> dict[str, Any]:
-    payload = {
-        "name": challenge["name"],
-        "description": challenge["description"],
-        "category": challenge["category"],
-        "value": challenge["value"],
-        "type": challenge.get("type", "standard"),
-        "state": challenge.get("state", "visible"),
-        "max_attempts": challenge.get("max_attempts", 0),
-        "function": challenge.get("function", "static"),
-        "logic": challenge.get("logic", "any"),
-        "position": challenge.get("position", position),
-        "requirements": requirements if requirements is not None else {"prerequisites": []},
-    }
-    if "connection_info" in challenge:
-        payload["connection_info"] = challenge["connection_info"]
-    if next_id is not None:
-        payload["next_id"] = next_id
-    return payload
-
-
-def resolve_prerequisites(
-    *,
-    challenge: dict[str, Any],
-    manifest_id_to_name: dict[int, str],
-    name_to_live_id: dict[str, int | None],
-) -> dict[str, Any]:
-    raw_requirements = challenge.get("requirements", {})
-    prerequisite_ids = []
-    for manifest_id in raw_requirements.get("prerequisites", []):
-        challenge_name = manifest_id_to_name.get(manifest_id)
-        if not challenge_name:
-            print(f"warn: prerequisite id {manifest_id!r} not found in manifest")
-            continue
-        live_id = name_to_live_id.get(challenge_name)
-        if live_id is None:
-            print(f"warn: prerequisite {challenge_name!r} has no live id yet")
-            continue
-        prerequisite_ids.append(live_id)
-
-    return {"prerequisites": prerequisite_ids}
-
-
 def ensure_tags(
     client: CtfdClient,
     *,
@@ -321,6 +89,12 @@ def ensure_tags(
     tags: list[str],
     dry_run: bool,
 ) -> None:
+    """Reconcile tag rows for a challenge against the manifest's tag list.
+
+    Stays in this script rather than ``ctfd_reconcile`` because the live tag
+    surface uses a flat ``value`` key (not a row-keyed ``reconcile_rows``
+    shape) and only the Polaris board uses it today.
+    """
     if dry_run or challenge_id is None:
         for tag in tags:
             print(f"sync tag: {challenge_name} :: {tag}")
@@ -395,7 +169,17 @@ def sync_challenges(
     synced_by_name: dict[str, dict[str, Any]] = {}
 
     for position, challenge in enumerate(challenges, start=1):
-        payload = build_payload(challenge=challenge, position=position)
+        # First pass: write empty prerequisites so unresolved manifest ids
+        # never reach the live CTFd authorization gate. Pass two patches in
+        # resolved live ids via resolve_prerequisites once every challenge
+        # exists; if the sync aborts between the two passes, CTFd is left
+        # with safe-by-default empty prereqs instead of stale manifest ids
+        # that happen to collide with unrelated live challenge ids.
+        payload = build_challenge_payload(
+            challenge=challenge,
+            position=position,
+            requirements={"prerequisites": []},
+        )
         synced = upsert_challenge(
             client,
             existing_challenges=existing_challenges,
@@ -414,7 +198,7 @@ def sync_challenges(
             if next_id is None:
                 print(f"warn: next challenge {next_name!r} not found; leaving next_id unset")
 
-        payload = build_payload(
+        payload = build_challenge_payload(
             challenge=challenge,
             position=position,
             requirements=resolve_prerequisites(

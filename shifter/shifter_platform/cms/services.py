@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
     from cms.models import App, Request
+    from cms.scenarios.schema import ScenarioTemplate
     from shared.schemas.app import NGFWAppContext, NGFWAppRef
     from shared.schemas.credentials import CredentialContext, CredentialRef
     from shared.schemas.range import InstanceContextBase, RangeContext, RangeSpec
@@ -106,7 +107,7 @@ def _validate_nonneg_int_id(value: object, name: str, fn_name: str, user_id: obj
 # =============================================================================
 
 
-def create_agent(user: User, **kwargs: object) -> AgentConfig:
+def create_agent(user: User, **kwargs: Any) -> AgentConfig:
     """Create agent record.
 
     Delegates to cms.assets.services.create_agent() after validating user.
@@ -442,7 +443,7 @@ def get_allowed_extensions() -> list[str]:
 # =============================================================================
 
 
-def create_credential(user: User, credential_type_slug: str, **kwargs: object) -> CredentialRef:
+def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> CredentialRef:
     """Create credential (SCM or deployment profile).
 
     Args:
@@ -1363,7 +1364,7 @@ def _assert_no_active_range(user: User) -> None:
         raise CMSError(msg)
 
 
-def _load_scenario_template_or_raise(scenario: str) -> dict[str, Any]:
+def _load_scenario_template_or_raise(scenario: str) -> ScenarioTemplate:
     """Return the scenario template or raise CMSError if not found."""
     from cms.exceptions import CMSError
     from cms.scenarios.registry import load_scenario_template as load_scenario
@@ -2464,6 +2465,15 @@ def _validate_nonempty_str(value: object, name: str, fn_name: str, user_id: obje
     if value is None:
         logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
         raise ValueError(f"{name} cannot be None")
+    if not isinstance(value, str):
+        logger.error(
+            "%s called with non-string %s (type=%s) for user_id=%s",
+            fn_name,
+            name,
+            type(value).__name__,
+            user_id,
+        )
+        raise TypeError(f"{name} must be a string, got {type(value).__name__}")
     stripped: str = value.strip()
     if not stripped:
         logger.error("%s called with empty %s for user_id=%s", fn_name, name, user_id)

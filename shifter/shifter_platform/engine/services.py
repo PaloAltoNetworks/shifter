@@ -48,17 +48,14 @@ def _get_instance_provider_metadata(instance: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(provider_metadata, dict):
         return {}
 
-    provider = _first_connection_value(instance.get("cloud_provider")).lower()
-    if provider:
-        metadata = provider_metadata.get(provider)
-        if isinstance(metadata, dict):
-            return metadata
-
-    for provider_name in ("gcp", "gdc", "aws"):
+    # Probe order: caller-declared cloud_provider first (if any), then the
+    # known providers in the historical fallback order.
+    declared_provider = _first_connection_value(instance.get("cloud_provider")).lower()
+    candidates = [declared_provider, "gcp", "gdc", "aws"] if declared_provider else ["gcp", "gdc", "aws"]
+    for provider_name in candidates:
         metadata = provider_metadata.get(provider_name)
         if isinstance(metadata, dict):
             return metadata
-
     return {}
 
 
@@ -133,6 +130,13 @@ def _resolve_instance_connection_name(instance: dict[str, Any]) -> str:
     return f"{display_role}-{os_type or 'instance'}"
 
 
+_OS_DEFAULT_SSH_USERNAMES = {
+    "kali": "kali",
+    "amazon-linux": "ec2-user",
+    "windows": "Administrator",
+}
+
+
 def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
     """Resolve the guest SSH username for terminal and Guacamole access."""
     provider_metadata = _get_instance_provider_metadata(instance)
@@ -147,13 +151,7 @@ def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
         return explicit_username
 
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
-    if os_type == "kali":
-        return "kali"
-    if os_type == "amazon-linux":
-        return "ec2-user"
-    if os_type == "windows":
-        return "Administrator"
-    return "ubuntu"
+    return _OS_DEFAULT_SSH_USERNAMES.get(os_type, "ubuntu")
 
 
 def _resolve_dc_password(instance: dict[str, Any]) -> str | None:
@@ -218,6 +216,13 @@ def _resolve_non_dc_rdp_password(instance: dict[str, Any]) -> str | None:
         ) from None
 
 
+_OS_DEFAULT_RDP_USERNAMES = {
+    "windows": "Administrator",
+    "kali": "kali",
+    "ubuntu": "ubuntu",
+}
+
+
 def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str | None]:
     """Resolve the RDP username/password pair for a provisioned guest.
 
@@ -227,18 +232,13 @@ def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str 
     ``DC_DOMAIN_PASSWORD`` lookup (separate concern — domain admin).
     """
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
+    username = _OS_DEFAULT_RDP_USERNAMES.get(os_type)
+    if username is None:
+        return None, None
     role = _first_connection_value(instance.get("role"), "instance").lower()
-
-    if os_type == "windows":
-        if role == "dc":
-            return ("Administrator", _resolve_dc_password(instance))
-        return ("Administrator", _resolve_non_dc_rdp_password(instance))
-
-    if os_type == "kali":
-        return ("kali", _resolve_non_dc_rdp_password(instance))
-    if os_type == "ubuntu":
-        return ("ubuntu", _resolve_non_dc_rdp_password(instance))
-    return None, None
+    if os_type == "windows" and role == "dc":
+        return username, _resolve_dc_password(instance)
+    return username, _resolve_non_dc_rdp_password(instance)
 
 
 def _get_ngfw_provider_metadata(state: dict[str, Any]) -> dict[str, Any]:
@@ -247,17 +247,12 @@ def _get_ngfw_provider_metadata(state: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(provider_metadata, dict):
         return {}
 
-    provider = _first_connection_value(state.get("cloud_provider")).lower()
-    if provider:
-        metadata = provider_metadata.get(provider)
-        if isinstance(metadata, dict):
-            return metadata
-
-    for provider_name in ("gcp", "gdc", "aws"):
+    declared_provider = _first_connection_value(state.get("cloud_provider")).lower()
+    candidates = [declared_provider, "gcp", "gdc", "aws"] if declared_provider else ["gcp", "gdc", "aws"]
+    for provider_name in candidates:
         metadata = provider_metadata.get(provider_name)
         if isinstance(metadata, dict):
             return metadata
-
     return {}
 
 
@@ -450,23 +445,28 @@ def destroy_range(request: RangeContext) -> bool:
         logger.warning("destroy_range: range not found range_id=%s", request.range_id)
         return False
 
+    return _apply_destroy_to_range(range_obj, request.range_id, request.user_id, start_teardown)
+
+
+def _apply_destroy_to_range(range_obj: Any, range_id: int, user_id: int, start_teardown: Any) -> bool:
+    """Status-branch helper for ``destroy_range`` so the caller stays under the return-count cap."""
     # Already destroyed - nothing to do
     if range_obj.status == ResourceStatus.DESTROYED:
-        logger.warning("destroy_range: range already destroyed range_id=%s", request.range_id)
+        logger.warning("destroy_range: range already destroyed range_id=%s", range_id)
         return False
 
     # Already destroying - idempotent success
     if range_obj.status == ResourceStatus.DESTROYING:
-        logger.info("destroy_range: range already destroying range_id=%s", request.range_id)
+        logger.info("destroy_range: range already destroying range_id=%s", range_id)
         return True
 
     # Set status and trigger teardown
     range_obj.status = ResourceStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
 
-    logger.info("destroy_range: set status to DESTROYING range_id=%s", request.range_id)
+    logger.info("destroy_range: set status to DESTROYING range_id=%s", range_id)
 
-    task_arn = start_teardown(request.range_id, request.user_id)
+    task_arn = start_teardown(range_id, user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
@@ -589,6 +589,11 @@ def destroy_range_by_request(request_id: UUID) -> bool:
         logger.warning("destroy_range_by_request: no range for request_id=%s", request_id)
         return False
 
+    return _apply_destroy_by_request(range_obj, request_id, start_range_teardown)
+
+
+def _apply_destroy_by_request(range_obj: Any, request_id: UUID, start_range_teardown: Any) -> bool:
+    """Status-branch helper for ``destroy_range_by_request`` (same shape as ``_apply_destroy_to_range``)."""
     # Already destroyed - nothing to do
     if range_obj.status == ResourceStatus.DESTROYED.value:
         logger.warning(
@@ -732,6 +737,102 @@ def get_range_status(range_id: int) -> dict[str, Any] | None:
     }
 
 
+def _run_range_lifecycle_op(
+    request_id: UUID,
+    op_name: str,
+    *,
+    idempotent_statuses: tuple[str, ...],
+    required_status: str,
+    target_status: str,
+    revert_status: str,
+) -> bool:
+    """Shared pause/resume transition + ECS-dispatch helper.
+
+    Returns True if the operation was initiated (or already complete);
+    False if the range was missing, in the wrong state, or the ECS task
+    could not be started. Status transitions and revert-on-failure mirror
+    the original per-operation implementations so behaviour is unchanged.
+    """
+    from engine.ecs import start_range_operation
+    from engine.models import Range
+    from shared.cloud.exceptions import CloudTaskError
+
+    logger.debug("%s_range: request_id=%s", op_name, request_id)
+
+    with transaction.atomic():
+        range_obj = Range.objects.select_for_update().filter(request__request_id=request_id).first()
+        if not range_obj:
+            logger.warning("%s_range: no range for request_id=%s", op_name, request_id)
+            return False
+
+        decision = _classify_lifecycle_decision(
+            range_obj.status,
+            request_id=request_id,
+            op_name=op_name,
+            idempotent_statuses=idempotent_statuses,
+            required_status=required_status,
+        )
+        if decision is not None:
+            return decision
+
+        range_obj.status = target_status
+        range_obj.save(update_fields=["status", "updated_at"])
+
+    # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
+    return _dispatch_lifecycle_ecs(range_obj, request_id, op_name, revert_status, start_range_operation, CloudTaskError)
+
+
+def _classify_lifecycle_decision(
+    status: str,
+    *,
+    request_id: UUID,
+    op_name: str,
+    idempotent_statuses: tuple[str, ...],
+    required_status: str,
+) -> bool | None:
+    """Return True / False to short-circuit, or None to proceed with the transition."""
+    if status in idempotent_statuses:
+        logger.info("%s_range: already %s/%sing request_id=%s", op_name, op_name, op_name, request_id)
+        return True
+    if status != required_status:
+        logger.warning(
+            "%s_range: cannot %s range in status=%s request_id=%s",
+            op_name,
+            op_name,
+            status,
+            request_id,
+        )
+        return False
+    return None
+
+
+def _dispatch_lifecycle_ecs(
+    range_obj: Any,
+    request_id: UUID,
+    op_name: str,
+    revert_status: str,
+    start_range_operation: Any,
+    cloud_task_error_cls: type[BaseException],
+) -> bool:
+    """Invoke the ECS task and revert state on failure."""
+    try:
+        task_arn = start_range_operation(request_id, op_name)
+    except cloud_task_error_cls:
+        logger.exception("%s_range: ECS CloudTaskError request_id=%s", op_name, request_id)
+        range_obj.status = revert_status
+        range_obj.save(update_fields=["status", "updated_at"])
+        return False
+
+    if task_arn:
+        logger.info("%s_range: started ECS task=%s request_id=%s", op_name, task_arn, request_id)
+        return True
+
+    logger.warning("%s_range: ECS returned None, reverting status request_id=%s", op_name, request_id)
+    range_obj.status = revert_status
+    range_obj.save(update_fields=["status", "updated_at"])
+    return False
+
+
 def pause_range(request_id: UUID) -> bool:
     """Pause all instances in a range.
 
@@ -746,53 +847,14 @@ def pause_range(request_id: UUID) -> bool:
         True if pause initiated or already paused.
         False if range not found, not in pausable state, or ECS call failed.
     """
-    from engine.ecs import start_range_operation
-    from engine.models import Range
-    from shared.cloud.exceptions import CloudTaskError
-
-    logger.debug("pause_range: request_id=%s", request_id)
-
-    with transaction.atomic():
-        range_obj = Range.objects.select_for_update().filter(request__request_id=request_id).first()
-        if not range_obj:
-            logger.warning("pause_range: no range for request_id=%s", request_id)
-            return False
-
-        # Idempotent: already paused or pausing
-        if range_obj.status in (ResourceStatus.PAUSED.value, ResourceStatus.PAUSING.value):
-            logger.info("pause_range: already paused/pausing request_id=%s", request_id)
-            return True
-
-        # Can only pause from READY state
-        if range_obj.status != ResourceStatus.READY.value:
-            logger.warning(
-                "pause_range: cannot pause range in status=%s request_id=%s",
-                range_obj.status,
-                request_id,
-            )
-            return False
-
-        # Update status to PAUSING
-        range_obj.status = ResourceStatus.PAUSING.value
-        range_obj.save(update_fields=["status", "updated_at"])
-
-    # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
-    try:
-        task_arn = start_range_operation(request_id, "pause")
-    except CloudTaskError:
-        logger.exception("pause_range: ECS CloudTaskError request_id=%s", request_id)
-        range_obj.status = ResourceStatus.READY.value
-        range_obj.save(update_fields=["status", "updated_at"])
-        return False
-
-    if task_arn:
-        logger.info("pause_range: started ECS task=%s request_id=%s", task_arn, request_id)
-        return True
-    else:
-        logger.warning("pause_range: ECS returned None, reverting status request_id=%s", request_id)
-        range_obj.status = ResourceStatus.READY.value
-        range_obj.save(update_fields=["status", "updated_at"])
-        return False
+    return _run_range_lifecycle_op(
+        request_id,
+        "pause",
+        idempotent_statuses=(ResourceStatus.PAUSED.value, ResourceStatus.PAUSING.value),
+        required_status=ResourceStatus.READY.value,
+        target_status=ResourceStatus.PAUSING.value,
+        revert_status=ResourceStatus.READY.value,
+    )
 
 
 def resume_range(request_id: UUID) -> bool:
@@ -809,53 +871,14 @@ def resume_range(request_id: UUID) -> bool:
         True if resume initiated or already ready.
         False if range not found, not in resumable state, or ECS call failed.
     """
-    from engine.ecs import start_range_operation
-    from engine.models import Range
-    from shared.cloud.exceptions import CloudTaskError
-
-    logger.debug("resume_range: request_id=%s", request_id)
-
-    with transaction.atomic():
-        range_obj = Range.objects.select_for_update().filter(request__request_id=request_id).first()
-        if not range_obj:
-            logger.warning("resume_range: no range for request_id=%s", request_id)
-            return False
-
-        # Idempotent: already ready or resuming
-        if range_obj.status in (ResourceStatus.READY.value, ResourceStatus.RESUMING.value):
-            logger.info("resume_range: already ready/resuming request_id=%s", request_id)
-            return True
-
-        # Can only resume from PAUSED state
-        if range_obj.status != ResourceStatus.PAUSED.value:
-            logger.warning(
-                "resume_range: cannot resume range in status=%s request_id=%s",
-                range_obj.status,
-                request_id,
-            )
-            return False
-
-        # Update status to RESUMING
-        range_obj.status = ResourceStatus.RESUMING.value
-        range_obj.save(update_fields=["status", "updated_at"])
-
-    # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
-    try:
-        task_arn = start_range_operation(request_id, "resume")
-    except CloudTaskError:
-        logger.exception("resume_range: ECS CloudTaskError request_id=%s", request_id)
-        range_obj.status = ResourceStatus.PAUSED.value
-        range_obj.save(update_fields=["status", "updated_at"])
-        return False
-
-    if task_arn:
-        logger.info("resume_range: started ECS task=%s request_id=%s", task_arn, request_id)
-        return True
-    else:
-        logger.warning("resume_range: ECS returned None, reverting status request_id=%s", request_id)
-        range_obj.status = ResourceStatus.PAUSED.value
-        range_obj.save(update_fields=["status", "updated_at"])
-        return False
+    return _run_range_lifecycle_op(
+        request_id,
+        "resume",
+        idempotent_statuses=(ResourceStatus.READY.value, ResourceStatus.RESUMING.value),
+        required_status=ResourceStatus.PAUSED.value,
+        target_status=ResourceStatus.RESUMING.value,
+        revert_status=ResourceStatus.PAUSED.value,
+    )
 
 
 def _require_rdp_password(instance: dict[str, Any], os_type: str, rdp_password: str | None) -> None:
@@ -908,12 +931,12 @@ def _fetch_sftp_ssh_key(instance: dict[str, Any], os_type: str) -> str | None:
     ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
     if not ssh_key_ref:
         return None
-
     try:
-        return get_ssh_key(ssh_key_ref)
+        result = get_ssh_key(ssh_key_ref)
     except SecretsError as e:
         logger.warning("Failed to get SSH key for SFTP: %s", e)
-        return None
+        result = None
+    return result
 
 
 def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
@@ -1332,107 +1355,69 @@ def destroy_ngfw(request_id: UUID) -> bool:
     return task_arn is not None
 
 
+def _run_ngfw_lifecycle_op(request_id: UUID, op_name: str, allowed_statuses: tuple[str, ...]) -> bool:
+    """Shared start/stop NGFW transition + ECS-dispatch helper.
+
+    Mirrors the previous per-operation flow: validate request → validate
+    NGFW instance exists → check status → dispatch ECS task. Returns
+    True only when the ECS task was successfully started.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("%s_ngfw: request_id=%s", op_name, request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("%s_ngfw: request not found request_id=%s", op_name, request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("%s_ngfw: no NGFW instance found for request_id=%s", op_name, request_id)
+        return False
+
+    if ngfw_instance.status not in allowed_statuses:
+        logger.warning(
+            "%s_ngfw: invalid status=%s for request_id=%s (allowed=%s)",
+            op_name,
+            ngfw_instance.status,
+            request_id,
+            allowed_statuses,
+        )
+        return False
+
+    task_arn = start_ngfw_operation(request_id, op_name)
+    if task_arn:
+        logger.info("%s_ngfw: started ECS task=%s for request=%s", op_name, task_arn, request_id)
+    return task_arn is not None
+
+
 def start_ngfw(request_id: UUID) -> bool:
     """Start a stopped NGFW instance.
 
     Validates the Instance is in a stoppable state (stopped or failed),
     then triggers ECS to run the start operation.
-
-    Args:
-        request_id: UUID of the request containing the NGFW.
-
-    Returns:
-        True if start initiated, False if request/instance not found
-        or invalid status.
     """
-    from engine.ecs import start_ngfw_operation
-    from engine.models import Instance, Request
-
-    logger.debug("start_ngfw: request_id=%s", request_id)
-
-    try:
-        request = Request.objects.get(request_id=request_id)
-    except Request.DoesNotExist:
-        logger.warning("start_ngfw: request not found request_id=%s", request_id)
-        return False
-
-    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
-    if not ngfw_instance:
-        logger.warning("start_ngfw: no NGFW instance found for request_id=%s", request_id)
-        return False
-
-    # Only allow starting from paused or failed status
-    if ngfw_instance.status not in (
-        ResourceStatus.PAUSED.value,
-        ResourceStatus.FAILED.value,
-    ):
-        logger.warning(
-            "start_ngfw: invalid status=%s for request_id=%s (must be stopped or failed)",
-            ngfw_instance.status,
-            request_id,
-        )
-        return False
-
-    task_arn = start_ngfw_operation(request_id, "start")
-
-    if task_arn:
-        logger.info(
-            "start_ngfw: started ECS task=%s for request=%s",
-            task_arn,
-            request_id,
-        )
-
-    return task_arn is not None
+    return _run_ngfw_lifecycle_op(
+        request_id,
+        "start",
+        (ResourceStatus.PAUSED.value, ResourceStatus.FAILED.value),
+    )
 
 
 def stop_ngfw(request_id: UUID) -> bool:
     """Stop a running NGFW instance.
 
-    Validates the Instance is in a running state (ready or active),
-    then triggers ECS to run the stop operation.
-
-    Args:
-        request_id: UUID of the request containing the NGFW.
-
-    Returns:
-        True if stop initiated, False if request/instance not found
-        or invalid status.
+    Validates the Instance is in a running state (ready), then triggers
+    ECS to run the stop operation.
     """
-    from engine.ecs import start_ngfw_operation
-    from engine.models import Instance, Request
-
-    logger.debug("stop_ngfw: request_id=%s", request_id)
-
-    try:
-        request = Request.objects.get(request_id=request_id)
-    except Request.DoesNotExist:
-        logger.warning("stop_ngfw: request not found request_id=%s", request_id)
-        return False
-
-    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
-    if not ngfw_instance:
-        logger.warning("stop_ngfw: no NGFW instance found for request_id=%s", request_id)
-        return False
-
-    # Only allow stopping from ready status
-    if ngfw_instance.status != ResourceStatus.READY.value:
-        logger.warning(
-            "stop_ngfw: invalid status=%s for request_id=%s (must be ready)",
-            ngfw_instance.status,
-            request_id,
-        )
-        return False
-
-    task_arn = start_ngfw_operation(request_id, "stop")
-
-    if task_arn:
-        logger.info(
-            "stop_ngfw: started ECS task=%s for request=%s",
-            task_arn,
-            request_id,
-        )
-
-    return task_arn is not None
+    return _run_ngfw_lifecycle_op(
+        request_id,
+        "stop",
+        (ResourceStatus.READY.value,),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from cms.models import App
     from shared.schemas.app import NGFWAppContext, NGFWAppRef
     from shared.schemas.credentials import CredentialContext, CredentialRef
-    from shared.schemas.range import RangeContext
+    from shared.schemas.range import InstanceContextBase, RangeContext
 
 logger = logging.getLogger(__name__)
 
@@ -1039,33 +1039,43 @@ def get_range(user: User, range_id: int) -> RangeInstance:
         raise
 
 
-def _instance_contexts_from_range_spec(
-    range_spec: dict[str, Any] | None,
-    instance_context_cls: type,
-    ip_by_uuid: dict[str, str] | None = None,
-) -> list[Any]:
-    """Flatten a stored range_spec into a list of `InstanceContext` rows.
+def _flatten_range_spec_instances(range_spec: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return the flat list of raw instance dicts from a stored range_spec.
 
     Accepts two on-disk shapes:
     - Current: instances nested under subnets (`range_spec["subnets"][*]["instances"]`)
     - Legacy: a flat `range_spec["instances"]` list (preserved for backward
       compatibility with existing prod rows)
+    """
+    if not range_spec:
+        return []
+    subnet_specs = range_spec.get("subnets")
+    if subnet_specs is not None:
+        return [spec for subnet in subnet_specs for spec in subnet.get("instances", [])]
+    return list(range_spec.get("instances") or [])
 
-    The `instance_context_cls` is passed in so this helper has no
-    cross-layer model import; the caller already imports it from
-    `shared.schemas`.
+
+def _instance_contexts_from_range_spec[InstanceContextT: "InstanceContextBase"](
+    range_spec: dict[str, Any] | None,
+    instance_context_cls: type[InstanceContextT],
+    ip_by_uuid: dict[str, str] | None = None,
+) -> list[InstanceContextT]:
+    """Flatten a stored range_spec into a list of `InstanceContext` rows.
+
+    Delegates the on-disk-shape handling to
+    ``_flatten_range_spec_instances``. The ``instance_context_cls`` is
+    passed in so this helper has no cross-layer model import; the caller
+    already imports it from ``shared.schemas``.
 
     When ``ip_by_uuid`` is supplied, the helper sets ``private_ip`` on each
     row whose ``uuid`` is in the map. The map is sourced from
     ``engine.services.get_instance_ips_by_uuid`` and joined by uuid (NOT by
     role/name) per the architecture preflight for issue #370.
     """
-    if not range_spec:
-        return []
-
     ips = ip_by_uuid or {}
 
-    def to_context(spec: dict[str, Any]) -> Any:
+    def to_context(spec: dict[str, Any]) -> InstanceContextT:
+        """Build one ``instance_context_cls`` row, joining the runtime IP map by uuid."""
         spec_uuid = spec.get("uuid")
         return instance_context_cls(
             uuid=spec_uuid,
@@ -1076,11 +1086,7 @@ def _instance_contexts_from_range_spec(
             private_ip=ips.get(spec_uuid) if isinstance(spec_uuid, str) else None,
         )
 
-    if "subnets" in range_spec:
-        return [to_context(spec) for subnet in range_spec["subnets"] for spec in subnet.get("instances", [])]
-    if "instances" in range_spec:
-        return [to_context(spec) for spec in range_spec["instances"]]
-    return []
+    return [to_context(spec) for spec in _flatten_range_spec_instances(range_spec)]
 
 
 def _resolve_runtime_ips(range_id: int | None) -> dict[str, str]:

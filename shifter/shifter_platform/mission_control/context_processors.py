@@ -1,16 +1,20 @@
 """Context processors for mission_control app."""
 
 import logging
+from collections.abc import Iterable
+from typing import Any
+
+from django.http import HttpRequest
 
 from cms.services import get_active_range, get_scenario
 from mission_control.utils import build_connection_urls
 from shared.auth import is_ctf_participant_only
-from shared.schemas import RangeContext
+from shared.schemas import InstanceContext, RangeContext
 
 logger = logging.getLogger(__name__)
 
 
-def _terminal_instances_payload(instances):
+def _terminal_instances_payload(instances: Iterable[InstanceContext]) -> list[dict[str, Any]]:
     """Project InstanceContext rows into the json_script-safe dict shape consumed by terminal.js."""
     return [
         {
@@ -24,7 +28,23 @@ def _terminal_instances_payload(instances):
     ]
 
 
-def active_range(request):
+def _empty_active_range_context() -> dict[str, Any]:
+    """Return the shared "no active range" context payload.
+
+    Centralizes the unauthenticated, invalid-type, and exception branches of
+    ``active_range`` so the function stays under the Sonar return-count gate
+    and so all empty payloads share one shape.
+    """
+    return {
+        "has_active_range": False,
+        "active_range": None,
+        "connection_urls": [],
+        "scenario_name": None,
+        "terminal_instances": [],
+    }
+
+
+def active_range(request: HttpRequest) -> dict[str, Any]:
     """
     Add active range information to template context.
 
@@ -36,13 +56,7 @@ def active_range(request):
         - terminal_instances: json_script-safe per-instance payload for terminal.js
     """
     if not request.user.is_authenticated:
-        return {
-            "has_active_range": False,
-            "active_range": None,
-            "connection_urls": [],
-            "scenario_name": None,
-            "terminal_instances": [],
-        }
+        return _empty_active_range_context()
 
     user_id = request.user.id
 
@@ -55,13 +69,7 @@ def active_range(request):
                 type(range_context).__name__,
                 user_id,
             )
-            return {
-                "has_active_range": False,
-                "active_range": None,
-                "connection_urls": [],
-                "scenario_name": None,
-                "terminal_instances": [],
-            }
+            return _empty_active_range_context()
 
         if range_context is not None:
             is_ready = range_context.is_ready
@@ -115,10 +123,4 @@ def active_range(request):
             "Error in active_range context processor for user_id=%s",
             user_id,
         )
-        return {
-            "has_active_range": False,
-            "active_range": None,
-            "connection_urls": [],
-            "scenario_name": None,
-            "terminal_instances": [],
-        }
+        return _empty_active_range_context()

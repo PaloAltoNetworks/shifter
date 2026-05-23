@@ -14,7 +14,10 @@
                 </h1>
                 {% if has_active_range %}
                     <span class="terminal-range-info">
-                        {{ scenario_name|default:active_range.scenario_id }}{% if active_range.range_id %} - {% trans "Range" %} {{ active_range.range_id }}{% endif %}
+                        {{ scenario_name|default:active_range.scenario_id }}
+                        {% if active_range.range_id %}
+                            - {% trans "Range" %} {{ active_range.range_id }}
+                        {% endif %}
                     </span>
                 {% else %}
                     <span class="terminal-range-info text-muted">{% trans "No active range" %}</span>
@@ -78,7 +81,10 @@
                                 </svg>
                             </span>
                             <span class="pane-title">{{ instance.name|default:instance.role }}</span>
-                            <span class="pane-subtitle">{{ instance.os_type }}{% if instance.private_ip %} · {{ instance.private_ip }}{% endif %}</span>
+                            <span class="pane-subtitle">
+                                {{ instance.os_type }}
+                                {% if instance.private_ip %}· {{ instance.private_ip }}{% endif %}
+                            </span>
                             <button class="pane-action-btn ssh-btn"
                                     title='{% trans "Open SSH Session" %}'
                                     data-uuid="{{ instance.uuid }}">
@@ -255,21 +261,9 @@
         {{ terminal_instances|json_script:"terminal-instances-data" }}
         {{ connection_urls|json_script:"terminal-connection-urls-data" }}
         <script src="{% static 'js/terminal.js' %}"></script>
+        <script src="{% static 'js/terminal-init.js' %}"></script>
         <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const instances = JSON.parse(document.getElementById('terminal-instances-data').textContent);
-    const rawConnectionUrls = JSON.parse(document.getElementById('terminal-connection-urls-data').textContent);
-    const connectionUrls = rawConnectionUrls.map(function (conn) {
-        return { uuid: conn.uuid, terminalUrl: conn.terminal_url };
-    });
-
-    const terminalManager = new TerminalManager({
-        instances: instances,
-        connectionUrls: connectionUrls,
-        wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',
-        wsHost: window.location.host,
-    });
-    terminalManager.init();
 
     async function openGuacamoleSession(button, instanceUuid, endpointUrl, sessionLabel) {
         if (!instanceUuid) {

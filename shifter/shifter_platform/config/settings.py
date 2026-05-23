@@ -2,8 +2,11 @@
 Django settings for Shifter platform.
 """
 
+from __future__ import annotations
+
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -38,7 +41,8 @@ if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY environment variable is required")
 DEBUG = _env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
+# Required for debug context processor
+INTERNAL_IPS = ["127.0.0.1"]
 
 # Field encryption key for sensitive model fields (e.g., SCMCredential.scm_pin_value)
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -92,8 +96,10 @@ if AUTH_PROVIDER == "oidc":
     INSTALLED_APPS.append("mozilla_django_oidc")
 
 MIDDLEWARE = [
-    "config.middleware.HealthCheckMiddleware",  # Must be first to bypass ALLOWED_HOSTS for ALB
-    "config.middleware.RequestIDMiddleware",  # Request ID for audit logging correlation
+    # Must be first to bypass ALLOWED_HOSTS for ALB
+    "config.middleware.HealthCheckMiddleware",
+    # Request ID for audit logging correlation
+    "config.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -155,7 +161,7 @@ ASGI_APPLICATION = "config.asgi.application"
 #
 # Fail closed when the TLS flag is on but no password was hydrated — silent
 # fallback to plaintext is the failure mode #963 was opened to close.
-def _build_channel_layers(env):
+def _build_channel_layers(env: Mapping[str, str]) -> dict[str, dict[str, object]]:
     """Build CHANNEL_LAYERS from the given mapping (typically os.environ).
 
     Pure function so it is unit-testable without touching real settings.
@@ -215,7 +221,7 @@ def _build_channel_layers(env):
             "ssl_cert_reqs": "required",
             "ssl_ca_data": ca_pem,
         }
-        hosts = [host_entry]
+        hosts: list[object] = [host_entry]
     else:
         hosts = [(host, port)]
 
@@ -435,19 +441,27 @@ OIDC_USERNAME_ALGO = "config.oidc.generate_username"
 # URLs exempt from OIDC authentication (public pages)
 # Must be URL paths starting with "/" or view names (not regex patterns)
 OIDC_EXEMPT_URLS = [
-    "/",  # Landing page
-    "/health",  # Health check
-    "/health/",  # Health check with trailing slash
-    "/dev-login/",  # View enforces production blocking directly
-    "/dev-logout/",  # View enforces production blocking directly
-    "/ctf/register/",  # CTF magic link registration (token is the auth)
-    "/ctf/help/",  # CTF help page
+    # Landing page
+    "/",
+    # Health check
+    "/health",
+    # Health check with trailing slash
+    "/health/",
+    # View enforces production blocking directly
+    "/dev-login/",
+    # View enforces production blocking directly
+    "/dev-logout/",
+    # CTF magic link registration (token is the auth)
+    "/ctf/register/",
+    # CTF help page
+    "/ctf/help/",
 ]
 
 # Session cookie lifetime — makes Django's 14-day default explicit.
 # CTF participants auth via magic link (ModelBackend), so OIDC SessionRefresh
 # won't expire their sessions. This ensures no surprises from Django defaults.
-SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 14 days
+# 14 days
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
 
 # ------------------------------------------------------------------------------
 # Field Encryption (django-encrypted-model-fields)
@@ -472,7 +486,8 @@ SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "noreply@shifter
 
 # Provisioning timeout - how long dashboard waits before showing timeout error
 # UI fallback is 60 min if not provided (avoids long range standup issues during testing)
-PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
+# 30 minutes
+PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000
 
 # ------------------------------------------------------------------------------
 # Cloud Provider Configuration
@@ -494,14 +509,19 @@ STORAGE_BUCKET_NAME = os.environ.get("STORAGE_BUCKET_NAME") or os.environ.get("A
 # AWS S3 Configuration
 # ------------------------------------------------------------------------------
 
-AWS_S3_BUCKET_NAME = STORAGE_BUCKET_NAME  # Backward compat alias
-AWS_S3_REGION = CLOUD_REGION  # Backward compat alias
-AWS_REGION = CLOUD_REGION  # Backward compat alias
-AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
+# Backward compat alias
+AWS_S3_BUCKET_NAME = STORAGE_BUCKET_NAME
+# Backward compat alias
+AWS_S3_REGION = CLOUD_REGION
+# Backward compat alias
+AWS_REGION = CLOUD_REGION
+# LocalStack support
+AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")
 
 # Topic for publishing events (provisioner -> workers)
 RANGE_EVENTS_TOPIC_ID = os.environ.get("RANGE_EVENTS_TOPIC_ID") or os.environ.get("SNS_RANGE_EVENTS_ARN", "")
-SNS_RANGE_EVENTS_ARN = RANGE_EVENTS_TOPIC_ID  # Backward compat alias
+# Backward compat alias
+SNS_RANGE_EVENTS_ARN = RANGE_EVENTS_TOPIC_ID
 
 # Shifter Engine task runner configuration.
 # AWS uses ECS-compatible values. GCP uses a Kubernetes namespace plus a
@@ -549,13 +569,18 @@ LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
 PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
 
 # Agent upload limits
-AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
-AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
-AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+# 2GB max per file
+AGENT_MAX_FILE_SIZE_MB = 2048
+# 5GB max per user
+AGENT_USER_STORAGE_QUOTA_MB = 5120
+# 10 minutes for presigned URL
+AGENT_UPLOAD_URL_EXPIRES = 600
 
 # Experiment script upload limits
-SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1MB max per script
-SCRIPT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+# 1MB max per script
+SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024
+# 10 minutes for presigned URL
+SCRIPT_UPLOAD_URL_EXPIRES = 600
 
 # Server-side upload inspection (issue #696). Provider-neutral byte budget for
 # the magic-byte header read performed at finalization across CTF, agent, and
@@ -597,6 +622,7 @@ GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMO
 
 
 def _build_queue_config(name: str, legacy_env: str, handler: str) -> dict[str, str]:
+    """Read consumer/publisher IDs for a named queue, honoring legacy env-var aliases."""
     consumer_id = (
         os.environ.get(f"QUEUE_{name}_CONSUMER_ID")
         or os.environ.get(f"QUEUE_{name}_ID")
@@ -623,7 +649,8 @@ QUEUE_CONFIG = {
         "cms.experiments.handlers.process_event",
     ),
 }
-SQS_QUEUE_CONFIG = QUEUE_CONFIG  # Backward compat alias
+# Backward compat alias
+SQS_QUEUE_CONFIG = QUEUE_CONFIG
 
 # ------------------------------------------------------------------------------
 # CTF Configuration
@@ -699,7 +726,8 @@ LOGGING = {
     "loggers": {
         "django": {
             "handlers": ["console"],
-            "level": "INFO",  # Keep Django framework logs at INFO
+            # Keep Django framework logs at INFO
+            "level": "INFO",
             "propagate": False,
         },
         "django.request": {

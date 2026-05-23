@@ -23,12 +23,17 @@ echo "A14 smoketest - Kali attack platform"
 
 echo
 echo "--- Content files ---"
-for f in /home/kali/README.md /home/kali/mission_brief.txt /home/kali/mission_brief.pdf \
-         /home/kali/tools/flag_submit.sh /home/kali/tools/modbus_scan.py \
-         /home/kali/.config/claude/system_prompt.txt; do
+# README.md, mission_brief.{txt,pdf}, and tools/flag_submit.sh were removed
+# in 2026-04 (see scenario-dev/polaris/build/a14/Dockerfile:85): they were
+# stale relative to the CTFd board and Kali has no route to CTFd, so a
+# Kali-side submission helper is broken by design. CTFd is the reference.
+# The remaining content drops are modbus_scan.py (Mission 4 helper), the
+# Claude POLARIS system prompt, and the warm-up challenge target.
+for f in /home/kali/tools/modbus_scan.py \
+         /home/kali/.config/claude/system_prompt.txt \
+         /home/kali/.polaris/welcome.txt; do
     [[ -f "$f" ]] && pass "$f present" || fail "$f missing"
 done
-[[ -x /home/kali/tools/flag_submit.sh ]] && pass "flag_submit.sh executable" || fail "flag_submit.sh not exec"
 [[ -x /home/kali/tools/modbus_scan.py ]] && pass "modbus_scan.py executable" || fail "modbus_scan.py not exec"
 
 echo

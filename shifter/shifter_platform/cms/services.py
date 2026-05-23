@@ -6,7 +6,7 @@ Content and asset management for Shifter platform.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from django.utils import timezone
@@ -49,7 +49,7 @@ __all__ = (
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from cms.models import App, Instance, Request
+    from cms.models import App, Credential, Instance, Request
     from cms.scenarios.schema import ScenarioTemplate
     from shared.schemas.app import NGFWAppContext, NGFWAppRef
     from shared.schemas.credentials import CredentialContext, CredentialRef
@@ -3107,20 +3107,22 @@ def _validate_ngfw_name(name: str) -> str:
     return name.strip()
 
 
-def _resolve_ngfw_deployment_profile(user: User, deployment_profile_id: int, Credential: Any) -> Any:
+def _resolve_ngfw_deployment_profile(
+    user: User, deployment_profile_id: int, credential_model: type[Credential]
+) -> Credential:
     """Load and type-check the deployment-profile credential for `create_ngfw`."""
     if not deployment_profile_id:
         raise ValueError("deployment_profile_id is required")
     try:
-        deployment_profile = Credential.objects.select_related("credential_type").get(
+        deployment_profile = credential_model.objects.select_related("credential_type").get(
             id=deployment_profile_id,
             user=user,
         )
-    except Credential.DoesNotExist:
+    except credential_model.DoesNotExist:
         raise CMSError("Deployment profile not found") from None
     if deployment_profile.credential_type.slug != "deployment_profile":
         raise CMSError("deployment_profile_id must reference a deployment profile credential")
-    return deployment_profile
+    return cast("Credential", deployment_profile)
 
 
 def _resolve_ngfw_registration(
@@ -3129,8 +3131,8 @@ def _resolve_ngfw_registration(
     scm_credential_id: int | None,
     otp_value: str | None,
     otp_folder: str | None,
-    Credential: Any,
-) -> Any:
+    credential_model: type[Credential],
+) -> Credential | None:
     """Validate registration-method-specific inputs; return the SCM credential or None."""
     if registration_method not in ("pin", "otp"):
         raise ValueError("registration_method must be 'pin' or 'otp'")
@@ -3142,15 +3144,15 @@ def _resolve_ngfw_registration(
     if not scm_credential_id:
         raise ValueError("scm_credential_id is required for PIN registration")
     try:
-        scm_credential = Credential.objects.select_related("credential_type").get(
+        scm_credential = credential_model.objects.select_related("credential_type").get(
             id=scm_credential_id,
             user=user,
         )
-    except Credential.DoesNotExist:
+    except credential_model.DoesNotExist:
         raise CMSError("SCM credential not found") from None
     if scm_credential.credential_type.slug != "scm":
         raise CMSError("scm_credential_id must reference an SCM credential")
-    return scm_credential
+    return cast("Credential", scm_credential)
 
 
 def _validate_app_id(app_id: UUID | str) -> UUID:

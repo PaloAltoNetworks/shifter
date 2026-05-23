@@ -49,15 +49,15 @@ __all__ = (
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from cms.models import App
+    from cms.models import App, Request
     from shared.schemas.app import NGFWAppContext, NGFWAppRef
     from shared.schemas.credentials import CredentialContext, CredentialRef
-    from shared.schemas.range import InstanceContextBase, RangeContext
+    from shared.schemas.range import InstanceContextBase, RangeContext, RangeSpec
 
 logger = logging.getLogger(__name__)
 
 
-def _validate_caller_user(user: Any, fn_name: str) -> None:
+def _validate_caller_user(user: object, fn_name: str) -> None:
     """Reject None/wrong-type/unsaved User; raise the canonical TypeError/ValueError.
 
     Used by every service entrypoint that takes `user: User` so the
@@ -76,7 +76,7 @@ def _validate_caller_user(user: Any, fn_name: str) -> None:
         raise ValueError(USER_MUST_BE_SAVED)
 
 
-def _validate_nonneg_int_id(value: Any, name: str, fn_name: str, user_id: Any) -> None:
+def _validate_nonneg_int_id(value: object, name: str, fn_name: str, user_id: object) -> None:
     """Reject None/wrong-type/negative int IDs; raise canonical TypeError/ValueError."""
     if value is None:
         logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
@@ -106,7 +106,7 @@ def _validate_nonneg_int_id(value: Any, name: str, fn_name: str, user_id: Any) -
 # =============================================================================
 
 
-def create_agent(user: User, **kwargs: Any) -> AgentConfig:
+def create_agent(user: User, **kwargs: object) -> AgentConfig:
     """Create agent record.
 
     Delegates to cms.assets.services.create_agent() after validating user.
@@ -259,7 +259,7 @@ def _validate_listing_user(user: User, fn_name: str) -> None:
         raise ValueError(USER_MUST_BE_SAVED)
 
 
-def _agent_projection_dict(agent: Any) -> dict[str, Any]:
+def _agent_projection_dict(agent: AgentConfig) -> dict[str, Any]:
     """Build the agent projection dict; verify the model shape on the way out.
 
     Centralizes the per-agent type-shape contract that `list_agents` enforces
@@ -442,7 +442,7 @@ def get_allowed_extensions() -> list[str]:
 # =============================================================================
 
 
-def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> CredentialRef:
+def create_credential(user: User, credential_type_slug: str, **kwargs: object) -> CredentialRef:
     """Create credential (SCM or deployment profile).
 
     Args:
@@ -1363,7 +1363,7 @@ def _assert_no_active_range(user: User) -> None:
         raise CMSError(msg)
 
 
-def _load_scenario_template_or_raise(scenario: str) -> Any:
+def _load_scenario_template_or_raise(scenario: str) -> dict[str, Any]:
     """Return the scenario template or raise CMSError if not found."""
     from cms.exceptions import CMSError
     from cms.scenarios.registry import load_scenario_template as load_scenario
@@ -1392,7 +1392,7 @@ def _lookup_agents_by_os(user: User, agents_by_os: dict[str, int]) -> dict[str, 
     return {os_type: get_agent(user, aid) for os_type, aid in agents_by_os.items()}
 
 
-def _create_cms_request_and_dispatch_engine(user: User, range_spec: Any) -> tuple[UUID, Any]:
+def _create_cms_request_and_dispatch_engine(user: User, range_spec: RangeSpec) -> tuple[UUID, Request]:
     """Create the CMS Request row, dispatch the engine, return (request_id, cms_request)."""
     from uuid import uuid4
 
@@ -1421,11 +1421,11 @@ def _create_cms_request_and_dispatch_engine(user: User, range_spec: Any) -> tupl
 
 
 def _persist_range_instance_record(
-    cms_request: Any,
+    cms_request: Request,
     scenario: str,
     user: User,
     agents: dict[str, AgentConfig],
-    range_spec: Any,
+    range_spec: RangeSpec,
 ) -> None:
     """Persist the RangeInstance row tying the CMS Request to the hydrated spec."""
     from cms.models import RangeInstance
@@ -1470,7 +1470,7 @@ def _build_range_context_for_create(
     request_id: UUID,
     scenario: str,
     user: User,
-    range_spec: Any,
+    range_spec: RangeSpec,
     agents: dict[str, AgentConfig],
 ) -> RangeContext:
     """Build the RangeContext projection returned by create_range."""
@@ -2459,7 +2459,7 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 # =============================================================================
 
 
-def _validate_nonempty_str(value: Any, name: str, fn_name: str, user_id: Any) -> str:
+def _validate_nonempty_str(value: object, name: str, fn_name: str, user_id: object) -> str:
     """Strip and validate a required non-empty string parameter."""
     if value is None:
         logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
@@ -2471,7 +2471,7 @@ def _validate_nonempty_str(value: Any, name: str, fn_name: str, user_id: Any) ->
     return stripped
 
 
-def _validate_positive_int(value: Any, name: str, fn_name: str, user_id: Any) -> None:
+def _validate_positive_int(value: object, name: str, fn_name: str, user_id: object) -> None:
     """Validate a required positive int (> 0); raise canonical TypeError/ValueError."""
     if value is None:
         logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
@@ -3549,7 +3549,7 @@ def get_range_spec_by_id(range_instance_id: int) -> dict | None:
         return None
 
 
-def find_range_instance_id_by_request(request_id: Any) -> int | None:
+def find_range_instance_id_by_request(request_id: str | UUID) -> int | None:
     """Find a RangeInstance PK by its provisioning request ID.
 
     Returns:

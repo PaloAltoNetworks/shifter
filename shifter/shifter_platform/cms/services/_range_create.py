@@ -22,14 +22,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _engine_create_range_call(request_spec: Any) -> Any:  # NOSONAR (late-bind proxy)
+def _engine_create_range_call(request_spec: Any) -> Any:  # NOSONAR
     """Late-bound call to ``cms.services.engine_create_range`` so test patches apply."""
     from cms import services as _cs
 
     return _cs.engine_create_range(request_spec)
 
 
-def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR (late-bind proxy)
+def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
     """Late-bound call to ``cms.services.audit_log`` so test patches apply."""
     from cms import services as _cs
 

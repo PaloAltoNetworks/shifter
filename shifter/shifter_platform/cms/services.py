@@ -2687,7 +2687,7 @@ def _verify_upload_token_or_raise(upload_token: str, user_id: int) -> dict[str, 
     try:
         return verify_upload_token(upload_token, user_id)
     except ValueError as e:
-        logger.error("complete_upload: token verification failed for user_id=%s - %s", user_id, e)
+        logger.exception("complete_upload: token verification failed for user_id=%s", user_id)
         raise CMSError("Invalid upload token") from e
 
 
@@ -2699,7 +2699,7 @@ def _verify_upload_object_or_raise(s3_key: str, expected_size: int, user_id: int
     try:
         actual_size, _etag = verify_s3_object_exists(s3_key)
     except S3Error as e:
-        logger.error("complete_upload: S3 verification failed for user_id=%s - %s", user_id, e)
+        logger.exception("complete_upload: S3 verification failed for user_id=%s", user_id)
         raise CMSError("Upload not found in storage") from e
 
     if actual_size != expected_size:
@@ -3306,9 +3306,9 @@ def _hydrate_and_dispatch_ngfw(
     instance: Instance,
     app: App,
     name: str,
-    deployment_profile: Any,
+    deployment_profile: Credential,
     registration_method: str,
-    scm_credential: Any,
+    scm_credential: Credential | None,
     otp_value: str | None,
     otp_folder: str | None,
 ) -> None:

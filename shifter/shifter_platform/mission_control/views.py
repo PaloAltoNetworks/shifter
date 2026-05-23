@@ -151,9 +151,17 @@ def terminal(request: HttpRequest) -> HttpResponse:
     Template accesses active_range.range_id for WebSocket connection.
     OS types for RDP buttons are accessed via active_range.attacker_instance/victim_instances.
     """
+    from django.middleware.csrf import get_token
+    from django.urls import reverse
+
     context = {
         "page_title": "Terminal",
         "active_nav": "terminal",
+        "terminal_guacamole_config": {
+            "rdpUrl": reverse("mission_control:guacamole_rdp_url"),
+            "sshUrl": reverse("mission_control:guacamole_ssh_url"),
+            "csrfToken": get_token(request),
+        },
     }
     return render(request, "mission_control/terminal.html", context)
 

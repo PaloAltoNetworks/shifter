@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from shared.schemas import InstanceSpec, RangeContext, RangeSpec, RequestSpec
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+    from engine.models import Range
     from engine.ssh import SSHConnection
 
 logger = logging.getLogger(__name__)
@@ -430,25 +432,29 @@ def destroy_range(request: RangeContext) -> bool:
     from engine.ecs import start_teardown
     from engine.models import Range
 
-    # Try request_id first (new pattern) when range_id is None
+    # New-pattern delegation when range_id is None: a present request_id
+    # routes through destroy_range_by_request; an absent one is a no-op.
     if request.range_id is None:
-        if request.request_id:
-            return destroy_range_by_request(request.request_id)
-        logger.warning("destroy_range: both range_id and request_id are None")
-        return False
+        if not request.request_id:
+            logger.warning("destroy_range: both range_id and request_id are None")
+            return False
+        return destroy_range_by_request(request.request_id)
 
     logger.debug("destroy_range: range_id=%s", request.range_id)
-
     try:
         range_obj = Range.objects.get(id=request.range_id)
     except Range.DoesNotExist:
         logger.warning("destroy_range: range not found range_id=%s", request.range_id)
         return False
-
     return _apply_destroy_to_range(range_obj, request.range_id, request.user_id, start_teardown)
 
 
-def _apply_destroy_to_range(range_obj: Any, range_id: int, user_id: int, start_teardown: Any) -> bool:
+def _apply_destroy_to_range(
+    range_obj: Range,
+    range_id: int,
+    user_id: int,
+    start_teardown: Callable[[int, int], str | None],
+) -> bool:
     """Status-branch helper for ``destroy_range`` so the caller stays under the return-count cap."""
     # Already destroyed - nothing to do
     if range_obj.status == ResourceStatus.DESTROYED:
@@ -592,7 +598,11 @@ def destroy_range_by_request(request_id: UUID) -> bool:
     return _apply_destroy_by_request(range_obj, request_id, start_range_teardown)
 
 
-def _apply_destroy_by_request(range_obj: Any, request_id: UUID, start_range_teardown: Any) -> bool:
+def _apply_destroy_by_request(
+    range_obj: Range,
+    request_id: UUID,
+    start_range_teardown: Callable[[UUID], str | None],
+) -> bool:
     """Status-branch helper for ``destroy_range_by_request`` (same shape as ``_apply_destroy_to_range``)."""
     # Already destroyed - nothing to do
     if range_obj.status == ResourceStatus.DESTROYED.value:
@@ -807,11 +817,11 @@ def _classify_lifecycle_decision(
 
 
 def _dispatch_lifecycle_ecs(
-    range_obj: Any,
+    range_obj: Range,
     request_id: UUID,
     op_name: str,
     revert_status: str,
-    start_range_operation: Any,
+    start_range_operation: Callable[[UUID, str], str | None],
     cloud_task_error_cls: type[BaseException],
 ) -> bool:
     """Invoke the ECS task and revert state on failure."""
@@ -1355,28 +1365,22 @@ def destroy_ngfw(request_id: UUID) -> bool:
     return task_arn is not None
 
 
-def _run_ngfw_lifecycle_op(request_id: UUID, op_name: str, allowed_statuses: tuple[str, ...]) -> bool:
-    """Shared start/stop NGFW transition + ECS-dispatch helper.
-
-    Mirrors the previous per-operation flow: validate request → validate
-    NGFW instance exists → check status → dispatch ECS task. Returns
-    True only when the ECS task was successfully started.
-    """
-    from engine.ecs import start_ngfw_operation
+def _resolve_ngfw_instance_for_lifecycle(
+    request_id: UUID, op_name: str, allowed_statuses: tuple[str, ...]
+) -> Any | None:
+    """Return the NGFW Instance row when it exists and its status permits ``op_name``."""
     from engine.models import Instance, Request
-
-    logger.debug("%s_ngfw: request_id=%s", op_name, request_id)
 
     try:
         request = Request.objects.get(request_id=request_id)
     except Request.DoesNotExist:
         logger.warning("%s_ngfw: request not found request_id=%s", op_name, request_id)
-        return False
+        return None
 
     ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
     if not ngfw_instance:
         logger.warning("%s_ngfw: no NGFW instance found for request_id=%s", op_name, request_id)
-        return False
+        return None
 
     if ngfw_instance.status not in allowed_statuses:
         logger.warning(
@@ -1386,6 +1390,24 @@ def _run_ngfw_lifecycle_op(request_id: UUID, op_name: str, allowed_statuses: tup
             request_id,
             allowed_statuses,
         )
+        return None
+
+    return ngfw_instance
+
+
+def _run_ngfw_lifecycle_op(request_id: UUID, op_name: str, allowed_statuses: tuple[str, ...]) -> bool:
+    """Shared start/stop NGFW transition + ECS-dispatch helper.
+
+    Mirrors the previous per-operation flow: validate request → validate
+    NGFW instance exists → check status → dispatch ECS task. Returns
+    True only when the ECS task was successfully started.
+    """
+    from engine.ecs import start_ngfw_operation
+
+    logger.debug("%s_ngfw: request_id=%s", op_name, request_id)
+
+    ngfw_instance = _resolve_ngfw_instance_for_lifecycle(request_id, op_name, allowed_statuses)
+    if ngfw_instance is None:
         return False
 
     task_arn = start_ngfw_operation(request_id, op_name)

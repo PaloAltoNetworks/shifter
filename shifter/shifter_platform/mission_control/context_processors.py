@@ -10,6 +10,20 @@ from shared.schemas import RangeContext
 logger = logging.getLogger(__name__)
 
 
+def _terminal_instances_payload(instances):
+    """Project InstanceContext rows into the json_script-safe dict shape consumed by terminal.js."""
+    return [
+        {
+            "uuid": inst.uuid,
+            "role": inst.role,
+            "osType": inst.os_type,
+            "name": inst.name or inst.role,
+            "privateIp": inst.private_ip,
+        }
+        for inst in instances
+    ]
+
+
 def active_range(request):
     """
     Add active range information to template context.
@@ -19,6 +33,7 @@ def active_range(request):
     Provides:
         - has_active_range: Boolean indicating if user has a ready range
         - active_range: The user's active RangeContext (or None)
+        - terminal_instances: json_script-safe per-instance payload for terminal.js
     """
     if not request.user.is_authenticated:
         return {
@@ -26,6 +41,7 @@ def active_range(request):
             "active_range": None,
             "connection_urls": [],
             "scenario_name": None,
+            "terminal_instances": [],
         }
 
     user_id = request.user.id
@@ -44,6 +60,7 @@ def active_range(request):
                 "active_range": None,
                 "connection_urls": [],
                 "scenario_name": None,
+                "terminal_instances": [],
             }
 
         if range_context is not None:
@@ -83,11 +100,14 @@ def active_range(request):
             connection_urls = []
             scenario_name = None
 
+        terminal_instances = _terminal_instances_payload(range_context.instances) if range_context is not None else []
+
         return {
             "has_active_range": has_ready_range,
             "active_range": range_context,
             "connection_urls": connection_urls,
             "scenario_name": scenario_name,
+            "terminal_instances": terminal_instances,
         }
 
     except Exception:
@@ -100,4 +120,5 @@ def active_range(request):
             "active_range": None,
             "connection_urls": [],
             "scenario_name": None,
+            "terminal_instances": [],
         }

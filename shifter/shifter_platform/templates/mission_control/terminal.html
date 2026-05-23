@@ -13,7 +13,9 @@
                     {% trans "Terminal" %}
                 </h1>
                 {% if has_active_range %}
-                    <span class="terminal-range-info">{{ scenario_name|default:active_range.scenario_id }}</span>
+                    <span class="terminal-range-info">
+                        {{ scenario_name|default:active_range.scenario_id }}{% if active_range.range_id %} - {% trans "Range" %} {{ active_range.range_id }}{% endif %}
+                    </span>
                 {% else %}
                     <span class="terminal-range-info text-muted">{% trans "No active range" %}</span>
                 {% endif %}
@@ -76,7 +78,7 @@
                                 </svg>
                             </span>
                             <span class="pane-title">{{ instance.name|default:instance.role }}</span>
-                            <span class="pane-subtitle">{{ instance.os_type }}</span>
+                            <span class="pane-subtitle">{{ instance.os_type }}{% if instance.private_ip %} · {{ instance.private_ip }}{% endif %}</span>
                             <button class="pane-action-btn ssh-btn"
                                     title='{% trans "Open SSH Session" %}'
                                     data-uuid="{{ instance.uuid }}">
@@ -250,30 +252,16 @@
                 crossorigin="anonymous"></script>
         <!-- Split.js for resizable split panes -->
         <script src="https://unpkg.com/split.js@1.6.5/dist/split.min.js"></script>
+        {{ terminal_instances|json_script:"terminal-instances-data" }}
+        {{ connection_urls|json_script:"terminal-connection-urls-data" }}
         <script src="{% static 'js/terminal.js' %}"></script>
         <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Instances from RangeContext (uuid, role, os_type, name)
-    const instances = [
-        {% for instance in active_range.instances %}
-        {
-            uuid: "{{ instance.uuid }}",
-            role: "{{ instance.role }}",
-            osType: "{{ instance.os_type }}",
-            name: "{{ instance.name|default:instance.role }}"
-        }{% if not forloop.last %},{% endif %}
-        {% endfor %}
-    ];
-
-    // Connection URLs from context processor (uuid, terminal_url)
-    const connectionUrls = [
-        {% for conn in connection_urls %}
-        {
-            uuid: "{{ conn.uuid }}",
-            terminalUrl: "{{ conn.terminal_url }}"
-        }{% if not forloop.last %},{% endif %}
-        {% endfor %}
-    ];
+    const instances = JSON.parse(document.getElementById('terminal-instances-data').textContent);
+    const rawConnectionUrls = JSON.parse(document.getElementById('terminal-connection-urls-data').textContent);
+    const connectionUrls = rawConnectionUrls.map(function (conn) {
+        return { uuid: conn.uuid, terminalUrl: conn.terminal_url };
+    });
 
     const terminalManager = new TerminalManager({
         instances: instances,

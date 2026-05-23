@@ -443,3 +443,106 @@ class TestActiveRangeContextProcessor:
         assert len(result["active_range"].instances) == 2
         assert all(inst.os_type == "kali" for inst in result["active_range"].instances)
         assert len(result["connection_urls"]) == 2
+
+
+class TestTerminalInstancesPayload:
+    """Tests for the json_script-safe terminal_instances payload."""
+
+    @staticmethod
+    def _range_with(instances):
+        from shared.schemas import RangeContext
+
+        return RangeContext(
+            request_id=uuid4(),
+            range_id=42,
+            user_id=42,
+            scenario_id="basic",
+            status=ResourceStatus.READY,
+            instances=instances,
+            agent_name="Test Agent",
+        )
+
+    def test_payload_contains_private_ip_camelcase(self):
+        from mission_control.context_processors import active_range
+        from shared.schemas import InstanceContext
+
+        request = MagicMock()
+        request.user.is_authenticated = True
+        request.user.id = 42
+
+        range_ctx = self._range_with(
+            [
+                InstanceContext(
+                    uuid="att-1",
+                    name="AttackerKali",
+                    role="attacker",
+                    os_type="kali",
+                    private_ip="10.0.1.5",
+                ),
+                InstanceContext(
+                    uuid="vic-1",
+                    name="VictimWin",
+                    role="victim",
+                    os_type="windows",
+                ),
+            ]
+        )
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=False),
+        ):
+            result = active_range(request)
+
+        payload = result["terminal_instances"]
+        assert payload == [
+            {
+                "uuid": "att-1",
+                "role": "attacker",
+                "osType": "kali",
+                "name": "AttackerKali",
+                "privateIp": "10.0.1.5",
+            },
+            {
+                "uuid": "vic-1",
+                "role": "victim",
+                "osType": "windows",
+                "name": "VictimWin",
+                "privateIp": None,
+            },
+        ]
+
+    def test_payload_respects_ctf_filtering(self):
+        from mission_control.context_processors import active_range
+        from shared.schemas import InstanceContext
+
+        request = MagicMock()
+        request.user.is_authenticated = True
+        request.user.id = 42
+
+        range_ctx = self._range_with(
+            [
+                InstanceContext(uuid="k", name="K", role="attacker", os_type="kali", private_ip="10.0.0.1"),
+                InstanceContext(uuid="w", name="W", role="victim", os_type="windows", private_ip="10.0.0.2"),
+            ]
+        )
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=True),
+        ):
+            result = active_range(request)
+
+        assert [row["uuid"] for row in result["terminal_instances"]] == ["k"]
+
+    def test_payload_empty_when_no_active_range(self):
+        from mission_control.context_processors import active_range
+
+        request = MagicMock()
+        request.user.is_authenticated = True
+        request.user.id = 42
+
+        with patch("mission_control.context_processors.get_active_range", return_value=None):
+            result = active_range(request)
+
+        assert result["terminal_instances"] == []

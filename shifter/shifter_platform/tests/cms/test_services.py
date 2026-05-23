@@ -96,38 +96,15 @@ class TestGetActiveRange:
     # Filtering behavior
     # ---------------------------------------------------------------------
 
-    def test_excludes_deleted_ranges(self, mock_user):
-        """Returns None when queryset returns no match (deleted ranges filtered out)."""
-        from cms.services import get_active_range
-
-        ctx, _ = _patch_active_queryset(None)
-        with ctx:
-            result = get_active_range(mock_user)
-
-        assert result is None
-
-    def test_excludes_destroyed_ranges(self, mock_user):
-        """Returns None when queryset returns no match (DESTROYED filtered out)."""
-        from cms.services import get_active_range
-
-        ctx, _ = _patch_active_queryset(None)
-        with ctx:
-            result = get_active_range(mock_user)
-
-        assert result is None
-
-    def test_excludes_failed_ranges(self, mock_user):
-        """Returns None when queryset returns no match (FAILED filtered out)."""
-        from cms.services import get_active_range
-
-        ctx, _ = _patch_active_queryset(None)
-        with ctx:
-            result = get_active_range(mock_user)
-
-        assert result is None
-
     def test_excludes_destroying_ranges(self, mock_user):
-        """Verifies DESTROYING status is excluded from the queryset."""
+        """Verifies DESTROYING status is excluded from the queryset.
+
+        Note: deleted rows are filtered by RangeInstance.objects' SoftDeleteManager
+        (a framework guarantee not worth mocking). DESTROYED/FAILED are intentionally
+        NOT excluded in production — callers decide how to surface terminal-state
+        ranges — so there is nothing to assert on the queryset chain for those.
+        Only DESTROYING is filtered here.
+        """
         from cms.services import get_active_range
 
         ctx, mock_active = _patch_active_queryset(None)
@@ -263,3 +240,167 @@ class TestGetActiveRange:
         assert len(result.instances) == 1
         assert result.instances[0].uuid == "leg-att"
         assert result.instances[0].role == "attacker"
+
+
+class TestActiveRangePrivateIpOverlay:
+    """get_active_range overlays runtime IPs from engine.services onto InstanceContext."""
+
+    def _instance(self, range_id=200):
+        inst = MagicMock()
+        inst.range_id = range_id
+        inst.scenario_id = "basic"
+        inst.user_id = 42
+        inst.status = ResourceStatus.READY.value
+        inst.range_spec = {
+            "subnets": [
+                {
+                    "name": "core",
+                    "instances": [
+                        {"uuid": "att-uuid", "role": "attacker", "os_type": "kali"},
+                        {"uuid": "vic-uuid", "role": "victim", "os_type": "windows"},
+                    ],
+                }
+            ]
+        }
+        inst.agent = None
+        inst.request = MagicMock()
+        inst.request.request_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        return inst
+
+    def test_populates_private_ip_from_engine_helper(self, mock_user):
+        from cms.services import get_active_range
+
+        ctx, _ = _patch_active_queryset(self._instance())
+        with (
+            ctx,
+            patch(
+                "cms.services.engine_get_instance_ips_by_uuid",
+                return_value={"att-uuid": "10.0.1.5", "vic-uuid": "10.0.1.6"},
+            ) as ips_call,
+        ):
+            result = get_active_range(mock_user)
+
+        ips_call.assert_called_once_with(200)
+        assert result is not None
+        assert {inst.uuid: inst.private_ip for inst in result.instances} == {
+            "att-uuid": "10.0.1.5",
+            "vic-uuid": "10.0.1.6",
+        }
+
+    def test_leaves_private_ip_none_when_not_in_map(self, mock_user):
+        from cms.services import get_active_range
+
+        ctx, _ = _patch_active_queryset(self._instance())
+        with (
+            ctx,
+            patch(
+                "cms.services.engine_get_instance_ips_by_uuid",
+                return_value={"att-uuid": "10.0.1.5"},
+            ),
+        ):
+            result = get_active_range(mock_user)
+
+        by_uuid = {inst.uuid: inst.private_ip for inst in result.instances}
+        assert by_uuid == {"att-uuid": "10.0.1.5", "vic-uuid": None}
+
+    def test_skips_engine_call_when_range_id_is_none(self, mock_user):
+        from cms.services import get_active_range
+
+        inst = self._instance()
+        inst.range_id = None
+        ctx, _ = _patch_active_queryset(inst)
+        with (
+            ctx,
+            patch("cms.services.engine_get_instance_ips_by_uuid") as ips_call,
+        ):
+            result = get_active_range(mock_user)
+
+        ips_call.assert_not_called()
+        assert result is not None
+        assert all(inst.private_ip is None for inst in result.instances)
+
+    def test_engine_failure_degrades_to_no_ip(self, mock_user):
+        from cms.services import get_active_range
+
+        ctx, _ = _patch_active_queryset(self._instance())
+        with (
+            ctx,
+            patch(
+                "cms.services.engine_get_instance_ips_by_uuid",
+                side_effect=RuntimeError("engine boom"),
+            ),
+        ):
+            result = get_active_range(mock_user)
+
+        assert result is not None
+        assert len(result.instances) == 2
+        assert all(inst.private_ip is None for inst in result.instances)
+
+
+class TestGetRangeByRequestIdPrivateIp:
+    """get_range_by_request_id overlays runtime IPs as well."""
+
+    def _instance(self, range_id=300):
+        inst = MagicMock()
+        inst.range_id = range_id
+        inst.scenario_id = "basic"
+        inst.user_id = 42
+        inst.status = ResourceStatus.READY.value
+        inst.range_spec = {
+            "instances": [
+                {"uuid": "att-uuid", "role": "attacker", "os_type": "kali"},
+            ]
+        }
+        inst.agent = None
+        inst.request = MagicMock()
+        inst.request.request_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+        return inst
+
+    def test_populates_private_ip(self, mock_user):
+        from cms.services import get_range_by_request_id
+
+        mock_objects = MagicMock()
+        mock_objects.filter.return_value.first.return_value = self._instance()
+        with (
+            patch("cms.services.RangeInstance.objects", mock_objects),
+            patch(
+                "cms.services.engine_get_instance_ips_by_uuid",
+                return_value={"att-uuid": "10.9.9.9"},
+            ) as ips_call,
+        ):
+            result = get_range_by_request_id(mock_user, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+        ips_call.assert_called_once_with(300)
+        assert result.instances[0].private_ip == "10.9.9.9"
+
+    def test_skips_engine_call_when_range_id_is_none(self, mock_user):
+        from cms.services import get_range_by_request_id
+
+        inst = self._instance()
+        inst.range_id = None
+        mock_objects = MagicMock()
+        mock_objects.filter.return_value.first.return_value = inst
+        with (
+            patch("cms.services.RangeInstance.objects", mock_objects),
+            patch("cms.services.engine_get_instance_ips_by_uuid") as ips_call,
+        ):
+            result = get_range_by_request_id(mock_user, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+        ips_call.assert_not_called()
+        assert result.instances[0].private_ip is None
+
+    def test_engine_failure_degrades_to_no_ip(self, mock_user):
+        from cms.services import get_range_by_request_id
+
+        mock_objects = MagicMock()
+        mock_objects.filter.return_value.first.return_value = self._instance()
+        with (
+            patch("cms.services.RangeInstance.objects", mock_objects),
+            patch(
+                "cms.services.engine_get_instance_ips_by_uuid",
+                side_effect=RuntimeError("engine boom"),
+            ),
+        ):
+            result = get_range_by_request_id(mock_user, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+        assert result.instances[0].private_ip is None

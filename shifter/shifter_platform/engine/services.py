@@ -665,6 +665,44 @@ def cancel_range_by_request(request_id: UUID) -> bool:
     return True
 
 
+def get_instance_ips_by_uuid(range_id: int) -> dict[str, str]:
+    """Return a {uuid: internal_ip} map for the range's provisioned instances.
+
+    Looks up the range via ``get_range_status`` and resolves each instance's
+    best internal host/IP using the same priority as
+    ``_resolve_instance_host``. Instances without a usable ``uuid`` or a
+    resolvable host are dropped silently — the caller treats the missing
+    entry as "no IP known yet" and degrades gracefully.
+
+    Args:
+        range_id: Engine range identifier (matches ``Range.id`` /
+            ``RangeInstance.range_id``). Callers without a ``range_id`` (for
+            example, a request that has not yet been picked up by the
+            provisioner) should not invoke this — return an empty map.
+
+    Returns:
+        ``{uuid: ip}`` for instances that have both. Empty dict when the
+        range is missing, has no provisioned state, or no instance has both
+        a uuid and a resolvable IP.
+    """
+    status = get_range_status(range_id)
+    if not status:
+        return {}
+
+    result: dict[str, str] = {}
+    for instance in status.get("instances") or []:
+        if not isinstance(instance, dict):
+            continue
+        uuid_value = instance.get("uuid")
+        if not isinstance(uuid_value, str) or not uuid_value.strip():
+            continue
+        ip_value = _resolve_instance_host(instance)
+        if not ip_value:
+            continue
+        result[uuid_value.strip()] = ip_value
+    return result
+
+
 def get_range_status(range_id: int) -> dict[str, Any] | None:
     """Get current state and instance details.
 

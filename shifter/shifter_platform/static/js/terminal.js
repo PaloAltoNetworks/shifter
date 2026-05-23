@@ -253,9 +253,12 @@ class TerminalManager {
                 tab.classList.add('active');
             }
 
+            const ipSuffix = instance.privateIp
+                ? ` <span class="tab-ip">${this._escapeHtml(instance.privateIp)}</span>`
+                : '';
             tab.innerHTML = `
                 <span class="tab-status"></span>
-                <span class="tab-label">${this._escapeHtml(instance.name)}</span>
+                <span class="tab-label">${this._escapeHtml(instance.name)}${ipSuffix}</span>
             `;
 
             tab.addEventListener('click', () => this.activateTerminal(instance.uuid));
@@ -276,7 +279,9 @@ class TerminalManager {
             this.instances.forEach(instance => {
                 const option = document.createElement('option');
                 option.value = instance.uuid;
-                option.textContent = instance.name;
+                option.textContent = instance.privateIp
+                    ? `${instance.name} (${instance.privateIp})`
+                    : instance.name;
                 dropdown.appendChild(option);
             });
 

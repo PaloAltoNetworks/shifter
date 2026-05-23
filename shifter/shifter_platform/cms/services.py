@@ -19,6 +19,7 @@ from cms.models import AgentConfig, RangeInstance
 from engine.services import cancel_range_by_request as engine_cancel_range_by_request
 from engine.services import create_range as engine_create_range
 from engine.services import destroy_range_by_request as engine_destroy_range_by_request
+from engine.services import get_instance_ips_by_uuid as engine_get_instance_ips_by_uuid
 from engine.services import pause_range as engine_pause_range
 from engine.services import resume_range as engine_resume_range
 from risk_register.models import AuditLog
@@ -1041,6 +1042,7 @@ def get_range(user: User, range_id: int) -> RangeInstance:
 def _instance_contexts_from_range_spec(
     range_spec: dict[str, Any] | None,
     instance_context_cls: type,
+    ip_by_uuid: dict[str, str] | None = None,
 ) -> list[Any]:
     """Flatten a stored range_spec into a list of `InstanceContext` rows.
 
@@ -1052,17 +1054,26 @@ def _instance_contexts_from_range_spec(
     The `instance_context_cls` is passed in so this helper has no
     cross-layer model import; the caller already imports it from
     `shared.schemas`.
+
+    When ``ip_by_uuid`` is supplied, the helper sets ``private_ip`` on each
+    row whose ``uuid`` is in the map. The map is sourced from
+    ``engine.services.get_instance_ips_by_uuid`` and joined by uuid (NOT by
+    role/name) per the architecture preflight for issue #370.
     """
     if not range_spec:
         return []
 
+    ips = ip_by_uuid or {}
+
     def to_context(spec: dict[str, Any]) -> Any:
+        spec_uuid = spec.get("uuid")
         return instance_context_cls(
-            uuid=spec.get("uuid"),
+            uuid=spec_uuid,
             name=spec.get("name", ""),
             role=spec["role"],
             os_type=spec["os_type"],
             join_domain=spec.get("join_domain", False),
+            private_ip=ips.get(spec_uuid) if isinstance(spec_uuid, str) else None,
         )
 
     if "subnets" in range_spec:
@@ -1070,6 +1081,22 @@ def _instance_contexts_from_range_spec(
     if "instances" in range_spec:
         return [to_context(spec) for spec in range_spec["instances"]]
     return []
+
+
+def _resolve_runtime_ips(range_id: int | None) -> dict[str, str]:
+    """Best-effort lookup of {uuid: private_ip} for a range's provisioned instances.
+
+    Returns an empty map when ``range_id`` is None (request not yet
+    associated with an engine range) or when the engine lookup fails for
+    any reason — the projection still renders, just without IPs.
+    """
+    if range_id is None:
+        return {}
+    try:
+        return engine_get_instance_ips_by_uuid(range_id)
+    except Exception:
+        logger.exception("Failed to resolve runtime IPs for range_id=%s", range_id)
+        return {}
 
 
 def get_active_range(user: User) -> RangeContext | None:
@@ -1147,7 +1174,8 @@ def get_active_range(user: User) -> RangeContext | None:
         # Get instance data from stored range_spec
         # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
         # Legacy format: instances directly at range_spec["instances"]
-        instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext)
+        ip_by_uuid = _resolve_runtime_ips(instance.range_id)
+        instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext, ip_by_uuid)
 
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None
@@ -1227,7 +1255,8 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     if instance.request is None:
         raise CMSError("Range has no associated request")
 
-    instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext)
+    ip_by_uuid = _resolve_runtime_ips(instance.range_id)
+    instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext, ip_by_uuid)
 
     # Get agent_name from FK if exists
     agent_name = instance.agent.name if instance.agent else None

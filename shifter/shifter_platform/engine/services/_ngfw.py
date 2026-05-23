@@ -102,10 +102,19 @@ def _resolve_ngfw_instance_for_lifecycle(
         return None
 
     ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    return _validate_ngfw_instance_status(ngfw_instance, op_name, request_id, allowed_statuses)
+
+
+def _validate_ngfw_instance_status(
+    ngfw_instance: Any | None,
+    op_name: str,
+    request_id: UUID,
+    allowed_statuses: tuple[str, ...],
+) -> Any | None:
+    """Return the row only when it exists and its status is in ``allowed_statuses``."""
     if not ngfw_instance:
         logger.warning("%s_ngfw: no NGFW instance found for request_id=%s", op_name, request_id)
         return None
-
     if ngfw_instance.status not in allowed_statuses:
         logger.warning(
             "%s_ngfw: invalid status=%s for request_id=%s (allowed=%s)",
@@ -115,7 +124,6 @@ def _resolve_ngfw_instance_for_lifecycle(
             allowed_statuses,
         )
         return None
-
     return ngfw_instance
 
 

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _atomic():
+def _atomic() -> Any:
     """Late-bound ``engine.services.transaction.atomic()`` so tests can patch the package-level name."""
     from engine import services as _es
 
@@ -69,7 +69,10 @@ def create_range(request_spec: RequestSpec) -> UUID:
 
 
 def _persist_range_atomically(
-    request_spec: RequestSpec, range_spec: RangeSpec, user_model: Any, range_model: Any
+    request_spec: RequestSpec,
+    range_spec: RangeSpec,
+    user_model: Any,
+    range_model: Any,
 ) -> Range:
     """Run the interpret + Range + Subnet inserts under a single transaction."""
     from engine.interpreter import interpret
@@ -141,10 +144,7 @@ def destroy_range(request: RangeContext) -> bool:
     from engine.models import Range
 
     if request.range_id is None:
-        if not request.request_id:
-            logger.warning("destroy_range: both range_id and request_id are None")
-            return False
-        return destroy_range_by_request(request.request_id)
+        return _destroy_via_request_id(request.request_id)
 
     logger.debug("destroy_range: range_id=%s", request.range_id)
     try:
@@ -153,6 +153,14 @@ def destroy_range(request: RangeContext) -> bool:
         logger.warning("destroy_range: range not found range_id=%s", request.range_id)
         return False
     return _apply_destroy_to_range(range_obj, request.range_id, request.user_id, start_teardown)
+
+
+def _destroy_via_request_id(request_id: UUID | None) -> bool:
+    """Fan out the ``destroy_range`` no-range_id branch to ``destroy_range_by_request``."""
+    if not request_id:
+        logger.warning("destroy_range: both range_id and request_id are None")
+        return False
+    return destroy_range_by_request(request_id)
 
 
 def _apply_destroy_to_range(

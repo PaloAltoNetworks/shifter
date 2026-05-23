@@ -41,6 +41,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_USER_REQUIRED_MSG = "user is required"
+
 
 def _require_rdp_password(instance: dict[str, Any], os_type: str, rdp_password: str | None) -> None:
     """Fail loud when a range guest has no RDP password.
@@ -98,7 +100,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     from engine.models import Range
 
     if user is None:
-        raise ValueError("user is required")
+        raise ValueError(_USER_REQUIRED_MSG)
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
@@ -142,7 +144,7 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     from engine.models import Range
 
     if user is None:
-        raise ValueError("user is required")
+        raise ValueError(_USER_REQUIRED_MSG)
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
@@ -216,7 +218,7 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
     from engine.ssh import SSHConnection
 
     if user is None:
-        raise ValueError("user is required")
+        raise ValueError(_USER_REQUIRED_MSG)
     if not ngfw_uuid:
         raise ValueError("ngfw_uuid is required")
 

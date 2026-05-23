@@ -15,8 +15,14 @@ from django.views.decorators.http import require_GET, require_POST
 
 from cms.services import (
     create_ngfw as cms_create_ngfw,
+)
+from cms.services import (
     destroy_ngfw as cms_destroy_ngfw,
+)
+from cms.services import (
     list_credentials as cms_list_credentials,
+)
+from cms.services import (
     list_ngfws as cms_list_ngfws,
 )
 from shared.exceptions import CMSError

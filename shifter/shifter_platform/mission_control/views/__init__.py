@@ -22,19 +22,45 @@ from django.shortcuts import render
 
 from cms.services import (
     create_credential as cms_create_credential,
+)
+from cms.services import (
     create_ngfw as cms_create_ngfw,
+)
+from cms.services import (
     create_range as cms_create_range,
+)
+from cms.services import (
     delete_agent as cms_delete_agent,
+)
+from cms.services import (
     delete_credential as cms_delete_credential,
+)
+from cms.services import (
     destroy_ngfw as cms_destroy_ngfw,
+)
+from cms.services import (
     get_active_range,
-    get_agent as cms_get_agent,
-    get_credential as cms_get_credential,
     get_allowed_extensions,
+)
+from cms.services import (
+    get_agent as cms_get_agent,
+)
+from cms.services import (
+    get_credential as cms_get_credential,
+)
+from cms.services import (
     get_ngfw as cms_get_ngfw,
+)
+from cms.services import (
     list_agents as cms_list_agents,
+)
+from cms.services import (
     list_credentials as cms_list_credentials,
+)
+from cms.services import (
     list_ngfws as cms_list_ngfws,
+)
+from cms.services import (
     list_scenarios as cms_list_scenarios,
 )
 from risk_register.models import AuditLog
@@ -81,10 +107,12 @@ from ._ranges import (
     destroy_range,
     get_range,
     launch_range,
-    list_agents as list_agents_api,
     list_scenarios,
     pause_range,
     resume_range,
+)
+from ._ranges import (
+    list_agents as list_agents_api,
 )
 from ._uploads import (
     cancel_upload,
@@ -104,6 +132,7 @@ list_agents = list_agents_api
 logger = logging.getLogger(__name__)
 
 __all__ = (
+    "AuditLog",
     "agents",
     "api_credential_create",
     "api_credential_delete",
@@ -112,7 +141,6 @@ __all__ = (
     "api_ngfw_destroy",
     "api_ngfw_list",
     "api_ngfw_ssh_url",
-    "AuditLog",
     "audit_log_from_request",
     "cancel_range",
     "cancel_upload",

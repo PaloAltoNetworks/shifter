@@ -49,13 +49,17 @@ __all__ = (
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from cms.models import App, Request
+    from cms.models import App, Instance, Request
     from cms.scenarios.schema import ScenarioTemplate
     from shared.schemas.app import NGFWAppContext, NGFWAppRef
     from shared.schemas.credentials import CredentialContext, CredentialRef
     from shared.schemas.range import InstanceContextBase, RangeContext, RangeSpec
 
 logger = logging.getLogger(__name__)
+
+# Shared log format for "%(fn)s called with None %(arg)s for user_id=%(uid)s" so
+# the three validation helpers stay in sync (Sonar python:S1192).
+_LOG_FMT_NONE_PARAM = "%s called with None %s for user_id=%s"
 
 
 def _validate_caller_user(user: object, fn_name: str) -> None:
@@ -80,7 +84,7 @@ def _validate_caller_user(user: object, fn_name: str) -> None:
 def _validate_nonneg_int_id(value: object, name: str, fn_name: str, user_id: object) -> None:
     """Reject None/wrong-type/negative int IDs; raise canonical TypeError/ValueError."""
     if value is None:
-        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        logger.error(_LOG_FMT_NONE_PARAM, fn_name, name, user_id)
         raise TypeError(f"{name} cannot be None")
     if not isinstance(value, int):
         logger.error(
@@ -284,20 +288,28 @@ def _agent_projection_dict(agent: AgentConfig) -> dict[str, Any]:
     return projection
 
 
+_AGENT_PROJECTION_SHAPE: tuple[tuple[str, type | tuple[type, ...], bool, str], ...] = (
+    ("id", int, False, "agent.id must be int"),
+    ("name", str, True, "agent.name must be non-empty str"),
+    ("os_name", str, True, "agent.os.name must be non-empty str"),
+    ("os_slug", str, True, "agent.os.slug must be non-empty str"),
+    ("file_size_mb", (int, float), False, "agent.file_size_mb must be number"),
+    ("original_filename", str, True, "agent.original_filename must be non-empty str"),
+)
+
+
 def _assert_agent_projection_shape(projection: dict[str, Any]) -> None:
-    """Assert the projection dict satisfies the documented downstream contract."""
-    if not isinstance(projection["id"], int):
-        raise TypeError("agent.id must be int")
-    if not isinstance(projection["name"], str) or not projection["name"]:
-        raise TypeError("agent.name must be non-empty str")
-    if not isinstance(projection["os_name"], str) or not projection["os_name"]:
-        raise TypeError("agent.os.name must be non-empty str")
-    if not isinstance(projection["os_slug"], str) or not projection["os_slug"]:
-        raise TypeError("agent.os.slug must be non-empty str")
-    if not isinstance(projection["file_size_mb"], (int, float)):
-        raise TypeError("agent.file_size_mb must be number")
-    if not isinstance(projection["original_filename"], str) or not projection["original_filename"]:
-        raise TypeError("agent.original_filename must be non-empty str")
+    """Assert the projection dict satisfies the documented downstream contract.
+
+    Iterates ``_AGENT_PROJECTION_SHAPE`` so the per-field branches don't
+    push this function over Sonar's per-function complexity cap.
+    """
+    for key, expected_type, require_truthy, error_msg in _AGENT_PROJECTION_SHAPE:
+        value = projection[key]
+        if not isinstance(value, expected_type):
+            raise TypeError(error_msg)
+        if require_truthy and not value:
+            raise TypeError(error_msg)
     if projection["created_at"] is None:
         raise TypeError("agent.created_at must not be None")
 
@@ -1376,7 +1388,9 @@ def _load_scenario_template_or_raise(scenario: str) -> ScenarioTemplate:
         raise CMSError(str(e)) from e
 
 
-def _check_scenario_agent_requirements(scenario: str, requirements: dict, agents_by_os: dict[str, int]) -> None:
+def _check_scenario_agent_requirements(
+    scenario: str, requirements: dict[str, bool], agents_by_os: dict[str, int]
+) -> None:
     """Raise CMSError when scenario requirements are not met by agents_by_os."""
     from cms.exceptions import CMSError
 
@@ -2463,7 +2477,7 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 def _validate_nonempty_str(value: object, name: str, fn_name: str, user_id: object) -> str:
     """Strip and validate a required non-empty string parameter."""
     if value is None:
-        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        logger.error(_LOG_FMT_NONE_PARAM, fn_name, name, user_id)
         raise ValueError(f"{name} cannot be None")
     if not isinstance(value, str):
         logger.error(
@@ -2484,7 +2498,7 @@ def _validate_nonempty_str(value: object, name: str, fn_name: str, user_id: obje
 def _validate_positive_int(value: object, name: str, fn_name: str, user_id: object) -> None:
     """Validate a required positive int (> 0); raise canonical TypeError/ValueError."""
     if value is None:
-        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        logger.error(_LOG_FMT_NONE_PARAM, fn_name, name, user_id)
         raise TypeError(f"{name} cannot be None")
     if not isinstance(value, int):
         logger.error(
@@ -2665,141 +2679,115 @@ def initiate_upload(
         raise
 
 
+def _verify_upload_token_or_raise(upload_token: str, user_id: int) -> dict[str, Any]:
+    """Verify the signed upload token, re-raising payload errors as CMSError."""
+    from cms.assets.upload_token import verify_upload_token
+    from cms.exceptions import CMSError
+
+    try:
+        return verify_upload_token(upload_token, user_id)
+    except ValueError as e:
+        logger.error("complete_upload: token verification failed for user_id=%s - %s", user_id, e)
+        raise CMSError("Invalid upload token") from e
+
+
+def _verify_upload_object_or_raise(s3_key: str, expected_size: int, user_id: int) -> None:
+    """Verify the S3 object exists and its byte length matches the signed expectation."""
+    from cms.assets.s3 import S3Error, verify_s3_object_exists
+    from cms.exceptions import CMSError
+
+    try:
+        actual_size, _etag = verify_s3_object_exists(s3_key)
+    except S3Error as e:
+        logger.error("complete_upload: S3 verification failed for user_id=%s - %s", user_id, e)
+        raise CMSError("Upload not found in storage") from e
+
+    if actual_size != expected_size:
+        logger.error(
+            "complete_upload: size mismatch for user_id=%s - expected=%s, actual=%s",
+            user_id,
+            expected_size,
+            actual_size,
+        )
+        raise CMSError(f"File size mismatch: expected {expected_size}, got {actual_size}")
+
+
+def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_id: int) -> None:
+    """Header-inspect the uploaded object (issue #696); delete + raise on mismatch."""
+    from django.conf import settings as _settings
+
+    from cms.assets import s3 as _s3
+    from cms.assets.s3 import S3Error
+    from cms.assets.validation import ValidationError as _AssetValidationError
+    from cms.assets.validation import validate_file_extension
+    from cms.exceptions import CMSError
+    from shared.uploads.inspection import InspectionError as _InspectionError
+    from shared.uploads.inspection import validate_magic_bytes as _validate_magic_bytes
+
+    try:
+        expected_format = validate_file_extension(payload["filename"])
+    except _AssetValidationError as exc:
+        logger.error("complete_upload: filename failed extension check user_id=%s", user_id)
+        _s3.delete_agent(s3_key)
+        raise CMSError(f"Invalid upload filename: {exc}") from exc
+
+    try:
+        header = _s3.read_agent_header(s3_key, _settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES)
+    except S3Error as exc:
+        logger.error("complete_upload: header read failed user_id=%s s3_key=%s", user_id, s3_key)
+        raise CMSError("Upload content inspection failed") from exc
+
+    try:
+        _validate_magic_bytes(header, expected_format)
+    except _InspectionError as exc:
+        logger.warning(
+            "complete_upload: header inspection rejected upload user_id=%s s3_key=%s expected=%s reason=%s",
+            user_id,
+            s3_key,
+            expected_format.description,
+            exc,
+        )
+        try:
+            _s3.delete_agent(s3_key)
+        except S3Error as delete_exc:
+            logger.error(
+                "complete_upload: delete after inspection failure also failed user_id=%s s3_key=%s error=%s",
+                user_id,
+                s3_key,
+                delete_exc,
+            )
+        raise CMSError("Uploaded content does not match the declared installer format") from exc
+
+
 def complete_upload(user: User, upload_token: str) -> AgentConfig:
     """Verify and finalize upload after file has been uploaded to S3.
 
     Verifies the upload token, checks the S3 object exists with correct size,
-    tags it as completed, and creates the agent record.
-
-    Args:
-        user: User who initiated the upload
-        upload_token: Signed token from initiate_upload
-
-    Returns:
-        AgentConfig: The newly created agent record
+    runs server-side header inspection (issue #696), tags it as completed,
+    and creates the agent record.
 
     Raises:
-        TypeError: If user is None or invalid type
-        ValueError: If user is unsaved or upload_token is empty
-        CMSError: If token is invalid/expired, S3 verification fails,
-            or size mismatch
+        TypeError: If user is None or invalid type.
+        ValueError: If user is unsaved or upload_token is empty.
+        CMSError: If token is invalid/expired, S3 verification fails, size
+            mismatch, or header inspection rejects the upload.
     """
-    from django.conf import settings as _settings
-
-    from cms.assets import s3 as _s3
-    from cms.assets.s3 import (
-        S3Error,
-        tag_s3_object,
-        verify_s3_object_exists,
-    )
+    from cms.assets.s3 import tag_s3_object
     from cms.assets.services import create_agent
-    from cms.assets.upload_token import verify_upload_token
-    from cms.assets.validation import (
-        ValidationError as _AssetValidationError,
-    )
-    from cms.assets.validation import (
-        validate_file_extension,
-    )
     from cms.exceptions import CMSError
-    from shared.uploads.inspection import InspectionError as _InspectionError
-    from shared.uploads.inspection import (
-        validate_magic_bytes as _validate_magic_bytes,
-    )
 
     _validate_caller_user(user, "complete_upload")
     upload_token = _validate_nonempty_str(upload_token, "upload_token", "complete_upload", user.id)
-
     logger.debug("complete_upload called for user_id=%s", user.id)
 
     try:
-        try:
-            payload = verify_upload_token(upload_token, user.id)
-        except ValueError as e:
-            logger.error(
-                "complete_upload: token verification failed for user_id=%s - %s",
-                user.id,
-                str(e),
-            )
-            raise CMSError("Invalid upload token") from e
-
+        payload = _verify_upload_token_or_raise(upload_token, user.id)
         s3_key = payload["s3_key"]
         expected_size = payload["file_size"]
+        _verify_upload_object_or_raise(s3_key, expected_size, user.id)
+        _inspect_upload_header_or_raise(payload, s3_key, user.id)
 
-        # Verify S3 object exists
-        try:
-            actual_size, _etag = verify_s3_object_exists(s3_key)
-        except S3Error as e:
-            logger.error(
-                "complete_upload: S3 verification failed for user_id=%s - %s",
-                user.id,
-                str(e),
-            )
-            raise CMSError("Upload not found in storage") from e
-
-        # Verify size matches
-        if actual_size != expected_size:
-            logger.error(
-                "complete_upload: size mismatch for user_id=%s - expected=%s, actual=%s",
-                user.id,
-                expected_size,
-                actual_size,
-            )
-            msg = f"File size mismatch: expected {expected_size}, got {actual_size}"
-            raise CMSError(msg)
-
-        # Server-side header inspection (issue #696). Resolve the expected
-        # installer format from the signed filename, read a bounded byte range,
-        # and reject the upload if the magic bytes don't match. Token shape
-        # already guarantees `filename` came from initiate_upload, so the
-        # extension lookup cannot be steered by request input.
-        try:
-            expected_format = validate_file_extension(payload["filename"])
-        except _AssetValidationError as exc:
-            logger.error(
-                "complete_upload: filename failed extension check user_id=%s",
-                user.id,
-            )
-            _s3.delete_agent(s3_key)
-            raise CMSError(f"Invalid upload filename: {exc}") from exc
-
-        max_header = _settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES
-        try:
-            header = _s3.read_agent_header(s3_key, max_header)
-        except S3Error as exc:
-            logger.error(
-                "complete_upload: header read failed user_id=%s s3_key=%s",
-                user.id,
-                s3_key,
-            )
-            raise CMSError("Upload content inspection failed") from exc
-
-        try:
-            _validate_magic_bytes(header, expected_format)
-        except _InspectionError as exc:
-            logger.warning(
-                "complete_upload: header inspection rejected upload user_id=%s s3_key=%s expected=%s reason=%s",
-                user.id,
-                s3_key,
-                expected_format.description,
-                exc,
-            )
-            # Remove the rejected object so the bucket does not accumulate
-            # mismatched uploads. delete_agent failures are best-effort logged.
-            try:
-                _s3.delete_agent(s3_key)
-            except S3Error as delete_exc:
-                logger.error(
-                    "complete_upload: delete after inspection failure also failed user_id=%s s3_key=%s error=%s",
-                    user.id,
-                    s3_key,
-                    delete_exc,
-                )
-            raise CMSError("Uploaded content does not match the declared installer format") from exc
-
-        # Tag S3 object as completed
         tag_s3_object(s3_key, {"status": "completed"})
-
-        # Create agent record
         agent = create_agent(
             user=user,
             name=payload["name"],
@@ -2810,17 +2798,10 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
             upload_method="presigned",
             agent_type=payload.get("agent_type", "xdr"),
         )
-
-        logger.debug(
-            "complete_upload completed for user_id=%s, agent_id=%s",
-            user.id,
-            agent.id,
-        )
-
+        logger.debug("complete_upload completed for user_id=%s, agent_id=%s", user.id, agent.id)
         return agent
 
     except (TypeError, ValueError, CMSError):
-        # Re-raise known errors
         raise
     except Exception:
         logger.exception("Error in complete_upload for user_id=%s", user.id)
@@ -3258,43 +3239,10 @@ def get_ngfw(user: User, app_id: UUID | str) -> NGFWAppContext:
     return _app_to_ngfw_context(app)
 
 
-def create_ngfw(
-    user: User,
-    name: str,
-    deployment_profile_id: int,
-    registration_method: str,
-    scm_credential_id: int | None = None,
-    otp_value: str | None = None,
-    otp_folder: str | None = None,
-) -> NGFWAppRef:
-    """Create a new NGFW.
+def _reject_existing_active_ngfw(user: User) -> None:
+    """Refuse provisioning when the user already has an active NGFW."""
+    from cms.models import App
 
-    Validates credentials, creates NGFW record, and triggers provisioning.
-
-    Args:
-        user: User requesting provisioning
-        name: Display name for the NGFW
-        deployment_profile_id: ID of deployment profile credential
-        registration_method: Either "pin" or "otp"
-        scm_credential_id: Required if registration_method is "pin"
-        otp_value: Required if registration_method is "otp"
-        otp_folder: Required if registration_method is "otp"
-
-    Returns:
-        NGFWAppRef with ngfw_id for status polling
-
-    Raises:
-        TypeError: If user is None or parameter types are invalid
-        ValueError: If required fields missing or invalid values
-        CMSError: If credential validation fails
-    """
-    from cms.models import App, Credential
-    from shared.enums import ResourceStatus
-    from shared.schemas.app import NGFWAppRef
-
-    _validate_ngfw_user(user)
-
-    # Check user doesn't already have an active NGFW
     existing_ngfw = (
         App.objects.filter(
             instance__request__user=user,
@@ -3310,6 +3258,125 @@ def create_ngfw(
             existing_ngfw.id,
         )
         raise CMSError("You already have an active NGFW. Please destroy it before creating a new one.")
+
+
+def _provision_ngfw_request_records(user: User, name: str) -> tuple[UUID, Request, Instance, App]:
+    """Create the Request / Instance / App rows that own an NGFW provisioning."""
+    from uuid import uuid4
+
+    from cms.models import App, AppType, Instance, InstanceType, Request
+    from shared.enums import RequestType
+
+    request_id = uuid4()
+    request = Request.objects.create(
+        request_id=request_id,
+        request_type=RequestType.NGFW.value,
+        user=user,
+    )
+    logger.info("create_ngfw: created Request id=%s for user_id=%s", request_id, user.id)
+
+    instance_type = InstanceType.objects.get(slug="panw-ngfw")
+    app_type = AppType.objects.get(slug="panw-ngfw")
+
+    instance = Instance.objects.create(
+        request=request,
+        name=name,
+        instance_type=instance_type,
+        status=ResourceStatus.PROVISIONING.value,
+    )
+    logger.info("create_ngfw: created Instance id=%s for user_id=%s", instance.id, user.id)
+
+    app = App.objects.create(
+        name=name,
+        app_type=app_type,
+        instance=instance,
+        status=ResourceStatus.PROVISIONING.value,
+    )
+    logger.info("create_ngfw: created App id=%s for instance_id=%s", app.id, instance.id)
+
+    return request_id, request, instance, app
+
+
+def _hydrate_and_dispatch_ngfw(
+    request_id: UUID,
+    user: User,
+    request: Request,
+    instance: Instance,
+    app: App,
+    name: str,
+    deployment_profile: Any,
+    registration_method: str,
+    scm_credential: Any,
+    otp_value: str | None,
+    otp_folder: str | None,
+) -> None:
+    """Hydrate the NGFW spec, persist for audit, dispatch the engine, and write the audit-log row."""
+    from cms.scenarios.hydrator import hydrate_ngfw
+    from engine.services import create_ngfw as engine_create_ngfw
+    from shared.schemas import RequestSpec
+
+    ngfw_instance_spec = hydrate_ngfw(
+        instance=instance,
+        app=app,
+        request=request,
+        deployment_profile=deployment_profile,
+        registration_method=registration_method,  # type: ignore[arg-type]
+        scm_credential=scm_credential,
+        otp_value=otp_value,
+        otp_folder=otp_folder,
+    )
+    request_spec = RequestSpec(
+        request_id=request_id,
+        user_id=user.id,
+        items=[ngfw_instance_spec],
+    )
+
+    instance.data = ngfw_instance_spec.model_dump(mode="json")
+    instance.save(update_fields=["data"])
+
+    engine_create_ngfw(request_spec)
+
+    audit_log(
+        entity_type=AuditLog.EntityType.NGFW,
+        entity_id=0,
+        action=AuditLog.Action.PROVISION,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state={
+            "app_uuid": str(app.id),
+            "name": name,
+            "registration_method": registration_method,
+            "request_id": str(request_id),
+        },
+        request_id=str(request_id),
+    )
+
+
+def create_ngfw(
+    user: User,
+    name: str,
+    deployment_profile_id: int,
+    registration_method: str,
+    scm_credential_id: int | None = None,
+    otp_value: str | None = None,
+    otp_folder: str | None = None,
+) -> NGFWAppRef:
+    """Create a new NGFW.
+
+    Validates credentials, creates the Request/Instance/App rows, hydrates
+    the NGFW spec, and dispatches engine provisioning.
+
+    Raises:
+        TypeError: If user is None or parameter types are invalid.
+        ValueError: If required fields are missing or have invalid values.
+        CMSError: If credential validation fails or the user already has an
+            active NGFW.
+    """
+    from cms.models import Credential
+    from shared.schemas.app import NGFWAppRef
+
+    _validate_ngfw_user(user)
+    _reject_existing_active_ngfw(user)
 
     name = _validate_ngfw_name(name)
     deployment_profile = _resolve_ngfw_deployment_profile(user, deployment_profile_id, Credential)
@@ -3329,95 +3396,19 @@ def create_ngfw(
         registration_method,
     )
 
-    from uuid import uuid4
-
-    from cms.models import AppType, Instance, InstanceType, Request
-    from cms.scenarios.hydrator import hydrate_ngfw
-    from engine.services import create_ngfw as engine_create_ngfw
-    from shared.enums import RequestType
-    from shared.schemas import RequestSpec
-
-    # Create Request record first
-    request_id = uuid4()
-    request = Request.objects.create(
-        request_id=request_id,
-        request_type=RequestType.NGFW.value,
-        user=user,
-    )
-
-    logger.info("create_ngfw: created Request id=%s for user_id=%s", request_id, user.id)
-
-    # Look up catalog types for NGFW
-    instance_type = InstanceType.objects.get(slug="panw-ngfw")
-    app_type = AppType.objects.get(slug="panw-ngfw")
-
-    # Create Instance (UUID auto-generated by EntityBase)
-    instance = Instance.objects.create(
-        request=request,
-        name=name,
-        instance_type=instance_type,
-        status=ResourceStatus.PROVISIONING.value,
-    )
-
-    logger.info(
-        "create_ngfw: created Instance id=%s for user_id=%s",
-        instance.id,
-        user.id,
-    )
-
-    # Create App linked to Instance (UUID auto-generated by EntityBase)
-    app = App.objects.create(
-        name=name,
-        app_type=app_type,
-        instance=instance,
-        status=ResourceStatus.PROVISIONING.value,
-    )
-
-    logger.info(
-        "create_ngfw: created App id=%s for instance_id=%s",
-        app.id,
-        instance.id,
-    )
-
-    # Hydrate NGFW with credential data
-    ngfw_instance_spec = hydrate_ngfw(
-        instance=instance,
-        app=app,
-        request=request,
-        deployment_profile=deployment_profile,
-        registration_method=registration_method,  # type: ignore[arg-type]
-        scm_credential=scm_credential,
-        otp_value=otp_value,
-        otp_folder=otp_folder,
-    )
-
-    # Wrap in RequestSpec
-    request_spec = RequestSpec(
-        request_id=request_id,
-        user_id=user.id,
-        items=[ngfw_instance_spec],
-    )
-
-    # Store the hydrated spec for audit/debugging
-    instance.data = ngfw_instance_spec.model_dump(mode="json")
-    instance.save(update_fields=["data"])
-
-    engine_create_ngfw(request_spec)
-
-    # Audit log NGFW provisioning request
-    audit_log(
-        entity_type=AuditLog.EntityType.NGFW,
-        entity_id=0,
-        action=AuditLog.Action.PROVISION,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=user.id,
-        new_state={
-            "app_uuid": str(app.id),
-            "name": name,
-            "registration_method": registration_method,
-            "request_id": str(request_id),
-        },
-        request_id=str(request_id),
+    request_id, request, instance, app = _provision_ngfw_request_records(user, name)
+    _hydrate_and_dispatch_ngfw(
+        request_id,
+        user,
+        request,
+        instance,
+        app,
+        name,
+        deployment_profile,
+        registration_method,
+        scm_credential,
+        otp_value,
+        otp_folder,
     )
 
     return NGFWAppRef(

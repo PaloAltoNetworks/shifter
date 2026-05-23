@@ -63,6 +63,11 @@ python3 scripts/ctfd-workshop/sync_polaris_ctfd.py \
   --base-url https://polaris.example.com
 ```
 
+Flag, hint, and tag rows are reconciled against the source JSON on every
+challenge upsert, so re-syncs are idempotent. The source manifest is validated
+before any CTFd write, and after sync the script reads flag and hint rows back
+from CTFd and exits non-zero if any challenge that should have them has none.
+
 ## Sync Range Flags
 
 Run this after participant ranges are `ready` so the box flag files match CTFd:

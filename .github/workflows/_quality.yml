@@ -120,6 +120,26 @@ jobs:
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs
           python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
 
+  # Pin the behavior of the Polaris CTFd workshop sync helpers. Issue #702
+  # shipped 38/39 challenges unsubmittable because flag-row reconciliation
+  # sat behind a category allowlist; these tests exercise the flag/hint
+  # reconciliation, manifest validation, and post-sync verification with a
+  # fake CTFd client. The scripts import siblings by bare name, so the test
+  # runs from the package directory (its name contains a hyphen, so the
+  # `unittest scripts.<pkg>` form the check_tf_* tests use is unavailable).
+  # Pure stdlib — no dependency install needed.
+  ctfd-workshop-tests:
+    permissions:
+      contents: read
+    name: Test (ctfd-workshop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run Polaris CTFd sync tests
+        working-directory: scripts/ctfd-workshop
+        run: python3 -m unittest test_sync_polaris_ctfd
+
   shifter-platform-lint:
     permissions:
       contents: read

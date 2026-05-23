@@ -4,6 +4,7 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
+from django.conf import settings
 from django.http import HttpRequest
 
 from cms.services import get_active_range, get_scenario
@@ -12,6 +13,15 @@ from shared.auth import is_ctf_participant_only
 from shared.schemas import InstanceContext, RangeContext
 
 logger = logging.getLogger(__name__)
+
+
+def terminal_cdn_assets(_request: HttpRequest) -> dict[str, Any]:
+    """Expose the centralised TERMINAL_CDN_ASSETS map to every template.
+
+    The terminal page renders <link>/<script> tags from this map so the
+    template never hard-codes absolute CDN URIs (Sonar Web:S1829).
+    """
+    return {"terminal_cdn_assets": getattr(settings, "TERMINAL_CDN_ASSETS", {})}
 
 
 def _terminal_instances_payload(instances: Iterable[InstanceContext]) -> list[dict[str, Any]]:

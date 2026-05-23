@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _audit_log_call(**kwargs: Any) -> None:
+def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR (late-bind proxy)
     """Late-bound call to ``cms.services.audit_log`` so test patches apply."""
     from cms import services as _cs
 

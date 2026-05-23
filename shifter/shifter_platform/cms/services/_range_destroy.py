@@ -24,21 +24,21 @@ logger = logging.getLogger(__name__)
 _RANGE_NOT_FOUND_MSG = "Range not found"
 
 
-def _engine_destroy_range_by_request_call(request_id: Any) -> Any:
+def _engine_destroy_range_by_request_call(request_id: Any) -> Any:  # NOSONAR (late-bind proxy)
     """Late-bound call so test patches of cms.services.engine_destroy_range_by_request apply."""
     from cms import services as _cs
 
     return _cs.engine_destroy_range_by_request(request_id)
 
 
-def _engine_cancel_range_by_request_call(request_id: Any) -> Any:
+def _engine_cancel_range_by_request_call(request_id: Any) -> Any:  # NOSONAR (late-bind proxy)
     """Late-bound call so test patches of cms.services.engine_cancel_range_by_request apply."""
     from cms import services as _cs
 
     return _cs.engine_cancel_range_by_request(request_id)
 
 
-def _audit_log_call(**kwargs: Any) -> None:
+def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR (late-bind proxy)
     """Late-bound call to ``cms.services.audit_log`` so test patches apply."""
     from cms import services as _cs
 

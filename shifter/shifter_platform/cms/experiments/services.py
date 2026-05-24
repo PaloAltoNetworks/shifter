@@ -772,5 +772,5 @@ def get_scenario_instances(scenario_id: str, user: User | None = None) -> list[d
     except (TypeError, ValueError, ExperimentError):
         raise
     except Exception:
-        logger.exception("Error in get_scenario_instances for scenario_id=%s", safe_log(scenario_id))
+        logger.exception("Error in get_scenario_instances for scenario_id=%s", safe_log(scenario_id))  # NOSONAR
         raise

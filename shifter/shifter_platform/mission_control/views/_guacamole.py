@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from django.conf import settings as django_settings
 from django.contrib.auth.decorators import login_required
@@ -17,6 +17,24 @@ from ._common import (
     INTERNAL_SERVER_ERROR,
     _get_user,
 )
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
+
+
+class _SSHConn(Protocol):
+    """Structural type for an ``engine.ssh.SSHConnection``-like value.
+
+    ``mission_control`` is not allowed (per ADR-001) to import from
+    ``engine.ssh`` directly, but we still want a precise type for the
+    handful of attributes the view actually reads.
+    """
+
+    host: str
+    port: int
+    username: str
+    private_key: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +52,7 @@ class _ViewError(Exception):
 # ---------------------------------------------------------------------------
 
 
-def _parse_json_body(request: HttpRequest) -> dict:
+def _parse_json_body(request: HttpRequest) -> dict[str, Any]:
     """Parse the JSON body or raise ``_ViewError``."""
     try:
         return json.loads(request.body)
@@ -42,7 +60,7 @@ def _parse_json_body(request: HttpRequest) -> dict:
         raise _ViewError(JsonResponse({"error": "Invalid JSON"}, status=400)) from e
 
 
-def _require_instance_uuid(data: dict) -> str:
+def _require_instance_uuid(data: dict[str, Any]) -> str:
     """Extract instance_uuid from request data or raise ``_ViewError``."""
     instance_uuid = data.get("instance_uuid", "").strip()
     if not instance_uuid:
@@ -81,7 +99,7 @@ def _sftp_root_for_os(os_type: str | None) -> str | None:
     return _SFTP_ROOT_BY_OS.get(os_type)
 
 
-def _resolve_rdp_conn(user: Any, instance_uuid: str) -> dict:
+def _resolve_rdp_conn(user: User, instance_uuid: str) -> dict[str, Any]:
     """Get the RDP connection info or raise ``_ViewError``."""
     from engine.services import get_rdp_connection_info
 
@@ -94,8 +112,7 @@ def _resolve_rdp_conn(user: Any, instance_uuid: str) -> dict:
 def _generate_rdp_url(
     *,
     user_email: str,
-    instance_uuid: str,
-    conn_info: dict,
+    conn_info: dict[str, Any],
     secret_key: str,
     guacamole_base_url: str,
     guacamole_api_url: str | None,
@@ -119,7 +136,7 @@ def _generate_rdp_url(
             sftp_private_key=conn_info.get("ssh_key"),
         )
     except ValueError as e:
-        logger.error("Failed to generate Guacamole URL: %s", e)
+        logger.exception("Failed to generate Guacamole URL")
         raise _ViewError(JsonResponse({"error": "Failed to generate RDP URL"}, status=500)) from e
 
 
@@ -155,7 +172,6 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
         )
         url = _generate_rdp_url(
             user_email=user.email,
-            instance_uuid=instance_uuid,
             conn_info=conn_info,
             secret_key=secret_key,
             guacamole_base_url=guacamole_base_url,
@@ -177,22 +193,21 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_ngfw_ssh(user: Any, app_id: str) -> Any:
+def _resolve_ngfw_ssh(user: User, app_id: str) -> _SSHConn:
     """Look up the NGFW SSH connection details or raise ``_ViewError``."""
     from engine.services import connect_ngfw_terminal
 
     try:
         return connect_ngfw_terminal(user, app_id)
     except ValueError as e:
-        logger.error(
-            "NGFW SSH access denied (ValueError): user=%s ngfw_uuid=%s error=%s",
+        logger.exception(
+            "NGFW SSH access denied (ValueError): user=%s ngfw_uuid=%s",
             user.email,
             app_id,
-            e,
         )
         raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
     except PermissionError as e:
-        logger.error("NGFW SSH access denied (PermissionError): user=%s ngfw_uuid=%s", user.email, app_id)
+        logger.exception("NGFW SSH access denied (PermissionError): user=%s ngfw_uuid=%s", user.email, app_id)
         raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
     except Exception as e:
         logger.exception(
@@ -207,7 +222,7 @@ def _generate_ngfw_ssh_url(
     *,
     user_email: str,
     app_id: str,
-    ssh_conn: Any,
+    ssh_conn: _SSHConn,
     secret_key: str,
     guacamole_base_url: str,
     guacamole_api_url: str | None,
@@ -229,7 +244,7 @@ def _generate_ngfw_ssh_url(
             api_base_url=guacamole_api_url,
         )
     except ValueError as e:
-        logger.error("Failed to generate NGFW SSH URL: user=%s ngfw_uuid=%s error=%s", user_email, app_id, e)
+        logger.exception("Failed to generate NGFW SSH URL: user=%s ngfw_uuid=%s", user_email, app_id)
         raise _ViewError(JsonResponse({"error": "Failed to generate SSH URL"}, status=500)) from e
     except Exception as e:
         logger.exception("Unexpected error generating NGFW SSH URL: user=%s ngfw_uuid=%s", user_email, app_id)
@@ -287,22 +302,21 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_range_ssh(user: Any, instance_uuid: str) -> dict:
+def _resolve_range_ssh(user: User, instance_uuid: str) -> dict[str, Any]:
     """Look up the range SSH connection info or raise ``_ViewError``."""
     from engine.services import get_ssh_connection_info
 
     try:
         return get_ssh_connection_info(user, instance_uuid)
     except ValueError as e:
-        logger.error(
-            "Range SSH access denied (ValueError): user=%s instance_uuid=%s error=%s",
+        logger.exception(
+            "Range SSH access denied (ValueError): user=%s instance_uuid=%s",
             user.email,
             instance_uuid,
-            e,
         )
         raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
     except PermissionError as e:
-        logger.error(
+        logger.exception(
             "Range SSH access denied (PermissionError): user=%s instance_uuid=%s",
             user.email,
             instance_uuid,
@@ -321,7 +335,7 @@ def _generate_range_ssh_url(
     *,
     user_email: str,
     instance_uuid: str,
-    ssh_info: dict,
+    ssh_info: dict[str, Any],
     secret_key: str,
     guacamole_base_url: str,
     guacamole_api_url: str | None,
@@ -343,11 +357,10 @@ def _generate_range_ssh_url(
             api_base_url=guacamole_api_url,
         )
     except ValueError as e:
-        logger.error(
-            "Failed to generate range SSH URL: user=%s instance_uuid=%s error=%s",
+        logger.exception(
+            "Failed to generate range SSH URL: user=%s instance_uuid=%s",
             user_email,
             instance_uuid,
-            e,
         )
         raise _ViewError(JsonResponse({"error": "Failed to generate SSH URL"}, status=500)) from e
     except Exception as e:

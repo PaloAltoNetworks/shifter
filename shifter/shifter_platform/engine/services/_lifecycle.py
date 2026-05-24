@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from shared.enums import ResourceStatus
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager as ContextManager
+
     from engine.models import Range
 
 logger = logging.getLogger(__name__)
 
 
-def _atomic() -> Any:
+def _atomic() -> "ContextManager[None]":
     """Late-bound ``engine.services.transaction.atomic()`` so tests can patch the package-level name."""
     from engine import services as _es
 

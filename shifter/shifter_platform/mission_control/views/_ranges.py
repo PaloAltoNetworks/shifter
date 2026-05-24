@@ -25,7 +25,7 @@ class _RangeError(Exception):
         self.response = response
 
 
-def _parse_json_body(request: HttpRequest) -> dict:
+def _parse_json_body(request: HttpRequest) -> dict[str, Any]:
     """Parse the JSON body or raise ``_RangeError``."""
     try:
         return json.loads(request.body)
@@ -58,7 +58,7 @@ def get_range(request: HttpRequest) -> JsonResponse:
     )
 
 
-def _resolve_launch_agents(user: User, data: dict) -> dict[str, int]:
+def _resolve_launch_agents(user: User, data: dict[str, Any]) -> dict[str, int]:
     """Resolve the ``agents`` mapping for ``launch_range`` or raise ``_RangeError``."""
     if "agents" in data:
         return data["agents"]
@@ -282,5 +282,5 @@ def list_scenarios(request: HttpRequest) -> JsonResponse:
     Response (JSON):
         - scenarios: List of scenario dicts with agent_requirements field
     """
-    scenarios: Any = _pkg().cms_list_scenarios(_get_user(request))
+    scenarios: list[dict[str, Any]] = _pkg().cms_list_scenarios(_get_user(request))
     return JsonResponse({"scenarios": scenarios})

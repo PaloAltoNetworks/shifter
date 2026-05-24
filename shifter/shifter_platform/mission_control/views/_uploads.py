@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from typing import Any
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
@@ -35,7 +36,7 @@ class _UploadError(Exception):
         self.response = response
 
 
-def _parse_json_body(request: HttpRequest, *, default_on_decode_error: bool = False) -> dict:
+def _parse_json_body(request: HttpRequest, *, default_on_decode_error: bool = False) -> dict[str, Any]:
     """Parse the request body as JSON.
 
     Raises ``_UploadError`` on invalid JSON unless ``default_on_decode_error`` is True,
@@ -49,7 +50,7 @@ def _parse_json_body(request: HttpRequest, *, default_on_decode_error: bool = Fa
         raise _UploadError(JsonResponse({"error": "Invalid JSON"}, status=400)) from e
 
 
-def _validate_initiate_fields(data: dict) -> tuple[str, str, int, str]:
+def _validate_initiate_fields(data: dict[str, Any]) -> tuple[str, str, int, str]:
     """Validate the initiate_upload payload or raise ``_UploadError``."""
     name = data.get("name", "").strip()
     filename = data.get("filename", "").strip()
@@ -152,7 +153,8 @@ def complete_upload(request: HttpRequest) -> JsonResponse:
     )
 
 
-@csrf_exempt  # Allow sendBeacon on page unload (no custom headers)
+# Allow sendBeacon on page unload (no custom headers).
+@csrf_exempt
 @login_required
 @require_POST
 def cancel_upload(request: HttpRequest) -> JsonResponse:
@@ -177,7 +179,8 @@ def cancel_upload(request: HttpRequest) -> JsonResponse:
             cms_cancel_upload(user, upload_token)
             logger.info("Cancelled upload cleaned up: user=%s", user.email)
         except CMSError:
-            pass  # Invalid token or S3 error, ignore
+            # Invalid token or S3 error, ignore.
+            pass
 
     set_upload_in_progress(request.session, False)
     return JsonResponse({"success": True})

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -47,7 +48,7 @@ def files(request: HttpRequest) -> HttpResponse:
     return _render_via_pkg(request, "mission_control/files.html", context)
 
 
-def _validate_initiate_fields(data: dict) -> tuple[str, str, int]:
+def _validate_initiate_fields(data: dict[str, Any]) -> tuple[str, str, int]:
     """Validate the step-1 initiate payload or raise ``_FileError``."""
     name = data.get("name", "").strip()
     filename = data.get("filename", "").strip()
@@ -80,7 +81,7 @@ def _complete_script(user: User, upload_token: str) -> JsonResponse:
     )
 
 
-def _initiate_script(user: User, data: dict) -> JsonResponse:
+def _initiate_script(user: User, data: dict[str, Any]) -> JsonResponse:
     """Step 1 of file_upload: validate fields and issue a presigned URL."""
     try:
         name, filename, file_size = _validate_initiate_fields(data)
@@ -131,11 +132,10 @@ def file_delete(request: HttpRequest, script_id: int) -> HttpResponse:
         logger.info("Script deleted: user=%s script_id=%s", user.email, script_id)
     except ScriptUploadError as e:
         messages.error(request, str(e))
-        logger.error(
-            "Script delete error: user=%s script_id=%s error=%s",
+        logger.exception(
+            "Script delete error: user=%s script_id=%s",
             user.email,
             script_id,
-            str(e),
         )
 
     return redirect("mission_control:files")

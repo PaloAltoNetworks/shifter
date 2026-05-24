@@ -60,11 +60,10 @@ def delete_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
         logger.info("Agent deleted: user=%s agent_id=%s", user.email, agent_id)
     except (CMSError, AssetError) as e:
         messages.error(request, str(e))
-        logger.error(
-            "Agent delete error: user=%s agent_id=%s error=%s",
+        logger.exception(
+            "Agent delete error: user=%s agent_id=%s",
             user.email,
             agent_id,
-            str(e),
         )
 
     return redirect("mission_control:agents")

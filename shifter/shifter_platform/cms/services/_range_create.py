@@ -36,7 +36,7 @@ def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
     _cs.audit_log(**kwargs)
 
 
-def _get_active_range_call(user: User) -> Any:
+def _get_active_range_call(user: User) -> Any:  # noqa: ANN401  # NOSONAR
     """Look up active range through the package to honor test patches."""
     from cms import services as _cs
 

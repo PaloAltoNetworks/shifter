@@ -237,12 +237,11 @@ def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_i
         )
         try:
             _s3.delete_agent(s3_key)
-        except S3Error as delete_exc:
-            logger.error(
-                "complete_upload: delete after inspection failure also failed user_id=%s s3_key=%s error=%s",
+        except S3Error:
+            logger.exception(
+                "complete_upload: delete after inspection failure also failed user_id=%s s3_key=%s",
                 user_id,
                 s3_key,
-                delete_exc,
             )
         raise CMSError("Uploaded content does not match the declared installer format") from exc
 

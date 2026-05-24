@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -26,6 +26,12 @@ from cms.services import (
 from shared.exceptions import CMSError
 
 from ._common import _get_user, _render_via_pkg
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
+    from pydantic import BaseModel
+
+    from shared.schemas import CredentialRef
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +91,7 @@ def credential_add(request: HttpRequest) -> HttpResponse:
     return _render_via_pkg(request, "mission_control/credentials/add.html", context)
 
 
-def _validate_credential_spec(data: dict, credential_type_slug: str) -> Any:
+def _validate_credential_spec(data: dict[str, Any], credential_type_slug: str) -> BaseModel:
     """Validate the create-credential payload via the matching Pydantic spec."""
     from pydantic import ValidationError as PydanticValidationError
 
@@ -104,7 +110,7 @@ def _validate_credential_spec(data: dict, credential_type_slug: str) -> Any:
         ) from e
 
 
-def _persist_credential(user: Any, credential_type_slug: str, kwargs: dict) -> Any:
+def _persist_credential(user: User, credential_type_slug: str, kwargs: dict[str, Any]) -> CredentialRef:
     """Create the credential record, mapping service errors to ``_CredentialError``."""
     try:
         return cms_create_credential(user, credential_type_slug, **kwargs)

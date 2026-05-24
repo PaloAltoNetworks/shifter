@@ -13,12 +13,16 @@ from shared.schemas import RangeContext, RangeSpec, RequestSpec
 from ._common import EngineError, _resolve_instance_host
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager as ContextManager
+
+    from django.contrib.auth.models import User
+
     from engine.models import Range
 
 logger = logging.getLogger(__name__)
 
 
-def _atomic() -> Any:
+def _atomic() -> "ContextManager[None]":
     """Late-bound ``engine.services.transaction.atomic()`` so tests can patch the package-level name."""
     from engine import services as _es
 
@@ -71,8 +75,8 @@ def create_range(request_spec: RequestSpec) -> UUID:
 def _persist_range_atomically(
     request_spec: RequestSpec,
     range_spec: RangeSpec,
-    user_model: Any,
-    range_model: Any,
+    user_model: type[User],
+    range_model: type[Range],
 ) -> Range:
     """Run the interpret + Range + Subnet inserts under a single transaction."""
     from engine.interpreter import interpret

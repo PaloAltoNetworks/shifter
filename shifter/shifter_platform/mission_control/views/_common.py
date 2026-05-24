@@ -9,6 +9,7 @@ effect at call time.
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any, cast
 
 from django.contrib.auth.models import User
@@ -22,7 +23,7 @@ INTERNAL_SERVER_ERROR = "Internal server error"
 NGFW_NOT_FOUND = "NGFW not found"
 
 
-def _pkg() -> Any:
+def _pkg() -> ModuleType:
     """Return the ``mission_control.views`` package module (for late-binding)."""
     from mission_control import views as _v
 
@@ -41,7 +42,7 @@ def _audit_range_lifecycle(
     *,
     range_id: int | None = None,
     range_request_id: str | None = None,
-    extra_state: dict | None = None,
+    extra_state: dict[str, Any] | None = None,
 ) -> None:
     """Record an HTTP-layer audit entry for a range lifecycle action.
 
@@ -51,7 +52,7 @@ def _audit_range_lifecycle(
 
     range_id (legacy) or range_request_id (UUID) identifies the range.
     """
-    new_state: dict = {}
+    new_state: dict[str, Any] = {}
     if range_request_id:
         new_state["request_id"] = range_request_id
     if range_id is not None:
@@ -71,31 +72,31 @@ def _audit_range_lifecycle(
 # -- Late-binding helpers for names tests patch at the package level ----------
 
 
-def _render_via_pkg(*args: Any, **kwargs: Any) -> Any:
+def _render_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
     """Late-bound call to ``mission_control.views.render``."""
     return _pkg().render(*args, **kwargs)
 
 
-def _cms_list_agents_via_pkg(*args: Any, **kwargs: Any) -> Any:
+def _cms_list_agents_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
     """Late-bound call to ``mission_control.views.cms_list_agents``."""
     return _pkg().cms_list_agents(*args, **kwargs)
 
 
-def _cms_delete_agent_via_pkg(*args: Any, **kwargs: Any) -> Any:
+def _cms_delete_agent_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
     """Late-bound call to ``mission_control.views.cms_delete_agent``."""
     return _pkg().cms_delete_agent(*args, **kwargs)
 
 
-def _cms_get_ngfw_via_pkg(*args: Any, **kwargs: Any) -> Any:
+def _cms_get_ngfw_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
     """Late-bound call to ``mission_control.views.cms_get_ngfw``."""
     return _pkg().cms_get_ngfw(*args, **kwargs)
 
 
-def _get_allowed_extensions_via_pkg(*args: Any, **kwargs: Any) -> Any:
+def _get_allowed_extensions_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
     """Late-bound call to ``mission_control.views.get_allowed_extensions``."""
     return _pkg().get_allowed_extensions(*args, **kwargs)
 
 
-def _logger() -> Any:
+def _logger() -> Any:  # noqa: ANN401  # NOSONAR
     """Return the shared ``mission_control.views.logger`` (late-bound)."""
     return _pkg().logger

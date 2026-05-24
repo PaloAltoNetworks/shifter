@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import cast
+from typing import Any, cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -127,7 +127,7 @@ def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
     return _render_via_pkg(request, "mission_control/ngfw/deprovision.html", context)
 
 
-def _extract_ngfw_create_payload(data: dict) -> dict:
+def _extract_ngfw_create_payload(data: dict[str, Any]) -> dict[str, Any]:
     """Normalise the api_ngfw_create payload (string IDs → ints, strip OTP fields)."""
     deployment_profile_id = data.get("deployment_profile_id")
     scm_credential_id = data.get("scm_credential_id")

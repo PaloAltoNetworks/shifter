@@ -15,6 +15,7 @@ import uuid as uuid_module
 from typing import TYPE_CHECKING, Literal
 
 from cms.exceptions import CMSError
+from shared.log_sanitize import safe_log_value
 from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec, SubnetSpec
 
 from .registry import load_scenario_template as load_scenario
@@ -184,7 +185,7 @@ def hydrate_ngfw(
         "hydrate_ngfw: instance_id=%s, app_id=%s, method=%s",
         instance.id,
         app.id,
-        registration_method,
+        safe_log_value(registration_method),
     )
 
     # Create hydrated NGFWAppSpec with actual credential values

@@ -20,6 +20,7 @@ from cms.models import AgentConfig, AgentType, OperatingSystem
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.exceptions import AssetError
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -75,22 +76,22 @@ def create_agent(
     logger.debug(
         "create_agent: user_id=%s name=%s os_slug=%s file_size=%d agent_type=%s",
         user.id,
-        name,
-        os_slug,
+        safe_log_value(name),
+        safe_log_value(os_slug),
         file_size,
-        agent_type,
+        safe_log_value(agent_type),
     )
 
     # Validate agent_type
     valid_types = {choice[0] for choice in AgentType.choices}
     if agent_type not in valid_types:
-        logger.error("create_agent: Invalid agent_type=%s", agent_type)
+        logger.error("create_agent: Invalid agent_type=%s", safe_log_value(agent_type))
         raise AssetError(f"Invalid agent type '{agent_type}'")
 
     # Look up OS
     os_obj = OperatingSystem.objects.filter(slug=os_slug).first()
     if not os_obj:
-        logger.error("create_agent: OS not found os_slug=%s", os_slug)
+        logger.error("create_agent: OS not found os_slug=%s", safe_log_value(os_slug))
         raise AssetError(f"Operating system '{os_slug}' not found")
 
     # Create database record
@@ -141,7 +142,7 @@ def delete_agent(agent: AgentConfig) -> None:
     Raises:
         AssetError: If S3 delete fails
     """
-    logger.debug("delete_agent: agent_id=%s s3_key=%s", agent.id, agent.s3_key)
+    logger.debug("delete_agent: agent_id=%s s3_key=%s", agent.id, safe_log_value(agent.s3_key))
 
     # Delete from S3 first - fail fast before touching DB
     try:

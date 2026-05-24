@@ -23,6 +23,7 @@ from cms.services import (
 from cms.services import (
     list_credentials as cms_list_credentials,
 )
+from shared.errors import UserFacingError
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
@@ -117,12 +118,12 @@ def _persist_credential(user: User, credential_type_slug: str, kwargs: dict[str,
     try:
         return cms_create_credential(user, credential_type_slug, **kwargs)
     except (CMSError, ValueError) as e:
-        raise _CredentialError(JsonResponse({"error": str(e)}, status=400)) from e
+        raise _CredentialError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except ValidationError as e:
         msg = e.message_dict.get("__all__", [str(e)])[0] if hasattr(e, "message_dict") else str(e)
         if "unique_active_credential_name_per_user" in msg:
             msg = "A credential with this name already exists"
-        raise _CredentialError(JsonResponse({"error": msg}, status=400)) from e
+        raise _CredentialError(JsonResponse({"error": UserFacingError(msg).user_message}, status=400)) from e
 
 
 @login_required
@@ -158,9 +159,9 @@ def api_credential_create(request: HttpRequest) -> JsonResponse:
 
     logger.info(
         "Credential created: user=%s credential_id=%s type=%s",
-        user.email,
+        safe_log_value(user.email),
         cred_ref.credential_id,
-        credential_type_slug,
+        safe_log_value(credential_type_slug),
     )
     return JsonResponse(
         {
@@ -185,6 +186,6 @@ def api_credential_delete(request: HttpRequest, credential_id: int) -> JsonRespo
     logger.info(
         "Credential deleted: user=%s credential_id=%s",
         safe_log_value(user.email),
-        credential_id,
+        safe_log_value(credential_id),
     )
     return JsonResponse({"success": True})

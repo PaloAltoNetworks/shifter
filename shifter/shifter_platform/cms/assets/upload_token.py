@@ -13,6 +13,8 @@ import time
 
 from django.conf import settings
 
+from shared.log_sanitize import safe_log_value
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,7 +69,7 @@ def generate_upload_token(
         hashlib.sha256,
     ).hexdigest()
 
-    logger.debug("generate_upload_token: user_id=%s s3_key=%s", user_id, s3_key)
+    logger.debug("generate_upload_token: user_id=%s s3_key=%s", user_id, safe_log_value(s3_key))
     return f"{payload_b64}.{signature}"
 
 
@@ -118,7 +120,7 @@ def verify_upload_token(token: str, user_id: int) -> dict:
     if payload.get("user_id") != user_id:
         logger.warning(
             "verify_upload_token: user mismatch token_user=%s request_user=%s",
-            payload.get("user_id"),
+            safe_log_value(payload.get("user_id")),
             user_id,
         )
         raise ValueError("Token user mismatch")
@@ -127,5 +129,5 @@ def verify_upload_token(token: str, user_id: int) -> dict:
         logger.warning("verify_upload_token: expired user_id=%s", user_id)
         raise ValueError("Token expired")
 
-    logger.debug("verify_upload_token: success user_id=%s s3_key=%s", user_id, payload.get("s3_key"))
+    logger.debug("verify_upload_token: success user_id=%s s3_key=%s", user_id, safe_log_value(payload.get("s3_key")))
     return payload

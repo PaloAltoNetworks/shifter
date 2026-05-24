@@ -73,13 +73,13 @@ def _require_instance_uuid(data: dict[str, Any]) -> str:
 
 def _get_guac_settings(service_name: str) -> tuple[str, str, str | None]:
     """Read Guacamole settings or raise ``_ViewError``."""
-    secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
-    if not secret_key:
+    guacamole_signing_secret = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
+    if not guacamole_signing_secret:
         logger.error(GUAC_AUTH_NOT_CONFIGURED)
         raise _ViewError(JsonResponse({"error": f"{service_name} service not configured"}, status=503))
     base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", GUACAMOLE_BASE_PATH)
     api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
-    return secret_key, base_url, api_url
+    return guacamole_signing_secret, base_url, api_url
 
 
 # ---------------------------------------------------------------------------
@@ -109,14 +109,14 @@ def _resolve_rdp_conn(user: User, instance_uuid: str) -> dict[str, Any]:
     try:
         return get_rdp_connection_info(user, instance_uuid)
     except ValueError as e:
-        raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
+        raise _ViewError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
 
 
 def _generate_rdp_url(
     *,
     user_email: str,
     conn_info: dict[str, Any],
-    secret_key: str,
+    guacamole_signing_secret: str,
     guacamole_base_url: str,
     guacamole_api_url: str | None,
 ) -> str:
@@ -127,7 +127,7 @@ def _generate_rdp_url(
     try:
         return create_guacamole_rdp_url(
             base_url=guacamole_base_url,
-            secret_key=secret_key,
+            secret_key=guacamole_signing_secret,
             username=user_email,
             connection_name=conn_info["connection_name"],
             hostname=conn_info["private_ip"],
@@ -165,9 +165,9 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
         data = _parse_json_body(request)
         instance_uuid = _require_instance_uuid(data)
         conn_info = _resolve_rdp_conn(user, instance_uuid)
-        secret_key, guacamole_base_url, guacamole_api_url = _get_guac_settings("RDP")
+        guacamole_signing_secret, guacamole_base_url, guacamole_api_url = _get_guac_settings("RDP")
         logger.info(
-            "Guac RDP request: user=%s instance_uuid=%s os=%s sftp_key=%s",
+            "Guac RDP request: user=%s instance_uuid=%s os=%s sftp_present=%s",
             safe_log_value(user.email),
             safe_log_value(instance_uuid),
             safe_log_value(conn_info.get("os_type")),
@@ -176,7 +176,7 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
         url = _generate_rdp_url(
             user_email=user.email,
             conn_info=conn_info,
-            secret_key=secret_key,
+            guacamole_signing_secret=guacamole_signing_secret,
             guacamole_base_url=guacamole_base_url,
             guacamole_api_url=guacamole_api_url,
         )
@@ -230,7 +230,7 @@ def _generate_ngfw_ssh_url(
     user_email: str,
     app_id: str,
     ssh_conn: _SSHConn,
-    secret_key: str,
+    guacamole_signing_secret: str,
     guacamole_base_url: str,
     guacamole_api_url: str | None,
 ) -> str:
@@ -240,7 +240,7 @@ def _generate_ngfw_ssh_url(
     try:
         return create_guacamole_ssh_url(
             base_url=guacamole_base_url,
-            secret_key=secret_key,
+            secret_key=guacamole_signing_secret,
             username=user_email,
             connection_name=f"ngfw-{app_id}",
             hostname=ssh_conn.host,
@@ -292,12 +292,12 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
     user = _get_user(request)
     try:
         ssh_conn = _resolve_ngfw_ssh(user, app_id)
-        secret_key, guacamole_base_url, guacamole_api_url = _get_guac_settings("SSH")
+        guacamole_signing_secret, guacamole_base_url, guacamole_api_url = _get_guac_settings("SSH")
         url = _generate_ngfw_ssh_url(
             user_email=user.email,
             app_id=app_id,
             ssh_conn=ssh_conn,
-            secret_key=secret_key,
+            guacamole_signing_secret=guacamole_signing_secret,
             guacamole_base_url=guacamole_base_url,
             guacamole_api_url=guacamole_api_url,
         )
@@ -351,7 +351,7 @@ def _generate_range_ssh_url(
     user_email: str,
     instance_uuid: str,
     ssh_info: dict[str, Any],
-    secret_key: str,
+    guacamole_signing_secret: str,
     guacamole_base_url: str,
     guacamole_api_url: str | None,
 ) -> str:
@@ -361,7 +361,7 @@ def _generate_range_ssh_url(
     try:
         return create_guacamole_ssh_url(
             base_url=guacamole_base_url,
-            secret_key=secret_key,
+            secret_key=guacamole_signing_secret,
             username=user_email,
             connection_name=ssh_info["connection_name"],
             hostname=ssh_info["host"],
@@ -396,12 +396,12 @@ def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
         data = _parse_json_body(request)
         instance_uuid = _require_instance_uuid(data)
         ssh_info = _resolve_range_ssh(user, instance_uuid)
-        secret_key, guacamole_base_url, guacamole_api_url = _get_guac_settings("SSH")
+        guacamole_signing_secret, guacamole_base_url, guacamole_api_url = _get_guac_settings("SSH")
         url = _generate_range_ssh_url(
             user_email=user.email,
             instance_uuid=instance_uuid,
             ssh_info=ssh_info,
-            secret_key=secret_key,
+            guacamole_signing_secret=guacamole_signing_secret,
             guacamole_base_url=guacamole_base_url,
             guacamole_api_url=guacamole_api_url,
         )

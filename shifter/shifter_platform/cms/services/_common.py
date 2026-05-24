@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from cms.models import AgentConfig
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -119,7 +120,7 @@ def _validate_positive_int(value: object, name: str, fn_name: str, user_id: obje
         msg = f"{name} must be an int, got {type(value).__name__}"
         raise TypeError(msg)
     if value <= 0:
-        logger.error("%s called with invalid %s=%s for user_id=%s", fn_name, name, value, user_id)
+        logger.error("%s called with invalid %s=%s for user_id=%s", fn_name, name, safe_log_value(value), user_id)
         raise ValueError(f"{name} must be positive")
 
 

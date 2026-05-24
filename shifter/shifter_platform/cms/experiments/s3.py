@@ -19,7 +19,7 @@ from django.conf import settings
 from cms.assets.s3 import S3Error, sanitize_s3_filename
 from shared.cloud import get_object_storage
 from shared.cloud.exceptions import CloudStorageError
-from shared.log_sanitize import safe_log
+from shared.log_sanitize import safe_log, safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -175,10 +175,10 @@ def delete_s3_object(s3_key: str) -> None:
         storage = get_object_storage()
         storage.delete_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
     except CloudStorageError as e:
-        logger.error("delete_s3_object: failed s3_key=%s error=%s", safe_log(s3_key), safe_log(str(e)))
+        logger.error("delete_s3_object: failed s3_key=%s error=%s", safe_log_value(s3_key), safe_log_value(e))
         raise S3Error(str(e)) from e
 
-    logger.info("delete_s3_object: success s3_key=%s", safe_log(s3_key))
+    logger.info("delete_s3_object: success s3_key=%s", safe_log_value(s3_key))
 
 
 def read_script_header(s3_key: str, max_bytes: int) -> bytes:
@@ -203,8 +203,8 @@ def read_script_header(s3_key: str, max_bytes: int) -> bytes:
     except CloudStorageError as e:
         logger.exception(
             "read_script_header: failed s3_key=%s error=%s",
-            safe_log(s3_key),
-            safe_log(str(e)),
+            safe_log_value(s3_key),
+            safe_log_value(e),
         )
         raise S3Error(str(e)) from e
 
@@ -230,13 +230,13 @@ def verify_s3_object(s3_key: str) -> tuple[int, str]:
         metadata = storage.head_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
         size = metadata["content_length"]
         etag = metadata["etag"]
-        logger.debug("verify_s3_object: success s3_key=%s size=%d", safe_log(s3_key), size)
+        logger.debug("verify_s3_object: success s3_key=%s size=%d", safe_log_value(s3_key), size)
         return size, etag
     except CloudStorageError as e:
         if "not found" in str(e).lower() or "404" in str(e):
-            logger.warning("verify_s3_object: not found s3_key=%s", safe_log(s3_key))
+            logger.warning("verify_s3_object: not found s3_key=%s", safe_log_value(s3_key))
             raise S3Error(f"Object not found: {s3_key}") from e
-        logger.error("verify_s3_object: failed s3_key=%s error=%s", safe_log(s3_key), safe_log(str(e)))
+        logger.error("verify_s3_object: failed s3_key=%s error=%s", safe_log_value(s3_key), safe_log_value(e))
         raise S3Error(str(e)) from e
 
 
@@ -340,7 +340,7 @@ def verify_upload_token(token: str, user_id: int) -> dict:
     if payload.get("user_id") != user_id:
         logger.warning(
             "verify_upload_token: user mismatch token_user=%s request_user=%s",
-            payload.get("user_id"),
+            safe_log_value(payload.get("user_id")),
             user_id,
         )
         raise ValueError("Token user mismatch")
@@ -349,5 +349,5 @@ def verify_upload_token(token: str, user_id: int) -> dict:
         logger.warning("verify_upload_token: expired user_id=%s", user_id)
         raise ValueError("Token expired")
 
-    logger.debug("verify_upload_token: success user_id=%s s3_key=%s", user_id, payload.get("s3_key"))
+    logger.debug("verify_upload_token: success user_id=%s s3_key=%s", user_id, safe_log_value(payload.get("s3_key")))
     return payload

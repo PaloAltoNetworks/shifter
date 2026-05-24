@@ -11,6 +11,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from risk_register.models import AuditLog
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -68,10 +69,10 @@ def audit_log(
         )
         logger.debug(
             "Audit logged: %s %s %s by %s:%s",
-            action,
-            entity_type,
-            entity_id,
-            actor_type,
+            safe_log_value(action),
+            safe_log_value(entity_type),
+            safe_log_value(entity_id),
+            safe_log_value(actor_type),
             actor_id,
         )
         return entry
@@ -79,9 +80,9 @@ def audit_log(
         # Audit logging should never break the application
         logger.exception(
             "Failed to create audit log: action=%s entity_type=%s entity_id=%s",
-            action,
-            entity_type,
-            entity_id,
+            safe_log_value(action),
+            safe_log_value(entity_type),
+            safe_log_value(entity_id),
         )
         return None
 

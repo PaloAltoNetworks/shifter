@@ -24,14 +24,14 @@ class AWSSecretsStore:
         endpoint_url: str | None = os.environ.get("AWS_ENDPOINT_URL") or None
         return boto3.client("secretsmanager", region_name=region, endpoint_url=endpoint_url)
 
-    def get_secret(self, secret_id: str) -> str:
-        logger.debug("get_secret: secret_id=%s", secret_id)
+    def get_secret(self, secret_ref: str) -> str:
+        logger.debug("get_secret: secret_ref=%s", secret_ref)
         try:
             client = self._get_client()
-            response: dict[str, Any] = client.get_secret_value(SecretId=secret_id)
+            response: dict[str, Any] = client.get_secret_value(SecretId=secret_ref)
             if "SecretString" in response:
                 return response["SecretString"]
             return base64.b64decode(response["SecretBinary"]).decode("utf-8")
         except (ClientError, BotoCoreError) as e:
-            logger.exception("get_secret: failed secret_id=%s", secret_id)
+            logger.exception("get_secret: failed secret_ref=%s", secret_ref)
             raise CloudSecretsError(f"Failed to retrieve secret: {e}") from e

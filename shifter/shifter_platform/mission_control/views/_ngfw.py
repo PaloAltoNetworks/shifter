@@ -25,6 +25,7 @@ from cms.services import (
 from cms.services import (
     list_ngfws as cms_list_ngfws,
 )
+from shared.errors import UserFacingError
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
@@ -161,13 +162,13 @@ def api_ngfw_create(request: HttpRequest) -> JsonResponse:
         try:
             ngfw_ref = cms_create_ngfw(user=user, **payload)
         except (TypeError, ValueError, CMSError) as e:
-            raise _NgfwError(JsonResponse({"error": str(e)}, status=400)) from e
+            raise _NgfwError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except _NgfwError as err:
         return err.response
 
     logger.info(
         "NGFW provisioning started: user=%s app_id=%s",
-        user.email,
+        safe_log_value(user.email),
         ngfw_ref.app_id,
     )
     return JsonResponse(
@@ -204,9 +205,9 @@ def _run_ngfw_destroy(user: User, app_id: str, confirm_name: str) -> None:
     except CMSError as e:
         if "not found" in str(e).lower():
             raise Http404(NGFW_NOT_FOUND) from None
-        raise _NgfwError(JsonResponse({"error": str(e)}, status=400)) from e
+        raise _NgfwError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except ValueError as e:
-        raise _NgfwError(JsonResponse({"error": str(e)}, status=400)) from e
+        raise _NgfwError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
 
 
 @login_required

@@ -145,7 +145,7 @@ def complete_upload(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)
 
     set_upload_in_progress(request.session, False)
-    logger.info("Upload completed: user=%s agent_id=%s", user.email, agent.id)
+    logger.info("Upload completed: user=%s agent_id=%s", safe_log_value(user.email), agent.id)
     return JsonResponse(
         {
             "success": True,
@@ -179,7 +179,7 @@ def cancel_upload(request: HttpRequest) -> JsonResponse:
     if upload_token:
         try:
             cms_cancel_upload(user, upload_token)
-            logger.info("Cancelled upload cleaned up: user=%s", user.email)
+            logger.info("Cancelled upload cleaned up: user=%s", safe_log_value(user.email))
         except CMSError:
             # Invalid token or S3 error, ignore.
             pass

@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from cms.exceptions import CMSError
 from risk_register.models import AuditLog
+from shared.log_sanitize import safe_log_value
 
 from ._common import _validate_caller_user
 
@@ -180,7 +181,7 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
     if credential_id < 0:
         logger.error(
             "delete_credential called with negative credential_id=%s for user_id=%s",
-            credential_id,
+            safe_log_value(credential_id),
             user.id,
         )
         raise ValueError("credential_id must be non-negative")
@@ -188,7 +189,7 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
     logger.debug(
         "delete_credential called for user_id=%s, credential_id=%s",
         user.id,
-        credential_id,
+        safe_log_value(credential_id),
     )
 
     try:
@@ -200,7 +201,7 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
         except Credential.DoesNotExist:
             logger.error(
                 "delete_credential: credential_id=%s not found for user_id=%s",
-                credential_id,
+                safe_log_value(credential_id),
                 user.id,
             )
             raise CMSError(f"Credential {credential_id} not found") from None
@@ -224,7 +225,7 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
 
         logger.debug(
             "delete_credential completed for credential_id=%s, user_id=%s",
-            credential_id,
+            safe_log_value(credential_id),
             user.id,
         )
 
@@ -240,7 +241,7 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
         logger.exception(
             "Error in delete_credential for user_id=%s, credential_id=%s",
             user.id,
-            credential_id,
+            safe_log_value(credential_id),
         )
         raise
 
@@ -378,7 +379,7 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
     if credential_id < 0:
         logger.error(
             "get_credential called with negative credential_id=%s for user_id=%s",
-            credential_id,
+            safe_log_value(credential_id),
             user.id,
         )
         raise ValueError("credential_id must be non-negative")
@@ -386,7 +387,7 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
     logger.debug(
         "get_credential called for user_id=%s, credential_id=%s",
         user.id,
-        credential_id,
+        safe_log_value(credential_id),
     )
 
     try:
@@ -397,7 +398,7 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
     except Credential.DoesNotExist:
         logger.error(
             "get_credential: credential_id=%s not found for user_id=%s",
-            credential_id,
+            safe_log_value(credential_id),
             user.id,
         )
         raise CMSError(f"Credential {credential_id} not found") from None
@@ -433,14 +434,14 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
         else:
             logger.error(
                 "get_credential: unknown credential type '%s' for credential_id=%s",
-                type_slug,
-                credential_id,
+                safe_log_value(type_slug),
+                safe_log_value(credential_id),
             )
             raise CMSError(f"Unknown credential type: {type_slug}")
 
         logger.debug(
             "get_credential returning credential_id=%s for user_id=%s",
-            credential_id,
+            safe_log_value(credential_id),
             user.id,
         )
         return ctx
@@ -451,6 +452,6 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
         logger.exception(
             "Error in get_credential for user_id=%s, credential_id=%s",
             user.id,
-            credential_id,
+            safe_log_value(credential_id),
         )
         raise

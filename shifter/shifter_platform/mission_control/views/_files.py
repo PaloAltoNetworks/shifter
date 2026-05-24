@@ -21,6 +21,7 @@ from cms.services import (
     initiate_script_upload,
     list_scripts,
 )
+from shared.errors import UserFacingError
 from shared.log_sanitize import safe_log_value
 
 from ._common import _get_user, _render_via_pkg
@@ -70,7 +71,7 @@ def _complete_script(user: User, upload_token: str) -> JsonResponse:
     try:
         script = complete_script_upload(user, upload_token)
     except ScriptUploadError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        return JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)
 
     logger.info("Script upload completed: user=%s script_id=%s", user.email, script.pk)
     return JsonResponse(
@@ -89,7 +90,7 @@ def _initiate_script(user: User, data: dict[str, Any]) -> JsonResponse:
         try:
             result = initiate_script_upload(user, name, filename, file_size)
         except ScriptUploadError as e:
-            raise _FileError(JsonResponse({"error": str(e)}, status=400)) from e
+            raise _FileError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except _FileError as err:
         return err.response
 
@@ -130,13 +131,13 @@ def file_delete(request: HttpRequest, script_id: int) -> HttpResponse:
     try:
         delete_script(user, script_id)
         messages.success(request, "Script deleted.")
-        logger.info("Script deleted: user=%s script_id=%s", safe_log_value(user.email), script_id)
+        logger.info("Script deleted: user=%s script_id=%s", safe_log_value(user.email), safe_log_value(script_id))
     except ScriptUploadError as e:
         messages.error(request, str(e))
         logger.exception(
             "Script delete error: user=%s script_id=%s",
             safe_log_value(user.email),
-            script_id,
+            safe_log_value(script_id),
         )
 
     return redirect("mission_control:files")

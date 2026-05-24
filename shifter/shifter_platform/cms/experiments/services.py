@@ -49,7 +49,7 @@ from cms.scenarios.registry import check_scenario_access, load_scenario_template
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.auth import validate_cms_authoring_user
-from shared.log_sanitize import safe_log
+from shared.log_sanitize import safe_log, safe_log_value
 from shared.uploads.inspection import (
     InspectionError as _ScriptInspectionError,
 )
@@ -122,7 +122,7 @@ def initiate_script_upload(user: User, name: str, filename: str, file_size: int)
         ScriptUploadError: If validation or URL generation fails.
     """
     _validate_user(user, "initiate_script_upload")
-    logger.debug("initiate_script_upload called for user_id=%s filename=%s", user.id, filename)
+    logger.debug("initiate_script_upload called for user_id=%s filename=%s", user.id, safe_log_value(filename))
     try:
         try:
             validated = ScriptUploadInput(name=name, filename=filename, file_size=file_size)
@@ -169,8 +169,8 @@ def _inspect_uploaded_script_body(user: User, s3_key: str, max_size: int) -> Non
     except S3Error as e:
         logger.exception(
             "complete_script_upload: body read failed s3_key=%s: %s",
-            safe_log(s3_key),
-            safe_log(str(e)),
+            safe_log_value(s3_key),
+            safe_log_value(e),
         )
         raise ScriptUploadError("Upload content inspection failed") from e
 
@@ -180,16 +180,16 @@ def _inspect_uploaded_script_body(user: User, s3_key: str, max_size: int) -> Non
         logger.warning(
             "complete_script_upload: header inspection rejected upload user_id=%s s3_key=%s reason=%s",
             user.pk,
-            safe_log(s3_key),
-            e,
+            safe_log_value(s3_key),
+            safe_log_value(e),
         )
         try:
             delete_s3_object(s3_key)
         except S3Error as delete_exc:
             logger.exception(
                 "complete_script_upload: delete after inspection failure also failed s3_key=%s: %s",
-                safe_log(s3_key),
-                safe_log(str(delete_exc)),
+                safe_log_value(s3_key),
+                safe_log_value(delete_exc),
             )
         raise ScriptUploadError("Uploaded content is not a valid script (binary or non-UTF-8 header)") from e
 
@@ -222,14 +222,18 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         try:
             actual_size, etag = verify_s3_object(s3_key)
         except S3Error as e:
-            logger.error("complete_script_upload: S3 verify failed s3_key=%s: %s", safe_log(s3_key), safe_log(str(e)))
+            logger.error(
+                "complete_script_upload: S3 verify failed s3_key=%s: %s",
+                safe_log_value(s3_key),
+                safe_log_value(e),
+            )
             raise ScriptUploadError(f"Upload verification failed: {e}") from e
 
         max_size = settings.SCRIPT_MAX_FILE_SIZE_BYTES
         if actual_size > max_size:
             logger.warning(
                 "complete_script_upload: file too large s3_key=%s size=%d max=%d",
-                safe_log(s3_key),
+                safe_log_value(s3_key),
                 actual_size,
                 max_size,
             )
@@ -243,7 +247,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         if actual_size != expected_size:
             logger.warning(
                 "complete_script_upload: size mismatch s3_key=%s expected=%d actual=%d",
-                safe_log(s3_key),
+                safe_log_value(s3_key),
                 expected_size,
                 actual_size,
             )
@@ -283,7 +287,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             "complete_script_upload: created script_id=%s user_id=%s s3_key=%s",
             script.pk,
             user.pk,
-            safe_log(s3_key),
+            safe_log_value(s3_key),
         )
         return script
     except (TypeError, ValueError, ExperimentError):
@@ -403,7 +407,7 @@ def _resolve_experiment_scenario(scenario_id, user):
         check_scenario_access(scenario_id, user)
         return load_scenario_template(scenario_id)
     except ValueError as e:
-        logger.warning("create_experiment: invalid scenario_id=%s: %s", scenario_id, e)
+        logger.warning("create_experiment: invalid scenario_id=%s: %s", safe_log_value(scenario_id), safe_log_value(e))
         raise ExperimentValidationError(f"Invalid scenario: {e}") from e
 
 
@@ -452,7 +456,7 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
         ExperimentValidationError: If scenario or scripts are invalid.
     """
     _validate_user(user, "create_experiment")
-    logger.debug("create_experiment called for user_id=%s scenario=%s", user.id, data.scenario_id)
+    logger.debug("create_experiment called for user_id=%s scenario=%s", user.id, safe_log_value(data.scenario_id))
     try:
         scenario = _resolve_experiment_scenario(data.scenario_id, user)
         _validate_script_assignments(data.scripts, scenario, user, data.scenario_id)
@@ -501,7 +505,7 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
             "create_experiment: created experiment_id=%s user_id=%s scenario=%s runs=%d",
             experiment.pk,
             user.pk,
-            data.scenario_id,
+            safe_log_value(data.scenario_id),
             data.total_runs,
         )
         return experiment
@@ -747,7 +751,7 @@ def get_scenario_instances(scenario_id: str, user: User | None = None) -> list[d
     Raises:
         ExperimentValidationError: If scenario not found or access denied.
     """
-    logger.debug("get_scenario_instances called for scenario_id=%s", scenario_id)
+    logger.debug("get_scenario_instances called for scenario_id=%s", safe_log_value(scenario_id))
     if user is not None:
         _validate_user(user, "get_scenario_instances")
     try:

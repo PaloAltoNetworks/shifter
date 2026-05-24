@@ -59,7 +59,7 @@ def _initiate_upload_inner(
             "initiate_upload: quota exceeded for user_id=%s - current=%s, requested=%s, quota=%s",
             user.id,
             current_usage,
-            file_size,
+            safe_log_value(file_size),
             quota_bytes,
         )
         msg = (
@@ -91,7 +91,7 @@ def _initiate_upload_inner(
     if os_slug is None:
         logger.error(
             "initiate_upload: installer format missing os_slug for filename=%s",
-            filename,
+            safe_log_value(filename),
         )
         raise CMSError("Internal error: installer format misconfigured")
 
@@ -108,8 +108,8 @@ def _initiate_upload_inner(
     logger.debug(
         "initiate_upload completed for user_id=%s, filename=%s, s3_key=%s",
         user.id,
-        filename,
-        s3_key,
+        safe_log_value(filename),
+        safe_log_value(s3_key),
     )
 
     return {
@@ -158,8 +158,8 @@ def initiate_upload(
     logger.debug(
         "initiate_upload called for user_id=%s, filename=%s, file_size=%s",
         user.id,
-        filename,
-        file_size,
+        safe_log_value(filename),
+        safe_log_value(file_size),
     )
 
     try:
@@ -196,7 +196,7 @@ def _verify_upload_object_or_raise(s3_key: str, expected_size: int, user_id: int
         logger.error(
             "complete_upload: size mismatch for user_id=%s - expected=%s, actual=%s",
             user_id,
-            expected_size,
+            safe_log_value(expected_size),
             actual_size,
         )
         raise CMSError(f"File size mismatch: expected {expected_size}, got {actual_size}")
@@ -223,7 +223,7 @@ def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_i
     try:
         header = _s3.read_agent_header(s3_key, _settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES)
     except S3Error as exc:
-        logger.exception("complete_upload: header read failed user_id=%s s3_key=%s", user_id, s3_key)
+        logger.exception("complete_upload: header read failed user_id=%s s3_key=%s", user_id, safe_log_value(s3_key))
         raise CMSError("Upload content inspection failed") from exc
 
     try:
@@ -355,14 +355,14 @@ def cancel_upload(user: User, upload_token: str) -> None:
             logger.warning(
                 "cancel_upload: S3 delete failed for user_id=%s, s3_key=%s - %s",
                 user.id,
-                s3_key,
-                str(e),
+                safe_log_value(s3_key),
+                safe_log_value(e),
             )
 
         logger.debug(
             "cancel_upload completed for user_id=%s, s3_key=%s",
             user.id,
-            s3_key,
+            safe_log_value(s3_key),
         )
 
     except (TypeError, ValueError, CMSError):

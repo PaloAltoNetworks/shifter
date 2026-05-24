@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from engine.secrets import SecretsError
 from shared.enums import ResourceStatus
+from shared.log_sanitize import safe_log_value
 
 from ._common import (
     _first_connection_value,
@@ -104,7 +105,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
-    logger.debug("get_rdp_connection_info: user=%s instance_uuid=%s", user.id, instance_uuid)
+    logger.debug("get_rdp_connection_info: user=%s instance_uuid=%s", user.id, safe_log_value(instance_uuid))
 
     range_obj = Range.get_active_for_user(user)
     if not range_obj:
@@ -148,7 +149,7 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
-    logger.debug("connect_terminal: user_id=%s instance_uuid=%s", user.id, instance_uuid)
+    logger.debug("connect_terminal: user_id=%s instance_uuid=%s", user.id, safe_log_value(instance_uuid))
 
     range_obj = Range.objects.filter(
         provisioned_instances__contains=[{"uuid": instance_uuid}],
@@ -156,7 +157,9 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     ).first()
 
     if not range_obj:
-        logger.error("Range not found for instance: user_id=%s instance_uuid=%s", user.id, instance_uuid)
+        logger.error(
+            "Range not found for instance: user_id=%s instance_uuid=%s", user.id, safe_log_value(instance_uuid)
+        )
         raise ValueError(f"No range found containing instance {instance_uuid}")
 
     if range_obj.status != Range.Status.READY:
@@ -165,19 +168,19 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if instance is None:
-        logger.error("Instance not found: range_id=%s instance_uuid=%s", range_obj.id, instance_uuid)
+        logger.error("Instance not found: range_id=%s instance_uuid=%s", range_obj.id, safe_log_value(instance_uuid))
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
     if not ssh_key_ref:
-        logger.error("No SSH key reference for instance: %s", instance_uuid)
+        logger.error("No SSH key reference for instance: %s", safe_log_value(instance_uuid))
         raise ValueError(f"Instance {instance_uuid} has no SSH key configured")
 
     ssh_key = _get_ssh_key(ssh_key_ref)
 
     host = _resolve_instance_host(instance)
     if not host:
-        logger.error("No IP address for instance: %s", instance_uuid)
+        logger.error("No IP address for instance: %s", safe_log_value(instance_uuid))
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
@@ -222,7 +225,7 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
     if not ngfw_uuid:
         raise ValueError("ngfw_uuid is required")
 
-    logger.debug("connect_ngfw_terminal: user_id=%s ngfw_uuid=%s", user.id, ngfw_uuid)
+    logger.debug("connect_ngfw_terminal: user_id=%s ngfw_uuid=%s", user.id, safe_log_value(ngfw_uuid))
 
     try:
         ngfw_instance = Instance.objects.select_related("request").get(
@@ -230,18 +233,18 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
             role=Instance.Role.NGFW,
         )
     except Instance.DoesNotExist:
-        logger.error("NGFW instance not found: user_id=%s ngfw_uuid=%s", user.id, ngfw_uuid)
+        logger.error("NGFW instance not found: user_id=%s ngfw_uuid=%s", user.id, safe_log_value(ngfw_uuid))
         raise ValueError(f"NGFW instance {ngfw_uuid} not found") from None
 
     if ngfw_instance.request is None:
-        logger.error("NGFW instance has no associated request: ngfw_uuid=%s", ngfw_uuid)
+        logger.error("NGFW instance has no associated request: ngfw_uuid=%s", safe_log_value(ngfw_uuid))
         raise ValueError(f"NGFW instance {ngfw_uuid} has no associated request")
 
     if ngfw_instance.request.user != user:
         logger.error(
             "Permission denied: user_id=%s does not own ngfw_uuid=%s (owner=%s)",
             user.id,
-            ngfw_uuid,
+            safe_log_value(ngfw_uuid),
             ngfw_instance.request.user.id,
         )
         raise PermissionError(f"You do not have permission to access NGFW {ngfw_uuid}")
@@ -249,23 +252,23 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
     if ngfw_instance.status != ResourceStatus.READY.value:
         logger.error(
             "NGFW not accessible: ngfw_uuid=%s status=%s (expected ready)",
-            ngfw_uuid,
+            safe_log_value(ngfw_uuid),
             ngfw_instance.status,
         )
         raise ValueError(f"NGFW is not accessible (status: {ngfw_instance.status}). NGFW must be in ready state.")
 
     if not ngfw_instance.state:
-        logger.error("NGFW has no state: ngfw_uuid=%s", ngfw_uuid)
+        logger.error("NGFW has no state: ngfw_uuid=%s", safe_log_value(ngfw_uuid))
         raise ValueError(f"NGFW {ngfw_uuid} has no infrastructure state")
 
     management_ip = _resolve_ngfw_management_ip(ngfw_instance.state)
     if not management_ip:
-        logger.error("No management IP in NGFW state: ngfw_uuid=%s", ngfw_uuid)
+        logger.error("No management IP in NGFW state: ngfw_uuid=%s", safe_log_value(ngfw_uuid))
         raise ValueError(f"NGFW {ngfw_uuid} has no management IP configured")
 
     ssh_key_ref = _resolve_ngfw_ssh_key_secret_ref(ngfw_instance.state)
     if not ssh_key_ref:
-        logger.error("No SSH key ARN in NGFW state: ngfw_uuid=%s", ngfw_uuid)
+        logger.error("No SSH key ARN in NGFW state: ngfw_uuid=%s", safe_log_value(ngfw_uuid))
         raise ValueError(f"NGFW {ngfw_uuid} has no SSH key configured")
 
     ssh_key = _get_ssh_key(ssh_key_ref)
@@ -273,7 +276,7 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
     logger.info(
         "Creating SSH connection for NGFW: user_id=%s ngfw_uuid=%s management_ip=%s",
         user.id,
-        ngfw_uuid,
+        safe_log_value(ngfw_uuid),
         management_ip,
     )
 

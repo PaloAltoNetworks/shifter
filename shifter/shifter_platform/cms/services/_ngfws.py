@@ -10,6 +10,7 @@ from cms.exceptions import CMSError
 from risk_register.models import AuditLog
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -356,8 +357,8 @@ def create_ngfw(
     logger.debug(
         "create_ngfw called for user_id=%s, name=%s, method=%s",
         user.id,
-        name,
-        registration_method,
+        safe_log_value(name),
+        safe_log_value(registration_method),
     )
 
     request_id, request, instance, app = _provision_ngfw_request_records(user, name)
@@ -408,7 +409,7 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
 
     _validate_ngfw_user(user)
     validated_app_id = _validate_app_id(app_id)
-    logger.debug("destroy_ngfw called for user_id=%s, app_id=%s", user.id, validated_app_id)
+    logger.debug("destroy_ngfw called for user_id=%s, app_id=%s", user.id, safe_log_value(validated_app_id))
 
     try:
         app = App.objects.select_related("instance", "instance__request").get(
@@ -417,15 +418,15 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
             app_type__slug="panw-ngfw",
         )
     except App.DoesNotExist:
-        logger.error("destroy_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
+        logger.error("destroy_ngfw: App id=%s not found for user_id=%s", safe_log_value(app_id), user.id)
         raise CMSError("NGFW not found") from None
 
     if confirm_name != app.name:
         logger.error(
             "destroy_ngfw: name mismatch for App id=%s (expected=%s, got=%s)",
-            app_id,
-            app.name,
-            confirm_name,
+            safe_log_value(app_id),
+            safe_log_value(app.name),
+            safe_log_value(confirm_name),
         )
         raise ValueError("Name confirmation does not match")
 
@@ -463,7 +464,7 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
 
     logger.info(
         "destroy_ngfw: started deprovisioning App id=%s, request_id=%s",
-        app_id,
+        safe_log_value(app_id),
         request_id,
     )
 

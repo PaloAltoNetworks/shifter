@@ -12,7 +12,9 @@ from django.views.decorators.http import require_GET, require_POST
 
 from mission_control.utils import build_connection_urls
 from risk_register.models import AuditLog
+from shared.errors import UserFacingError
 from shared.exceptions import CMSError
+from shared.log_sanitize import safe_log_value
 
 from ._common import _audit_range_lifecycle, _get_user, _logger, _pkg
 
@@ -69,7 +71,7 @@ def _resolve_launch_agents(user: User, data: dict[str, Any]) -> dict[str, int]:
         try:
             agent = _pkg().cms_get_agent(user, agent_id)
         except CMSError as e:
-            raise _RangeError(JsonResponse({"error": str(e)}, status=400)) from e
+            raise _RangeError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
         os_type = "windows" if agent.os.slug == "windows" else "linux"
         return {os_type: agent_id}
     raise _RangeError(JsonResponse({"error": "Either 'agents' or 'agent_id' is required"}, status=400))
@@ -105,16 +107,16 @@ def launch_range(request: HttpRequest) -> JsonResponse:
         try:
             range_ctx = _pkg().cms_create_range(user, scenario, agents_by_os)
         except CMSError as e:
-            raise _RangeError(JsonResponse({"error": str(e)}, status=400)) from e
+            raise _RangeError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except _RangeError as err:
         return err.response
 
     _logger().info(
         "Range launched: user=%s request_id=%s agent=%s scenario=%s",
-        user.email,
+        safe_log_value(user.email),
         range_ctx.request_id,
-        range_ctx.agent_name,
-        scenario,
+        safe_log_value(range_ctx.agent_name),
+        safe_log_value(scenario),
     )
     _audit_range_lifecycle(
         request,
@@ -155,12 +157,22 @@ def _dispatch_range_lifecycle(
         try:
             if request_id:
                 getattr(cms_services_mod, by_request_attr)(user, request_id)
-                _logger().info("Range %s: user=%s request_id=%s", log_verb, user.email, request_id)
+                _logger().info(
+                    "Range %s: user=%s request_id=%s",
+                    log_verb,
+                    safe_log_value(user.email),
+                    safe_log_value(request_id),
+                )
             else:
                 getattr(cms_services_mod, by_id_attr)(user, range_id)
-                _logger().info("Range %s: user=%s range_id=%s", log_verb, user.email, range_id)
+                _logger().info(
+                    "Range %s: user=%s range_id=%s",
+                    log_verb,
+                    safe_log_value(user.email),
+                    safe_log_value(range_id),
+                )
         except CMSError as e:
-            raise _RangeError(JsonResponse({"error": str(e)}, status=400)) from e
+            raise _RangeError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except _RangeError as err:
         return err.response
 

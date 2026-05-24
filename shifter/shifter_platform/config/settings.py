@@ -265,6 +265,9 @@ if not DEBUG:
 # this module stays under the 500-line cap. Re-exported via star-import
 # here (``noqa`` suppresses the unused/ambiguous-import warnings — these
 # names are part of the public Django settings surface).
+
+# OIDC env-var guard above; F401/F403 are required for star-imports of
+# the public Django settings surface (the canonical split-settings idiom).
 from config._oidc_settings import *  # noqa: E402  # NOSONAR
 
 # ------------------------------------------------------------------------------

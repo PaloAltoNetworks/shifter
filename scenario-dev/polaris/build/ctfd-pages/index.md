@@ -63,15 +63,35 @@ auth_required: true
 .polaris-page .callout { margin: 1.2em 0; padding: 0.9em 1.3em; border-left: 3px solid var(--amber); background: rgba(255,179,0,0.06); color: var(--amber); }
 .polaris-page .footer-nav { margin-top: 3em; padding-top: 1.2em; border-top: 1px solid var(--line); font-size: 0.85em; color: var(--fg-dim); letter-spacing: 0.1em; text-transform: uppercase; }
 .polaris-page .footer-nav a { margin-right: 1.2em; }
+.polaris-page .first-click { border: 1px solid var(--amber); background: rgba(255, 179, 0, 0.06); padding: 1.6em 1.8em 1.2em; margin: 0 0 2.5em; position: relative; }
+.polaris-page .first-click::before { content: "START HERE"; position: absolute; top: -0.7em; left: 1.2em; background: var(--bg); color: var(--amber); padding: 0 0.6em; font-size: 11px; letter-spacing: 0.35em; }
+.polaris-page .first-click__h { font-size: 1.35em; color: var(--amber); letter-spacing: 0.04em; margin: 0 0 0.9em; line-height: 1.3; }
+.polaris-page .first-click__h a { color: var(--amber); text-decoration: underline; text-decoration-color: var(--amber-dim); }
+.polaris-page .first-click__h a:hover { color: var(--cyan); text-decoration-color: var(--cyan); }
+.polaris-page .first-click ol { margin: 0; padding-left: 1.4em; }
+.polaris-page .first-click ol li { margin: 0.35em 0; color: var(--fg); }
+.polaris-page .first-click ol li strong { color: var(--cyan); }
 </style>
 
 <div class="polaris-page" markdown="1">
 
-<div class="brief-tag">§ 00 — ORIENTATION</div>
+<!-- vale Google.EmDash = NO -->
+<div class="first-click">
+<h2 class="first-click__h">🎯 <a href="/challenges">Open the board and solve <em>Start Here — Kali Warm-Up</em></a></h2>
+<ol>
+<li>Click your <strong>magic-link email</strong> → <strong>Mission Control</strong> → <strong>ENTER RANGE</strong>. ~5 min to provision; your Kali desktop opens in-browser.</li>
+<li>On the Kali desktop, find the orientation note in your home directory. Read it.</li>
+<li>Back in this browser tab, <a href="/challenges">open the challenges board</a>, click <strong>Start Here — Kali Warm-Up</strong>, and submit the flag from the note.</li>
+<li>Then start <strong>Mission 1 — Boreas</strong>.</li>
+</ol>
+</div>
+<!-- vale Google.EmDash = YES -->
+
+<div class="brief-tag">§ 00—ORIENTATION</div>
 
 # OPERATION NORTHSTORM
 
-You are a POLARIS operator. AURORA COLLECTIVE is building something underground. Your range has everything you need to find out what — and, if the window opens, take it.
+You are a POLARIS operator. AURORA COLLECTIVE is building something underground. Your range has everything you need to find out what—and, if the window opens, take it.
 
 ## Before You Begin
 
@@ -85,21 +105,21 @@ By participating in this CTF you acknowledge:
 
 ## First Moves
 
-1. Solve [**Start Here — Kali Warm-Up**](/challenges) for a quick first submit.
+1. Solve [**Start Here—Kali Warm-Up**](/challenges) for a quick first submit.
 2. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
-3. Start with Mission 1 — recon the front company.
+3. Start with Mission 1—recon the front company.
 
 ## Missions
 
-Five missions. Chained by pivots — work them in order.
+Five missions. Chained by pivots—work them in order.
 
-- **Mission 1 — Boreas.** Map the front company.
-- **Mission 2 — Inside Boreas.** Breach the corporate perimeter.
-- **Mission 3 — The Lab.** Determine what PROJECT LEVIATHAN is. <span class="warn">requires pivot</span>
-- **Mission 4 — Lights Out.** Take the plant offline. <span class="warn">requires pivot</span>
-- **Mission 5 — Bunker.** Reach the control path. Turn it. <span class="warn">requires blackout (M4)</span>
+- **Mission 1—Boreas.** Map the front company.
+- **Mission 2—Inside Boreas.** Breach the corporate perimeter.
+- **Mission 3—The Lab.** Determine what PROJECT LEVIATHAN is. <span class="warn">requires pivot</span>
+- **Mission 4—Lights Out.** Take the plant offline. <span class="warn">requires pivot</span>
+- **Mission 5—Bunker.** Reach the control path. Turn it. <span class="warn">requires blackout (M4)</span>
 
-For the full reference card — objectives, surfaces, status flags — see the [Mission Log](/mission-log).
+For the full reference card—objectives, surfaces, status flags—see the [Mission Log](/mission-log).
 
 ## Reference Pages
 

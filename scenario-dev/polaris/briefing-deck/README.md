@@ -2,16 +2,21 @@
 
 Static, hand-authored HTML/CSS/JS slide deck used at event briefing time.
 
-- `index.html` — slide content; each slide is one `<section class="slide">`
+- `index.html`—slide content; each slide is one `<section class="slide">`
   with a `data-title` attribute. Add a slide by appending another
   `<section>` in the order it should appear.
-- `styles.css` — single sheet scoped to the slide-component class hierarchy
+- `styles.css`—single sheet scoped to the slide-component class hierarchy
   (`.slide`, `.slide--brief`, `.slide--mission`, `.slide--classification`,
   etc.). Add a new variant by adding a class and styling it under that
   selector; do not split per-slide.
-- `deck.js` — keyboard navigation + simple ARIA progress hookup.
-- `serve.sh` — `python3 -m http.server` wrapper so you can preview locally.
-- `asset-inventory.md`, `script.md` — speaker notes and asset reference.
+- `deck.js`—keyboard navigation + simple ARIA progress hookup.
+- `serve.sh`: wraps `python3 -m http.server` so you can preview locally.
+- `asset-inventory.md`, `script.md`—speaker notes and asset reference.
+- `seat-handout.html`: printable single-page handout for each seat. Open in
+  a browser and print (or save to PDF). Carries the same first-click path the
+  deck's closing slide projects, plus the board URL and the shared event
+  password. Does not include per-participant credentials, magic-link URLs,
+  the orientation-note path, or the warm-up flag; those stay out of print.
 
 ## Why this is left as a single HTML file
 

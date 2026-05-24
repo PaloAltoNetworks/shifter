@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _atomic() -> "ContextManager[None]":
+def _atomic() -> ContextManager[None]:
     """Late-bound ``engine.services.transaction.atomic()`` so tests can patch the package-level name."""
     from engine import services as _es
 

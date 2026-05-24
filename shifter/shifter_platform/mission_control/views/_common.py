@@ -72,31 +72,31 @@ def _audit_range_lifecycle(
 # -- Late-binding helpers for names tests patch at the package level ----------
 
 
-def _render_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
+def _render_via_pkg(*args: Any, **kwargs: Any) -> Any:  # NOSONAR
     """Late-bound call to ``mission_control.views.render``."""
     return _pkg().render(*args, **kwargs)
 
 
-def _cms_list_agents_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
+def _cms_list_agents_via_pkg(*args: Any, **kwargs: Any) -> Any:  # NOSONAR
     """Late-bound call to ``mission_control.views.cms_list_agents``."""
     return _pkg().cms_list_agents(*args, **kwargs)
 
 
-def _cms_delete_agent_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
+def _cms_delete_agent_via_pkg(*args: Any, **kwargs: Any) -> Any:  # NOSONAR
     """Late-bound call to ``mission_control.views.cms_delete_agent``."""
     return _pkg().cms_delete_agent(*args, **kwargs)
 
 
-def _cms_get_ngfw_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
+def _cms_get_ngfw_via_pkg(*args: Any, **kwargs: Any) -> Any:  # NOSONAR
     """Late-bound call to ``mission_control.views.cms_get_ngfw``."""
     return _pkg().cms_get_ngfw(*args, **kwargs)
 
 
-def _get_allowed_extensions_via_pkg(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # NOSONAR
+def _get_allowed_extensions_via_pkg(*args: Any, **kwargs: Any) -> Any:  # NOSONAR
     """Late-bound call to ``mission_control.views.get_allowed_extensions``."""
     return _pkg().get_allowed_extensions(*args, **kwargs)
 
 
-def _logger() -> Any:  # noqa: ANN401  # NOSONAR
+def _logger() -> Any:  # NOSONAR
     """Return the shared ``mission_control.views.logger`` (late-bound)."""
     return _pkg().logger

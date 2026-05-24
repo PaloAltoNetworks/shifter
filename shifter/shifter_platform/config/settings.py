@@ -1,15 +1,57 @@
 """
 Django settings for Shifter platform.
+
+Sub-sections (Channels layer, cloud/AWS task-runner + queue config,
+``LOGGING`` dict, terminal CDN assets) are split into ``config/_*.py``
+modules and re-imported here. The split keeps this module under Sonar
+S104's 500-line cap without changing the public ``config.settings``
+surface — ``from config.settings import X`` continues to resolve every
+name it always has.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from config._channels import _build_channel_layers
+from config._cloud import (  # noqa: F401  re-exported as Django settings
+    AWS_ENDPOINT_URL,
+    AWS_REGION,
+    AWS_S3_BUCKET_NAME,
+    AWS_S3_REGION,
+    CLOUD_PROVIDER,
+    CLOUD_REGION,
+    ENGINE_ECS_CLUSTER_ARN,
+    ENGINE_ECS_SECURITY_GROUP_ID,
+    ENGINE_PRIVATE_SUBNET_IDS,
+    ENGINE_TASK_BACKOFF_LIMIT,
+    ENGINE_TASK_CLUSTER,
+    ENGINE_TASK_DEFINITION,
+    ENGINE_TASK_DEFINITION_ARN,
+    ENGINE_TASK_IMAGE_PULL_POLICY,
+    ENGINE_TASK_NETWORK_SECURITY_GROUP_ID,
+    ENGINE_TASK_NETWORK_SUBNET_IDS,
+    ENGINE_TASK_SERVICE_ACCOUNT_NAME,
+    ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED,
+    EXPERIMENT_TASK_DEFINITION,
+    EXPERIMENT_TASK_DEFINITION_ARN,
+    GCP_PROJECT_ID,
+    GCP_REGION,
+    GOOGLE_CLOUD_PROJECT,
+    LOCAL_PROVISIONER,
+    PROVISIONER_PATH,
+    QUEUE_CONFIG,
+    RANGE_EVENTS_TOPIC_ID,
+    SNS_RANGE_EVENTS_ARN,
+    SQS_QUEUE_CONFIG,
+    STORAGE_BUCKET_NAME,
+)
+from config._logging_config import LOG_LEVEL, LOGGING  # noqa: F401
+from config._terminal_assets import TERMINAL_CDN_ASSETS  # noqa: F401
 
 load_dotenv()
 
@@ -145,94 +187,9 @@ ASGI_APPLICATION = "config.asgi.application"
 # ------------------------------------------------------------------------------
 # Django Channels Configuration
 # ------------------------------------------------------------------------------
-
-
-# Redis for the channel layer (multi-instance pod deployment).
-#
-# Three runtime postures, in order of preference, derived from the env:
-#   1. REDIS_HOST empty       -> InMemoryChannelLayer (local dev,
-#                                pytest runs without a Redis dependency).
-#   2. REDIS_HOST set, no TLS -> channels_redis tuple host form (plaintext
-#                                Redis on a private network — the AWS and
-#                                pre-#963 GCP shape).
-#   3. REDIS_HOST + REDIS_TLS -> rediss://<password>@host:port/0 URL host.
-#                                REDIS_PASSWORD is hydrated by entrypoint.sh
-#                                from Secret Manager (ADR-008-R6).
-#
-# Fail closed when the TLS flag is on but no password was hydrated — silent
-# fallback to plaintext is the failure mode #963 was opened to close.
-def _build_channel_layers(env: Mapping[str, str]) -> dict[str, dict[str, object]]:
-    """Build CHANNEL_LAYERS from the given mapping (typically os.environ).
-
-    Pure function so it is unit-testable without touching real settings.
-    """
-    from django.core.exceptions import ImproperlyConfigured
-
-    host = env.get("REDIS_HOST", "").strip()
-    if not host:
-        return {
-            "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
-        }
-
-    port = int(env.get("REDIS_PORT", "6379"))
-    tls = env.get("REDIS_TLS", "").strip().lower() == "true"
-    if tls:
-        password = env.get("REDIS_PASSWORD", "").strip()
-        if not password:
-            raise ImproperlyConfigured(
-                "REDIS_TLS=true requires REDIS_PASSWORD (hydrated by entrypoint.sh "
-                "from Secret Manager); refusing to fall back to a plaintext connection"
-            )
-        # channels_redis (>= 4) accepts dict-form host entries; the dict is
-        # unpacked into `aioredis.ConnectionPool.from_url(address, **rest)`
-        # (see channels_redis/utils.py::create_pool), so redis-py's SSL
-        # kwargs flow through. SERVER_AUTHENTICATION on GCP Memorystore
-        # needs the instance CA to verify the server cert — when present,
-        # the CA PEM is passed via `ssl_ca_data` so we never have to write
-        # the cert to disk or mutate the system trust store. When absent
-        # (tests, or environments that haven't shipped the CA bundle yet),
-        # redis-py falls back to the system trust store with cert_reqs
-        # still required.
-        ca_pem = env.get("REDIS_CA_PEM", "")
-        if not ca_pem.strip():
-            # ADR-008-R6 fail-closed: the GCP runtime delivers the
-            # Memorystore server CA alongside the AUTH token in Secret
-            # Manager, and entrypoint.sh exports both as a unit. If the
-            # CA didn't make it into the env, either Terraform hasn't
-            # been re-applied with the new payload yet or the entrypoint
-            # block was bypassed — both are misconfigurations, not
-            # "fall back to system trust" cases. Memorystore uses a
-            # private CA, so the system trust store could not validate
-            # the cert anyway; this guard surfaces the misconfiguration
-            # at startup rather than as an opaque TLS handshake failure
-            # later.
-            raise ImproperlyConfigured(
-                "REDIS_TLS=true requires REDIS_CA_PEM (hydrated by entrypoint.sh "
-                "from the Memorystore server_ca_cert in Secret Manager); refusing "
-                "to fall back to the system trust store, which cannot validate the "
-                "Memorystore private CA"
-            )
-        address = f"rediss://:{password}@{host}:{port}/0"
-        # Use the raw CA value (do not strip) — the PEM block's
-        # trailing newline matters for some TLS implementations and the
-        # canonical form ends with one.
-        host_entry = {
-            "address": address,
-            "ssl_cert_reqs": "required",
-            "ssl_ca_data": ca_pem,
-        }
-        hosts: list[object] = [host_entry]
-    else:
-        hosts = [(host, port)]
-
-    return {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": hosts},
-        },
-    }
-
-
+# Channel-layer construction lives in ``config._channels`` so this module
+# stays under the 500-line cap. See that module's docstring for the
+# AWS/GCP TLS posture matrix.
 REDIS_HOST = os.environ.get("REDIS_HOST", "")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 CHANNEL_LAYERS = _build_channel_layers(os.environ)
@@ -295,33 +252,6 @@ else:
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
 
-# Terminal CDN assets (xterm.js + addons + split.js). Centralised so the
-# terminal template references symbolic names instead of inline absolute
-# URIs (Sonar Web:S1829 hardens this surface). When bumping a pin update
-# both `url` and `integrity` together.
-TERMINAL_CDN_ASSETS = {
-    "xterm_css": {
-        "url": "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css",
-        "integrity": "sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh",
-    },
-    "xterm_js": {
-        "url": "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js",
-        "integrity": "sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH",
-    },
-    "xterm_addon_fit": {
-        "url": "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js",
-        "integrity": "sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn",
-    },
-    "xterm_addon_web_links": {
-        "url": "https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js",
-        "integrity": "sha384-iAAiqSZrWZz/YKZSTKOPNaRhVOg9JY14avg2EWEpYNnUsrnATA+Sg8pV7mak84/G",
-    },
-    "split_js": {
-        "url": "https://unpkg.com/split.js@1.6.5/dist/split.min.js",
-        "integrity": "",
-    },
-}
-
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -354,119 +284,41 @@ if not DEBUG:
 # ------------------------------------------------------------------------------
 # Authentication
 # ------------------------------------------------------------------------------
-
-if AUTH_PROVIDER == "identity_platform":
-    AUTHENTICATION_BACKENDS = [
-        "config.identity_platform.IdentityPlatformBackend",
-        "django.contrib.auth.backends.ModelBackend",
-    ]
-else:
-    AUTHENTICATION_BACKENDS = [
-        "config.oidc.ShifterOIDCBackend",
-        "django.contrib.auth.backends.ModelBackend",
-    ]
-
-# Magic link authentication (PLAT-101)
-MAGIC_LINK_EXPIRY_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRY_HOURS", "24"))
-MAGIC_LINK_SINGLE_USE = _env_bool("MAGIC_LINK_SINGLE_USE", False)
-
-# OIDC settings - loaded from environment for AWS/Cognito deployments.
-OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "test-oidc-client-id" if IS_TEST_RUN else "")
-OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "test-oidc-client-secret" if IS_TEST_RUN else "")
-IDENTITY_PLATFORM_API_KEY = os.environ.get("IDENTITY_PLATFORM_API_KEY", "")
-IDENTITY_PLATFORM_PROJECT_ID = os.environ.get("IDENTITY_PLATFORM_PROJECT_ID", "")
-IDENTITY_PLATFORM_AUTH_DOMAIN = os.environ.get("IDENTITY_PLATFORM_AUTH_DOMAIN", "")
-IDENTITY_ALLOWED_EMAIL_DOMAIN = os.environ.get("IDENTITY_ALLOWED_EMAIL_DOMAIN", "paloaltonetworks.com")
-IDENTITY_ALLOWED_EMAILS = _env_csv("IDENTITY_ALLOWED_EMAILS")
-IDENTITY_PLATFORM_ISSUER = os.environ.get("IDENTITY_PLATFORM_ISSUER", "Shifter")
-IDENTITY_PLATFORM_TOTP_DISPLAY_NAME = os.environ.get(
-    "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
-    "Shifter Authenticator",
+# Authentication backends, OIDC endpoint discovery, magic-link config,
+# and ``OIDC_EXEMPT_URLS`` are defined in ``config._oidc_settings`` so
+# this module stays under the 500-line cap. Re-exported via star-import
+# here (``noqa`` suppresses the unused/ambiguous-import warnings — these
+# names are part of the public Django settings surface).
+from config._oidc_settings import (  # noqa: E402, F401
+    AUTHENTICATION_BACKENDS,
+    IDENTITY_ALLOWED_EMAIL_DOMAIN,
+    IDENTITY_ALLOWED_EMAILS,
+    IDENTITY_PLATFORM_API_KEY,
+    IDENTITY_PLATFORM_AUTH_DOMAIN,
+    IDENTITY_PLATFORM_ISSUER,
+    IDENTITY_PLATFORM_PROJECT_ID,
+    IDENTITY_PLATFORM_TOTP_DISPLAY_NAME,
+    LOGIN_REDIRECT_URL,
+    LOGIN_URL,
+    LOGOUT_REDIRECT_URL,
+    MAGIC_LINK_EXPIRY_HOURS,
+    MAGIC_LINK_SINGLE_USE,
+    OIDC_CREATE_USER,
+    OIDC_EXEMPT_URLS,
+    OIDC_OP_AUTHORIZATION_ENDPOINT,
+    OIDC_OP_JWKS_ENDPOINT,
+    OIDC_OP_LOGOUT_URL_METHOD,
+    OIDC_OP_TOKEN_ENDPOINT,
+    OIDC_OP_USER_ENDPOINT,
+    OIDC_RP_CLIENT_ID,
+    OIDC_RP_CLIENT_SECRET,
+    OIDC_RP_SCOPES,
+    OIDC_RP_SIGN_ALGO,
+    OIDC_USERNAME_ALGO,
+    PLATFORM_BOOTSTRAP_STAFF_EMAILS,
+    PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS,
+    SESSION_COOKIE_AGE,
 )
-PLATFORM_BOOTSTRAP_STAFF_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_STAFF_EMAILS")
-PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS")
-
-# Cognito endpoints
-# Cognito has two different base URLs:
-# - Auth domain: for OAuth endpoints (authorize, token, userInfo)
-# - Issuer URL: for JWKS (token verification)
-_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "https://auth.example.test" if IS_TEST_RUN else "")
-_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "https://issuer.example.test" if IS_TEST_RUN else "")
-
-# Always define OIDC_OP_* variables to avoid runtime errors.
-# ``_oidc_placeholder`` indirection sidesteps bandit's B105 false-positive
-# on the empty-string literal for *_TOKEN_ENDPOINT (the variable name
-# pattern-matches as suspicious) without needing per-line `# nosec`
-# markers that fight Sonar's S139 trailing-comment rule.
-_oidc_placeholder = ""
-OIDC_OP_AUTHORIZATION_ENDPOINT = _oidc_placeholder
-OIDC_OP_TOKEN_ENDPOINT = _oidc_placeholder
-OIDC_OP_USER_ENDPOINT = _oidc_placeholder
-OIDC_OP_JWKS_ENDPOINT = _oidc_placeholder
-
-if AUTH_PROVIDER == "oidc" and _oidc_auth_domain and _oidc_issuer:
-    # OAuth endpoints use the auth domain
-    OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_auth_domain}/oauth2/authorize"
-    OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_auth_domain}/oauth2/token"
-    OIDC_OP_USER_ENDPOINT = f"{_oidc_auth_domain}/oauth2/userInfo"
-    # JWKS uses the issuer URL
-    OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
-else:
-    import warnings
-
-    if AUTH_PROVIDER == "oidc":
-        warnings.warn(
-            "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-# Token verification
-OIDC_RP_SIGN_ALGO = "RS256"
-
-# User mapping - Cognito uses 'email' claim
-OIDC_RP_SCOPES = "openid email profile"
-
-# Redirect after login/logout
-# Uses the dashboard router to redirect users based on their user type
-LOGIN_REDIRECT_URL = "/dashboard/"
-LOGOUT_REDIRECT_URL = "/"
-
-# Login URL - dev bypass in DEBUG, provider router in production
-LOGIN_URL = "/dev-login/" if DEBUG else "platform_login"
-
-# OIDC logout endpoint - clears the identity provider session in addition to Django session
-OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url" if AUTH_PROVIDER == "oidc" else ""
-
-# Create users on first login
-OIDC_CREATE_USER = True
-
-# Use email as username (default is sha1 hash of email)
-OIDC_USERNAME_ALGO = "config.oidc.generate_username"
-
-# URLs exempt from OIDC authentication (public pages)
-# Must be URL paths starting with "/" or view names (not regex patterns)
-OIDC_EXEMPT_URLS = [
-    # Landing page
-    "/",
-    # Health check
-    "/health",
-    # Health check with trailing slash
-    "/health/",
-    # View enforces production blocking directly
-    "/dev-login/",
-    # View enforces production blocking directly
-    "/dev-logout/",
-    # CTF magic link registration (token is the auth)
-    "/ctf/register/",
-    # CTF help page
-    "/ctf/help/",
-]
-
-# Session cookie lifetime — makes Django's 14-day default explicit.
-# CTF participants auth via magic link (ModelBackend), so OIDC SessionRefresh
-# won't expire their sessions. This ensures no surprises from Django defaults.
-# 14 days
-SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
 
 # ------------------------------------------------------------------------------
 # Field Encryption (django-encrypted-model-fields)
@@ -493,85 +345,6 @@ SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "noreply@shifter
 # UI fallback is 60 min if not provided (avoids long range standup issues during testing)
 # 30 minutes
 PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000
-
-# ------------------------------------------------------------------------------
-# Cloud Provider Configuration
-# ------------------------------------------------------------------------------
-
-# Which cloud provider to use: "aws" (default) or "gcp" (future)
-CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
-GOOGLE_CLOUD_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
-GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID") or GOOGLE_CLOUD_PROJECT
-GCP_REGION = os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION", "")
-
-# Generic names — adapters use these; AWS-specific names kept as fallbacks
-CLOUD_REGION = (
-    os.environ.get("CLOUD_REGION") or os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
-)
-STORAGE_BUCKET_NAME = os.environ.get("STORAGE_BUCKET_NAME") or os.environ.get("AWS_S3_BUCKET_NAME", "")
-
-# ------------------------------------------------------------------------------
-# AWS S3 Configuration
-# ------------------------------------------------------------------------------
-
-# Backward compat alias
-AWS_S3_BUCKET_NAME = STORAGE_BUCKET_NAME
-# Backward compat alias
-AWS_S3_REGION = CLOUD_REGION
-# Backward compat alias
-AWS_REGION = CLOUD_REGION
-# LocalStack support
-AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")
-
-# Topic for publishing events (provisioner -> workers)
-RANGE_EVENTS_TOPIC_ID = os.environ.get("RANGE_EVENTS_TOPIC_ID") or os.environ.get("SNS_RANGE_EVENTS_ARN", "")
-# Backward compat alias
-SNS_RANGE_EVENTS_ARN = RANGE_EVENTS_TOPIC_ID
-
-# Shifter Engine task runner configuration.
-# AWS uses ECS-compatible values. GCP uses a Kubernetes namespace plus a
-# container image that the GKE-native task runner launches as a Job.
-ENGINE_TASK_CLUSTER = (
-    os.environ.get("ENGINE_TASK_NAMESPACE")
-    or os.environ.get("ENGINE_TASK_CLUSTER")
-    or os.environ.get("ENGINE_JOB_LOCATION")
-    or os.environ.get("ENGINE_ECS_CLUSTER_ARN")
-    or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
-)
-ENGINE_TASK_DEFINITION = (
-    os.environ.get("ENGINE_TASK_DEFINITION")
-    or os.environ.get("ENGINE_TASK_IMAGE")
-    or os.environ.get("ENGINE_TASK_DEFINITION_ARN")
-    or os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
-)
-ENGINE_TASK_SERVICE_ACCOUNT_NAME = os.environ.get("ENGINE_TASK_SERVICE_ACCOUNT_NAME", "")
-ENGINE_TASK_IMAGE_PULL_POLICY = os.environ.get("ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent")
-ENGINE_TASK_BACKOFF_LIMIT = int(os.environ.get("ENGINE_TASK_BACKOFF_LIMIT", "0"))
-ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED = int(os.environ.get("ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED", "3600"))
-ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = (
-    os.environ.get("ENGINE_TASK_NETWORK_SECURITY_GROUP_ID")
-    or os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID")
-    or os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
-)
-ENGINE_TASK_NETWORK_SUBNET_IDS = (
-    os.environ.get("ENGINE_TASK_NETWORK_SUBNET_IDS")
-    or os.environ.get("ENGINE_PRIVATE_SUBNET_IDS")
-    or os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
-)
-
-# Backward compat aliases for existing AWS call sites and tests
-ENGINE_ECS_CLUSTER_ARN = ENGINE_TASK_CLUSTER
-ENGINE_TASK_DEFINITION_ARN = ENGINE_TASK_DEFINITION
-ENGINE_ECS_SECURITY_GROUP_ID = ENGINE_TASK_NETWORK_SECURITY_GROUP_ID
-ENGINE_PRIVATE_SUBNET_IDS = ENGINE_TASK_NETWORK_SUBNET_IDS
-EXPERIMENT_TASK_DEFINITION = os.environ.get("EXPERIMENT_TASK_DEFINITION") or os.environ.get(
-    "EXPERIMENT_TASK_DEFINITION_ARN", ""
-)
-EXPERIMENT_TASK_DEFINITION_ARN = EXPERIMENT_TASK_DEFINITION
-
-# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
-LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
-PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
 
 # Agent upload limits
 # 2GB max per file
@@ -618,46 +391,6 @@ GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
 GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMOLE_BASE_URL
 
 # ------------------------------------------------------------------------------
-# SQS Worker Configuration
-# ------------------------------------------------------------------------------
-# Queue identifiers are passed via environment variables by the deployment workflow.
-# On AWS the consumer and publisher both use the same SQS URL. On GCP workers
-# consume Pub/Sub subscriptions while publishers target topics, so the config
-# allows those identifiers to diverge without changing existing AWS call sites.
-
-
-def _build_queue_config(name: str, legacy_env: str, handler: str) -> dict[str, str]:
-    """Read consumer/publisher IDs for a named queue, honoring legacy env-var aliases."""
-    consumer_id = (
-        os.environ.get(f"QUEUE_{name}_CONSUMER_ID")
-        or os.environ.get(f"QUEUE_{name}_ID")
-        or os.environ.get(legacy_env, "")
-    )
-    publisher_id = (
-        os.environ.get(f"QUEUE_{name}_PUBLISHER_ID") or os.environ.get(f"QUEUE_{name}_TOPIC_ID") or consumer_id
-    )
-    return {
-        "url": consumer_id,
-        "consumer_id": consumer_id,
-        "publisher_id": publisher_id,
-        "handler": handler,
-    }
-
-
-QUEUE_CONFIG = {
-    "cms": _build_queue_config("CMS", "SQS_CMS_URL", "cms.handlers.process_event"),
-    "engine": _build_queue_config("ENGINE", "SQS_ENGINE_URL", "engine.handlers.process_event"),
-    "mc": _build_queue_config("MC", "SQS_MC_URL", "mission_control.handlers.process_event"),
-    "experiments": _build_queue_config(
-        "EXPERIMENTS",
-        "SQS_EXPERIMENTS_URL",
-        "cms.experiments.handlers.process_event",
-    ),
-}
-# Backward compat alias
-SQS_QUEUE_CONFIG = QUEUE_CONFIG
-
-# ------------------------------------------------------------------------------
 # CTF Configuration
 # ------------------------------------------------------------------------------
 
@@ -698,82 +431,7 @@ DEV_LOGIN_ALLOWED_CIDRS = _env_list("DEV_LOGIN_ALLOWED_CIDRS")
 # ------------------------------------------------------------------------------
 # Logging Configuration
 # ------------------------------------------------------------------------------
-# ECS-formatted logging for XDR/XSIAM ingestion
-# See config/logging.py for ECSFormatter implementation
-# Import must be inline to avoid E402 (settings.py is special)
-
-# Log level: DEBUG for dev, INFO for production
-# Set LOG_LEVEL=DEBUG in dev to see routing/tracing logs
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "ecs": {
-            "()": "config.logging.ECSFormatter",
-        },
-        "verbose": {
-            "format": "{levelname} {asctime} {module} {message}",
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "ecs",
-        },
-    },
-    "root": {
-        "handlers": ["console"],
-        "level": LOG_LEVEL,
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console"],
-            # Keep Django framework logs at INFO
-            "level": "INFO",
-            "propagate": False,
-        },
-        "django.request": {
-            "handlers": ["console"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "django.security": {
-            "handlers": ["console"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "mission_control": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "engine": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "cms": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "cms.experiments": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "config": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "ctf": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-    },
-}
+# ECS-formatted logging for XDR/XSIAM ingestion lives in ``config.logging``
+# (formatter) and ``config._logging_config`` (dictConfig). ``LOGGING`` and
+# ``LOG_LEVEL`` are re-exported at the top of this file via star-equivalent
+# named imports.

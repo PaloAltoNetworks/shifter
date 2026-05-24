@@ -29,9 +29,10 @@ from ._common import _get_user, _render_via_pkg
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
-    from pydantic import BaseModel
 
-    from shared.schemas import CredentialRef
+    from shared.schemas import CredentialRef, DeploymentProfileSpec, SCMCredentialSpec
+
+    CredentialSpec = SCMCredentialSpec | DeploymentProfileSpec
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ def credential_add(request: HttpRequest) -> HttpResponse:
     return _render_via_pkg(request, "mission_control/credentials/add.html", context)
 
 
-def _validate_credential_spec(data: dict[str, Any], credential_type_slug: str) -> BaseModel:
+def _validate_credential_spec(data: dict[str, Any], credential_type_slug: str) -> CredentialSpec:
     """Validate the create-credential payload via the matching Pydantic spec."""
     from pydantic import ValidationError as PydanticValidationError
 

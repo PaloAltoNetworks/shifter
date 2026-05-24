@@ -59,6 +59,15 @@ pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
 addopts = "-n auto --maxprocesses=4 --dist loadscope --reuse-db"
 
 [tool.coverage.run]
+# ``source = ["."]`` makes coverage record paths from the
+# shifter_platform package root so coverage.xml has unambiguous
+# repo-relative names (``cms/services/_common.py`` rather than
+# ``services/_common.py`` rooted at the ``cms`` source directory).
+# Without this, SonarCloud cannot disambiguate when two Django apps
+# happen to share a sub-path (e.g. ``cms/services/_common.py`` and
+# ``engine/services/_common.py``) and attributes coverage to whichever
+# source root it picks, leaving the loser at 0%.
+source = ["."]
 omit = [
     "tests/conftest.py",
     "tests/*/conftest.py",

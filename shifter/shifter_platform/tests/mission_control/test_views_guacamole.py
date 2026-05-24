@@ -1,0 +1,300 @@
+"""Tests for mission_control.views._guacamole — RDP and range-SSH URL endpoints.
+
+NGFW SSH paths are exercised separately in ``test_api_ngfw_ssh_url.py``.
+"""
+
+from __future__ import annotations
+
+import json
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
+from django.test import RequestFactory
+
+
+@pytest.fixture
+def rf():
+    return RequestFactory()
+
+
+@pytest.fixture
+def mock_user():
+    user = MagicMock()
+    user.id = 1
+    user.email = "u@example.com"
+    user.is_authenticated = True
+    return user
+
+
+def _post(rf, path, payload, user):
+    body = json.dumps(payload) if not isinstance(payload, str) else payload
+    req = rf.post(path, data=body, content_type="application/json")
+    req.user = user
+    req.session = {}
+    return req
+
+
+# ---------------------------------------------------------------------------
+# guacamole_rdp_url
+# ---------------------------------------------------------------------------
+
+
+class TestGuacamoleRDPURL:
+    def test_returns_400_for_invalid_json(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_rdp_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        request = _post(rf, "/mc/guac/rdp/", "not json", mock_user)
+        response = guacamole_rdp_url(request)
+        assert response.status_code == 400
+
+    def test_returns_400_when_instance_uuid_missing(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_rdp_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        request = _post(rf, "/mc/guac/rdp/", {}, mock_user)
+        response = guacamole_rdp_url(request)
+        assert response.status_code == 400
+
+    def test_returns_503_when_secret_not_configured(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_rdp_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = ""
+        request = _post(rf, "/mc/guac/rdp/", {"instance_uuid": str(uuid4())}, mock_user)
+        conn_info = {
+            "os_type": "windows",
+            "connection_name": "vm-1",
+            "private_ip": "10.0.0.1",
+            "rdp_username": "Admin",
+            "rdp_password": "pw",
+            "ssh_key": None,
+        }
+        with patch("engine.services.get_rdp_connection_info", return_value=conn_info):
+            response = guacamole_rdp_url(request)
+        assert response.status_code == 503
+
+    def test_returns_400_when_engine_raises_valueerror(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_rdp_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        request = _post(rf, "/mc/guac/rdp/", {"instance_uuid": str(uuid4())}, mock_user)
+        with patch(
+            "engine.services.get_rdp_connection_info",
+            side_effect=ValueError("not ready"),
+        ):
+            response = guacamole_rdp_url(request)
+        assert response.status_code == 400
+
+    def test_returns_url_on_success(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_rdp_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        settings.GUACAMOLE_BASE_URL = "https://guac.example.com"
+        request = _post(rf, "/mc/guac/rdp/", {"instance_uuid": str(uuid4())}, mock_user)
+        conn_info = {
+            "os_type": "kali",
+            "connection_name": "vm-1",
+            "private_ip": "10.0.0.1",
+            "rdp_username": "kali",
+            "rdp_password": "pw",
+            "ssh_key": "key",
+        }
+        with (
+            patch("engine.services.get_rdp_connection_info", return_value=conn_info),
+            patch(
+                "mission_control.guacamole.create_guacamole_rdp_url",
+                return_value="https://guac/abc",
+            ),
+        ):
+            response = guacamole_rdp_url(request)
+        assert response.status_code == 200
+        assert json.loads(response.content)["url"] == "https://guac/abc"
+
+    def test_returns_500_when_url_generation_raises(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_rdp_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        request = _post(rf, "/mc/guac/rdp/", {"instance_uuid": str(uuid4())}, mock_user)
+        conn_info = {
+            "os_type": "ubuntu",
+            "connection_name": "vm-1",
+            "private_ip": "10.0.0.1",
+            "rdp_username": "u",
+            "rdp_password": "p",
+            "ssh_key": None,
+        }
+        with (
+            patch("engine.services.get_rdp_connection_info", return_value=conn_info),
+            patch(
+                "mission_control.guacamole.create_guacamole_rdp_url",
+                side_effect=ValueError("bad"),
+            ),
+        ):
+            response = guacamole_rdp_url(request)
+        assert response.status_code == 500
+
+
+class TestSftpRootHelper:
+    def test_known_os_returns_path(self):
+        from mission_control.views._guacamole import _sftp_root_for_os
+
+        assert _sftp_root_for_os("kali") == "/home/kali"
+        assert _sftp_root_for_os("ubuntu") == "/home/ubuntu"
+        assert _sftp_root_for_os("windows").startswith("/C:")
+
+    def test_unknown_os_returns_none(self):
+        from mission_control.views._guacamole import _sftp_root_for_os
+
+        assert _sftp_root_for_os("unknown") is None
+
+    def test_none_returns_none(self):
+        from mission_control.views._guacamole import _sftp_root_for_os
+
+        assert _sftp_root_for_os(None) is None
+
+
+# ---------------------------------------------------------------------------
+# guacamole_ssh_url (range SSH)
+# ---------------------------------------------------------------------------
+
+
+class TestGuacamoleSSHURL:
+    def _ssh_info(self):
+        return {
+            "connection_name": "kali-1",
+            "host": "10.0.0.2",
+            "port": 22,
+            "username": "kali",
+            "private_key": "PEM",
+            "cloud_provider": "aws",
+        }
+
+    def test_returns_400_for_invalid_json(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", "not json", mock_user)
+        response = guacamole_ssh_url(request)
+        assert response.status_code == 400
+
+    def test_returns_400_when_instance_uuid_missing(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {}, mock_user)
+        response = guacamole_ssh_url(request)
+        assert response.status_code == 400
+
+    def test_returns_400_when_engine_raises_valueerror(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": str(uuid4())}, mock_user)
+        with patch(
+            "engine.services.get_ssh_connection_info",
+            side_effect=ValueError("no ssh"),
+        ):
+            response = guacamole_ssh_url(request)
+        assert response.status_code == 400
+
+    def test_returns_400_when_engine_raises_permission_error(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": str(uuid4())}, mock_user)
+        with patch(
+            "engine.services.get_ssh_connection_info",
+            side_effect=PermissionError("denied"),
+        ):
+            response = guacamole_ssh_url(request)
+        assert response.status_code == 400
+
+    def test_returns_500_when_engine_raises_unexpected(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": str(uuid4())}, mock_user)
+        with patch(
+            "engine.services.get_ssh_connection_info",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = guacamole_ssh_url(request)
+        assert response.status_code == 500
+
+    def test_returns_url_on_success(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": str(uuid4())}, mock_user)
+        with (
+            patch("engine.services.get_ssh_connection_info", return_value=self._ssh_info()),
+            patch(
+                "mission_control.guacamole.create_guacamole_ssh_url",
+                return_value="https://guac/x",
+            ),
+        ):
+            response = guacamole_ssh_url(request)
+        assert response.status_code == 200
+        assert json.loads(response.content)["url"] == "https://guac/x"
+
+    def test_returns_500_when_url_gen_raises_valueerror(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": str(uuid4())}, mock_user)
+        with (
+            patch("engine.services.get_ssh_connection_info", return_value=self._ssh_info()),
+            patch(
+                "mission_control.guacamole.create_guacamole_ssh_url",
+                side_effect=ValueError("bad"),
+            ),
+        ):
+            response = guacamole_ssh_url(request)
+        assert response.status_code == 500
+
+    def test_returns_500_when_url_gen_raises_unexpected(self, rf, mock_user, settings):
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": str(uuid4())}, mock_user)
+        with (
+            patch("engine.services.get_ssh_connection_info", return_value=self._ssh_info()),
+            patch(
+                "mission_control.guacamole.create_guacamole_ssh_url",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            response = guacamole_ssh_url(request)
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# api_ngfw_ssh_url — additional error branches
+# ---------------------------------------------------------------------------
+
+
+class TestApiNGFWSSHURLErrorPaths:
+    def test_returns_400_on_permission_error(self, rf, mock_user, settings):
+        from mission_control.views import api_ngfw_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/ngfw/x/ssh/", {}, mock_user)
+        with patch(
+            "engine.services.connect_ngfw_terminal",
+            side_effect=PermissionError("denied"),
+        ):
+            response = api_ngfw_ssh_url(request, str(uuid4()))
+        assert response.status_code == 400
+
+    def test_returns_500_on_unexpected_error(self, rf, mock_user, settings):
+        from mission_control.views import api_ngfw_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/ngfw/x/ssh/", {}, mock_user)
+        with patch(
+            "engine.services.connect_ngfw_terminal",
+            side_effect=RuntimeError("kaboom"),
+        ):
+            response = api_ngfw_ssh_url(request, str(uuid4()))
+        assert response.status_code == 500

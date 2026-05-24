@@ -19,9 +19,10 @@ from dotenv import load_dotenv
 
 # Sub-module re-exports. Each sub-module declares ``__all__`` so the
 # wildcard surfaces only the names that are part of the public Django
-# settings contract. ``NOSONAR`` silences Sonar's S2208 (no-wildcard)
-# guidance — for a settings module the wildcard is the contract
-# (Django's official split-settings pattern uses ``from .base import *``).
+# settings contract. The wildcard suppressions on each line below
+# silence Sonar's S2208 (no-wildcard) guidance — for a settings module
+# the wildcard *is* the contract (Django's official split-settings
+# pattern uses ``from .base import *``).
 from config._channels import *  # NOSONAR
 from config._channels import _build_channel_layers
 from config._cloud import *  # NOSONAR

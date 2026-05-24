@@ -26,6 +26,7 @@ from cms.services import (
     list_ngfws as cms_list_ngfws,
 )
 from shared.exceptions import CMSError
+from shared.log_sanitize import safe_log_value
 
 from ._common import (
     NGFW_NOT_FOUND,
@@ -223,5 +224,9 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
     except _NgfwError as err:
         return err.response
 
-    logger.info("NGFW deprovisioning started: user=%s app_id=%s", user.email, app_id)
+    logger.info(
+        "NGFW deprovisioning started: user=%s app_id=%s",
+        safe_log_value(user.email),
+        safe_log_value(app_id),
+    )
     return JsonResponse({"status": "deprovisioning"})

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from cms.exceptions import CMSError
 from cms.models import AgentConfig
+from shared.log_sanitize import safe_log_value
 
 from ._common import _validate_caller_user, _validate_nonempty_str, _validate_positive_int
 
@@ -231,7 +232,7 @@ def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_i
         logger.warning(
             "complete_upload: header inspection rejected upload user_id=%s s3_key=%s expected=%s reason=%s",
             user_id,
-            s3_key,
+            safe_log_value(s3_key),
             expected_format.description,
             exc,
         )
@@ -241,7 +242,7 @@ def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_i
             logger.exception(
                 "complete_upload: delete after inspection failure also failed user_id=%s s3_key=%s",
                 user_id,
-                s3_key,
+                safe_log_value(s3_key),
             )
         raise CMSError("Uploaded content does not match the declared installer format") from exc
 

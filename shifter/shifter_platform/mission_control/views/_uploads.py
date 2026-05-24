@@ -19,7 +19,9 @@ from mission_control.upload_session import (
     check_upload_in_progress,
     set_upload_in_progress,
 )
+from shared.errors import UserFacingError
 from shared.exceptions import CMSError
+from shared.log_sanitize import safe_log_value
 
 from ._common import _get_user
 
@@ -101,15 +103,15 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
         try:
             result = cms_initiate_upload(user, name, filename, file_size, agent_type)
         except CMSError as e:
-            raise _UploadError(JsonResponse({"error": str(e)}, status=400)) from e
+            raise _UploadError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except _UploadError as err:
         return err.response
 
     set_upload_in_progress(request.session, True)
     logger.info(
         "Upload initiated: user=%s filename=%s size=%d",
-        user.email,
-        filename,
+        safe_log_value(user.email),
+        safe_log_value(filename),
         file_size,
     )
     return JsonResponse(result)
@@ -140,7 +142,7 @@ def complete_upload(request: HttpRequest) -> JsonResponse:
         agent = cms_complete_upload(user, upload_token)
     except CMSError as e:
         set_upload_in_progress(request.session, False)
-        return JsonResponse({"error": str(e)}, status=400)
+        return JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)
 
     set_upload_in_progress(request.session, False)
     logger.info("Upload completed: user=%s agent_id=%s", user.email, agent.id)

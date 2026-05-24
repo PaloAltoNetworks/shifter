@@ -12,6 +12,7 @@ from django.shortcuts import redirect
 from django.views.decorators.http import require_GET, require_POST
 
 from shared.exceptions import AssetError, CMSError
+from shared.log_sanitize import safe_log_value
 
 from ._common import (
     _cms_delete_agent_via_pkg,
@@ -57,12 +58,12 @@ def delete_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
     try:
         _cms_delete_agent_via_pkg(user, agent_id)
         messages.success(request, "Agent deleted.")
-        logger.info("Agent deleted: user=%s agent_id=%s", user.email, agent_id)
+        logger.info("Agent deleted: user=%s agent_id=%s", safe_log_value(user.email), agent_id)
     except (CMSError, AssetError) as e:
         messages.error(request, str(e))
         logger.exception(
             "Agent delete error: user=%s agent_id=%s",
-            user.email,
+            safe_log_value(user.email),
             agent_id,
         )
 

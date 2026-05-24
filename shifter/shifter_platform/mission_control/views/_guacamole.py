@@ -11,6 +11,9 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
+from shared.errors import UserFacingError
+from shared.log_sanitize import safe_log_value
+
 from ._common import (
     GUAC_AUTH_NOT_CONFIGURED,
     GUACAMOLE_BASE_PATH,
@@ -165,9 +168,9 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
         secret_key, guacamole_base_url, guacamole_api_url = _get_guac_settings("RDP")
         logger.info(
             "Guac RDP request: user=%s instance_uuid=%s os=%s sftp_key=%s",
-            user.email,
-            instance_uuid,
-            conn_info.get("os_type"),
+            safe_log_value(user.email),
+            safe_log_value(instance_uuid),
+            safe_log_value(conn_info.get("os_type")),
             "yes" if conn_info.get("ssh_key") else "no",
         )
         url = _generate_rdp_url(
@@ -182,8 +185,8 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
 
     logger.info(
         "Guacamole RDP URL generated: user=%s instance_uuid=%s",
-        user.email,
-        instance_uuid,
+        safe_log_value(user.email),
+        safe_log_value(instance_uuid),
     )
     return JsonResponse({"url": url})
 
@@ -202,18 +205,22 @@ def _resolve_ngfw_ssh(user: User, app_id: str) -> _SSHConn:
     except ValueError as e:
         logger.exception(
             "NGFW SSH access denied (ValueError): user=%s ngfw_uuid=%s",
-            user.email,
-            app_id,
+            safe_log_value(user.email),
+            safe_log_value(app_id),
         )
-        raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
+        raise _ViewError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except PermissionError as e:
-        logger.exception("NGFW SSH access denied (PermissionError): user=%s ngfw_uuid=%s", user.email, app_id)
-        raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
+        logger.exception(
+            "NGFW SSH access denied (PermissionError): user=%s ngfw_uuid=%s",
+            safe_log_value(user.email),
+            safe_log_value(app_id),
+        )
+        raise _ViewError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except Exception as e:
         logger.exception(
             "Unexpected error getting NGFW SSH connection: user=%s ngfw_uuid=%s",
-            user.email,
-            app_id,
+            safe_log_value(user.email),
+            safe_log_value(app_id),
         )
         raise _ViewError(JsonResponse({"error": INTERNAL_SERVER_ERROR}, status=500)) from e
 
@@ -244,10 +251,18 @@ def _generate_ngfw_ssh_url(
             api_base_url=guacamole_api_url,
         )
     except ValueError as e:
-        logger.exception("Failed to generate NGFW SSH URL: user=%s ngfw_uuid=%s", user_email, app_id)
+        logger.exception(
+            "Failed to generate NGFW SSH URL: user=%s ngfw_uuid=%s",
+            safe_log_value(user_email),
+            safe_log_value(app_id),
+        )
         raise _ViewError(JsonResponse({"error": "Failed to generate SSH URL"}, status=500)) from e
     except Exception as e:
-        logger.exception("Unexpected error generating NGFW SSH URL: user=%s ngfw_uuid=%s", user_email, app_id)
+        logger.exception(
+            "Unexpected error generating NGFW SSH URL: user=%s ngfw_uuid=%s",
+            safe_log_value(user_email),
+            safe_log_value(app_id),
+        )
         raise _ViewError(JsonResponse({"error": INTERNAL_SERVER_ERROR}, status=500)) from e
 
 
@@ -291,8 +306,8 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
 
     logger.info(
         "Guacamole SSH URL generated for NGFW: user=%s ngfw_uuid=%s",
-        user.email,
-        app_id,
+        safe_log_value(user.email),
+        safe_log_value(app_id),
     )
     return JsonResponse({"url": url})
 
@@ -311,22 +326,22 @@ def _resolve_range_ssh(user: User, instance_uuid: str) -> dict[str, Any]:
     except ValueError as e:
         logger.exception(
             "Range SSH access denied (ValueError): user=%s instance_uuid=%s",
-            user.email,
-            instance_uuid,
+            safe_log_value(user.email),
+            safe_log_value(instance_uuid),
         )
-        raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
+        raise _ViewError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except PermissionError as e:
         logger.exception(
             "Range SSH access denied (PermissionError): user=%s instance_uuid=%s",
-            user.email,
-            instance_uuid,
+            safe_log_value(user.email),
+            safe_log_value(instance_uuid),
         )
-        raise _ViewError(JsonResponse({"error": str(e)}, status=400)) from e
+        raise _ViewError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
     except Exception as e:
         logger.exception(
             "Unexpected error getting range SSH connection: user=%s instance_uuid=%s",
-            user.email,
-            instance_uuid,
+            safe_log_value(user.email),
+            safe_log_value(instance_uuid),
         )
         raise _ViewError(JsonResponse({"error": INTERNAL_SERVER_ERROR}, status=500)) from e
 
@@ -359,15 +374,15 @@ def _generate_range_ssh_url(
     except ValueError as e:
         logger.exception(
             "Failed to generate range SSH URL: user=%s instance_uuid=%s",
-            user_email,
-            instance_uuid,
+            safe_log_value(user_email),
+            safe_log_value(instance_uuid),
         )
         raise _ViewError(JsonResponse({"error": "Failed to generate SSH URL"}, status=500)) from e
     except Exception as e:
         logger.exception(
             "Unexpected error generating range SSH URL: user=%s instance_uuid=%s",
-            user_email,
-            instance_uuid,
+            safe_log_value(user_email),
+            safe_log_value(instance_uuid),
         )
         raise _ViewError(JsonResponse({"error": INTERNAL_SERVER_ERROR}, status=500)) from e
 
@@ -395,9 +410,9 @@ def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
 
     logger.info(
         "Guacamole SSH URL generated for range instance: user=%s instance_uuid=%s host=%s provider=%s",
-        user.email,
-        instance_uuid,
-        ssh_info["host"],
-        ssh_info.get("cloud_provider") or "unknown",
+        safe_log_value(user.email),
+        safe_log_value(instance_uuid),
+        safe_log_value(ssh_info["host"]),
+        safe_log_value(ssh_info.get("cloud_provider") or "unknown"),
     )
     return JsonResponse({"url": url})

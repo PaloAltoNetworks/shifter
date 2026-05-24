@@ -24,6 +24,7 @@ from cms.services import (
     list_credentials as cms_list_credentials,
 )
 from shared.exceptions import CMSError
+from shared.log_sanitize import safe_log_value
 
 from ._common import _get_user, _render_via_pkg
 
@@ -183,7 +184,7 @@ def api_credential_delete(request: HttpRequest, credential_id: int) -> JsonRespo
 
     logger.info(
         "Credential deleted: user=%s credential_id=%s",
-        user.email,
+        safe_log_value(user.email),
         credential_id,
     )
     return JsonResponse({"success": True})

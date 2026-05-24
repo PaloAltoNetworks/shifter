@@ -94,6 +94,32 @@ class TestInitiateUpload:
         assert response.status_code == 400
         assert "file too big" in json.loads(response.content)["error"]
 
+    def test_cms_error_message_is_sanitized_against_log_injection(self, rf, mock_user):
+        """An attacker-controlled exception message must not leak CR/LF into the response body.
+
+        Guards CodeQL ``py/stack-trace-exposure`` — the response body must come from
+        :class:`shared.errors.UserFacingError`, not raw ``str(exc)``.
+        """
+        from cms.exceptions import CMSError
+        from mission_control.views import initiate_upload
+
+        request = _post(
+            rf,
+            "/mc/api/upload/initiate/",
+            {"name": "n", "filename": "f.msi", "file_size": 10},
+            mock_user,
+        )
+        with patch(
+            "mission_control.views._uploads.cms_initiate_upload",
+            side_effect=CMSError("evil\r\nForged log entry"),
+        ):
+            response = initiate_upload(request)
+        body = json.loads(response.content)
+        assert response.status_code == 400
+        assert "\n" not in body["error"]
+        assert "\r" not in body["error"]
+        assert "Forged" in body["error"]  # whitespace-collapsed but text retained
+
     def test_returns_payload_and_sets_lock_on_success(self, rf, mock_user):
         from mission_control.views import initiate_upload
 

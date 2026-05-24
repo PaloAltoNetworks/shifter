@@ -21,6 +21,7 @@ from cms.services import (
     initiate_script_upload,
     list_scripts,
 )
+from shared.log_sanitize import safe_log_value
 
 from ._common import _get_user, _render_via_pkg
 
@@ -94,8 +95,8 @@ def _initiate_script(user: User, data: dict[str, Any]) -> JsonResponse:
 
     logger.info(
         "Script upload initiated: user=%s filename=%s size=%d",
-        user.email,
-        filename,
+        safe_log_value(user.email),
+        safe_log_value(filename),
         file_size,
     )
     return JsonResponse(result)
@@ -129,12 +130,12 @@ def file_delete(request: HttpRequest, script_id: int) -> HttpResponse:
     try:
         delete_script(user, script_id)
         messages.success(request, "Script deleted.")
-        logger.info("Script deleted: user=%s script_id=%s", user.email, script_id)
+        logger.info("Script deleted: user=%s script_id=%s", safe_log_value(user.email), script_id)
     except ScriptUploadError as e:
         messages.error(request, str(e))
         logger.exception(
             "Script delete error: user=%s script_id=%s",
-            user.email,
+            safe_log_value(user.email),
             script_id,
         )
 

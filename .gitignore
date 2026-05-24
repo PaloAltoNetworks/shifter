@@ -466,3 +466,7 @@ CLAUDE.local.md
 .gc/telemetry/
 
 temp/
+
+# Vale prose linter — vendored Google style package and binary install path.
+.vale/styles/
+.tools/

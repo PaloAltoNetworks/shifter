@@ -17,15 +17,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Sub-module star-imports — each sub-module declares ``__all__`` so the
+# Sub-module re-exports. Each sub-module declares ``__all__`` so the
 # wildcard surfaces only the names that are part of the public Django
-# settings contract. Sonar treats these as legitimate re-exports
-# (S1128 doesn't fire on a star-import that's covered by ``__all__``).
-from config._channels import *
+# settings contract. ``NOSONAR`` silences Sonar's S2208 (no-wildcard)
+# guidance — for a settings module the wildcard is the contract
+# (Django's official split-settings pattern uses ``from .base import *``).
+from config._channels import *  # NOSONAR
 from config._channels import _build_channel_layers
-from config._cloud import *
-from config._logging_config import *
-from config._terminal_assets import *
+from config._cloud import *  # NOSONAR
+from config._logging_config import *  # NOSONAR
+from config._terminal_assets import *  # NOSONAR
 
 load_dotenv()
 
@@ -263,7 +264,7 @@ if not DEBUG:
 # this module stays under the 500-line cap. Re-exported via star-import
 # here (``noqa`` suppresses the unused/ambiguous-import warnings — these
 # names are part of the public Django settings surface).
-from config._oidc_settings import *  # noqa: E402
+from config._oidc_settings import *  # noqa: E402  # NOSONAR
 
 # ------------------------------------------------------------------------------
 # Field Encryption (django-encrypted-model-fields)

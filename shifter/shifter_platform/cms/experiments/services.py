@@ -245,11 +245,14 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         # `complete_upload` invariant; without it a caller could initiate a
         # small-size upload and PUT a different-size object to the same key.
         if actual_size != expected_size:
+            # Inline CR/LF stripping at the call site so CodeQL's
+            # ``py/log-injection`` taint tracker recognises the sanitization.
+            safe_s3_key = str(s3_key).replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
             logger.warning(
                 "complete_script_upload: size mismatch s3_key=%s expected=%d actual=%d",
-                safe_log_value(s3_key),
-                expected_size,
-                actual_size,
+                safe_s3_key,
+                int(expected_size),
+                int(actual_size),
             )
             delete_s3_object(s3_key)
             raise ScriptUploadError(f"File size mismatch: expected {expected_size}, got {actual_size}")
@@ -308,12 +311,15 @@ def delete_script(user: User, script_id: int) -> None:
         ScriptUploadError: If script not found or not owned by user.
     """
     _validate_user(user, "delete_script")
-    logger.debug("delete_script called for user_id=%s script_id=%s", user.id, script_id)
+    # Coerce script_id through int() at the boundary so CodeQL sees a
+    # primitive-int barrier between user input and the log statements below.
+    script_id = int(script_id)
+    logger.debug("delete_script called for user_id=%s script_id=%d", user.id, script_id)
     try:
         try:
             script = ScriptAsset.objects.get(pk=script_id, user=user)
         except ScriptAsset.DoesNotExist:
-            logger.warning("delete_script: not found script_id=%s user_id=%s", script_id, user.pk)
+            logger.warning("delete_script: not found script_id=%d user_id=%s", script_id, user.pk)
             raise ScriptUploadError("Script not found or you don't have access") from None
         _check_result_type(script, ScriptAsset, "delete_script")
 
@@ -327,7 +333,7 @@ def delete_script(user: User, script_id: int) -> None:
             actor_id=user.id,
             previous_state={"name": script.name},
         )
-        logger.info("delete_script: soft-deleted script_id=%s user_id=%s", script_id, user.pk)
+        logger.info("delete_script: soft-deleted script_id=%d user_id=%s", script_id, user.pk)
     except (TypeError, ValueError, ExperimentError):
         raise
     except Exception:

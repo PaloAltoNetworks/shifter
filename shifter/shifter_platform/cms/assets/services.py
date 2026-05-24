@@ -73,13 +73,19 @@ def create_agent(
     Raises:
         AssetError: If the operating system is not found or agent_type is invalid
     """
+    # Inline CR/LF stripping at the call site so CodeQL's ``py/log-injection``
+    # taint tracker recognises the sanitization (routing through a helper
+    # function loses the connection).
+    safe_name = name.replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
+    safe_os_slug = os_slug.replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
+    safe_agent_type = agent_type.replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
     logger.debug(
         "create_agent: user_id=%s name=%s os_slug=%s file_size=%d agent_type=%s",
         user.id,
-        safe_log_value(name),
-        safe_log_value(os_slug),
+        safe_name,
+        safe_os_slug,
         file_size,
-        safe_log_value(agent_type),
+        safe_agent_type,
     )
 
     # Validate agent_type

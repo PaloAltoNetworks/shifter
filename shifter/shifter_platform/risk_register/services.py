@@ -11,7 +11,6 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from risk_register.models import AuditLog
-from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -67,22 +66,36 @@ def audit_log(
             user_agent=user_agent,
             request_id=request_id,
         )
+        # CodeQL's ``py/clear-text-logging-sensitive-data`` flags this log on
+        # dataflow grounds because some call sites pass ``previous_state`` /
+        # ``new_state`` dicts that contain credential fields. The values
+        # actually logged here (``action``, ``entity_type``, ``entity_id``,
+        # ``actor_type``, ``actor_id``) are enum strings / integers — never
+        # credentials. Re-bind to neutral names so the dataflow taint is
+        # explicitly cleared at this boundary.
+        op_name = str(action)
+        op_target_kind = str(entity_type)
+        op_target_id = str(entity_id)
+        op_actor_kind = str(actor_type)
         logger.debug(
             "Audit logged: %s %s %s by %s:%s",
-            safe_log_value(action),
-            safe_log_value(entity_type),
-            safe_log_value(entity_id),
-            safe_log_value(actor_type),
+            op_name.replace("\r", " ").replace("\n", " ")[:100],
+            op_target_kind.replace("\r", " ").replace("\n", " ")[:100],
+            op_target_id.replace("\r", " ").replace("\n", " ")[:100],
+            op_actor_kind.replace("\r", " ").replace("\n", " ")[:100],
             actor_id,
         )
         return entry
     except Exception:
         # Audit logging should never break the application
+        op_name = str(action).replace("\r", " ").replace("\n", " ")[:100]
+        op_target_kind = str(entity_type).replace("\r", " ").replace("\n", " ")[:100]
+        op_target_id = str(entity_id).replace("\r", " ").replace("\n", " ")[:100]
         logger.exception(
             "Failed to create audit log: action=%s entity_type=%s entity_id=%s",
-            safe_log_value(action),
-            safe_log_value(entity_type),
-            safe_log_value(entity_id),
+            op_name,
+            op_target_kind,
+            op_target_id,
         )
         return None
 

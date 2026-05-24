@@ -19,7 +19,7 @@ from mission_control.upload_session import (
     check_upload_in_progress,
     set_upload_in_progress,
 )
-from shared.errors import UserFacingError
+from shared.errors import classify_user_message
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
@@ -103,15 +103,29 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
         try:
             result = cms_initiate_upload(user, name, filename, file_size, agent_type)
         except CMSError as e:
-            raise _UploadError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+            logger.exception(
+                "Upload initiation failed: user=%s filename=%s",
+                safe_log_value(user.email),
+                safe_log_value(filename),
+            )
+            raise _UploadError(
+                JsonResponse(
+                    {"error": classify_user_message(str(e), default="Upload could not be initiated")}, status=400
+                )
+            ) from e
     except _UploadError as err:
         return err.response
 
     set_upload_in_progress(request.session, True)
+    # Inline CR/LF stripping so CodeQL recognises the sanitization. The chained
+    # ``.replace()`` calls are what its ``py/log-injection`` taint tracker
+    # accepts as a barrier; routing through a helper function loses that.
+    safe_filename = filename.replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
+    safe_email = user.email.replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
     logger.info(
         "Upload initiated: user=%s filename=%s size=%d",
-        safe_log_value(user.email),
-        safe_log_value(filename),
+        safe_email,
+        safe_filename,
         file_size,
     )
     return JsonResponse(result)
@@ -142,7 +156,10 @@ def complete_upload(request: HttpRequest) -> JsonResponse:
         agent = cms_complete_upload(user, upload_token)
     except CMSError as e:
         set_upload_in_progress(request.session, False)
-        return JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)
+        logger.exception("Upload completion failed: user=%s", user.pk)
+        return JsonResponse(
+            {"error": classify_user_message(str(e), default="Upload could not be completed")}, status=400
+        )
 
     set_upload_in_progress(request.session, False)
     logger.info("Upload completed: user=%s agent_id=%s", safe_log_value(user.email), agent.id)

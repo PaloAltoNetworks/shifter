@@ -21,7 +21,7 @@ from cms.services import (
     initiate_script_upload,
     list_scripts,
 )
-from shared.errors import UserFacingError
+from shared.errors import classify_user_message
 from shared.log_sanitize import safe_log_value
 
 from ._common import _get_user, _render_via_pkg
@@ -71,9 +71,12 @@ def _complete_script(user: User, upload_token: str) -> JsonResponse:
     try:
         script = complete_script_upload(user, upload_token)
     except ScriptUploadError as e:
-        return JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)
+        logger.exception("Script upload completion failed: user=%s", user.pk)
+        return JsonResponse(
+            {"error": classify_user_message(str(e), default="Upload could not be completed")}, status=400
+        )
 
-    logger.info("Script upload completed: user=%s script_id=%s", user.email, script.pk)
+    logger.info("Script upload completed: user=%s script_id=%s", safe_log_value(user.email), script.pk)
     return JsonResponse(
         {
             "success": True,
@@ -90,14 +93,24 @@ def _initiate_script(user: User, data: dict[str, Any]) -> JsonResponse:
         try:
             result = initiate_script_upload(user, name, filename, file_size)
         except ScriptUploadError as e:
-            raise _FileError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+            logger.exception("Script upload initiation failed: user=%s", user.pk)
+            raise _FileError(
+                JsonResponse(
+                    {"error": classify_user_message(str(e), default="Upload could not be initiated")}, status=400
+                )
+            ) from e
     except _FileError as err:
         return err.response
 
+    # Inline CR/LF stripping so CodeQL recognises the sanitization. The chained
+    # ``.replace()`` calls are what its ``py/log-injection`` taint tracker
+    # accepts as a barrier; routing through a helper function loses that.
+    safe_filename = filename.replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
+    safe_email = user.email.replace("\r", " ").replace("\n", " ").replace("\t", " ")[:200]
     logger.info(
         "Script upload initiated: user=%s filename=%s size=%d",
-        safe_log_value(user.email),
-        safe_log_value(filename),
+        safe_email,
+        safe_filename,
         file_size,
     )
     return JsonResponse(result)

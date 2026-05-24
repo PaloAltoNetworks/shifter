@@ -23,7 +23,7 @@ from cms.services import (
 from cms.services import (
     list_credentials as cms_list_credentials,
 )
-from shared.errors import UserFacingError
+from shared.errors import classify_user_message
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
@@ -118,12 +118,19 @@ def _persist_credential(user: User, credential_type_slug: str, kwargs: dict[str,
     try:
         return cms_create_credential(user, credential_type_slug, **kwargs)
     except (CMSError, ValueError) as e:
-        raise _CredentialError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+        logger.exception("Credential creation failed: user=%s type=%s", user.pk, credential_type_slug)
+        raise _CredentialError(
+            JsonResponse({"error": classify_user_message(str(e), default="Invalid credential data")}, status=400)
+        ) from e
     except ValidationError as e:
-        msg = e.message_dict.get("__all__", [str(e)])[0] if hasattr(e, "message_dict") else str(e)
-        if "unique_active_credential_name_per_user" in msg:
-            msg = "A credential with this name already exists"
-        raise _CredentialError(JsonResponse({"error": UserFacingError(msg).user_message}, status=400)) from e
+        raw = e.message_dict.get("__all__", [str(e)])[0] if hasattr(e, "message_dict") else str(e)
+        # Use authored literals — never the original message — for the response body.
+        if "unique_active_credential_name_per_user" in raw:
+            response_msg = "A credential with this name already exists"
+        else:
+            response_msg = "Invalid credential data"
+        logger.exception("Credential validation failed: user=%s type=%s", user.pk, credential_type_slug)
+        raise _CredentialError(JsonResponse({"error": response_msg}, status=400)) from e
 
 
 @login_required

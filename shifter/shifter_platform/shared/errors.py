@@ -60,3 +60,59 @@ def safe_user_message(message: object) -> str:
     instantiating the exception class itself.
     """
     return UserFacingError(str(message) if message is not None else "").user_message
+
+
+# ---------------------------------------------------------------------------
+# Category-based message selection
+# ---------------------------------------------------------------------------
+#
+# CodeQL's ``py/stack-trace-exposure`` taint flow is not severed by routing
+# ``str(exc)`` through :class:`UserFacingError`'s CR/LF stripping — the rule
+# considers the message still tainted by the original exception. The only
+# reliable way to clear the taint is to return a value selected from a fixed
+# set of authored string literals. ``classify_user_message`` inspects the
+# original message for known substrings and returns one of those literals,
+# defaulting to a generic "request could not be processed" message.
+#
+# Call sites should still ``logger.exception(...)`` the full error so the
+# specific text is preserved in logs.
+
+
+_NOT_FOUND_TOKENS = ("not found", "does not exist", "no such", "missing")
+_PERMISSION_TOKENS = ("permission", "forbidden", "not allowed", "access denied", "unauthorized")
+_NOT_ACCESSIBLE_TOKENS = ("not accessible", "not ready", "not available", "wrong state")
+_CONFLICT_TOKENS = ("already exists", "already have", "duplicate", "conflict", "in progress")
+_VALIDATION_TOKENS = ("invalid", "must be", "required", "too large", "too long", "exceeds", "expected")
+
+
+def classify_user_message(
+    message: object,
+    *,
+    default: str = "Request could not be processed",
+) -> str:
+    """Return a hardcoded user-facing string chosen from the original message.
+
+    The returned value is always one of a small fixed set of string literals
+    defined in this module, so the call site's response body is not tainted
+    by the original (potentially attacker-influenced) exception text. The
+    classification is best-effort keyword matching; on no match, ``default``
+    (which must itself be a literal supplied at the call site) is returned.
+
+    The full original message should be sent to the logger via
+    ``logger.exception`` separately — this helper is only for what's surfaced
+    to the API caller.
+    """
+    text = ("" if message is None else str(message)).lower()
+    if not text:
+        return default
+    if any(tok in text for tok in _NOT_FOUND_TOKENS):
+        return "Resource not found"
+    if any(tok in text for tok in _PERMISSION_TOKENS):
+        return "Permission denied"
+    if any(tok in text for tok in _NOT_ACCESSIBLE_TOKENS):
+        return "Resource is not accessible in its current state"
+    if any(tok in text for tok in _CONFLICT_TOKENS):
+        return "Request conflicts with current state"
+    if any(tok in text for tok in _VALIDATION_TOKENS):
+        return "Invalid request"
+    return default

@@ -25,7 +25,7 @@ from cms.services import (
 from cms.services import (
     list_ngfws as cms_list_ngfws,
 )
-from shared.errors import UserFacingError
+from shared.errors import classify_user_message
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
@@ -162,7 +162,10 @@ def api_ngfw_create(request: HttpRequest) -> JsonResponse:
         try:
             ngfw_ref = cms_create_ngfw(user=user, **payload)
         except (TypeError, ValueError, CMSError) as e:
-            raise _NgfwError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+            logger.exception("NGFW creation failed: user=%s name=%s", user.pk, safe_log_value(payload.get("name", "")))
+            raise _NgfwError(
+                JsonResponse({"error": classify_user_message(str(e), default="NGFW could not be created")}, status=400)
+            ) from e
     except _NgfwError as err:
         return err.response
 
@@ -205,9 +208,15 @@ def _run_ngfw_destroy(user: User, app_id: str, confirm_name: str) -> None:
     except CMSError as e:
         if "not found" in str(e).lower():
             raise Http404(NGFW_NOT_FOUND) from None
-        raise _NgfwError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+        logger.exception("NGFW destroy failed (CMSError): user=%s app_id=%s", user.pk, safe_log_value(app_id))
+        raise _NgfwError(
+            JsonResponse({"error": classify_user_message(str(e), default="NGFW could not be destroyed")}, status=400)
+        ) from e
     except ValueError as e:
-        raise _NgfwError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+        logger.exception("NGFW destroy failed (ValueError): user=%s app_id=%s", user.pk, safe_log_value(app_id))
+        raise _NgfwError(
+            JsonResponse({"error": classify_user_message(str(e), default="Invalid destroy request")}, status=400)
+        ) from e
 
 
 @login_required

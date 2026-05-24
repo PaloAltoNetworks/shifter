@@ -92,13 +92,16 @@ class TestInitiateUpload:
         ):
             response = initiate_upload(request)
         assert response.status_code == 400
-        assert "file too big" in json.loads(response.content)["error"]
+        # ``str(e)`` is no longer echoed to the response — the view returns one
+        # of a fixed set of authored literals from ``classify_user_message``.
+        assert json.loads(response.content)["error"] == "Upload could not be initiated"
 
-    def test_cms_error_message_is_sanitized_against_log_injection(self, rf, mock_user):
-        """An attacker-controlled exception message must not leak CR/LF into the response body.
+    def test_cms_error_message_is_not_echoed_to_response(self, rf, mock_user):
+        """An attacker-controlled exception message must not appear in the response body.
 
-        Guards CodeQL ``py/stack-trace-exposure`` — the response body must come from
-        :class:`shared.errors.UserFacingError`, not raw ``str(exc)``.
+        Guards CodeQL ``py/stack-trace-exposure``: the response body is now selected
+        from a fixed set of authored literals via ``classify_user_message`` — the
+        original exception text is logged but never reflected back to the caller.
         """
         from cms.exceptions import CMSError
         from mission_control.views import initiate_upload
@@ -118,7 +121,11 @@ class TestInitiateUpload:
         assert response.status_code == 400
         assert "\n" not in body["error"]
         assert "\r" not in body["error"]
-        assert "Forged" in body["error"]  # whitespace-collapsed but text retained
+        # Critical: the attacker-controlled text must NOT appear in the response.
+        assert "Forged" not in body["error"]
+        assert "evil" not in body["error"]
+        # Body is one of the authored literals from ``shared.errors``.
+        assert body["error"] == "Upload could not be initiated"
 
     def test_returns_payload_and_sets_lock_on_success(self, rf, mock_user):
         from mission_control.views import initiate_upload

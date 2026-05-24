@@ -12,7 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from mission_control.utils import build_connection_urls
 from risk_register.models import AuditLog
-from shared.errors import UserFacingError
+from shared.errors import classify_user_message
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
@@ -71,7 +71,10 @@ def _resolve_launch_agents(user: User, data: dict[str, Any]) -> dict[str, int]:
         try:
             agent = _pkg().cms_get_agent(user, agent_id)
         except CMSError as e:
-            raise _RangeError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+            _logger().exception("Agent lookup failed: user=%s agent_id=%s", user.pk, safe_log_value(agent_id))
+            raise _RangeError(
+                JsonResponse({"error": classify_user_message(str(e), default="Agent not available")}, status=400)
+            ) from e
         os_type = "windows" if agent.os.slug == "windows" else "linux"
         return {os_type: agent_id}
     raise _RangeError(JsonResponse({"error": "Either 'agents' or 'agent_id' is required"}, status=400))
@@ -107,7 +110,15 @@ def launch_range(request: HttpRequest) -> JsonResponse:
         try:
             range_ctx = _pkg().cms_create_range(user, scenario, agents_by_os)
         except CMSError as e:
-            raise _RangeError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+            _logger().exception("Range creation failed: user=%s scenario=%s", user.pk, safe_log_value(scenario))
+            # Preserve the "already have an active range" guidance for the UI
+            # using an authored literal (str(e) must not reach the response).
+            text = str(e).lower()
+            if "already have" in text or "active range" in text:
+                response_msg = "You already have an active range"
+            else:
+                response_msg = classify_user_message(str(e), default="Range could not be launched")
+            raise _RangeError(JsonResponse({"error": response_msg}, status=400)) from e
     except _RangeError as err:
         return err.response
 
@@ -172,7 +183,18 @@ def _dispatch_range_lifecycle(
                     safe_log_value(range_id),
                 )
         except CMSError as e:
-            raise _RangeError(JsonResponse({"error": UserFacingError(str(e)).user_message}, status=400)) from e
+            _logger().exception(
+                "Range %s failed: user=%s request_id=%s range_id=%s",
+                log_verb,
+                user.pk,
+                safe_log_value(request_id),
+                safe_log_value(range_id),
+            )
+            raise _RangeError(
+                JsonResponse(
+                    {"error": classify_user_message(str(e), default="Range action could not be completed")}, status=400
+                )
+            ) from e
     except _RangeError as err:
         return err.response
 

@@ -109,7 +109,9 @@ class TestFileUploadInitiate:
         ):
             response = file_upload(request)
         assert response.status_code == 400
-        assert "nope" in json.loads(response.content)["error"]
+        # ``str(e)`` is no longer echoed to the response; "nope" doesn't match
+        # any classifier keyword, so the authored default is returned.
+        assert json.loads(response.content)["error"] == "Upload could not be initiated"
 
     def test_returns_presigned_payload_with_basename(self, rf, mock_user):
         from mission_control.views import file_upload

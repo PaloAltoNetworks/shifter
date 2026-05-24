@@ -179,7 +179,9 @@ class TestApiNGFWCreate:
         with patch("mission_control.views._ngfw.cms_create_ngfw", side_effect=_BackendCMSError("bad")):
             response = api_ngfw_create(request)
         assert response.status_code == 400
-        assert "bad" in json.loads(response.content)["error"]
+        # ``str(e)`` is no longer echoed; "bad" doesn't match any classifier
+        # keyword so the authored default is returned.
+        assert json.loads(response.content)["error"] == "NGFW could not be created"
 
     def test_returns_400_for_value_error(self, rf, mock_user):
         from mission_control.views import api_ngfw_create

@@ -13,6 +13,37 @@ import sys
 import warnings
 from pathlib import Path
 
+__all__ = [
+    "AUTHENTICATION_BACKENDS",
+    "IDENTITY_ALLOWED_EMAILS",
+    "IDENTITY_ALLOWED_EMAIL_DOMAIN",
+    "IDENTITY_PLATFORM_API_KEY",
+    "IDENTITY_PLATFORM_AUTH_DOMAIN",
+    "IDENTITY_PLATFORM_ISSUER",
+    "IDENTITY_PLATFORM_PROJECT_ID",
+    "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
+    "LOGIN_REDIRECT_URL",
+    "LOGIN_URL",
+    "LOGOUT_REDIRECT_URL",
+    "MAGIC_LINK_EXPIRY_HOURS",
+    "MAGIC_LINK_SINGLE_USE",
+    "OIDC_CREATE_USER",
+    "OIDC_EXEMPT_URLS",
+    "OIDC_OP_AUTHORIZATION_ENDPOINT",
+    "OIDC_OP_JWKS_ENDPOINT",
+    "OIDC_OP_LOGOUT_URL_METHOD",
+    "OIDC_OP_TOKEN_ENDPOINT",
+    "OIDC_OP_USER_ENDPOINT",
+    "OIDC_RP_CLIENT_ID",
+    "OIDC_RP_CLIENT_SECRET",
+    "OIDC_RP_SCOPES",
+    "OIDC_RP_SIGN_ALGO",
+    "OIDC_USERNAME_ALGO",
+    "PLATFORM_BOOTSTRAP_STAFF_EMAILS",
+    "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS",
+    "SESSION_COOKIE_AGE",
+]
+
 # Re-derive the toggles the OIDC block needs. These are also defined in
 # ``config.settings`` but importing them from there would create a cycle
 # (settings.py imports this module).
@@ -22,6 +53,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 
 def _env_csv(name: str) -> list[str]:
+    """Parse comma-separated environment variables into normalized lowercase lists."""
     return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
 
 

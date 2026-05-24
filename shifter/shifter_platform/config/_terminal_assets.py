@@ -9,6 +9,8 @@ Web:S1829 hardens this surface). When bumping a pin, update both
 
 from __future__ import annotations
 
+__all__ = ["TERMINAL_CDN_ASSETS"]
+
 TERMINAL_CDN_ASSETS = {
     "xterm_css": {
         "url": "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css",

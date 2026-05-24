@@ -17,41 +17,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# Sub-module star-imports — each sub-module declares ``__all__`` so the
+# wildcard surfaces only the names that are part of the public Django
+# settings contract. Sonar treats these as legitimate re-exports
+# (S1128 doesn't fire on a star-import that's covered by ``__all__``).
+from config._channels import *
 from config._channels import _build_channel_layers
-from config._cloud import (  # noqa: F401  re-exported as Django settings
-    AWS_ENDPOINT_URL,
-    AWS_REGION,
-    AWS_S3_BUCKET_NAME,
-    AWS_S3_REGION,
-    CLOUD_PROVIDER,
-    CLOUD_REGION,
-    ENGINE_ECS_CLUSTER_ARN,
-    ENGINE_ECS_SECURITY_GROUP_ID,
-    ENGINE_PRIVATE_SUBNET_IDS,
-    ENGINE_TASK_BACKOFF_LIMIT,
-    ENGINE_TASK_CLUSTER,
-    ENGINE_TASK_DEFINITION,
-    ENGINE_TASK_DEFINITION_ARN,
-    ENGINE_TASK_IMAGE_PULL_POLICY,
-    ENGINE_TASK_NETWORK_SECURITY_GROUP_ID,
-    ENGINE_TASK_NETWORK_SUBNET_IDS,
-    ENGINE_TASK_SERVICE_ACCOUNT_NAME,
-    ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED,
-    EXPERIMENT_TASK_DEFINITION,
-    EXPERIMENT_TASK_DEFINITION_ARN,
-    GCP_PROJECT_ID,
-    GCP_REGION,
-    GOOGLE_CLOUD_PROJECT,
-    LOCAL_PROVISIONER,
-    PROVISIONER_PATH,
-    QUEUE_CONFIG,
-    RANGE_EVENTS_TOPIC_ID,
-    SNS_RANGE_EVENTS_ARN,
-    SQS_QUEUE_CONFIG,
-    STORAGE_BUCKET_NAME,
-)
-from config._logging_config import LOG_LEVEL, LOGGING  # noqa: F401
-from config._terminal_assets import TERMINAL_CDN_ASSETS  # noqa: F401
+from config._cloud import *
+from config._logging_config import *
+from config._terminal_assets import *
 
 load_dotenv()
 
@@ -289,36 +263,7 @@ if not DEBUG:
 # this module stays under the 500-line cap. Re-exported via star-import
 # here (``noqa`` suppresses the unused/ambiguous-import warnings — these
 # names are part of the public Django settings surface).
-from config._oidc_settings import (  # noqa: E402, F401
-    AUTHENTICATION_BACKENDS,
-    IDENTITY_ALLOWED_EMAIL_DOMAIN,
-    IDENTITY_ALLOWED_EMAILS,
-    IDENTITY_PLATFORM_API_KEY,
-    IDENTITY_PLATFORM_AUTH_DOMAIN,
-    IDENTITY_PLATFORM_ISSUER,
-    IDENTITY_PLATFORM_PROJECT_ID,
-    IDENTITY_PLATFORM_TOTP_DISPLAY_NAME,
-    LOGIN_REDIRECT_URL,
-    LOGIN_URL,
-    LOGOUT_REDIRECT_URL,
-    MAGIC_LINK_EXPIRY_HOURS,
-    MAGIC_LINK_SINGLE_USE,
-    OIDC_CREATE_USER,
-    OIDC_EXEMPT_URLS,
-    OIDC_OP_AUTHORIZATION_ENDPOINT,
-    OIDC_OP_JWKS_ENDPOINT,
-    OIDC_OP_LOGOUT_URL_METHOD,
-    OIDC_OP_TOKEN_ENDPOINT,
-    OIDC_OP_USER_ENDPOINT,
-    OIDC_RP_CLIENT_ID,
-    OIDC_RP_CLIENT_SECRET,
-    OIDC_RP_SCOPES,
-    OIDC_RP_SIGN_ALGO,
-    OIDC_USERNAME_ALGO,
-    PLATFORM_BOOTSTRAP_STAFF_EMAILS,
-    PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS,
-    SESSION_COOKIE_AGE,
-)
+from config._oidc_settings import *  # noqa: E402
 
 # ------------------------------------------------------------------------------
 # Field Encryption (django-encrypted-model-fields)

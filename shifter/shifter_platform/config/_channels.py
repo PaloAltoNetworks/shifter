@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+__all__ = ["_build_channel_layers"]
+
 
 def _build_channel_layers(env: Mapping[str, str]) -> dict[str, dict[str, object]]:
     """Build CHANNEL_LAYERS from the given mapping (typically os.environ).

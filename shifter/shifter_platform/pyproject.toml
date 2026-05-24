@@ -112,6 +112,8 @@ max-complexity = 15
 ]
 "config/settings.py" = [
     "S105",   # empty password string for default
+    "F403",   # ``from config._<topic> import *`` re-exports Django settings
+    "F405",   # ditto — names land via star-imports declared with __all__
 ]
 
 [tool.ruff.format]

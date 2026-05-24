@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 
+__all__ = ["LOGGING", "LOG_LEVEL"]
+
 # Log level: DEBUG for dev, INFO for production.
 # Set LOG_LEVEL=DEBUG in dev to see routing/tracing logs.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()

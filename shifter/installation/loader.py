@@ -220,11 +220,8 @@ def load_root_config(path: str | Path) -> RootConfig:
     # The root schema validated the *shape*; the selected backend bundle owns the
     # contents of ``settings`` and the per-provider secret reference grammar.
     bundle = registry.get_backend_bundle(config.backend)
-    # An unknown backend already failed the root schema, so this branch is
-    # unreachable in practice; the `# pragma: no cover` annotates the return
-    # statement itself so coverage measurement still credits the if-test.
-    if bundle is None:
-        return config  # pragma: no cover
+    if bundle is None:  # pragma: no cover - an unknown backend already failed the root schema
+        return config
     try:
         normalized_settings = bundle.validate_settings(config.settings)
     except InstallationConfigError as exc:

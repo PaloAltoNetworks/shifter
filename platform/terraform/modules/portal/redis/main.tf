@@ -90,9 +90,11 @@ resource "aws_elasticache_cluster" "single_node" {
 # ElastiCache Redis - Replication Group (prod)
 # ------------------------------------------------------------------------------
 
-# checkov:skip=CKV_AWS_31:Redis encryption at rest deferred - internal VPC only, see #295
-# checkov:skip=CKV_AWS_30:Redis encryption in transit deferred - internal VPC only, see #295
 resource "aws_elasticache_replication_group" "ha" {
+  # checkov:skip=CKV_AWS_29:Redis at-rest encryption requires Django Channels TLS reconfiguration; principled deferral via ADR-004-R11 exception (#295).
+  # checkov:skip=CKV_AWS_30:Redis transit encryption requires Django Channels TLS reconfiguration; principled deferral via ADR-004-R11 exception (#295).
+  # checkov:skip=CKV_AWS_31:Auth token requires consumer-side credential plumbing; principled deferral via ADR-004-R11 exception (#295).
+  # checkov:skip=CKV_AWS_191:KMS CMK on ElastiCache requires encryption at rest enabled; principled deferral via ADR-004-R11 exception (#295).
   count = var.enable_replication ? 1 : 0
 
   replication_group_id = "${var.name_prefix}-redis"

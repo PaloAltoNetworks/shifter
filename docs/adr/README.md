@@ -62,6 +62,12 @@ Current mechanisms:
   header.
 - `.kube-linter.yaml`: Kubernetes security and best-practice linting
   configuration (enforces ADR-006 checks)
+- `Checkov`: Terraform and Kubernetes IaC security scanning. ADR-004-R11
+  makes the Terraform path a blocking gate (pre-commit and CI share
+  `platform/terraform/.checkov.yaml`); the Kubernetes path remains
+  soft-fail while manifest hardening proceeds as a separate workstream.
+  Accepted-risk waivers MUST have an entry in `docs/adr/exceptions.yaml`
+  with owner, reason, expiry, affected paths, and the Checkov policy ID.
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
   flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
   `child_process` (any shape — named, default, namespace, CommonJS

@@ -28,10 +28,21 @@ validation rules) lives in ``polaris_manifest.py``.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
 from common import CtfdClient
+
+
+# Source flags use the canonical ``FLAG{<16-hex>}`` wrapper. The bare-hex
+# alias (issue #705) is derived only when the wrapper is well-formed and the
+# hex body is exactly 16 chars — the production contract documented in
+# ``docs/architecture/polaris-bare-hash-flag-preflight-705.md``. Anything
+# else stays as the operator wrote it. ``polaris_manifest.validate_manifest``
+# rejects malformed or non-16-hex wrappers upstream so the helper here only
+# ever sees the clean canonical shape on the canonical path.
+_CANONICAL_FLAG_WRAPPER_RE = re.compile(r"^FLAG\{([0-9a-fA-F]{16})\}$")
 
 
 # -----------------------------------------------------------------------------
@@ -267,10 +278,31 @@ def upsert_challenge(
 
 
 def normalize_flag(flag: dict[str, Any]) -> dict[str, Any]:
-    """Return a CTFd flag-row body from a source-JSON flag entry."""
+    """Return a CTFd flag-row body from a source-JSON flag entry.
+
+    Canonical ``FLAG{<16-hex>}`` static source content is aliased to a
+    single case-insensitive regex row that accepts either the wrapped form
+    or the bare ``<16-hex>`` (issue #705). The canonical answer in repo
+    content stays ``FLAG{<16-hex>}``; only the live CTFd row shape changes,
+    so existing walkthroughs and challenge descriptions are untouched.
+
+    Source flags already typed ``regex``, and ``static`` entries whose
+    content is not a canonical FLAG wrapper, pass through unchanged.
+    """
+    source_type = flag.get("type", "static")
+    content = flag["content"]
+    if source_type == "static":
+        match = _CANONICAL_FLAG_WRAPPER_RE.match(content)
+        if match:
+            hex_part = match.group(1)
+            return {
+                "type": "regex",
+                "content": rf"^(?:FLAG\{{{hex_part}\}}|{hex_part})$",
+                "data": "case_insensitive",
+            }
     return {
-        "type": flag.get("type", "static"),
-        "content": flag["content"],
+        "type": source_type,
+        "content": content,
         "data": flag.get("data", ""),
     }
 

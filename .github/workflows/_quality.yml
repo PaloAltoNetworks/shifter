@@ -680,7 +680,7 @@ jobs:
           DB_PASSWORD: test
         run: |
           uv run python manage.py collectstatic --noinput
-          uv run pytest tests/ --ignore=tests/documentation --cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov=ctf --cov=engine --cov=risk_register --cov-report=term-missing --cov-report=xml:coverage.xml
+          uv run pytest tests/ --ignore=tests/documentation --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4

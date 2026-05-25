@@ -260,6 +260,10 @@ class RangeSpec(RangeSpecBase):
 # =============================================================================
 
 
+_PRIVATE_IP_MAX_LEN = 64
+_PRIVATE_IP_ALLOWED_CHARS = frozenset("0123456789abcdefABCDEF.:")
+
+
 class InstanceContextBase(BaseModel):
     """Base projection for all instance types.
 
@@ -272,6 +276,10 @@ class InstanceContextBase(BaseModel):
         role: Instance role (attacker, victim, dc, or ngfw).
         os_type: Operating system type (kali, ubuntu, windows, or panos).
         join_domain: Whether instance should join the domain.
+        private_ip: Optional display-only internal IP address sourced from
+            engine runtime state. Malformed or oversized input is coerced to
+            None rather than raised so one bad provisioner row never breaks
+            the whole projection.
     """
 
     uuid: str | None = None
@@ -280,6 +288,23 @@ class InstanceContextBase(BaseModel):
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     join_domain: bool = False
     ami_key: str | None = None
+    private_ip: str | None = None
+
+    @field_validator("private_ip", mode="before")
+    @classmethod
+    def normalize_private_ip(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        if len(stripped) > _PRIVATE_IP_MAX_LEN:
+            return None
+        if not all(ch in _PRIVATE_IP_ALLOWED_CHARS for ch in stripped):
+            return None
+        return stripped
 
 
 class InstanceContext(InstanceContextBase):

@@ -125,6 +125,11 @@
         "id": "ADR-004-R10",
         "description": "Every Terraform module that defines an `aws_iam_role` whose attached `aws_iam_role_policy` grants `secretsmanager:GetSecretValue` (or any wildcard that covers it — `secretsmanager:*`, `secretsmanager:Get*`, `*`) on a secret encrypted with the portal Secrets Manager CMK must also attach a single `aws_iam_role_policy` statement granting `kms:Decrypt` on that CMK. The grant must satisfy all three predicates in the SAME IAM Statement: Action covering `kms:Decrypt`; Resource set to `var.secrets_manager_kms_key_arn` or `var.secrets_kms_key_arn` (both are accepted module-input names referring to the portal CMK; preferred) or `\"*\"` (accepted when the same statement carries the service condition); Condition `StringEquals` (or `StringLike`) `kms:ViaService = \"secretsmanager.<region>.amazonaws.com\"`. Spreading the three predicates across separate statements does NOT satisfy IAM evaluation. Additionally, any IAM statement granting `kms:Decrypt` on `Resource=\"*\"` (or `[\"*\"]`) must carry a `kms:ViaService` condition pinning to some service — unconditioned wildcard `kms:Decrypt` is too broad. The check is implemented in `scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py` and wired as the `check-tf-kms-secrets-grant` pre-commit hook plus a CI step in `.github/workflows/_quality.yml`. Currently scoped to `platform/terraform/modules/engine-provisioner/iam.tf`, `platform/terraform/modules/portal/ec2/main.tf`, and `platform/terraform/modules/guacamole/iam.tf`; expand the hook's `files:` regex and the CI invocation when a new module starts reading portal Secrets Manager secrets. Backstops the silent failure mode resolved by #52 where a fresh Secrets Manager CMK rotation left multiple roles without `kms:Decrypt` and ECS task secrets injection aborted at startup with `AccessDeniedException: Access to KMS is not allowed`.",
         "checks": []
+      },
+      {
+        "id": "ADR-004-R11",
+        "description": "Checkov is a blocking gate for first-party Terraform under `platform/terraform/`. The pre-commit hook (`.pre-commit-config.yaml` `checkov`) and the GitHub Actions security-iac job (`.github/workflows/_quality.yml`) both consume the same canonical config at `platform/terraform/.checkov.yaml`; `--soft-fail` is not set on either surface. Accepted-risk waivers (Checkov `skip-check` entries in `.checkov.yaml` or inline `# checkov:skip=CKV_X:...` comments on individual resources) MUST have a matching entry in `docs/adr/exceptions.yaml` with `rule_id: ADR-004-R11`, owner, reason (containing the Checkov policy ID), `expires_on`, and the affected `paths`. `adr_guard.py` rejects expired exceptions, forcing owner re-review. Terraform Checkov policy and Kubernetes Checkov policy are separate surfaces: the `security-k8s` job intentionally remains `soft_fail: true` while manifest hardening proceeds under a separate issue, and Kubernetes soft-fail debt does NOT justify Terraform soft-fail. If rule-level policy grows beyond a flat skip list, centralize it in `platform/terraform/.checkov.yaml` only — do NOT duplicate skip semantics across pre-commit args and workflow inputs.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -137,7 +142,12 @@
       ".pre-commit-config.yaml",
       ".github/workflows/_quality.yml",
       "scripts/adr_guard/adr_guard.py",
-      "scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py"
+      "scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py",
+      "platform/terraform/.checkov.yaml",
+      "docs/adr/exceptions.yaml",
+      "docs/architecture/checkov-soft-fail-preflight-757.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md"
     ]
   },
   {

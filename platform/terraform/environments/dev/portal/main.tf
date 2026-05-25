@@ -838,6 +838,7 @@ resource "aws_cloudwatch_log_group" "bedrock" {
 
   name              = "/aws/bedrock/${local.name_prefix}-invocations"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = merge(var.tags, {
     Name = "${local.name_prefix}-bedrock-invocations"

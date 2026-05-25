@@ -17,8 +17,9 @@ locals {
 # ------------------------------------------------------------------------------
 
 resource "aws_sns_topic" "range_events" {
-  name = "${var.name_prefix}-range-events"
-  tags = local.common_tags
+  name              = "${var.name_prefix}-range-events"
+  kms_master_key_id = aws_kms_key.messaging.arn
+  tags              = local.common_tags
 }
 
 # ------------------------------------------------------------------------------
@@ -28,9 +29,11 @@ resource "aws_sns_topic" "range_events" {
 resource "aws_sqs_queue" "dlq" {
   for_each = var.enable_dlq ? toset(var.consumers) : []
 
-  name                      = "${var.name_prefix}-${each.key}-tasks-dlq"
-  message_retention_seconds = var.dlq_message_retention_seconds
-  tags                      = local.common_tags
+  name                              = "${var.name_prefix}-${each.key}-tasks-dlq"
+  message_retention_seconds         = var.dlq_message_retention_seconds
+  kms_master_key_id                 = aws_kms_key.messaging.arn
+  kms_data_key_reuse_period_seconds = 300
+  tags                              = local.common_tags
 }
 
 # ------------------------------------------------------------------------------
@@ -40,10 +43,12 @@ resource "aws_sqs_queue" "dlq" {
 resource "aws_sqs_queue" "tasks" {
   for_each = toset(var.consumers)
 
-  name                       = "${var.name_prefix}-${each.key}-tasks"
-  visibility_timeout_seconds = var.visibility_timeout_seconds
-  message_retention_seconds  = var.message_retention_seconds
-  tags                       = local.common_tags
+  name                              = "${var.name_prefix}-${each.key}-tasks"
+  visibility_timeout_seconds        = var.visibility_timeout_seconds
+  message_retention_seconds         = var.message_retention_seconds
+  kms_master_key_id                 = aws_kms_key.messaging.arn
+  kms_data_key_reuse_period_seconds = 300
+  tags                              = local.common_tags
 
   # Redrive policy: send failed messages to DLQ after max_receive_count attempts
   redrive_policy = var.enable_dlq ? jsonencode({

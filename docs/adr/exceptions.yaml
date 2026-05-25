@@ -1,1 +1,200 @@
-[]
+[
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV2_AWS_34 (SSM Parameter encrypted): repo policy is 'secrets live in Secrets Manager, not SSM Parameter Store.' Every aws_ssm_parameter in platform/terraform/ holds non-sensitive references (ARNs, URLs, ECR identifiers, feature flags) by convention. Promoting them to SecureString would add KMS API calls and destroy/create churn for zero defense-in-depth gain.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/portal/ssm/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_51 (ECR image-tag mutability): the shifter deploy pattern uses a mixture of ':latest' (demo/dev) and ':<git-sha>' (prod) tags. The modules/ecr default stays MUTABLE; per-repo callers may pin IMMUTABLE in their tfvars. Forcing IMMUTABLE module-wide breaks demo deploy ergonomics. Revisit when every caller has been audited.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/ecr/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_46 (hard-coded EC2 user_data secret): false positive on Terraform templatefile interpolation. The relevant lines read SECRET_KEY=$${secret_key} where secret_key is generated at instance boot via openssl rand -hex 32. No hardcoded secret exists at the source level.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/global/ctfd-workshop/",
+      "platform/terraform/modules/portal/ctfd/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV2_AWS_57 (Secrets Manager rotation): rotation requires a custom Lambda that knows how to update the consumer-side credential (AD Administrator password, NGFW SSH key baked into Panorama config, Cognito client secret bound to the IdP). Building one rotation Lambda per consumer is out of scope for #757; manual rotation procedures are documented in each module that owns the secret. Each affected secret carries an inline `# checkov:skip=CKV2_AWS_57` pointer back to this entry.",
+    "expires_on": "2026-11-26",
+    "paths": [
+      "platform/terraform/modules/engine-provisioner/",
+      "platform/terraform/modules/guacamole/",
+      "platform/terraform/modules/portal/cognito/",
+      "platform/terraform/modules/portal/rds/",
+      "platform/terraform/environments/dev/portal/",
+      "platform/terraform/environments/prod/portal/",
+      "platform/terraform/global/dev-box/",
+      "platform/terraform/global/tssummit/",
+      "platform/terraform/global/tssummit-ranges/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_355 / CKV_AWS_290 / CKV_AWS_289 (IAM wildcard resource / unconstrained write / unconstrained permissions management): the engine provisioner orchestrates EC2, ELBv2 (GWLB), VPC endpoints, Security Groups, Route Tables, NAT Gateways, and Internet Gateways across arbitrary ranges. Many AWS APIs require Resource = '*' by design (e.g. CreateRouteTable, CreateSubnet, ec2:CreateTags). The runtime path is constrained by tag-based StringEquals conditions (aws:RequestTag / ec2:ResourceTag) where the API supports it. Narrowing further would require tagging at create time on every API call which is not universally supported.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/engine-provisioner/iam.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_88 / CKV_AWS_130 (EC2 / subnet public IP) and CKV_AWS_25 / CKV_AWS_260 / CKV_AWS_24 (open RDP/HTTP/SSH ingress): these fire on workshop demo ranges (tssummit, tssummit-ranges, ctfd-workshop, dev-box) and on the CTFd-platform module that backs customer CTF events. Demo participants need direct console access to those instances (public IP + RDP/SSH/HTTP from controlled CIDRs) or the workshop scenario does not run. The ingress rules are scoped to specific source CIDRs where possible; '0.0.0.0/0' appears only on the public CTFd web port where the platform is by design publicly reachable.",
+    "expires_on": "2026-11-26",
+    "paths": [
+      "platform/terraform/global/tssummit/",
+      "platform/terraform/global/tssummit-ranges/",
+      "platform/terraform/global/ctfd-workshop/",
+      "platform/terraform/global/dev-box/",
+      "platform/terraform/modules/portal/ctfd/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_382 (egress 0.0.0.0/0 all-ports): default outbound egress is required for package updates, SSM agent traffic, AWS API calls, container image pulls, and demo internet access. Narrowing to a proxy/NAT path is a future refactor (#860); meanwhile each rule is documented with a description and confined to a single SG.",
+    "expires_on": "2027-05-26"
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_273 / CKV_AWS_274 / CKV_AWS_40 / CKV2_AWS_22 (IAM users without SSO / with AdministratorAccess / direct policy attachment / console access): apply to programmatic-only service accounts (cursor-bedrock and similar) where there is no human and SSO does not apply. Each affected user is access-key-only (no console password) and scoped via inline policy.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/global/iam/",
+      "platform/terraform/global/se-admins/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV2_AWS_5 (Security Group unattached): SGs created here are attached at runtime by the engine provisioner (ECS task ENIs, range instances spawned by Pulumi), not statically by Terraform. Each unattached SG resource exports its ID via outputs.tf for the runtime consumer.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/engine-provisioner/security.tf",
+      "platform/terraform/modules/portal/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV2_AWS_19 (EIP unattached): NGFW management and untrust EIPs are associated to the NGFW interfaces (network_interface_id) via aws_eip_association at apply time, but Terraform sees them as 'unattached' because the aws_eip resource itself does not declare instance_id at declaration time (it cannot, since the ENI is created separately and the association is a third resource).",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/range/vpc/",
+      "platform/terraform/global/tssummit/",
+      "platform/terraform/global/tssummit-ranges/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 (S3 access logging / versioning / cross-region replication / event notifications): the log-aggregation S3 bucket is the access log sink — logging access of the log bucket back to itself is a recursion, and versioning would double storage on append-only log data. Cross-region replication is not in scope for ephemeral log archive. Event notifications are only added when a consumer actually exists.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/log-aggregation/s3.tf",
+      "platform/terraform/modules/engine-state/",
+      "platform/terraform/modules/portal/s3/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_378 (ALB target group HTTP protocol): the Guacamole tomcat backend does not accept TLS; the public ALB terminates HTTPS at the listener and forwards plaintext HTTP to the target inside the VPC over the ALB security group only.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/guacamole/alb.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_341 (Launch Template metadata response hop limit > 1): portal ASG containers run with Docker bridge networking, which routes IMDS calls through one extra hop. hop_limit = 2 is required for AWS SDK credential fetch inside containers. Pinning hop_limit = 1 would force a container networking redesign that is out of scope for #757.",
+    "expires_on": "2026-11-26",
+    "paths": [
+      "platform/terraform/modules/portal/ec2/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_157 (RDS Multi-AZ): controlled by var.db_multi_az / var.multi_az and set per-environment (dev false / prod true). The default is false in the module so Checkov sees the bare declaration as non-Multi-AZ; environments override.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/portal/rds/main.tf",
+      "platform/terraform/modules/guacamole/rds.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "Per-finding GCP exceptions (CKV_GCP_6 / 51 / 53 / 54 / 61 / 62 / 65 / 69 / 73 / 79 / 83 / 107 / 108 / 109 / 110 / 111 / 124, CKV2_GCP_10 / 13): apply to gcp/modules/platform-core/main.tf which composes Cloud SQL, Cloud Function, Cloud Armor, and GKE. Each rule requires per-flag review against the running Postgres major version and the workload's connectivity contract; doing that triage well needs a follow-up issue with the GCP deploy team.",
+    "expires_on": "2026-11-26",
+    "paths": [
+      "platform/terraform/gcp/modules/platform-core/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_29 / CKV_AWS_30 / CKV_AWS_31 / CKV_AWS_191 (ElastiCache encryption at rest, in transit, auth token, CMK): enabling these on the portal Redis replication group requires Django Channels client-side TLS + auth-token plumbing (tracked under #295). Carry the inline skips on the resource itself.",
+    "expires_on": "2026-11-26",
+    "paths": [
+      "platform/terraform/modules/portal/redis/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "Cognito pre-signup Lambda (CKV_AWS_50 / CKV_AWS_115 / CKV_AWS_116 / CKV_AWS_117 / CKV_AWS_173 / CKV_AWS_272): invoked synchronously by Cognito from AWS-owned infrastructure. DLQ does not apply to sync invocations; reserved concurrency would block legitimate signups; VPC config forces Cognito VPC endpoints for no security gain; env vars are non-sensitive allowlists; code signing needs CodeArtifact + Signer. Inline skips carry the per-rule justification.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/portal/cognito/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_91 (ALB access logs) and CKV2_AWS_76 (WAF AMR Log4j): ALB access logging is variable-gated and set in env tfvars when logs_bucket_name is configured; Checkov reads the bare resource and cannot evaluate the conditional. AMR for Log4j managed rule is a follow-up WAF policy enhancement separate from #757.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/portal/alb/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV2_AWS_31 (WAF logging configuration) and CKV2_AWS_63 (Network Firewall logging configuration): the logging configuration is defined in a separate `aws_wafv2_web_acl_logging_configuration` / `aws_networkfirewall_logging_configuration` resource referencing the ACL / firewall ARN. Checkov's graph check cannot resolve the cross-resource reference and flags the parent as unlogged.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/portal/alb/main.tf",
+      "platform/terraform/modules/range/vpc/firewall.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_336 (ECS container read-only root filesystem) on the guacd task: guacd writes its UNIX listener socket to /var/run/ and uses /tmp/ at runtime. Making the root FS read-only requires explicit tmpfs volume mounts for both paths, which is a follow-up hardening pass.",
+    "expires_on": "2026-11-26",
+    "paths": [
+      "platform/terraform/modules/guacamole/ecs.tf"
+    ]
+  }
+]

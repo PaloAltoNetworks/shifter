@@ -11,7 +11,7 @@
 
 environment        = "dev"
 aws_region         = "us-east-2"
-log_retention_days = 30
+log_retention_days = 365
 
 tags = {
   Project     = "shifter"

@@ -103,7 +103,7 @@ variable "webserver_ami_id" {
 variable "webserver_instance_type" {
   description = "Webserver EC2 instance type"
   type        = string
-  default     = "t2.small"
+  default     = "t3.small"
 }
 
 variable "workstation_ami_id" {

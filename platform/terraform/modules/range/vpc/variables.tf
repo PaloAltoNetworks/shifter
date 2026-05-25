@@ -31,9 +31,9 @@ variable "enable_network_firewall" {
 }
 
 variable "firewall_log_retention_days" {
-  description = "CloudWatch log retention for firewall logs"
+  description = "CloudWatch log retention for firewall logs (minimum 365 per ADR-004-R11 / Checkov CKV_AWS_338)"
   type        = number
-  default     = 30
+  default     = 365
 }
 
 variable "kali_allowed_domains" {

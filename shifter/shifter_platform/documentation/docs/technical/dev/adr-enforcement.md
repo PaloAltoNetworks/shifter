@@ -138,7 +138,21 @@ The first slice intentionally stays small:
 - `checkov-k8s`
   CIS Kubernetes benchmark and container security checks on manifests in
   `platform/k8s/`. Currently soft-fail while existing manifests are being
-  hardened.
+  hardened. This posture is separate from Terraform Checkov policy and must not
+  be used to justify Terraform soft-fail.
+
+- `checkov-terraform`
+  IaC security scan over first-party Terraform in `platform/terraform/`. A
+  **blocking gate** under ADR-004-R11. Pre-commit (`.pre-commit-config.yaml`
+  `checkov`) and the GitHub Actions `security-iac` job both consume the same
+  config at `platform/terraform/.checkov.yaml`; `--soft-fail` is not set on
+  either surface. Accepted-risk waivers (Checkov `skip-check` entries in
+  `.checkov.yaml` or inline `# checkov:skip=CKV_X:…` comments on individual
+  resources) MUST have a matching entry in `docs/adr/exceptions.yaml` with
+  `rule_id: ADR-004-R11`, owner, reason (containing the Checkov policy ID),
+  `expires_on`, and affected `paths`. `adr_guard.py` rejects expired
+  exceptions, forcing owner re-review. Do not create a separate Checkov
+  waiver registry; the ADR exceptions registry is the audit trail.
 
 - `k8s-image-registry`
   Verifies that the staged GCP Kubernetes deployment assets still point at

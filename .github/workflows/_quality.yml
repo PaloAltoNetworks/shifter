@@ -1017,21 +1017,28 @@ jobs:
             ${{ runner.os }}-checkov-
 
       - name: Checkov IaC Security
+        # Blocking gate per ADR-004-R11. Skip-check entries live in
+        # platform/terraform/.checkov.yaml so this job and the local
+        # pre-commit hook consume the same policy boundary. Accepted-risk
+        # waivers are documented in docs/adr/exceptions.yaml with owner,
+        # reason, expires_on, and affected paths.
         uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
         with:
           directory: platform/terraform/
-          framework: terraform
+          config_file: platform/terraform/.checkov.yaml
           download_external_modules: true
-          quiet: true
-          compact: true
-          soft_fail: true
+          soft_fail: false
 
   security-k8s:
     permissions:
       contents: read
     name: Security (k8s)
     runs-on: ubuntu-latest
-    continue-on-error: true  # Soft-fail until manifest remediation complete
+    # K8s Checkov is intentionally a separate policy surface from Terraform
+    # Checkov (per ADR-004-R11). It stays soft-fail / continue-on-error
+    # while manifest remediation proceeds under a separate issue;
+    # Terraform soft-fail is NOT permitted to inherit from this.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
 

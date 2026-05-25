@@ -38,15 +38,19 @@ resource "aws_s3_bucket_versioning" "logs" {
   }
 }
 
-# Server-side encryption with S3-managed keys
+# Server-side encryption with the log-aggregation customer-managed CMK
+# (Checkov CKV_AWS_145). `bucket_key_enabled = true` reduces per-object KMS
+# calls so SSE-KMS does not balloon Firehose costs.
 resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
   count  = var.enable_log_aggregation ? 1 : 0
   bucket = aws_s3_bucket.logs[0].id
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.log_aggregation[0].arn
     }
+    bucket_key_enabled = true
   }
 }
 

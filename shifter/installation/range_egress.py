@@ -131,21 +131,23 @@ def validate_settings_block(settings: Mapping[str, Any]) -> tuple[dict[str, Any]
     """
     normalized = dict(settings)
     raw = settings.get(SETTINGS_KEY)
+    issues: list[ConfigIssue] = []
     if raw is None:
-        return normalized, []
-    if not isinstance(raw, Mapping):
-        return normalized, [
+        pass
+    elif not isinstance(raw, Mapping):
+        issues.append(
             ConfigIssue(
                 f"settings.{SETTINGS_KEY}",
                 f"must be a mapping with mode and allowed_cidrs; got {type(raw).__name__}",
             )
-        ]
-    try:
-        policy = RangeEgressPolicy.model_validate(dict(raw))
-    except ValidationError as exc:
-        return normalized, _issues_from_pydantic_error(exc)
-    normalized[SETTINGS_KEY] = policy.model_dump(mode="json")
-    return normalized, []
+        )
+    else:
+        try:
+            policy = RangeEgressPolicy.model_validate(dict(raw))
+            normalized[SETTINGS_KEY] = policy.model_dump(mode="json")
+        except ValidationError as exc:
+            issues = _issues_from_pydantic_error(exc)
+    return normalized, issues
 
 
 def _issues_from_pydantic_error(exc: ValidationError) -> list[ConfigIssue]:

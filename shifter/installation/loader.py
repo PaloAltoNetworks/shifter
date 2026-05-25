@@ -86,6 +86,14 @@ def _reject_duplicate_keys(node: yaml.Node, _visited: set[int] | None = None) ->
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
+    """Read the YAML file at ``path`` and return the parsed top-level mapping.
+
+    Raises :class:`InstallationConfigError` when the file is missing,
+    unreadable, syntactically invalid, empty, or not a mapping at the top
+    level. Duplicate / merge keys are rejected during a parse-to-node-graph
+    pre-pass so PyYAML's silent last-wins behavior cannot validate a config
+    the operator did not author.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -126,6 +134,12 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
 
 
 def _yaml_issue(path: Path, exc: yaml.YAMLError) -> ConfigIssue:
+    """Convert a YAML parse error to a sanitized :class:`ConfigIssue`.
+
+    The message is composed strictly from the parser's own problem description
+    and position so a parse error on a line that holds a value (for example a
+    mistyped secret) cannot be echoed back through the error surface.
+    """
     # Build the message from the parser's own problem description and position only —
     # never from the file content — so a parse error on a line that holds a value
     # (for example a mistyped secret) cannot be echoed back through the error surface.
@@ -138,6 +152,13 @@ def _yaml_issue(path: Path, exc: yaml.YAMLError) -> ConfigIssue:
 
 
 def _issues_from_validation_error(exc: ValidationError) -> list[ConfigIssue]:
+    """Convert a Pydantic ``ValidationError`` to sorted, deduplicated issues.
+
+    Each issue carries the dotted location of the offending key (or ``<root>``)
+    and Pydantic's type-derived message. The input value is never read, so a
+    rejected secret reference cannot leak through this conversion. Returned
+    issues are sorted by ``(path, message)`` so renderings are stable.
+    """
     seen: set[tuple[str, str]] = set()
     issues: list[ConfigIssue] = []
     for err in exc.errors():

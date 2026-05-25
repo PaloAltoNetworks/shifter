@@ -22,11 +22,10 @@ Views call services, services call models/S3.
 
 from __future__ import annotations
 
-# --- Patchable dependency names ----------------------------------------------
-# These are imported at package load so tests can target them via
-# ``patch("cms.experiments.services.<name>")``. Submodules look them up
-# through this package (``cms.experiments.services``) at call time so the
-# patches apply across module boundaries.
+# Patchable third-party and cross-package imports come first so tests can
+# target them via ``patch("cms.experiments.services.<name>")``. Submodules
+# look these up through this package at call time so the patches apply
+# across module boundaries.
 from django.db import transaction
 
 from cms.experiments.events import publish_experiment_event
@@ -50,11 +49,8 @@ from cms.experiments.s3 import (
 from cms.scenarios.registry import check_scenario_access, load_scenario_template
 from risk_register.services import audit_log
 
-# --- Shared helpers (also patchable) -----------------------------------------
-from ._common import _check_result_type, _validate_user
-
-# --- Public service functions ------------------------------------------------
 from ._artifacts import get_artifact_download_url, get_bundle_download_url
+from ._common import _check_result_type, _validate_user
 from ._experiments import (
     cancel_experiment,
     create_experiment,
@@ -71,7 +67,6 @@ from ._scripts import (
 )
 
 __all__ = [
-    # Patchable dependencies (kept on __all__ so re-import is intentional)
     "Experiment",
     "ExperimentArtifact",
     "ExperimentRun",
@@ -81,22 +76,15 @@ __all__ = [
     "_check_result_type",
     "_validate_user",
     "audit_log",
+    "cancel_experiment",
     "check_scenario_access",
+    "complete_script_upload",
+    "create_experiment",
     "delete_s3_object",
+    "delete_script",
     "generate_presigned_download_url",
     "generate_script_upload_url",
     "generate_upload_token",
-    "load_scenario_template",
-    "publish_experiment_event",
-    "read_script_header",
-    "transaction",
-    "verify_s3_object",
-    "verify_upload_token",
-    # Public service functions
-    "cancel_experiment",
-    "complete_script_upload",
-    "create_experiment",
-    "delete_script",
     "get_artifact_download_url",
     "get_bundle_download_url",
     "get_experiment",
@@ -104,4 +92,11 @@ __all__ = [
     "initiate_script_upload",
     "list_experiments",
     "list_scripts",
+    "load_scenario_template",
+    "publish_experiment_event",
+    "read_script_header",
+    "start_experiment",
+    "transaction",
+    "verify_s3_object",
+    "verify_upload_token",
 ]

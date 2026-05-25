@@ -200,3 +200,24 @@ variable "identity_allowed_emails" {
   type        = list(string)
   default     = []
 }
+
+# ------------------------------------------------------------------------------
+# Range Egress (PLAT-220)
+# ------------------------------------------------------------------------------
+
+variable "range_egress_mode" {
+  description = "Range egress policy mode (bridge for shifter.yaml settings.range_egress.mode). One of status-quo, deny-all, allowlist."
+  type        = string
+  default     = "status-quo"
+
+  validation {
+    condition     = contains(["status-quo", "deny-all", "allowlist"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: status-quo, deny-all, allowlist."
+  }
+}
+
+variable "range_egress_allowed_cidrs" {
+  description = "IP CIDR allowlist for range egress (bridge for shifter.yaml settings.range_egress.allowed_cidrs)."
+  type        = list(string)
+  default     = []
+}

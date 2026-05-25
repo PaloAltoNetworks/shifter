@@ -1,0 +1,21 @@
+# Example deployment override for the prod range environment (PLAT-220).
+#
+# Copy this file to `local.auto.tfvars` (gitignored) next to it and edit for
+# your deployment. Terraform auto-loads any `*.auto.tfvars` files in the same
+# directory, so values written here OVERRIDE the committed `terraform.tfvars`.
+#
+# CIDRs are operator configuration, not secrets — but the actual list belongs
+# to your deployment, not the repo. The committed baseline ships empty so this
+# repo is OSS-publishable without an operator's allowlist leaking into git.
+#
+# Source for the PANW Cortex XSIAM/XDR allowlist:
+#   https://docs-cortex.paloaltonetworks.com/r/Cortex-XSIAM/Cortex-XSIAM-Administrator-Guide/Resources-Required-to-Enable-Access
+#
+# Validation: each entry must be a valid CIDR, and 0.0.0.0/0 / ::/0 are
+# rejected by both shifter/installation/range_egress.py (root config validation)
+# and the variable's `validation` block in variables.tf.
+
+victim_allowed_cidrs = [
+  # "8.8.8.8/32",
+  # "203.0.113.0/24",
+]

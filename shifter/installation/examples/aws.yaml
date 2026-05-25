@@ -30,3 +30,16 @@ secrets:
 # Deployment tooling validates the values it consumes.
 settings:
   region: us-east-2
+
+  # PLAT-220: range network egress policy. Same shape on AWS and GCP. Omit the
+  # block entirely (or set mode: status-quo) to preserve the backend's existing
+  # posture. CIDRs are operator configuration, not secrets — but the actual list
+  # for *your* deployment should live in a gitignored local override (see
+  # docs/dev/deploy-secrets.md and docs/architecture/range-egress-ip-allowlist.md),
+  # not in this committed example.
+  range_egress:
+    mode: status-quo
+    # When mode: allowlist, list CIDRs here. Default-route entries (0.0.0.0/0, ::/0)
+    # are rejected — allow-all is a separate mode (not yet defined).
+    # allowed_cidrs:
+    #   - 203.0.113.0/24

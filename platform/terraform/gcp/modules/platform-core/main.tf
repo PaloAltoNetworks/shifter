@@ -316,6 +316,91 @@ resource "google_compute_firewall" "range_allow_operator_admin_ssh" {
   }
 }
 
+# ------------------------------------------------------------------------------
+# Range VPC — PLAT-220 egress policy
+# ------------------------------------------------------------------------------
+#
+# The public surface is `settings.range_egress` in shifter.yaml (validated by
+# shifter/installation/range_egress.py). These resources are the GCP bridge —
+# bridged through `range_egress_mode` + `range_egress_allowed_cidrs` Terraform
+# variables on this module — into native VPC firewall egress rules on the range
+# VPC. AWS Network Firewall is the corresponding bridge in
+# platform/terraform/modules/range/vpc/firewall.tf. See
+# docs/architecture/range-egress-ip-allowlist.md for the cross-cloud mapping.
+#
+# Mode handling:
+#
+# - status-quo (default): no rules created; range Cloud NAT egress is
+#   unrestricted (the historical posture before PLAT-220).
+# - deny-all: a low-priority (65534) EGRESS deny on all destinations blocks
+#   external traffic. Private Google Access (for Google APIs/Container
+#   Registry) and Cloud DNS metadata (169.254.169.254) ride the VPC's
+#   implicit-allow paths and are unaffected.
+# - allowlist: deny-all base + a higher-priority (1000) EGRESS allow on
+#   TCP 443 to the allowed CIDRs. TCP/443 matches the AWS bridge's
+#   existing victim-IPs rule group (the Network Firewall rules under
+#   platform/terraform/modules/range/vpc/firewall.tf use `pass tcp $HOME_NET
+#   any -> $ALLOWED_IPS 443`); both clouds enforce the same wire-level shape.
+
+# PLAT-220 cross-variable invariant check (always evaluated).
+#
+# The public RangeEgressPolicy validator enforces three rules on the
+# (mode, allowed_cidrs) pair: allowlist requires a non-empty list,
+# deny-all requires an empty list, status-quo requires an empty list.
+# `terraform_data` (Terraform >= 1.4; CI pins 1.7.1) has no provider
+# dependencies and `count = 1` unconditionally, so this precondition
+# fires for every plan/apply regardless of which mode is selected —
+# unlike a precondition on `range_egress_deny_all`, which would skip
+# evaluation entirely when mode='status-quo' (count = 0) and silently
+# let `status-quo` + a non-empty allowlist apply without firewall rules.
+resource "terraform_data" "range_egress_invariant" {
+  lifecycle {
+    precondition {
+      condition = (
+        (var.range_egress_mode == "status-quo" && length(var.range_egress_allowed_cidrs) == 0)
+        || (var.range_egress_mode == "deny-all" && length(var.range_egress_allowed_cidrs) == 0)
+        || (var.range_egress_mode == "allowlist" && length(var.range_egress_allowed_cidrs) > 0)
+      )
+      error_message = "PLAT-220: range_egress_mode='allowlist' requires a non-empty range_egress_allowed_cidrs; range_egress_mode='deny-all' or 'status-quo' must carry an empty list. The public RangeEgressPolicy contract (shifter/installation/range_egress.py) enforces this; this precondition mirrors it for direct Terraform use."
+    }
+  }
+}
+
+resource "google_compute_firewall" "range_egress_deny_all" {
+  count = var.range_egress_mode == "status-quo" ? 0 : 1
+
+  name        = "${local.name_prefix}-range-egress-deny-all"
+  project     = var.project_id
+  network     = google_compute_network.range.name
+  description = "PLAT-220: range egress is policy-driven. Low-precedence deny enforces fail-closed when the operator selects deny-all or allowlist; the allowlist rule rides higher precedence."
+  direction   = "EGRESS"
+  priority    = 65534
+
+  destination_ranges = ["0.0.0.0/0"]
+
+  deny {
+    protocol = "all"
+  }
+}
+
+resource "google_compute_firewall" "range_egress_allow_allowlist" {
+  count = var.range_egress_mode == "allowlist" && length(var.range_egress_allowed_cidrs) > 0 ? 1 : 0
+
+  name        = "${local.name_prefix}-range-egress-allow-allowlist"
+  project     = var.project_id
+  network     = google_compute_network.range.name
+  description = "PLAT-220: range egress allowlist (HTTPS to operator-declared CIDRs). Higher precedence than the deny-all base so the named destinations actually reach the internet."
+  direction   = "EGRESS"
+  priority    = 1000
+
+  destination_ranges = var.range_egress_allowed_cidrs
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+}
+
 # Platform VPC — explicit deny on world-open SSH/RDP. The platform VPC is
 # private-cluster-only today, but this rule is an audit anchor: if a future
 # resource accidentally exposes an external IP, the rule still blocks SSH/RDP.

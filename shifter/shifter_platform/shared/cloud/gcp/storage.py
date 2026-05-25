@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from shared.cloud.exceptions import CloudStorageError
 from shared.cloud.gcp.base import import_google_module
 from shared.log_sanitize import safe_log_value
+
+if TYPE_CHECKING:
+    from google.cloud.storage import Client as GCSClient
+else:
+    GCSClient = Any
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +21,8 @@ logger = logging.getLogger(__name__)
 class GCPObjectStorage:
     """GCS implementation of ObjectStorage protocol."""
 
-    def _get_client(self) -> Any:
+    @staticmethod
+    def _get_client() -> GCSClient:
         try:
             storage = import_google_module("google.cloud.storage")
             return storage.Client()
@@ -25,7 +31,7 @@ class GCPObjectStorage:
 
     def upload_file(
         self,
-        file_obj: Any,
+        file_obj: BinaryIO,
         bucket: str,
         key: str,
         content_type: str = "",
@@ -37,7 +43,7 @@ class GCPObjectStorage:
             blob = client.bucket(bucket).blob(key)
             blob.upload_from_file(file_obj, content_type=content_type or None, rewind=True)
         except Exception as e:
-            logger.error("upload_file: failed bucket=%s key=%s error=%s", bucket, safe_key, safe_log_value(e))
+            logger.exception("upload_file: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to upload to GCS: {e}") from e
         logger.info("upload_file: success bucket=%s key=%s", bucket, safe_key)
 
@@ -48,7 +54,7 @@ class GCPObjectStorage:
             client = self._get_client()
             client.bucket(bucket).blob(key).delete()
         except Exception as e:
-            logger.error("delete_object: failed bucket=%s key=%s error=%s", bucket, safe_key, safe_log_value(e))
+            logger.exception("delete_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to delete GCS object: {e}") from e
         logger.info("delete_object: success bucket=%s key=%s", bucket, safe_key)
 
@@ -105,7 +111,7 @@ class GCPObjectStorage:
         except CloudStorageError:
             raise
         except Exception as e:
-            logger.error("head_object: failed bucket=%s key=%s error=%s", bucket, safe_key, safe_log_value(e))
+            logger.exception("head_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to head GCS object: {e}") from e
 
     def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes:
@@ -151,11 +157,10 @@ class GCPObjectStorage:
                 content_type=content_type,
             )
         except Exception as e:
-            logger.error(
-                "generate_presigned_upload_url: failed bucket=%s key=%s error=%s",
+            logger.exception(
+                "generate_presigned_upload_url: failed bucket=%s key=%s",
                 bucket,
                 safe_key,
-                safe_log_value(e),
             )
             raise CloudStorageError(f"Failed to generate GCS upload URL: {e}") from e
 
@@ -176,11 +181,10 @@ class GCPObjectStorage:
                 method="GET",
             )
         except Exception as e:
-            logger.error(
-                "generate_presigned_download_url: failed bucket=%s key=%s error=%s",
+            logger.exception(
+                "generate_presigned_download_url: failed bucket=%s key=%s",
                 bucket,
                 safe_key,
-                safe_log_value(e),
             )
             raise CloudStorageError(f"Failed to generate GCS download URL: {e}") from e
 
@@ -199,6 +203,6 @@ class GCPObjectStorage:
         except CloudStorageError:
             raise
         except Exception as e:
-            logger.error("tag_object: failed bucket=%s key=%s error=%s", bucket, safe_key, safe_log_value(e))
+            logger.exception("tag_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to tag GCS object: {e}") from e
         logger.debug("tag_object: success bucket=%s key=%s", bucket, safe_key)

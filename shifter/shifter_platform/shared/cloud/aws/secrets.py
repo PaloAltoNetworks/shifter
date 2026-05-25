@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 import boto3
+from botocore.client import BaseClient
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 
@@ -19,7 +20,8 @@ logger = logging.getLogger(__name__)
 class AWSSecretsStore:
     """Secrets Manager implementation of SecretsStore protocol."""
 
-    def _get_client(self) -> Any:
+    @staticmethod
+    def _get_client() -> BaseClient:
         region: str = str(getattr(settings, "CLOUD_REGION", None) or getattr(settings, "AWS_REGION", "us-east-2"))
         endpoint_url: str | None = os.environ.get("AWS_ENDPOINT_URL") or None
         return boto3.client("secretsmanager", region_name=region, endpoint_url=endpoint_url)

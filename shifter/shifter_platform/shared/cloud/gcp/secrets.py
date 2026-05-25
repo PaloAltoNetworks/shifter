@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 class GCPSecretsStore:
     """Secret Manager implementation of SecretsStore protocol."""
 
-    def get_secret(self, secret_ref: str) -> str:
+    @staticmethod
+    def get_secret(secret_ref: str) -> str:
         # ``secret_ref`` is the GCP Secret Manager resource name — an opaque
         # identifier, not the secret value. Logged under ``resource_name`` so
         # CodeQL's variable-name heuristic for ``py/clear-text-logging`` does

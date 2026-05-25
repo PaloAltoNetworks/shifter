@@ -309,6 +309,50 @@ class TestValidateRootConfigFile:
         issues = validate_root_config_file(write_config(aws_config))
         assert {issue.path for issue in issues} == {"settings.region"}
 
+    def test_range_egress_validation_runs_in_loader(self, write_config):
+        # PLAT-220: range_egress is validated cross-backend by the loader after the
+        # bundle's own settings validation. An invalid CIDR is surfaced by the loader
+        # (not silently passed through by a settings_model=None bundle).
+        issues = validate_root_config_file(
+            write_config(
+                {
+                    "backend": "gcp",
+                    "deployment": {"name": "shifter", "domain": "shifter.example.com"},
+                    "secrets": {"django_secret_key": "prompt"},
+                    "settings": {
+                        "region": "us-central1",
+                        "range_egress": {"mode": "allowlist", "allowed_cidrs": ["not-a-cidr"]},
+                    },
+                }
+            )
+        )
+        assert any(issue.path.startswith("settings.range_egress.allowed_cidrs") for issue in issues)
+
+    def test_valid_range_egress_normalized_in_loader(self, write_config):
+        # PLAT-220: the normalized form is stored back onto config.settings so
+        # downstream consumers (renderers, terraform tfvars writers) get canonical
+        # CIDRs and an explicit mode.
+        cfg = load_root_config(
+            write_config(
+                {
+                    "backend": "aws",
+                    "deployment": {"name": "shifter", "domain": "shifter.example.com"},
+                    "secrets": {"django_secret_key": "prompt", "db_password": "prompt"},
+                    "settings": {
+                        "region": "us-east-2",
+                        "range_egress": {
+                            "mode": "allowlist",
+                            "allowed_cidrs": ["203.0.113.0/24"],
+                        },
+                    },
+                }
+            )
+        )
+        assert cfg.settings["range_egress"] == {
+            "mode": "allowlist",
+            "allowed_cidrs": ["203.0.113.0/24"],
+        }
+
     def test_invalid_file_returns_issue_list_without_raising(self, write_config):
         issues = validate_root_config_file(write_config({"deployment": {"name": "x"}}))
         assert issues

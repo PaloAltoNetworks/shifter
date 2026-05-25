@@ -372,6 +372,16 @@ local.auto.tfvars
 *.tfvars.local
 *.auto.tfvars.local
 
+# PLAT-220 / #775: the range egress allowlist is operator configuration, not
+# repo content. The committed terraform.tfvars + local.auto.tfvars.example
+# baselines are empty. Operators write the per-deployment allowlist into a
+# gitignored `victim_allowed_cidrs.auto.tfvars` (AWS) or
+# `range_egress.auto.tfvars` (GCP) alongside the env's terraform.tfvars; the
+# rules below prevent either file from being re-committed by accident. See
+# docs/architecture/range-egress-ip-allowlist.md.
+victim_allowed_cidrs*.auto.tfvars
+range_egress*.auto.tfvars
+
 # Generated kustomize overlay files — the renderers
 # (scripts/gcp/render_edge_manifest.py, render_private_service_netpol.py)
 # overwrite these at deploy time from terraform outputs. The

@@ -672,5 +672,52 @@
       "shifter/shifter_platform/templates",
       "shifter/shifter_platform/cms/experiments/templates"
     ]
+  },
+  {
+    "id": "ADR-017",
+    "title": "Range network egress is a platform-level policy, applied uniformly on AWS and GCP",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Range egress is configured once at the platform level (`settings.range_egress` in shifter.yaml) and applied uniformly across supported cloud backends. The configuration shape is provider-neutral (`mode` + `allowed_cidrs`), validated by shifter/installation/range_egress.py, and bridged into AWS Network Firewall rule groups (platform/terraform/modules/range/vpc/firewall.tf) and GCP VPC firewall egress rules (platform/terraform/gcp/modules/platform-core/main.tf). The default mode (`status-quo`) preserves each backend's existing posture so the policy is opt-in. CIDRs are operator configuration, not secrets, but the per-deployment allowlist values live in gitignored `local.auto.tfvars` overrides — the committed Terraform baseline carries an empty allowlist so the repo is OSS-publishable without exposing any operator's allowlist (PLAT-220, #775).",
+    "rules": [
+      {
+        "id": "ADR-017-R1",
+        "description": "The public configuration surface for range egress is `settings.range_egress` in shifter.yaml; provider-specific Terraform variables (`victim_allowed_cidrs` on AWS, `range_egress_allowed_cidrs` on GCP) are internal bridges and must validate the same shape (well-formed CIDR, not 0.0.0.0/0 or ::/0) that shifter/installation/range_egress.py enforces.",
+        "checks": []
+      },
+      {
+        "id": "ADR-017-R2",
+        "description": "Per-deployment range egress allowlist values must not be committed to the repository. Operators write the values into a gitignored `local.auto.tfvars` (or any `*.auto.tfvars.local`) alongside the env's `terraform.tfvars`; the committed Terraform baseline ships an empty allowlist. `.gitignore` blocks the prior committed forms (`victim_allowed_cidrs*.auto.tfvars`, `range_egress*.auto.tfvars`) from being re-introduced.",
+        "checks": ["no-plaintext-secrets-in-tfvars"]
+      },
+      {
+        "id": "ADR-017-R3",
+        "description": "Default behavior when `settings.range_egress` is omitted (or `mode: status-quo`) is documented per backend: AWS retains the existing Network Firewall posture (enabled by default, deny-all with documented allow lanes); GCP retains its existing Cloud NAT egress (no enforcement). `mode: deny-all` and `mode: allowlist` apply the documented platform contract uniformly on both clouds (deny-all base on the range VPC; HTTPS allow on TCP 443 to the operator-declared CIDRs).",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "agent-policy"],
+    "evidence": [
+      "shifter/installation/range_egress.py",
+      "shifter/installation/loader.py",
+      "shifter/installation/tests/test_range_egress.py",
+      "shifter/installation/examples/aws.yaml",
+      "shifter/installation/examples/gcp.yaml",
+      "platform/terraform/modules/range/vpc/firewall.tf",
+      "platform/terraform/modules/range/vpc/variables.tf",
+      "platform/terraform/environments/dev/range/variables.tf",
+      "platform/terraform/environments/dev/range/local.auto.tfvars.example",
+      "platform/terraform/environments/prod/range/variables.tf",
+      "platform/terraform/environments/prod/range/local.auto.tfvars.example",
+      "platform/terraform/gcp/modules/platform-core/main.tf",
+      "platform/terraform/gcp/modules/platform-core/variables.tf",
+      "platform/terraform/gcp/environments/gcp-dev/variables.tf",
+      "platform/terraform/gcp/environments/gcp-dev/main.tf",
+      "platform/terraform/gcp/environments/gcp-dev/terraform.tfvars",
+      "docs/architecture/range-egress-ip-allowlist.md",
+      "docs/dev/deploy-secrets.md",
+      ".gitignore"
+    ]
   }
 ]

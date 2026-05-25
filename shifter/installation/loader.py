@@ -23,7 +23,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from . import registry
+from . import range_egress, registry
 from .errors import ConfigIssue, InstallationConfigError
 from .schema import RootConfig
 
@@ -168,6 +168,10 @@ def _backend_issues_from_raw(data: dict[str, Any]) -> list[ConfigIssue]:
     settings = data.get("settings", {})
     if isinstance(settings, dict):
         issues.extend(bundle.settings_issues(settings))
+        # range_egress (PLAT-220) is cross-backend; the bundle-specific check above
+        # may pass-through a settings_model=None backend without inspecting it.
+        _, range_egress_issues = range_egress.validate_settings_block(settings)
+        issues.extend(range_egress_issues)
     secrets = data.get("secrets", {})
     if isinstance(secrets, dict):
         issues.extend(bundle.secret_reference_issues(secrets))
@@ -202,6 +206,12 @@ def load_root_config(path: str | Path) -> RootConfig:
     except InstallationConfigError as exc:
         # Aggregate the settings *and* secret-reference problems before raising.
         raise InstallationConfigError([*exc.issues, *bundle.secret_reference_issues(config.secrets)]) from exc
+    # Cross-backend settings validation (PLAT-220 range_egress). Lives in the loader
+    # because the policy shape applies identically to AWS and GCP; per-backend
+    # settings_model migrations (#1116 / #1117) may later move this onto the model.
+    normalized_settings, range_egress_issues = range_egress.validate_settings_block(normalized_settings)
+    if range_egress_issues:
+        raise InstallationConfigError([*range_egress_issues, *bundle.secret_reference_issues(config.secrets)])
     secret_issues = bundle.secret_reference_issues(config.secrets)
     if secret_issues:
         raise InstallationConfigError(secret_issues)

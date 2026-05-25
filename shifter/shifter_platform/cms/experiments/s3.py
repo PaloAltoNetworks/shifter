@@ -175,7 +175,7 @@ def delete_s3_object(s3_key: str) -> None:
         storage = get_object_storage()
         storage.delete_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
     except CloudStorageError as e:
-        logger.error("delete_s3_object: failed s3_key=%s error=%s", safe_log_value(s3_key), safe_log_value(e))
+        logger.exception("delete_s3_object: failed s3_key=%s", safe_log_value(s3_key))
         raise S3Error(str(e)) from e
 
     logger.info("delete_s3_object: success s3_key=%s", safe_log_value(s3_key))
@@ -236,7 +236,7 @@ def verify_s3_object(s3_key: str) -> tuple[int, str]:
         if "not found" in str(e).lower() or "404" in str(e):
             logger.warning("verify_s3_object: not found s3_key=%s", safe_log_value(s3_key))
             raise S3Error(f"Object not found: {s3_key}") from e
-        logger.error("verify_s3_object: failed s3_key=%s error=%s", safe_log_value(s3_key), safe_log_value(e))
+        logger.exception("verify_s3_object: failed s3_key=%s", safe_log_value(s3_key))
         raise S3Error(str(e)) from e
 
 
@@ -294,7 +294,7 @@ def generate_upload_token(
     return f"{payload_b64}.{signature}"
 
 
-def verify_upload_token(token: str, user_id: int) -> dict:
+def verify_upload_token(token: str, user_id: int) -> dict[str, str | int]:
     """Verify token signature and extract payload.
 
     Args:

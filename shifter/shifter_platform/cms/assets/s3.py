@@ -8,13 +8,22 @@ import paths are preserved for backward compatibility.
 import hashlib
 import logging
 import uuid
+from typing import BinaryIO
 
 from django.conf import settings
 
 from shared.cloud import get_object_storage
 from shared.cloud.exceptions import CloudStorageError
 from shared.log_sanitize import safe_log_value
-from shared.s3 import get_s3_client, sanitize_s3_filename  # noqa: F401 — re-exported for backward compat
+
+# ``get_s3_client`` and ``sanitize_s3_filename`` are re-exported from this
+# module for backward compatibility: external callers (``cms/experiments/s3.py``
+# and several tests) import them via ``cms.assets.s3``. The ``noqa: F401`` is
+# required because flake8 cannot see those re-imports from outside the file.
+from shared.s3 import (  # noqa: F401
+    get_s3_client,
+    sanitize_s3_filename,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +34,7 @@ class S3Error(Exception):
     pass
 
 
-def upload_agent(file_obj, user_id: int, filename: str) -> tuple[str, str, int]:
+def upload_agent(file_obj: BinaryIO, user_id: int, filename: str) -> tuple[str, str, int]:
     """
     Upload agent file to S3.
 
@@ -73,11 +82,10 @@ def upload_agent(file_obj, user_id: int, filename: str) -> tuple[str, str, int]:
             content_type="application/octet-stream",
         )
     except CloudStorageError as e:
-        logger.error(
-            "upload_agent: failed user_id=%s s3_key=%s error=%s",
+        logger.exception(
+            "upload_agent: failed user_id=%s s3_key=%s",
             user_id,
             safe_log_value(s3_key),
-            safe_log_value(e),
         )
         raise S3Error(str(e)) from e
 
@@ -105,7 +113,7 @@ def delete_agent(s3_key: str) -> None:
         storage = get_object_storage()
         storage.delete_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
     except CloudStorageError as e:
-        logger.error("delete_agent: failed s3_key=%s error=%s", safe_log_value(s3_key), safe_log_value(e))
+        logger.exception("delete_agent: failed s3_key=%s", safe_log_value(s3_key))
         raise S3Error(str(e)) from e
 
     logger.info("delete_agent: success s3_key=%s", safe_log_value(s3_key))
@@ -150,7 +158,7 @@ def generate_presigned_upload_url(
             expires_in=settings.AGENT_UPLOAD_URL_EXPIRES,
         )
     except CloudStorageError as e:
-        logger.error("generate_presigned_upload_url: failed user_id=%s error=%s", user_id, safe_log_value(e))
+        logger.exception("generate_presigned_upload_url: failed user_id=%s", user_id)
         raise S3Error(str(e)) from e
 
     logger.debug("generate_presigned_upload_url: success user_id=%s s3_key=%s", user_id, safe_log_value(s3_key))
@@ -187,7 +195,7 @@ def verify_s3_object_exists(s3_key: str) -> tuple[int, str]:
         if "not found" in str(e).lower() or "404" in str(e):
             logger.warning("verify_s3_object_exists: not found s3_key=%s", safe_log_value(s3_key))
             raise S3Error(f"Object not found: {s3_key}") from e
-        logger.error("verify_s3_object_exists: failed s3_key=%s error=%s", safe_log_value(s3_key), safe_log_value(e))
+        logger.exception("verify_s3_object_exists: failed s3_key=%s", safe_log_value(s3_key))
         raise S3Error(str(e)) from e
 
 
@@ -239,7 +247,7 @@ def tag_s3_object(s3_key: str, tags: dict[str, str]) -> None:
         storage = get_object_storage()
         storage.tag_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key, tags=tags)
     except CloudStorageError as e:
-        logger.error("tag_s3_object: failed s3_key=%s error=%s", safe_log_value(s3_key), safe_log_value(e))
+        logger.exception("tag_s3_object: failed s3_key=%s", safe_log_value(s3_key))
         raise S3Error(str(e)) from e
 
     logger.debug("tag_s3_object: success s3_key=%s", safe_log_value(s3_key))

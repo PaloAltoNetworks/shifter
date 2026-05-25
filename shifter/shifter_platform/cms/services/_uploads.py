@@ -269,8 +269,8 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
 
     try:
         payload = _verify_upload_token_or_raise(upload_token, user.id)
-        s3_key = payload["s3_key"]
-        expected_size = payload["file_size"]
+        s3_key = str(payload["s3_key"])
+        expected_size = int(payload["file_size"])
         _verify_upload_object_or_raise(s3_key, expected_size, user.id)
         _inspect_upload_header_or_raise(payload, s3_key, user.id)
 
@@ -347,7 +347,7 @@ def cancel_upload(user: User, upload_token: str) -> None:
             )
             raise CMSError("Invalid upload token") from e
 
-        s3_key = payload["s3_key"]
+        s3_key = str(payload["s3_key"])
 
         try:
             delete_agent(s3_key)

@@ -73,7 +73,7 @@ def generate_upload_token(
     return f"{payload_b64}.{signature}"
 
 
-def verify_upload_token(token: str, user_id: int) -> dict:
+def verify_upload_token(token: str, user_id: int) -> dict[str, str | int]:
     """
     Verify token signature and extract payload.
 

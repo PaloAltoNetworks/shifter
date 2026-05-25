@@ -85,6 +85,25 @@ _CONFLICT_TOKENS = ("already exists", "already have", "duplicate", "conflict", "
 _VALIDATION_TOKENS = ("invalid", "must be", "required", "too large", "too long", "exceeds", "expected")
 
 
+# Ordered list of (token-set, hardcoded-response) pairs. Order matters:
+# the first matching token-set wins so callers get the most specific class.
+_CLASSIFICATION_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (_NOT_FOUND_TOKENS, "Resource not found"),
+    (_PERMISSION_TOKENS, "Permission denied"),
+    (_NOT_ACCESSIBLE_TOKENS, "Resource is not accessible in its current state"),
+    (_CONFLICT_TOKENS, "Request conflicts with current state"),
+    (_VALIDATION_TOKENS, "Invalid request"),
+)
+
+
+def _match_classification(text: str) -> str | None:
+    """Return the first hardcoded classification whose tokens are present, else ``None``."""
+    for tokens, label in _CLASSIFICATION_RULES:
+        if any(tok in text for tok in tokens):
+            return label
+    return None
+
+
 def classify_user_message(
     message: object,
     *,
@@ -103,16 +122,5 @@ def classify_user_message(
     to the API caller.
     """
     text = ("" if message is None else str(message)).lower()
-    if not text:
-        return default
-    if any(tok in text for tok in _NOT_FOUND_TOKENS):
-        return "Resource not found"
-    if any(tok in text for tok in _PERMISSION_TOKENS):
-        return "Permission denied"
-    if any(tok in text for tok in _NOT_ACCESSIBLE_TOKENS):
-        return "Resource is not accessible in its current state"
-    if any(tok in text for tok in _CONFLICT_TOKENS):
-        return "Request conflicts with current state"
-    if any(tok in text for tok in _VALIDATION_TOKENS):
-        return "Invalid request"
-    return default
+    label = _match_classification(text) if text else None
+    return label if label is not None else default

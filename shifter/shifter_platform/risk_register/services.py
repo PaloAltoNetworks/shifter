@@ -339,9 +339,10 @@ def audit_session_event(
     if target_ip:
         new_state["target_ip"] = target_ip
 
+    # Sessions don't have persistent IDs
     return audit_log(
         entity_type=AuditLog.EntityType.SESSION,
-        entity_id=0,  # Sessions don't have persistent IDs
+        entity_id=0,
         action=action,
         actor_type=AuditLog.ActorType.USER,
         actor_id=user_id,

@@ -132,16 +132,14 @@ def validate_settings_block(settings: Mapping[str, Any]) -> tuple[dict[str, Any]
     normalized = dict(settings)
     raw = settings.get(SETTINGS_KEY)
     issues: list[ConfigIssue] = []
-    if raw is None:
-        pass
-    elif not isinstance(raw, Mapping):
+    if raw is not None and not isinstance(raw, Mapping):
         issues.append(
             ConfigIssue(
                 f"settings.{SETTINGS_KEY}",
                 f"must be a mapping with mode and allowed_cidrs; got {type(raw).__name__}",
             )
         )
-    else:
+    elif isinstance(raw, Mapping):
         try:
             policy = RangeEgressPolicy.model_validate(dict(raw))
             normalized[SETTINGS_KEY] = policy.model_dump(mode="json")

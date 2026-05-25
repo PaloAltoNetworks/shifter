@@ -44,6 +44,21 @@ class AWSObjectStorage:
             config=config,
         )
 
+    @staticmethod
+    def _owner_kwargs() -> dict[str, str]:
+        """Return ``{"ExpectedBucketOwner": account_id}`` when the AWS account id is configured.
+
+        AWS S3 supports ``ExpectedBucketOwner`` on every Get/Put/Head/Delete/Copy/
+        Tagging request; the call fails with ``AccessDenied`` if the bucket's
+        owner does not match. This defends against bucket-squatting and against
+        operator misconfiguration that swaps the deployment's bucket out from
+        under us. Gated on the ``AWS_S3_EXPECTED_BUCKET_OWNER`` env var (or
+        ``settings.AWS_S3_EXPECTED_BUCKET_OWNER``) so dev/test environments
+        without a fixed account id continue to work.
+        """
+        owner = os.environ.get("AWS_S3_EXPECTED_BUCKET_OWNER") or getattr(settings, "AWS_S3_EXPECTED_BUCKET_OWNER", "")
+        return {"ExpectedBucketOwner": owner} if owner else {}
+
     def upload_file(
         self,
         file_obj: BinaryIO,
@@ -69,7 +84,7 @@ class AWSObjectStorage:
         logger.debug("delete_object: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
-            client.delete_object(Bucket=bucket, Key=key)
+            client.delete_object(Bucket=bucket, Key=key, **self._owner_kwargs())
         except (ClientError, BotoCoreError) as e:
             logger.exception("delete_object: failed bucket=%s key=%s", bucket, safe_key)
             msg = f"S3 delete failed: {e}"
@@ -83,10 +98,16 @@ class AWSObjectStorage:
         logger.debug("copy_object: bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
         try:
             client = self._get_client()
+            owner_kwargs = self._owner_kwargs()
+            copy_source_kwargs = (
+                {"ExpectedSourceBucketOwner": owner_kwargs["ExpectedBucketOwner"]} if owner_kwargs else {}
+            )
             client.copy_object(
                 Bucket=bucket,
                 CopySource={"Bucket": bucket, "Key": src_key},
                 Key=dst_key,
+                **owner_kwargs,
+                **copy_source_kwargs,
             )
         except (ClientError, BotoCoreError) as e:
             logger.exception(
@@ -103,7 +124,7 @@ class AWSObjectStorage:
         logger.debug("head_object: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
-            response: dict[str, Any] = client.head_object(Bucket=bucket, Key=key)
+            response: dict[str, Any] = client.head_object(Bucket=bucket, Key=key, **self._owner_kwargs())
             return {
                 "content_length": response["ContentLength"],
                 "etag": response["ETag"].strip('"'),
@@ -131,6 +152,7 @@ class AWSObjectStorage:
                 Bucket=bucket,
                 Key=key,
                 Range=f"bytes=0-{max_bytes - 1}",
+                **self._owner_kwargs(),
             )
             stream = response["Body"]
             try:
@@ -160,7 +182,7 @@ class AWSObjectStorage:
         logger.debug("object_exists: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
-            client.head_object(Bucket=bucket, Key=key)
+            client.head_object(Bucket=bucket, Key=key, **self._owner_kwargs())
             return True
         except ClientError as e:
             code = (e.response.get("Error") or {}).get("Code")
@@ -243,6 +265,7 @@ class AWSObjectStorage:
                 Bucket=bucket,
                 Key=key,
                 Tagging={"TagSet": [{"Key": k, "Value": v} for k, v in tags.items()]},
+                **self._owner_kwargs(),
             )
         except (ClientError, BotoCoreError) as e:
             logger.exception("tag_object: failed bucket=%s key=%s", bucket, safe_key)

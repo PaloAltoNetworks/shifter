@@ -20,7 +20,7 @@ from shared.log_sanitize import safe_log_value
 # module for backward compatibility: external callers (``cms/experiments/s3.py``
 # and several tests) import them via ``cms.assets.s3``. The ``noqa: F401`` is
 # required because flake8 cannot see those re-imports from outside the file.
-from shared.s3 import (  # noqa: F401
+from shared.s3 import (  # noqa: F401  # NOSONAR — re-exports, rationale above
     get_s3_client,
     sanitize_s3_filename,
 )

@@ -41,6 +41,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Shared error message for the "experiment row missing or owned by another
+# user" branch. We collapse "not found" and "not owned" into one message so
+# we don't reveal whether a given ID exists for a different user (CWE-209).
+_EXPERIMENT_NOT_FOUND_MSG = "Experiment not found or you don't have access"
+
 
 def list_experiments(user: User) -> QuerySet[Experiment]:
     """List experiments for a user.
@@ -96,7 +101,7 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
             )
         except _pkg.Experiment.DoesNotExist:
             logger.warning("get_experiment: not found experiment_id=%d user_id=%s", experiment_id, user.pk)
-            raise ExperimentError("Experiment not found or you don't have access") from None
+            raise ExperimentError(_EXPERIMENT_NOT_FOUND_MSG) from None
         _pkg._check_result_type(experiment, _pkg.Experiment, "get_experiment")
         return experiment
     except (TypeError, ValueError, ExperimentError):
@@ -252,7 +257,7 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
             try:
                 experiment = _pkg.Experiment.objects.select_for_update().get(pk=experiment_id, user=user)
             except _pkg.Experiment.DoesNotExist:
-                raise ExperimentError("Experiment not found or you don't have access") from None
+                raise ExperimentError(_EXPERIMENT_NOT_FOUND_MSG) from None
             _pkg._check_result_type(experiment, _pkg.Experiment, "start_experiment")
 
             if experiment.status != ExperimentStatus.DRAFT.value:
@@ -335,7 +340,7 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
         try:
             experiment = _pkg.Experiment.objects.get(pk=experiment_id, user=user)
         except _pkg.Experiment.DoesNotExist:
-            raise ExperimentError("Experiment not found or you don't have access") from None
+            raise ExperimentError(_EXPERIMENT_NOT_FOUND_MSG) from None
         _pkg._check_result_type(experiment, _pkg.Experiment, "cancel_experiment")
 
         if experiment.status not in {ExperimentStatus.QUEUED.value, ExperimentStatus.RUNNING.value}:

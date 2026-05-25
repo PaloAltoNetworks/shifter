@@ -18,11 +18,21 @@ Owns:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from common import CtfdClient
 
 SUPPORTED_FLAG_TYPES = {"static", "regex"}
+
+# Static source content that opens with ``FLAG{`` MUST be the canonical
+# ``FLAG{<16-hex>}`` shape so ``ctfd_reconcile.normalize_flag`` can derive
+# the bare-hex alias (issue #705). The 16-hex body length is the production
+# contract documented in
+# ``docs/architecture/polaris-bare-hash-flag-preflight-705.md``; enforcing
+# it here keeps a malformed or short-body wrapper from silently shipping a
+# trivially short accepted answer to CTFd.
+_CANONICAL_FLAG_WRAPPER_RE = re.compile(r"^FLAG\{[0-9a-fA-F]{16}\}$")
 
 STALE_CHALLENGE_NAMES = {
     "Mission 0 — Kali Warm-Up",
@@ -130,8 +140,24 @@ def validate_manifest(challenges: list[dict[str, Any]]) -> None:
                 errors.append(
                     f"challenge {name!r} has unsupported flag type {flag_type!r}"
                 )
-            if not flag.get("content"):
+            content = flag.get("content")
+            if not content:
                 errors.append(f"challenge {name!r} has a flag with empty content")
+                continue
+            if (
+                flag_type == "static"
+                and content.startswith("FLAG{")
+                and not _CANONICAL_FLAG_WRAPPER_RE.match(content)
+            ):
+                # FLAG{ open that does not close as exactly ``FLAG{<16-hex>}``
+                # would either silently skip bare-hex aliasing or ship a
+                # trivially short accepted answer to CTFd (issue #705). Fail
+                # loudly here, before any live mutation.
+                errors.append(
+                    f"challenge {name!r} has a malformed FLAG wrapper "
+                    "(expected FLAG{<16-hex>}); fix the source content or "
+                    "set type to regex"
+                )
 
     if errors:
         raise SyncError("manifest validation failed:\n  " + "\n  ".join(errors))

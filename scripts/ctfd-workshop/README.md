@@ -68,6 +68,30 @@ challenge upsert, so re-syncs are idempotent. The source manifest is validated
 before any CTFd write, and after sync the script reads flag and hint rows back
 from CTFd and exits non-zero if any challenge that should have them has none.
 
+### Bare-hex flag acceptance
+
+Source flags written as canonical `FLAG{<16-hex>}` static entries sync to CTFd
+as one row of `type: regex`, `data: case_insensitive`, and content
+`^(?:FLAG\{<16-hex>\}|<16-hex>)$` (issue #705). Participants who copy only the
+inner hex from a recovered artifact submit successfully, and the wrapped form
+keeps working too. The repo source content stays canonical: walkthroughs,
+challenge descriptions, the warm-up note, and the CTFd page copy continue to
+show `FLAG{<16-hex>}` as the answer. Only the live CTFd row shape changes.
+
+The 16-hex body length is the production contract, not a hint: manifest
+validation rejects `FLAG{...}` static entries whose body is missing, malformed,
+non-hex, or any length other than 16. A short body would derive a trivially
+short bare-hex alias that could ship a 1-3 character accepted answer to CTFd,
+so this check runs before any live mutation.
+
+Flags already typed `regex` in the source JSON pass through unchanged, and
+static entries whose content is not a canonical FLAG wrapper at all also pass
+through as-is. Malformed wrappers (`FLAG{` open without a clean
+`FLAG{<16-hex>}` close) fail manifest validation before any live write so a
+silently mis-aliased flag cannot reach the board. The first re-sync after a
+content version that predates this change deletes any stale static rows and
+creates the aliased regex rows in the same pass; subsequent syncs are no-ops.
+
 ## Sync Range Flags
 
 Run this after participant ranges are `ready` so the box flag files match CTFd:

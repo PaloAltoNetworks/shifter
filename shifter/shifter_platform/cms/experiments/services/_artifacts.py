@@ -32,8 +32,12 @@ def get_artifact_download_url(user: User, experiment_id: int, artifact_id: int) 
         ArtifactError: If artifact not found or access denied.
     """
     _validate_user(user, "get_artifact_download_url")
+    # Coerce user-controlled ids through ``int()`` at the boundary so CodeQL
+    # sees a primitive-int barrier between user input and the log statements.
+    experiment_id = int(experiment_id)
+    artifact_id = int(artifact_id)
     logger.debug(
-        "get_artifact_download_url called for user_id=%s experiment_id=%s artifact_id=%s",
+        "get_artifact_download_url called for user_id=%s experiment_id=%d artifact_id=%d",
         user.id,
         experiment_id,
         artifact_id,
@@ -52,10 +56,10 @@ def get_artifact_download_url(user: User, experiment_id: int, artifact_id: int) 
         try:
             url = _pkg.generate_presigned_download_url(artifact.s3_key)
         except S3Error as e:
-            logger.exception("get_artifact_download_url: failed artifact_id=%s", artifact_id)
+            logger.exception("get_artifact_download_url: failed artifact_id=%d", artifact_id)
             raise ArtifactError(f"Failed to generate download URL: {e}") from e
 
-        logger.info("get_artifact_download_url: artifact_id=%s user_id=%s", artifact_id, user.pk)
+        logger.info("get_artifact_download_url: artifact_id=%d user_id=%s", artifact_id, user.pk)
         return url
     except (TypeError, ValueError, ExperimentError):
         raise
@@ -78,7 +82,10 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
         ArtifactError: If bundle not found.
     """
     _validate_user(user, "get_bundle_download_url")
-    logger.debug("get_bundle_download_url called for user_id=%s experiment_id=%s", user.id, experiment_id)
+    # Coerce user-controlled id through ``int()`` at the boundary so CodeQL
+    # sees a primitive-int barrier between user input and the log statements.
+    experiment_id = int(experiment_id)
+    logger.debug("get_bundle_download_url called for user_id=%s experiment_id=%d", user.id, experiment_id)
     try:
         try:
             bundle = _pkg.ExperimentArtifact.objects.select_related("experiment").get(
@@ -92,10 +99,10 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
         try:
             url = _pkg.generate_presigned_download_url(bundle.s3_key)
         except S3Error as e:
-            logger.exception("get_bundle_download_url: failed experiment_id=%s", experiment_id)
+            logger.exception("get_bundle_download_url: failed experiment_id=%d", experiment_id)
             raise ArtifactError(f"Failed to generate download URL: {e}") from e
 
-        logger.info("get_bundle_download_url: experiment_id=%s user_id=%s", experiment_id, user.pk)
+        logger.info("get_bundle_download_url: experiment_id=%d user_id=%s", experiment_id, user.pk)
         return url
     except (TypeError, ValueError, ExperimentError):
         raise

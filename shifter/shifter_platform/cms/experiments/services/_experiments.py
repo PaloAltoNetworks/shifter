@@ -85,14 +85,17 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
         ExperimentError: If not found.
     """
     _validate_user(user, "get_experiment")
-    logger.debug("get_experiment called for user_id=%s experiment_id=%s", user.id, experiment_id)
+    # Coerce user-controlled id through ``int()`` at the boundary so CodeQL
+    # sees a primitive-int barrier between user input and the log statements.
+    experiment_id = int(experiment_id)
+    logger.debug("get_experiment called for user_id=%s experiment_id=%d", user.id, experiment_id)
     try:
         try:
             experiment = _pkg.Experiment.objects.prefetch_related("runs__artifacts", "scripts__script").get(
                 pk=experiment_id, user=user
             )
         except _pkg.Experiment.DoesNotExist:
-            logger.warning("get_experiment: not found experiment_id=%s user_id=%s", experiment_id, user.pk)
+            logger.warning("get_experiment: not found experiment_id=%d user_id=%s", experiment_id, user.pk)
             raise ExperimentError("Experiment not found or you don't have access") from None
         _pkg._check_result_type(experiment, _pkg.Experiment, "get_experiment")
         return experiment
@@ -240,7 +243,10 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
         ExperimentStateError: If not in DRAFT state.
     """
     _validate_user(user, "start_experiment")
-    logger.debug("start_experiment called for user_id=%s experiment_id=%s", user.id, experiment_id)
+    # Coerce user-controlled id through ``int()`` at the boundary so CodeQL
+    # sees a primitive-int barrier between user input and the log statements.
+    experiment_id = int(experiment_id)
+    logger.debug("start_experiment called for user_id=%s experiment_id=%d", user.id, experiment_id)
     try:
         with _pkg.transaction.atomic():
             try:
@@ -262,7 +268,7 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
                 _pkg.ExperimentRun.objects.bulk_create(runs)
             except IntegrityError:
                 logger.warning(
-                    "start_experiment: duplicate run numbers for experiment_id=%s (concurrent start?)",
+                    "start_experiment: duplicate run numbers for experiment_id=%d (concurrent start?)",
                     experiment_id,
                 )
                 raise ExperimentStateError("Experiment is already being started") from None
@@ -280,7 +286,7 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
             # Best-effort: don't fail the start operation if event publishing fails.
             # The orchestrator can be manually triggered if needed.
             logger.exception(
-                "start_experiment: failed to publish start event for experiment_id=%s",
+                "start_experiment: failed to publish start event for experiment_id=%d",
                 experiment_id,
             )
 
@@ -293,7 +299,7 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
             new_state={"total_runs": experiment.total_runs, "max_parallel_runs": experiment.max_parallel_runs},
         )
         logger.info(
-            "start_experiment: queued experiment_id=%s user_id=%s total_runs=%d",
+            "start_experiment: queued experiment_id=%d user_id=%s total_runs=%d",
             experiment_id,
             user.pk,
             experiment.total_runs,
@@ -321,7 +327,10 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
         ExperimentStateError: If not in a cancellable state.
     """
     _validate_user(user, "cancel_experiment")
-    logger.debug("cancel_experiment called for user_id=%s experiment_id=%s", user.id, experiment_id)
+    # Coerce user-controlled id through ``int()`` at the boundary so CodeQL
+    # sees a primitive-int barrier between user input and the log statements.
+    experiment_id = int(experiment_id)
+    logger.debug("cancel_experiment called for user_id=%s experiment_id=%d", user.id, experiment_id)
     try:
         try:
             experiment = _pkg.Experiment.objects.get(pk=experiment_id, user=user)
@@ -340,7 +349,7 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
             actor_type=AuditLog.ActorType.USER,
             actor_id=user.id,
         )
-        logger.info("cancel_experiment: cancelled experiment_id=%s user_id=%s", experiment_id, user.pk)
+        logger.info("cancel_experiment: cancelled experiment_id=%d user_id=%s", experiment_id, user.pk)
         return experiment
     except (TypeError, ValueError, ExperimentError):
         raise

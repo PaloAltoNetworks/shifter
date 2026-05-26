@@ -54,6 +54,26 @@ fi
 
 cd /opt/polaris/scenario-dev/polaris/build
 
+# Per-range Ed25519 keypair for the A9 splice-relay credential gate
+# (#707). The private half is staged on a14-kali via the entrypoint
+# (`KALI_SPLICE_PRIVATE_KEY_B64`, base64 so the value stays single-line
+# inside the compose override); the public half is installed into
+# a9-splice's /root/.ssh/authorized_keys via A9_AUTHORIZED_KEY. A9's
+# sshd has PasswordAuthentication off (Dockerfile change), so this key
+# is the only path to the Bunker OT controllers. Per-range generation
+# means an exfil from one participant's a14-kali cannot be used to
+# attack another range — even though ranges are network-isolated, the
+# key is treated as scenario credential material with least exposure.
+SPLICE_KEY_DIR="$(mktemp -d)"
+chmod 700 "$SPLICE_KEY_DIR"
+ssh-keygen -t ed25519 -N "" -C "splice-relay@$(date -u +%Y%m%dT%H%M%SZ)" \
+    -f "$SPLICE_KEY_DIR/splice_relay" -q
+SPLICE_PRIVATE_KEY_B64="$(base64 -w0 < "$SPLICE_KEY_DIR/splice_relay")"
+SPLICE_PUBLIC_KEY="$(cat "$SPLICE_KEY_DIR/splice_relay.pub")"
+shred -u "$SPLICE_KEY_DIR/splice_relay" "$SPLICE_KEY_DIR/splice_relay.pub" 2>/dev/null \
+    || rm -f "$SPLICE_KEY_DIR/splice_relay" "$SPLICE_KEY_DIR/splice_relay.pub"
+rmdir "$SPLICE_KEY_DIR"
+
 # Atomic rewrite via tmp + mv so docker compose never sees a partial file.
 cat > docker-compose.override.yml.new <<COMPOSE_EOF
 services:
@@ -63,15 +83,20 @@ services:
       - "3389:3389"
     environment:
       KALI_AUTHORIZED_KEY: "$KALI_PUBKEY"
+      KALI_SPLICE_PRIVATE_KEY_B64: "$SPLICE_PRIVATE_KEY_B64"
+  a9-splice:
+    environment:
+      A9_AUTHORIZED_KEY: "$SPLICE_PUBLIC_KEY"
   dns:
     environment:
       DC01_IP: "$DC_IP"
 COMPOSE_EOF
 mv docker-compose.override.yml.new docker-compose.override.yml
 
-# Force-recreate only the two containers whose env vars changed. The
-# other 15 stay running undisturbed.
-docker compose up -d --force-recreate dns a14-kali
+# Force-recreate only the containers whose env vars changed. The other
+# 14 stay running undisturbed. a9-splice was added in #707 because the
+# A9 entrypoint now consumes A9_AUTHORIZED_KEY.
+docker compose up -d --force-recreate dns a14-kali a9-splice
 
 # The baked compose attaches a14-kali to splice-link at container start
 # (legacy pre-gate wiring). Strip that here — the splice landing is gated
@@ -85,7 +110,8 @@ if [[ -n "$splice_net_name" ]]; then
   docker network disconnect "$splice_net_name" a14-kali 2>/dev/null || true
 fi
 
-# Wait up to 60s for both containers to be Up before declaring success.
+# Wait up to 60s for the three recreated containers to be Up before
+# declaring success.
 # `docker ps --format` uses Go template syntax (e.g. .Names, .Status)
 # inside double-brace delimiters. The orchestrator's render pass uses a
 # regex that requires word characters between the delimiters, so Go
@@ -96,8 +122,9 @@ for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
   ps_out=$(docker ps --format '{{.Names}} {{.Status}}' || true)
   a14_up=$(echo "$ps_out" | grep -c '^a14-kali .*Up' || true)
   dns_up=$(echo "$ps_out" | grep -c '^dns .*Up' || true)
-  if [[ "$a14_up" == "1" && "$dns_up" == "1" ]]; then
-    echo "polaris bootstrap: a14-kali + dns up after attempt $attempt"
+  a9_up=$(echo "$ps_out" | grep -c '^a9-splice .*Up' || true)
+  if [[ "$a14_up" == "1" && "$dns_up" == "1" && "$a9_up" == "1" ]]; then
+    echo "polaris bootstrap: a14-kali + dns + a9-splice up after attempt $attempt"
     break
   fi
   sleep 5
@@ -108,6 +135,20 @@ done
 for attempt in 1 2 3 4 5; do
   if docker exec a14-kali test -s /home/kali/.ssh/authorized_keys 2>/dev/null; then
     echo "polaris bootstrap: kali authorized_keys present"
+    break
+  fi
+  sleep 3
+done
+
+# Verify the splice key staging (#707): private key on a14-kali, public
+# key in a9-splice. The Bunker chain depends on both.
+for attempt in 1 2 3 4 5; do
+  splice_priv_ok=0
+  splice_pub_ok=0
+  docker exec a14-kali test -s /home/kali/.ssh/splice_relay 2>/dev/null && splice_priv_ok=1
+  docker exec a9-splice test -s /root/.ssh/authorized_keys 2>/dev/null && splice_pub_ok=1
+  if [[ "$splice_priv_ok" == "1" && "$splice_pub_ok" == "1" ]]; then
+    echo "polaris bootstrap: splice key staged on a14-kali and a9-splice"
     break
   fi
   sleep 3
@@ -394,6 +435,25 @@ fi
 # 4. a14-kali has the per-instance kali pubkey installed.
 if ! docker exec a14-kali test -s /home/kali/.ssh/authorized_keys; then
   echo "polaris verify: a14-kali /home/kali/.ssh/authorized_keys is missing or empty" >&2
+  exit 1
+fi
+
+# 4a. Splice-relay credential gate (#707): private key staged on a14-kali
+#     and matching pubkey installed on a9-splice. Without both halves the
+#     Bunker chain (flags 31-36) is unreachable post-splice. Mode is also
+#     checked on the private key — wrong perms invite client refusal at
+#     ssh-time, which masquerades as the original P0 symptom.
+if ! docker exec a14-kali test -s /home/kali/.ssh/splice_relay; then
+  echo "polaris verify: splice_relay private key missing on a14-kali" >&2
+  exit 1
+fi
+splice_mode=$(docker exec a14-kali stat -c '%a' /home/kali/.ssh/splice_relay 2>/dev/null || echo "")
+if [[ "$splice_mode" != "600" ]]; then
+  echo "polaris verify: splice_relay private key has wrong mode '$splice_mode' (expected 600)" >&2
+  exit 1
+fi
+if ! docker exec a9-splice test -s /root/.ssh/authorized_keys; then
+  echo "polaris verify: a9-splice /root/.ssh/authorized_keys is missing or empty" >&2
   exit 1
 fi
 

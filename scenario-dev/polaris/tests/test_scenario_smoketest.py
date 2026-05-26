@@ -560,3 +560,193 @@ def test_cli_uncovered_only_returns_failure(tmp_path, capsys):
 
 def test_cli_skip_range_with_no_ctfd_is_clean():
     assert cli.main(["--skip-range"]) == 0
+
+
+# --------------------------------------------------------------------------
+# mission 5 (Bunker) — challenge 31 splice-relay credential gate (#707)
+# --------------------------------------------------------------------------
+
+_M5_KEY_PATH = "/home/kali/.ssh/splice_relay"
+_M5_RUNNER = "a14-kali"
+_M5_EXPECTED_ANSWER = "AHS-TAIL-7741AHS-LEG-MN07AHS-ARM-AL42"
+_M5_DEVID_BODIES = {
+    "tail-ctrl": "VendorName: Aurora\nProductName: AHS-TAIL-7741\nMajorMinorRevision: 2.4\n",
+    "leg-ctrl": "VendorName: Aurora\nProductName: AHS-LEG-MN07\nMajorMinorRevision: 2.4\n",
+    "arms-ctrl": "VendorName: Aurora\nProductName: AHS-ARM-AL42\nMajorMinorRevision: 2.4\n",
+}
+
+
+def _m5_happy_responses(perms: str = "600", devid_bodies=None):
+    """FakeRunner argv -> ExecResult map for the full happy-path participant chain."""
+    bodies = devid_bodies if devid_bodies is not None else _M5_KEY_HAPPY_DEVID_BODIES()
+    base = {
+        (_M5_RUNNER, ("test", "-f", _M5_KEY_PATH)): runner.ExecResult(0, "", ""),
+        (_M5_RUNNER, ("stat", "-c", "%a", _M5_KEY_PATH)): runner.ExecResult(0, f"{perms}\n", ""),
+        (_M5_RUNNER, (
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "root@splice-relay", "true",
+        )): runner.ExecResult(0, "", ""),
+    }
+    for host, body in bodies.items():
+        argv = (
+            "ssh", "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "root@splice-relay",
+            "python3", "/usr/local/bin/modbus_client.py", host, "devid",
+        )
+        base[(_M5_RUNNER, argv)] = runner.ExecResult(0, body, "")
+    return base
+
+
+def _M5_KEY_HAPPY_DEVID_BODIES():
+    return dict(_M5_DEVID_BODIES)
+
+
+def test_mission5_adapter_registered_for_challenge_31():
+    """Importing scenario_smoketest.adapters must register challenge 31."""
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    assert 31 in ADAPTERS
+    adapter = ADAPTERS[31]
+    assert adapter.value_kind == "answer"
+    assert adapter.expected_answer == _M5_EXPECTED_ANSWER
+    assert adapter.runner == _M5_RUNNER
+
+
+def test_mission5_adapter_happy_path_produces_concatenated_models():
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    adapter = ADAPTERS[31]
+    fr = FakeRunner(_m5_happy_responses())
+    ctx = AdapterContext(runner=fr, hosts={})
+    produced = adapter.solve(ctx)
+    assert produced.value == _M5_EXPECTED_ANSWER
+    assert produced.kind == "answer"
+
+    # Pin the exact SSH auth argv. Without this assertion the FakeRunner's
+    # argv-prefix fallback would silently let a regression drop BatchMode=yes
+    # or ConnectTimeout=5 — both required for an unattended smoketest run:
+    # BatchMode prevents interactive prompts that would hang; ConnectTimeout
+    # bounds the probe time. A regressed auth argv would miss the canned
+    # key, fall back to ExecResult(0, "", ""), look like "auth passed", and
+    # the modbus probes' exact-key matches would still yield the expected
+    # concatenation.
+    expected_auth_argv = (
+        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "root@splice-relay", "true",
+    )
+    assert any(
+        argv == expected_auth_argv for _, argv in fr.calls
+    ), f"happy path must invoke the exact auth argv {expected_auth_argv!r}"
+
+
+def test_mission5_adapter_evidence_missing_short_circuits():
+    """If the participant's key file isn't staged, no SSH is attempted."""
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    adapter = ADAPTERS[31]
+    fr = FakeRunner({
+        (_M5_RUNNER, ("test", "-f", _M5_KEY_PATH)): runner.ExecResult(1, "", ""),
+    })
+    ctx = AdapterContext(runner=fr, hosts={})
+    produced = adapter.solve(ctx)
+    assert produced.value is None
+    assert "evidence missing" in produced.note.lower()
+    # No SSH attempt — running the SSH command would not have a canned response
+    # and would fall through to FakeRunner's empty default. Verify by argv set.
+    invoked = {tuple(argv) for _, argv in fr.calls}
+    assert not any("ssh" in argv for argv in invoked)
+
+
+def test_mission5_adapter_wrong_perms_fails_redacted():
+    """A 0644 key would be a real participant-flow defect; surface it without leaking content."""
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    adapter = ADAPTERS[31]
+    responses = _m5_happy_responses(perms="644")
+    fr = FakeRunner(responses)
+    ctx = AdapterContext(runner=fr, hosts={})
+    produced = adapter.solve(ctx)
+    assert produced.value is None
+    note = produced.note.lower()
+    assert "perm" in note
+    # Detail names the observed mode but never the key bytes; we only ever
+    # invoke `stat` on the key path, never `cat`.
+    invoked = {tuple(argv) for _, argv in fr.calls}
+    assert not any(("cat",) == argv[:1] for argv in invoked)
+
+
+def test_mission5_adapter_auth_refused_fails_without_modbus_probe():
+    """If sshd rejects the key, the harness must not attempt downstream probes."""
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    adapter = ADAPTERS[31]
+    responses = _m5_happy_responses()
+    ssh_key = (
+        _M5_RUNNER,
+        (
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "root@splice-relay", "true",
+        ),
+    )
+    responses[ssh_key] = runner.ExecResult(255, "", "Permission denied (publickey).")
+    fr = FakeRunner(responses)
+    ctx = AdapterContext(runner=fr, hosts={})
+    produced = adapter.solve(ctx)
+    assert produced.value is None
+    assert "auth" in produced.note.lower()
+    # No modbus probe argv invoked when auth fails.
+    invoked = [tuple(argv) for _, argv in fr.calls]
+    assert not any("modbus_client.py" in tuple(argv) for argv in invoked)
+    # Raw stderr (which would leak SSH banner or host details) does not surface.
+    assert "Permission denied" not in produced.note
+
+
+def test_mission5_adapter_modbus_mismatch_redacts_value():
+    """Wrong ProductName surfaces a host-keyed failure without leaking model bodies."""
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    adapter = ADAPTERS[31]
+    bodies = _M5_KEY_HAPPY_DEVID_BODIES()
+    bodies["arms-ctrl"] = "VendorName: Aurora\nProductName: AHS-ARM-WRONG\nMajorMinorRevision: 2.4\n"
+    fr = FakeRunner(_m5_happy_responses(devid_bodies=bodies))
+    ctx = AdapterContext(runner=fr, hosts={})
+    produced = adapter.solve(ctx)
+    # Adapter returns the concatenated produced value (including the drift); the
+    # harness compare layer turns the mismatch into a redacted "fail" verdict.
+    assert produced.value is not None
+    assert "AHS-ARM-WRONG" in produced.value  # adapter doesn't lie about what it saw
+    verdict = compare.compare(produced.value, adapter.expected_answer, adapter.value_kind)
+    assert verdict.status == "fail"
+    assert "AHS-ARM-WRONG" not in verdict.detail  # compare layer redacts
+    assert "AHS-TAIL-7741" not in verdict.detail
+
+
+def test_mission5_adapter_modbus_devid_missing_field_fails():
+    """A devid response without ProductName is the bake-defect signal."""
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    adapter = ADAPTERS[31]
+    bodies = _M5_KEY_HAPPY_DEVID_BODIES()
+    bodies["leg-ctrl"] = "VendorName: Aurora\n# ProductName field absent\n"
+    fr = FakeRunner(_m5_happy_responses(devid_bodies=bodies))
+    ctx = AdapterContext(runner=fr, hosts={})
+    produced = adapter.solve(ctx)
+    assert produced.value is None
+    assert "leg-ctrl" in produced.note
+    assert "productname" in produced.note.lower()
+
+
+def test_mission5_adapter_runner_chain_uses_only_a14_kali():
+    """Per the participant path, every exec must originate from a14-kali."""
+    import scenario_smoketest.adapters.mission5_bunker  # noqa: F401
+
+    adapter = ADAPTERS[31]
+    fr = FakeRunner(_m5_happy_responses())
+    ctx = AdapterContext(runner=fr, hosts={})
+    adapter.solve(ctx)
+    containers = {container for container, _ in fr.calls}
+    assert containers == {_M5_RUNNER}

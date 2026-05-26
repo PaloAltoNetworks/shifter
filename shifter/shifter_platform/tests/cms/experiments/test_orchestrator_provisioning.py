@@ -235,11 +235,11 @@ class TestRequestRangeProvisioning:
         self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
     ):
         """Scenarios that don't require agents can be provisioned without one."""
-        exp = _make_mock_experiment(agent=None, scenario_id="cortex_deployment_experience")
+        exp = _make_mock_experiment(agent=None, scenario_id="basic")
         mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
 
         mock_range_spec = MagicMock()
-        mock_range_spec.model_dump.return_value = {"scenario_id": "cortex_deployment_experience"}
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
         mock_hydrate.return_value = mock_range_spec
 
         run = _make_mock_run()

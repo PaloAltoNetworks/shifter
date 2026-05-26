@@ -13,11 +13,6 @@ on:
           - windows
           - dc
           - brokenbk
-          - ctf-webshell
-          - ctf-mailroom
-          - ctf-helpdesk
-          - ctf-devbox
-          - ctf-vault
       ref:
         description: 'Branch to build from'
         required: false

@@ -13,11 +13,6 @@ on:
           - windows
           - dc
           - brokenbk
-          - ctf-webshell
-          - ctf-mailroom
-          - ctf-helpdesk
-          - ctf-devbox
-          - ctf-vault
 
 jobs:
   # DC AMIs are prebaked - just update SSM from config file

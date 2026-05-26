@@ -131,7 +131,7 @@ def get_ami_id(ami_type: str) -> str:
     Custom ami_key values resolve to /shifter/ami/<ami_key>.
 
     Args:
-        ami_type: Known type or custom ami_key (e.g. 'ctf-webshell').
+        ami_type: Known type or custom ami_key (e.g. 'kali', 'windows').
 
     Returns:
         AMI ID string

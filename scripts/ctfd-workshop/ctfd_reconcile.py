@@ -1,9 +1,9 @@
 """Generic CTFd reconciliation helpers (issue #691).
 
-These helpers were duplicated across ``sync_polaris_ctfd_onboarding.py``
-(authoritative version), ``sync_polaris_ctfd.py`` (re-imported wrappers
-plus its own page sync), and ``seed_ctfd.py`` (parallel re-implementation
-with slightly different flag/hint semantics).
+These helpers were originally duplicated across the various Polaris CTFd
+sync scripts (``sync_polaris_ctfd_onboarding.py`` had the authoritative
+version, ``sync_polaris_ctfd.py`` re-imported wrappers plus its own page
+sync). Consolidated into this generic module.
 
 The module owns the **generic** CTFd row-reconciliation surface:
 

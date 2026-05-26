@@ -203,7 +203,7 @@ def sample_range_config(sample_subnet_config_attack, sample_subnet_config_target
 
 @pytest.fixture
 def sample_range_config_multi_subnet():
-    """Sample RangeConfig with multiple subnets (cortex_byot-style)."""
+    """Sample RangeConfig with multiple subnets (ngfw-segmented-style)."""
     return RangeConfig(
         range_id=99,
         user_id=2,
@@ -560,7 +560,7 @@ def sample_db_range_row_no_agent():
 
 @pytest.fixture
 def sample_db_range_row_multi_subnet():
-    """Sample database row for a range with 4 subnets (cortex_byot-style)."""
+    """Sample database row for a range with 4 subnets (ngfw-segmented-style)."""
     return (
         44,  # id
         3,  # user_id

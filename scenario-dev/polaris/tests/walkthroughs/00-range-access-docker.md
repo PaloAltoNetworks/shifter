@@ -31,7 +31,7 @@ The Kali container is on two networks: `shared` (172.20.0.x) and `corporate` (17
 | A6 Workstation | 172.20.30.10 | lab (VLAN 30) | Pivot through **A16** (the research analyst workstation) after flag 38 |
 | A7 Gitea | 172.20.30.20 | lab (VLAN 30) | Pivot through **A16**; has `git` preinstalled |
 | A8 Database | 172.20.30.30 | lab (VLAN 30) | Pivot through **A16** via cached `.pgpass` |
-| A9 Splice | 172.20.60.5 | splice-link | Pre-wired link to Kali (`splice-relay`, SSH `root / splice2025`) — represents the post-meltdown local splice install |
+| A9 Splice | 172.20.60.5 | splice-link | Pre-wired link to Kali (`splice-relay`, SSH `root` via key at `~/.ssh/splice_relay`) — represents the post-meltdown local splice install |
 | A10 Tail | 172.20.50.10 | bunker-ot | Via A9 after gate |
 | A11 Leg | 172.20.50.11 | bunker-ot | Via A9 after gate |
 | A12 Arms | 172.20.50.12 | bunker-ot | Via A9 after gate |
@@ -60,7 +60,7 @@ The Kali container uses 172.20.0.2 as its DNS server. Hostnames like `boreas-sys
 | svc-fileshare | F1l3Sh@r3Svc! | A4 IT share (from A1 Kowalski "creds backup" email) |
 | lab_general | LabGen2025! | A8 PostgreSQL compartment_a (from A3 /.env leak) |
 | lab_mfg | Mfg2025! | A8 PostgreSQL compartment_c (from A6 /home/p.nielsen/.pgpass) |
-| root | splice2025 | A9 SSH |
+| root | (key auth — `~/.ssh/splice_relay` on Kali) | A9 SSH |
 
 ## Managing the Range
 

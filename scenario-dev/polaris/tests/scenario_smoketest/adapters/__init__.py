@@ -86,3 +86,4 @@ def register(
 
 # Importing a mission module runs its @register decorators as a side effect.
 from . import mission1_osint  # noqa: E402,F401
+from . import mission5_bunker  # noqa: E402,F401

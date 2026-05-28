@@ -179,6 +179,12 @@ repos:
         language: system
         files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
 
+      - id: check-tf-iam-elb-scope
+        name: AWS ELBv2 (GWLB) IAM scoping (engine provisioner)
+        entry: python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py
+        language: system
+        files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
+
       # Custom: Secrets Manager kms:Decrypt grant check (issue #52).
       # Ensures every aws_iam_role defined in scoped files that reads
       # the portal Secrets Manager CMK has an attached
@@ -231,11 +237,12 @@ repos:
         entry: >-
           bash -c '
           python3 -m unittest scripts.check_tf_iam_ec2_scope.test_check_tf_iam_ec2_scope &&
+          python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope &&
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs &&
           python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
           '
         language: system
-        files: ^scripts/check_tf_(iam_ec2_scope|sg_cidrs|kms_secrets_grant)/
+        files: ^scripts/check_tf_(iam_ec2_scope|iam_elb_scope|sg_cidrs|kms_secrets_grant)/
         pass_filenames: false
 
   # Kubernetes schema validation

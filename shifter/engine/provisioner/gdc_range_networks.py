@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from config import GDCNetworkAccessConfig, load_gdc_network_access_config
+from log_redact import safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ def _apply_cluster_custom_object(custom_api, body: dict[str, Any], api_exception
             plural=_NETWORK_PLURAL,
             body=body,
         )
-        logger.info("Created GDC Network %s", name)
+        logger.info("Created GDC Network %s", safe_log_value(name))
     except api_exception as exc:
         if exc.status != 409:
             raise
@@ -244,7 +245,7 @@ def _apply_cluster_custom_object(custom_api, body: dict[str, Any], api_exception
             name=name,
             body=body,
         )
-        logger.info("Updated GDC Network %s", name)
+        logger.info("Updated GDC Network %s", safe_log_value(name))
 
 
 def _apply_namespaced_custom_object(custom_api, body: dict[str, Any], namespace: str, api_exception) -> None:
@@ -257,7 +258,7 @@ def _apply_namespaced_custom_object(custom_api, body: dict[str, Any], namespace:
             namespace=namespace,
             body=body,
         )
-        logger.info("Created NAD %s/%s", namespace, name)
+        logger.info("Created NAD %s/%s", safe_log_value(namespace), safe_log_value(name))
     except api_exception as exc:
         if exc.status != 409:
             raise
@@ -269,7 +270,7 @@ def _apply_namespaced_custom_object(custom_api, body: dict[str, Any], namespace:
             name=name,
             body=body,
         )
-        logger.info("Updated NAD %s/%s", namespace, name)
+        logger.info("Updated NAD %s/%s", safe_log_value(namespace), safe_log_value(name))
 
 
 def _delete_namespaced_custom_object(custom_api, namespace: str, name: str, api_exception) -> None:

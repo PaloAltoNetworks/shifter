@@ -18,6 +18,7 @@ from cloud.gcp.base import get_project_id, import_google_module
 from components.instance import sanitize_hostname
 from config import GDCNetworkAccessConfig, GDCVMRuntimeConfig, load_gdc_network_access_config, load_gdc_vmruntime_config
 from executors.factory import get_ssh_username
+from log_redact import safe_log_value
 from utils.crypto import derive_ssh_public_key, generate_rdp_password, generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
@@ -305,7 +306,7 @@ def _apply_namespaced_custom_object(
             namespace=namespace,
             body=body,
         )
-        logger.info("Created %s %s/%s", body["kind"], namespace, name)
+        logger.info("Created %s %s/%s", safe_log_value(body["kind"]), safe_log_value(namespace), safe_log_value(name))
     except api_exception as exc:
         if exc.status != 409:
             raise
@@ -317,7 +318,7 @@ def _apply_namespaced_custom_object(
             name=name,
             body=body,
         )
-        logger.info("Updated %s %s/%s", body["kind"], namespace, name)
+        logger.info("Updated %s %s/%s", safe_log_value(body["kind"]), safe_log_value(namespace), safe_log_value(name))
 
 
 def _delete_namespaced_custom_object(
@@ -338,7 +339,7 @@ def _delete_namespaced_custom_object(
             namespace=namespace,
             name=name,
         )
-        logger.info("Deleted %s %s/%s", plural, namespace, name)
+        logger.info("Deleted %s %s/%s", safe_log_value(plural), safe_log_value(namespace), safe_log_value(name))
     except api_exception as exc:
         if exc.status != 404:
             raise
@@ -522,7 +523,7 @@ def _delete_ssh_secret(range_id: int, instance: dict[str, Any]) -> None:
     secret_name = f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='ssh')}"
     try:
         client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC SSH secret %s", secret_name)
+        logger.info("Deleted GDC SSH secret %s", safe_log_value(secret_name))
     except google_exceptions.NotFound:
         return
 
@@ -581,7 +582,7 @@ def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None
     )
     try:
         client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC RDP password secret %s", secret_name)
+        logger.info("Deleted GDC RDP password secret %s", safe_log_value(secret_name))
     except google_exceptions.NotFound:
         return
 
@@ -604,12 +605,12 @@ def _ensure_gcs_image_secret(
     )
     try:
         core_api.create_namespaced_secret(namespace=namespace, body=body)
-        logger.info("Created GDC VM image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
+        logger.info("Created GDC VM image access secret %s/%s", safe_log_value(namespace), _IMAGE_IMPORT_SECRET_SUFFIX)
     except api_exception as exc:
         if exc.status != 409:
             raise
         core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace, body=body)
-        logger.info("Updated GDC VM image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
+        logger.info("Updated GDC VM image access secret %s/%s", safe_log_value(namespace), _IMAGE_IMPORT_SECRET_SUFFIX)
     return _IMAGE_IMPORT_SECRET_SUFFIX
 
 
@@ -690,7 +691,12 @@ def _delete_vm_runtime_resource(
     try:
         _wait_for_deleted(custom_api, namespace, name, _VM_GROUP, _VM_VERSION, plural, api_exception)
     except RuntimeError:
-        logger.warning("Timed out waiting for GDC %s %s/%s to delete", label, namespace, name)
+        logger.warning(
+            "Timed out waiting for GDC %s %s/%s to delete",
+            safe_log_value(label),
+            safe_log_value(namespace),
+            safe_log_value(name),
+        )
 
 
 def _build_pending_vm_runtime_instance(

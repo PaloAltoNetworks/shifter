@@ -17,6 +17,7 @@ from executors.base import (
     ExecutorError,
     ExecutorTimeoutError,
 )
+from log_redact import safe_log_value
 from plans.base import SetupPlan, SetupStep
 
 logger = logging.getLogger(__name__)
@@ -147,8 +148,8 @@ class SetupOrchestrator:
         plan_name = getattr(plan, "name", type(plan).__name__)
         logger.debug(
             "orchestrate: instance_id=%s plan=%s steps=%d",
-            instance_id,
-            plan_name,
+            safe_log_value(instance_id),
+            safe_log_value(plan_name),
             len(plan.steps),
         )
         step_results: list[StepResult] = []

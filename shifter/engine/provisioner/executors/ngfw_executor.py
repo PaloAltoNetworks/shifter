@@ -12,6 +12,7 @@ import tempfile
 import time
 
 from executors.base import CommandResult, ExecutorConnectionError, ExecutorError, ExecutorTimeoutError
+from log_redact import safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ class NGFWExecutor:
         command_input = self._build_command_input(script, stdin_input)
         ssh_args = self._build_ssh_args(host)
 
-        logger.info("Piping command to %s: %s", host, command_input[:100])
+        logger.info("Piping command to %s: %s", safe_log_value(host), safe_log_value(command_input[:100]))
 
         try:
             result = subprocess.run(  # noqa: S603  # NOSONAR — trusted ssh binary with controlled args
@@ -194,14 +195,14 @@ class NGFWExecutor:
                     timeout_seconds=15,
                 )
                 if result.success and self._is_system_info_ready(result.stdout):
-                    logger.info("NGFW ready at %s after %.1fs", host, elapsed)
+                    logger.info("NGFW ready at %s after %.1fs", safe_log_value(host), elapsed)
                     return True
             except (NGFWTimeoutError, NGFWConnectionError):
                 pass
 
             logger.info(
                 "Waiting for NGFW at %s... (%.1fs / %ds)",
-                host,
+                safe_log_value(host),
                 elapsed,
                 timeout_seconds,
             )

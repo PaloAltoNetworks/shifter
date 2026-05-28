@@ -49,6 +49,7 @@ from typing import Any
 from uuid import uuid4
 
 from cloud import get_event_bus
+from log_redact import safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -139,17 +140,17 @@ def _publish_event(event: dict[str, Any]) -> None:
 
         logger.debug(
             "Published event: request_id=%s range_id=%s event_type=%s",
-            event.get("request_id"),
-            event.get("range_id"),
-            event.get("event_type"),
+            safe_log_value(event.get("request_id")),
+            safe_log_value(event.get("range_id")),
+            safe_log_value(event.get("event_type")),
         )
 
     except Exception as e:
         logger.error(
             "Failed to publish event: request_id=%s range_id=%s error=%s",
-            event.get("request_id"),
-            event.get("range_id"),
-            str(e),
+            safe_log_value(event.get("request_id")),
+            safe_log_value(event.get("range_id")),
+            safe_log_value(e),
         )
 
 
@@ -340,11 +341,11 @@ def publish_ngfw_event(
 
     logger.info(
         "Publishing NGFW event: request_id=%s instance_id=%s app_id=%s status=%s serial=%s",
-        request_id,
-        instance_id,
-        app_id,
-        status,
-        serial_number or "N/A",
+        safe_log_value(request_id),
+        safe_log_value(instance_id),
+        safe_log_value(app_id),
+        safe_log_value(status),
+        safe_log_value(serial_number or "N/A"),
     )
 
     _publish_event(event)

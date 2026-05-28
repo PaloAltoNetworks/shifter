@@ -19,6 +19,7 @@ import boto3
 from botocore.exceptions import ClientError, WaiterError
 
 from executors.base import CommandResult
+from log_redact import safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +229,9 @@ class AWSExecutor:
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("start_instance: failed instance_id=%s code=%s", instance_id, error_code)
+            logger.warning(
+                "start_instance: failed instance_id=%s code=%s", safe_log_value(instance_id), safe_log_value(error_code)
+            )
             return CommandResult(
                 success=False,
                 exit_code=-1,
@@ -236,7 +239,7 @@ class AWSExecutor:
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
-            logger.exception("start_instance: unexpected error instance_id=%s", instance_id)
+            logger.exception("start_instance: unexpected error instance_id=%s", safe_log_value(instance_id))
             return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def stop_instance(self, instance_id: str) -> CommandResult:
@@ -262,7 +265,9 @@ class AWSExecutor:
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("stop_instance: failed instance_id=%s code=%s", instance_id, error_code)
+            logger.warning(
+                "stop_instance: failed instance_id=%s code=%s", safe_log_value(instance_id), safe_log_value(error_code)
+            )
             return CommandResult(
                 success=False,
                 exit_code=-1,
@@ -270,7 +275,7 @@ class AWSExecutor:
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
-            logger.exception("stop_instance: unexpected error instance_id=%s", instance_id)
+            logger.exception("stop_instance: unexpected error instance_id=%s", safe_log_value(instance_id))
             return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def wait_for_running(self, instance_id: str, timeout: int = 300) -> CommandResult:
@@ -283,7 +288,7 @@ class AWSExecutor:
         Returns:
             CommandResult with success status.
         """
-        logger.debug("wait_for_running: instance_id=%s timeout=%d", instance_id, timeout)
+        logger.debug("wait_for_running: instance_id=%s timeout=%d", safe_log_value(instance_id), timeout)
         try:
             client = self.get_client("ec2")
             waiter = client.get_waiter("instance_running")
@@ -293,7 +298,7 @@ class AWSExecutor:
                 InstanceIds=[instance_id],
                 WaiterConfig={"Delay": 15, "MaxAttempts": max_attempts},
             )
-            logger.info("wait_for_running: instance_id=%s is now running", instance_id)
+            logger.info("wait_for_running: instance_id=%s is now running", safe_log_value(instance_id))
             return CommandResult(
                 success=True,
                 exit_code=0,
@@ -301,7 +306,7 @@ class AWSExecutor:
                 stderr="",
             )
         except WaiterError as e:
-            logger.warning("wait_for_running: timeout instance_id=%s", instance_id)
+            logger.warning("wait_for_running: timeout instance_id=%s", safe_log_value(instance_id))
             return CommandResult(
                 success=False,
                 exit_code=-1,
@@ -311,7 +316,11 @@ class AWSExecutor:
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("wait_for_running: failed instance_id=%s code=%s", instance_id, error_code)
+            logger.warning(
+                "wait_for_running: failed instance_id=%s code=%s",
+                safe_log_value(instance_id),
+                safe_log_value(error_code),
+            )
             return CommandResult(
                 success=False,
                 exit_code=-1,
@@ -319,7 +328,7 @@ class AWSExecutor:
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
-            logger.exception("wait_for_running: unexpected error instance_id=%s", instance_id)
+            logger.exception("wait_for_running: unexpected error instance_id=%s", safe_log_value(instance_id))
             return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def wait_for_stopped(self, instance_id: str, timeout: int = 900) -> CommandResult:
@@ -332,7 +341,7 @@ class AWSExecutor:
         Returns:
             CommandResult with success status.
         """
-        logger.debug("wait_for_stopped: instance_id=%s timeout=%d", instance_id, timeout)
+        logger.debug("wait_for_stopped: instance_id=%s timeout=%d", safe_log_value(instance_id), timeout)
         try:
             client = self.get_client("ec2")
             waiter = client.get_waiter("instance_stopped")
@@ -341,7 +350,7 @@ class AWSExecutor:
                 InstanceIds=[instance_id],
                 WaiterConfig={"Delay": 15, "MaxAttempts": max_attempts},
             )
-            logger.info("wait_for_stopped: instance_id=%s is now stopped", instance_id)
+            logger.info("wait_for_stopped: instance_id=%s is now stopped", safe_log_value(instance_id))
             return CommandResult(
                 success=True,
                 exit_code=0,
@@ -349,7 +358,7 @@ class AWSExecutor:
                 stderr="",
             )
         except WaiterError as e:
-            logger.warning("wait_for_stopped: timeout instance_id=%s", instance_id)
+            logger.warning("wait_for_stopped: timeout instance_id=%s", safe_log_value(instance_id))
             return CommandResult(
                 success=False,
                 exit_code=-1,
@@ -359,7 +368,11 @@ class AWSExecutor:
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("wait_for_stopped: failed instance_id=%s code=%s", instance_id, error_code)
+            logger.warning(
+                "wait_for_stopped: failed instance_id=%s code=%s",
+                safe_log_value(instance_id),
+                safe_log_value(error_code),
+            )
             return CommandResult(
                 success=False,
                 exit_code=-1,
@@ -367,7 +380,7 @@ class AWSExecutor:
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
-            logger.exception("wait_for_stopped: unexpected error instance_id=%s", instance_id)
+            logger.exception("wait_for_stopped: unexpected error instance_id=%s", safe_log_value(instance_id))
             return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def describe_instance(self, instance_id: str) -> CommandResult:
@@ -379,7 +392,7 @@ class AWSExecutor:
         Returns:
             CommandResult with instance details in stdout.
         """
-        logger.debug("describe_instance: instance_id=%s", instance_id)
+        logger.debug("describe_instance: instance_id=%s", safe_log_value(instance_id))
         try:
             client = self.get_client("ec2")
             response = client.describe_instances(InstanceIds=[instance_id])
@@ -392,7 +405,11 @@ class AWSExecutor:
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("describe_instance: failed instance_id=%s code=%s", instance_id, error_code)
+            logger.warning(
+                "describe_instance: failed instance_id=%s code=%s",
+                safe_log_value(instance_id),
+                safe_log_value(error_code),
+            )
             return CommandResult(
                 success=False,
                 exit_code=-1,
@@ -400,7 +417,7 @@ class AWSExecutor:
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
-            logger.exception("describe_instance: unexpected error instance_id=%s", instance_id)
+            logger.exception("describe_instance: unexpected error instance_id=%s", safe_log_value(instance_id))
             return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     # =========================================================================

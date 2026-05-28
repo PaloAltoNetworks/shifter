@@ -236,15 +236,20 @@ _DB_REEXPORTS_USED = (
 )
 
 
-from instance_setup import (  # noqa: E402
-    _LINUX_VICTIM_OS_TYPES,
-    _build_uuid_to_config,
+from dc_setup import (  # noqa: E402
     _configure_dc_ssh_access,
     _DCBootstrapContext,
     _DCPromoteConfig,
+    _install_dc_xdr,
+    _run_dc_bootstrap_plan,
+    _run_dc_setup,
+    _verify_dc_setup,
+)
+from instance_setup import (  # noqa: E402
+    _LINUX_VICTIM_OS_TYPES,
+    _build_uuid_to_config,
     _dispatch_instance_setup_role,
     _DomainJoinSpec,
-    _install_dc_xdr,
     _install_xdr_or_raise,
     _InstanceSetupCtx,
     _InstanceSetupSpec,
@@ -254,8 +259,6 @@ from instance_setup import (  # noqa: E402
     _resolve_dc_ip_and_domain,
     _resolve_rdp_password_from_secret_ref,
     _resolve_setup_hostname,
-    _run_dc_bootstrap_plan,
-    _run_dc_setup,
     _run_polaris_range_bootstrap,
     _run_setup_plan,
     _run_single_instance_setup,
@@ -266,7 +269,6 @@ from instance_setup import (  # noqa: E402
     _setup_one_other_instance,
     _setup_other_instances_parallel,
     _setup_windows_victim,
-    _verify_dc_setup,
     run_instance_setup,
 )
 from ngfw_runtime import (  # noqa: E402

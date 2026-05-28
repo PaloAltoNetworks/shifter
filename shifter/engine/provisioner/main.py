@@ -35,10 +35,9 @@ from config import (
 )
 from events import (
     STATUS_DESTROYED,
-    STATUS_FAILED,
     publish_destroyed,
     publish_failed,
-    publish_ngfw_event,
+    publish_ngfw_event,  # noqa: F401 — re-exported for sibling modules and ``patch("main.publish_ngfw_event")``
     publish_ready,
     publish_status_update,
 )
@@ -48,7 +47,7 @@ from executors.factory import GuestExecutionContext, build_guest_execution_conte
 from executors.ngfw_executor import NGFWExecutor
 from executors.ssm_executor import SSMExecutor
 from ngfw_terraform import run_ngfw_terraform
-from orchestrators.ops_orchestrator import OpsOrchestrator
+from orchestrators.ops_orchestrator import OpsOrchestrator  # noqa: F401 — re-exported for ngfw_runtime_ops + tests
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import SetupPlan, SetupStep
 from plans.bootstrap import BootstrapPlan
@@ -291,206 +290,15 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
         conn.commit()
 
 
-def _assert_subnet_output(subnet_name: str, subnet_data: dict[str, Any]) -> None:
-    """Reject a Pulumi subnet record missing any required field."""
-    for field in ("uuid", "subnet_id", "subnet_cidr"):
-        if not subnet_data.get(field):
-            raise ValueError(f"Subnet '{subnet_name}' missing '{field}'")
-
-
-def _assert_instance_output(index: int, inst: dict[str, Any]) -> None:
-    """Reject a Pulumi instance record missing any required field."""
-    if not inst.get("uuid"):
-        raise ValueError(f"Instance[{index}] (role={inst.get('role')}) missing 'uuid'")
-    if not inst.get("instance_id"):
-        raise ValueError(f"Instance[{index}] missing 'instance_id'")
-    if not inst.get("private_ip"):
-        raise ValueError(f"Instance[{index}] (role={inst.get('role')}, os={inst.get('os')}) missing 'private_ip'")
-
-
-def _validate_provisioned_outputs(
-    subnets: dict[str, dict[str, Any]],
-    instances: list[dict[str, Any]],
-    expected_subnet_names: set[str] | None = None,
-) -> None:
-    """Validate Pulumi outputs have required fields before DB write.
-
-    Args:
-        subnets: Dict of subnet_name -> subnet details.
-        instances: List of instance dicts.
-        expected_subnet_names: Optional set of expected subnet names from spec.
-
-    Raises:
-        ValueError: If required fields are missing or empty.
-    """
-    for subnet_name, subnet_data in subnets.items():
-        _assert_subnet_output(subnet_name, subnet_data)
-    for i, inst in enumerate(instances):
-        _assert_instance_output(i, inst)
-
-    if expected_subnet_names:
-        actual_subnets = set(subnets.keys())
-        missing = expected_subnet_names - actual_subnets
-        if missing:
-            raise ValueError(f"Expected subnets not created: {missing}")
-        extra = actual_subnets - expected_subnet_names
-        if extra:
-            logger.warning("Unexpected subnets in output: %s", extra)
-
-
-def _get_cloud_provider() -> str:
-    """Return the active cloud provider for range state persistence."""
-    return os.environ.get("CLOUD_PROVIDER", "aws")
-
-
-def _get_bool_env(name: str) -> bool | None:
-    """Parse a boolean env var if set, otherwise return None."""
-    raw_value = os.environ.get(name)
-    if raw_value is None:
-        return None
-
-    normalized = raw_value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"{name} must be a boolean-like value, got: {raw_value!r}")
-
-
-def _should_promote_dc_at_runtime(provider: str | None = None) -> bool:
-    """Decide whether DC promotion should run during setup."""
-    override = _get_bool_env("DC_RUNTIME_PROMOTION")
-    if override is not None:
-        return override
-    return (provider or _get_cloud_provider()) == "gcp"
-
-
-def _should_run_dc_bootstrap_plan(provider: str | None = None) -> bool:
-    """Decide whether DC hostname/SSH bootstrap should run via setup plans."""
-    override = _get_bool_env("DC_BOOTSTRAP_VIA_SETUP_PLAN")
-    if override is not None:
-        return override
-    return (provider or _get_cloud_provider()) == "gcp"
-
-
-def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    """Drop empty provider metadata fields so persisted state stays readable."""
-    return {key: value for key, value in fields.items() if value not in (None, "", [], {}, ())}
-
-
-def _get_provider_metadata_prefixes(provider: str) -> list[str]:
-    """Return the accepted output prefixes for provider metadata extraction."""
-    if provider == "gcp":
-        return ["gcp_", "gdc_", "vmruntime_"]
-    return [f"{provider}_"]
-
-
-def _extract_provider_metadata(resource: dict[str, Any], provider: str) -> dict[str, Any]:
-    """Collect provider-prefixed keys into a nested metadata block."""
-    metadata: dict[str, Any] = {}
-    for prefix in _get_provider_metadata_prefixes(provider):
-        metadata.update({key.removeprefix(prefix): value for key, value in resource.items() if key.startswith(prefix)})
-    return _compact_state_fields(metadata)
-
-
-def _build_subnet_provider_metadata(subnet_data: dict[str, Any], provider: str) -> dict[str, Any]:
-    """Build provider-specific subnet metadata for persisted state."""
-    if provider == "aws":
-        metadata = {
-            "subnet_id": subnet_data.get("subnet_id"),
-            "cidr": subnet_data.get("subnet_cidr"),
-            "security_group_id": subnet_data.get("security_group_id"),
-            "route_table_id": subnet_data.get("route_table_id"),
-        }
-    else:
-        metadata = _extract_provider_metadata(subnet_data, provider)
-
-    return {provider: metadata} if metadata else {}
-
-
-def _build_instance_provider_metadata(instance_data: dict[str, Any], provider: str) -> dict[str, Any]:
-    """Build provider-specific instance metadata for persisted state."""
-    if provider == "aws":
-        metadata = {
-            "instance_id": instance_data.get("instance_id"),
-        }
-    else:
-        metadata = _extract_provider_metadata(instance_data, provider)
-
-    return {provider: metadata} if metadata else {}
-
-
-def _build_subnet_state(subnet_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
-    """Build the persisted engine_subnet.state payload."""
-    resolved_provider = provider or _get_cloud_provider()
-    state = {
-        "cloud_provider": resolved_provider,
-        "subnet_id": subnet_data.get("subnet_id"),
-        "subnet_cidr": subnet_data.get("subnet_cidr"),
-        "security_group_id": subnet_data.get("security_group_id"),
-        "route_table_id": subnet_data.get("route_table_id"),
-        "provider_metadata": _build_subnet_provider_metadata(subnet_data, resolved_provider),
-        # Preserve the current AWS field names for existing AWS callers.
-        "aws_subnet_id": subnet_data.get("subnet_id") if resolved_provider == "aws" else None,
-        "aws_cidr": subnet_data.get("subnet_cidr") if resolved_provider == "aws" else None,
-        "aws_security_group_id": subnet_data.get("security_group_id") if resolved_provider == "aws" else None,
-        "aws_route_table_id": subnet_data.get("route_table_id") if resolved_provider == "aws" else None,
-    }
-    return state
-
-
-def _build_instance_state(instance_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
-    """Build the persisted engine_instance.state payload for range guests."""
-    resolved_provider = provider or _get_cloud_provider()
-    state = {
-        "asset_type": instance_data.get("asset_type", "vm_runtime_vm"),
-        "cloud_provider": resolved_provider,
-        "instance_id": instance_data.get("instance_id"),
-        "private_ip": instance_data.get("private_ip"),
-        "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
-        # Per-instance RDP password secret reference (#762). Carries the
-        # provider-native identifier (AWS Secrets Manager ARN or GCP
-        # Secret Manager resource path); the password value itself is
-        # never persisted in state.
-        "rdp_password_secret_arn": instance_data.get("rdp_password_secret_arn"),
-        # SSM Parameter Store SecureString name for the same per-
-        # instance password (AWS only; GCP carries ``None``). Used by
-        # the AWS push path's ``{{ssm-secure:<name>}}`` substitution so
-        # the value never lands in SSM Run Command history (#762 codex
-        # cycle 3). Mirrors the Secrets Manager copy referenced above;
-        # the portal continues to read the value from Secrets Manager
-        # via ``shared.cloud`` at access time.
-        "rdp_password_ssm_param_name": instance_data.get("rdp_password_ssm_param_name"),
-        "ssh_username": instance_data.get("ssh_username"),
-        "subnet_name": instance_data.get("subnet_name"),
-        "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
-        # Preserve the current AWS field name for existing pause/resume readers.
-        "aws_instance_id": instance_data.get("instance_id") if resolved_provider == "aws" else None,
-    }
-    return state
-
-
-def _build_provisioned_instance_payload(instance_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
-    """Build the legacy Range.provisioned_instances entry with provider metadata."""
-    resolved_provider = provider or _get_cloud_provider()
-    return {
-        "uuid": instance_data.get("uuid"),
-        "name": instance_data.get("name"),
-        "asset_type": instance_data.get("asset_type", "vm_runtime_vm"),
-        "role": instance_data.get("role"),
-        "os_type": instance_data.get("os"),
-        "subnet_name": instance_data.get("subnet_name"),
-        "instance_id": instance_data.get("instance_id"),
-        "private_ip": instance_data.get("private_ip"),
-        "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
-        # Per-instance RDP password secret reference (#762).
-        "rdp_password_secret_arn": instance_data.get("rdp_password_secret_arn"),
-        # AWS-only mirror in SSM Parameter Store SecureString (#762 cycle 3).
-        "rdp_password_ssm_param_name": instance_data.get("rdp_password_ssm_param_name"),
-        "ssh_username": instance_data.get("ssh_username"),
-        "cloud_provider": resolved_provider,
-        "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
-    }
+from state_helpers import (  # noqa: E402
+    _build_instance_state,
+    _build_provisioned_instance_payload,
+    _build_subnet_state,
+    _get_cloud_provider,
+    _should_promote_dc_at_runtime,
+    _should_run_dc_bootstrap_plan,
+    _validate_provisioned_outputs,
+)
 
 
 def write_provisioned_state(
@@ -3199,151 +3007,26 @@ def _build_range_terraform_variables(
     return variables
 
 
-def _validate_ngfw_operation(operation: str) -> tuple[str, str]:
-    """Map an NGFW operation name to its (in-progress, success) status pair."""
-    status_map = {
-        "start": ("resuming", "ready"),
-        "stop": ("pausing", "paused"),
-    }
-    if operation not in status_map:
-        raise ValueError(f"Unknown operation: {operation}")
-    return status_map[operation]
+# Re-exports from sibling modules (S104 file-split, issue #780). These
+# imports preserve `patch("main.X")` test mocks for callers that still
+# reach in through ``main`` instead of the new sibling module path.
+from ngfw_runtime_ops import (  # noqa: E402
+    _load_ngfw_ops_plan,
+    _publish_ngfw_runtime_status,
+    _run_aws_ngfw_operation,
+    _run_gcp_ngfw_operation,
+    _validate_ngfw_operation,
+    run_ngfw_operation,
+)
 
-
-def _publish_ngfw_runtime_status(request_id: str, instance_uuid: str, app_id: str, status: str) -> None:
-    """Persist the new NGFW runtime status and emit the corresponding lifecycle event."""
-    update_instance_state(request_id, status)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_uuid,
-        app_id=app_id,
-        status=status,
-    )
-
-
-def _run_gcp_ngfw_operation(
-    operation: str,
-    request_id: str,
-    instance_uuid: str,
-    app_id: str,
-    state: dict[str, Any],
-) -> None:
-    """Drive a start/stop power operation against a GCP VM-Series NGFW."""
-    import gdc_vmseries_ngfw
-
-    in_progress_status, success_status = _validate_ngfw_operation(operation)
-    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
-    try:
-        gdc_vmseries_ngfw.run_power_operation(operation, state)
-    except Exception as e:
-        logger.error("GDC VM-Series NGFW operation failed: %s", e)
-        update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=STATUS_FAILED,
-        )
-        raise
-    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, success_status)
-
-
-def _load_ngfw_ops_plan(operation: str) -> SetupPlan:
-    """Lazily import and instantiate the SetupPlan for the requested NGFW operation."""
-    import importlib
-
-    plan_map = {
-        "start": "plans.ngfw_start.NGFWStartPlan",
-        "stop": "plans.ngfw_stop.NGFWStopPlan",
-    }
-    module_path, class_name = plan_map[operation].rsplit(".", 1)
-    module = importlib.import_module(module_path)
-    return getattr(module, class_name)()
-
-
-def _run_aws_ngfw_operation(
-    operation: str,
-    request_id: str,
-    instance_uuid: str,
-    app_id: str,
-    ec2_instance_id: str,
-    **kwargs: str,
-) -> None:
-    """Drive a start/stop power operation against an AWS-attached NGFW EC2 instance."""
-    in_progress_status, success_status = _validate_ngfw_operation(operation)
-    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
-
-    try:
-        executor = AWSExecutor()
-        orchestrator = OpsOrchestrator(executor)
-        plan = _load_ngfw_ops_plan(operation)
-        context = {"instance_id": ec2_instance_id, **kwargs}
-        result = orchestrator.orchestrate(ec2_instance_id, plan, context)
-        if not result.success:
-            for step_result in result.step_results:
-                if not step_result.success:
-                    logger.error(
-                        "NGFW %s step %s failed: %s",
-                        operation,
-                        step_result.step_name,
-                        step_result.stderr,
-                    )
-            raise RuntimeError(f"Operation {operation} failed")
-    except Exception as e:
-        error_msg = str(e)[:1000]
-        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=STATUS_FAILED,
-        )
-        raise
-
-    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, success_status)
-
-
-def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
-    """Run NGFW runtime operation (start/stop).
-
-    Retrieves EC2 instance ID from the Instance.state (populated during
-    provisioning), executes the operation plan, and publishes events for status
-    updates.
-
-    Args:
-        operation: Operation name (start, stop).
-        request_id: UUID string of the Request.
-        **kwargs: Operation-specific parameters (overrides for context).
-
-    Raises:
-        ValueError: If unknown operation or EC2 instance ID not found.
-        Exception: If operation fails.
-    """
-    logger.info("run_ngfw_operation: starting operation=%s request_id=%s", operation, request_id)
-    if kwargs:
-        logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
-
-    _validate_ngfw_operation(operation)
-
-    # Get NGFW data from database including state with EC2 instance ID
-    ngfw_data = get_ngfw_data_by_request_id(request_id)
-    # Our UUID, not AWS instance ID
-    instance_uuid = ngfw_data["instance_id"]
-    app_id = ngfw_data["app_id"]
-    state = ngfw_data.get("state", {})
-    provider = resolve_ngfw_attachment_config(state).cloud_provider
-
-    if provider == "gcp":
-        _run_gcp_ngfw_operation(operation, request_id, instance_uuid, app_id, state)
-        return
-    if provider != "aws":
-        raise RuntimeError(f"NGFW runtime operation {operation!r} is not implemented for cloud_provider={provider!r}")
-
-    # EC2 instance ID is stored in state after Terraform provisioning
-    ec2_instance_id = state.get("ec2_instance_id")
-    if not ec2_instance_id:
-        raise ValueError(f"EC2 instance ID not found in state for request: {request_id}")
-    _run_aws_ngfw_operation(operation, request_id, instance_uuid, app_id, ec2_instance_id, **kwargs)
+__all__ = [
+    "_load_ngfw_ops_plan",
+    "_publish_ngfw_runtime_status",
+    "_run_aws_ngfw_operation",
+    "_run_gcp_ngfw_operation",
+    "_validate_ngfw_operation",
+    "run_ngfw_operation",
+]
 
 
 if __name__ == "__main__":

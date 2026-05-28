@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Any
 
 import psycopg
@@ -42,13 +43,14 @@ from events import (
     publish_status_update,
 )
 from executors.aws_executor import AWSExecutor
-from executors.factory import build_guest_execution_context, get_ssh_username
+from executors.base import Executor
+from executors.factory import GuestExecutionContext, build_guest_execution_context, get_ssh_username
 from executors.ngfw_executor import NGFWExecutor
 from executors.ssm_executor import SSMExecutor
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
-from plans.base import SetupStep
+from plans.base import SetupPlan, SetupStep
 from plans.bootstrap import BootstrapPlan
 from plans.dc_setup import DCSetupPlan
 from plans.domain_join import DomainJoinPlan
@@ -62,7 +64,7 @@ from plans.xdr_agent_install import XDRAgentInstallPlan
 logger = logging.getLogger(__name__)
 
 
-def get_agent_presigned_url(inst_config: dict) -> str | None:
+def get_agent_presigned_url(inst_config: dict[str, Any]) -> str | None:
     """Generate presigned URL for XDR agent from instance config.
 
     Args:
@@ -81,15 +83,15 @@ def get_agent_presigned_url(inst_config: dict) -> str | None:
         logger.warning("AGENT_STORAGE_BUCKET/AGENT_S3_BUCKET not set, cannot generate presigned URL")
         return None
 
+    presigned_url: str | None = None
     try:
         from cloud import get_object_storage
 
         storage = get_object_storage()
-        url = storage.generate_presigned_download_url(bucket=bucket, key=s3_key, expires_in=3600)
-        return url
+        presigned_url = storage.generate_presigned_download_url(bucket=bucket, key=s3_key, expires_in=3600)
     except Exception as e:
         logger.error("Failed to generate presigned URL for %s: %s", s3_key, e)
-        return None
+    return presigned_url
 
 
 class DynamicPlan:
@@ -104,7 +106,8 @@ class DynamicPlan:
         self.steps = steps
         self.verify_step: SetupStep | None = None
 
-    def get_context(self, instance: object) -> dict:
+    @staticmethod
+    def get_context(instance: object) -> dict[str, Any]:
         """No template variables needed - steps are pre-built."""
         return {}
 
@@ -162,7 +165,8 @@ def get_ami_id(ami_type: str) -> str:
 
 # Default timeout for waiting for NGFW SSH to become available (seconds)
 # PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
-NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500  # 25 minutes
+# 25 minutes
+NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -223,8 +227,10 @@ def get_db_connection() -> psycopg.Connection:
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
     logger.debug("get_db_connection: cloud IAM auth to %s:%s/%s", db_host, db_port, db_name)
-    assert db_host is not None  # validated above
-    assert db_user is not None  # validated above
+    # validated above
+    assert db_host is not None
+    # validated above
+    assert db_user is not None
     from cloud import get_db_auth
 
     auth = get_db_auth()
@@ -243,7 +249,7 @@ def get_db_connection() -> psycopg.Connection:
     )
 
 
-def _append_kwarg_assignment(assignments: list, values: list, key: str, value) -> None:
+def _append_kwarg_assignment(assignments: list[Any], values: list[Any], key: str, value: Any) -> None:
     """Append one SET-clause fragment for an UPDATE, handling NOW() specially.
 
     `value is None` is filtered by the caller; this helper expects a
@@ -272,7 +278,7 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
                 sql.SQL("{} = %s").format(sql.Identifier("status")),
                 sql.SQL("{} = NOW()").format(sql.Identifier("updated_at")),
             ]
-            values: list = [status]
+            values: list[Any] = [status]
 
             for key, value in kwargs.items():
                 if value is None:
@@ -285,14 +291,14 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
         conn.commit()
 
 
-def _assert_subnet_output(subnet_name: str, subnet_data: dict) -> None:
+def _assert_subnet_output(subnet_name: str, subnet_data: dict[str, Any]) -> None:
     """Reject a Pulumi subnet record missing any required field."""
     for field in ("uuid", "subnet_id", "subnet_cidr"):
         if not subnet_data.get(field):
             raise ValueError(f"Subnet '{subnet_name}' missing '{field}'")
 
 
-def _assert_instance_output(index: int, inst: dict) -> None:
+def _assert_instance_output(index: int, inst: dict[str, Any]) -> None:
     """Reject a Pulumi instance record missing any required field."""
     if not inst.get("uuid"):
         raise ValueError(f"Instance[{index}] (role={inst.get('role')}) missing 'uuid'")
@@ -303,8 +309,8 @@ def _assert_instance_output(index: int, inst: dict) -> None:
 
 
 def _validate_provisioned_outputs(
-    subnets: dict[str, dict],
-    instances: list[dict],
+    subnets: dict[str, dict[str, Any]],
+    instances: list[dict[str, Any]],
     expected_subnet_names: set[str] | None = None,
 ) -> None:
     """Validate Pulumi outputs have required fields before DB write.
@@ -489,8 +495,8 @@ def _build_provisioned_instance_payload(instance_data: dict[str, Any], provider:
 
 def write_provisioned_state(
     range_id: int,
-    subnets: dict[str, dict],
-    instances: list[dict],
+    subnets: dict[str, dict[str, Any]],
+    instances: list[dict[str, Any]],
     ngfw_instance_id: int | None = None,
 ) -> None:
     """Write provisioned infrastructure state directly to database.
@@ -645,7 +651,7 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
     return instance_count, subnet_count
 
 
-def get_user_ngfw_data(user_id: int) -> dict | None:
+def get_user_ngfw_data(user_id: int) -> dict[str, Any] | None:
     """Get NGFW data for a user (if they have one provisioned).
 
     Queries for a ready/paused NGFW Instance belonging to this user and
@@ -771,7 +777,7 @@ def _remove_ngfw_range_attachment(
     )
 
 
-def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
+def remove_ngfw_subnets(user_id: int, subnets: list[dict[str, Any]], range_id: int) -> None:
     """Remove subnet addresses and security rules from user's NGFW.
 
     Resumes the NGFW if paused, waits for SSH, then runs the remove plan.
@@ -831,7 +837,6 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     )
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
-    # This ensures consistent execution flow with proven retry/commit handling
     has_endpoints = bool(os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR"))
     steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id, has_endpoints)
     plan = DynamicPlan(name="ngfw_remove_subnets", steps=steps)
@@ -878,7 +883,7 @@ def user_has_active_ranges(user_id: int, exclude_range_id: int) -> bool:
         return count > 0
 
 
-def get_ngfw_data_by_request_id(request_id: str) -> dict:
+def get_ngfw_data_by_request_id(request_id: str) -> dict[str, Any]:
     """Read NGFW request and instance data from Engine database.
 
     Queries engine_request joined with engine_instance and engine_app
@@ -933,7 +938,7 @@ def get_ngfw_data_by_request_id(request_id: str) -> dict:
         }
 
 
-def _update_range_config(range_id: int, range_spec: dict) -> None:
+def _update_range_config(range_id: int, range_spec: dict[str, Any]) -> None:
     """Write updated range_config back to mission_control_range.
 
     Called after subnet CIDR allocation to persist the CIDRs so that
@@ -952,7 +957,7 @@ def _update_range_config(range_id: int, range_spec: dict) -> None:
     logger.info("Persisted updated range_config for range %d", range_id)
 
 
-def get_range_data_by_request_id(request_id: str) -> dict:
+def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
     """Read Range request data from Engine database.
 
     Queries engine_request joined with mission_control_range to get
@@ -1143,6 +1148,23 @@ def parse_device_certificate_status(system_info_output: str) -> str | None:
     return match.group(1).strip()
 
 
+def _format_serial_cert_status(serial_value: str | None, cert_status: str | None) -> str:
+    """Format the per-poll serial/cert progress string for the retry log line."""
+    serial_part = f"serial={serial_value}" if serial_value else "serial=waiting"
+    cert_part = f"cert={cert_status}" if cert_status == "Valid" else f"cert={cert_status or 'waiting'}"
+    return f"{serial_part}, {cert_part}"
+
+
+def _raise_serial_cert_timeout(timeout_seconds: int, serial_value: str | None, cert_status: str | None) -> None:
+    """Raise RuntimeError describing which of serial/cert were still missing at timeout."""
+    missing = []
+    if not serial_value:
+        missing.append("serial number")
+    if cert_status != "Valid":
+        missing.append(f"device certificate (status: {cert_status or 'not found'})")
+    raise RuntimeError(f"NGFW verification failed after {timeout_seconds}s - missing: {', '.join(missing)}")
+
+
 def poll_for_serial_and_cert(
     ssh_executor: NGFWExecutor,
     host: str,
@@ -1170,18 +1192,13 @@ def poll_for_serial_and_cert(
     """
 
     start_time = time.time()
-    serial_value = None
-    cert_status = None
+    serial_value: str | None = None
+    cert_status: str | None = None
 
     while True:
         elapsed = time.time() - start_time
         if elapsed > timeout_seconds:
-            missing = []
-            if not serial_value:
-                missing.append("serial number")
-            if cert_status != "Valid":
-                missing.append(f"device certificate (status: {cert_status or 'not found'})")
-            raise RuntimeError(f"NGFW verification failed after {timeout_seconds}s - missing: {', '.join(missing)}")
+            _raise_serial_cert_timeout(timeout_seconds, serial_value, cert_status)
 
         logger.info(
             "Polling for NGFW serial and certificate... (%.0fs / %ds)",
@@ -1199,38 +1216,21 @@ def poll_for_serial_and_cert(
             # Debug: log raw output to diagnose parsing issues
             logger.debug("Raw SSH output (first 500 chars): %r", result.stdout[:500])
 
-            # Parse both values from output
             serial_value = parse_serial_number(result.stdout)
             cert_status = parse_device_certificate_status(result.stdout)
 
-            # Log current state
-            serial_ok = bool(serial_value)
-            cert_ok = cert_status == "Valid"
-
-            if serial_ok and cert_ok:
+            if serial_value and cert_status == "Valid":
                 logger.info(
                     "NGFW verification complete after %.0fs: serial=%s, cert=%s",
                     elapsed,
                     serial_value,
                     cert_status,
                 )
-                assert serial_value is not None  # Guaranteed by serial_ok check
                 return serial_value
-
-            # Log what's still missing
-            status_parts = []
-            if serial_ok:
-                status_parts.append(f"serial={serial_value}")
-            else:
-                status_parts.append("serial=waiting")
-            if cert_ok:
-                status_parts.append(f"cert={cert_status}")
-            else:
-                status_parts.append(f"cert={cert_status or 'waiting'}")
 
             logger.info(
                 "NGFW not ready (%s), retrying in %ds...",
-                ", ".join(status_parts),
+                _format_serial_cert_status(serial_value, cert_status),
                 poll_interval,
             )
 
@@ -1309,7 +1309,8 @@ def wait_for_autocommit(
                 "Found %d active job(s), waiting %ds: %s",
                 len(active_lines),
                 poll_interval,
-                active_lines[:3],  # Show first 3 for brevity
+                # Show first 3 for brevity
+                active_lines[:3],
             )
 
         except Exception as e:
@@ -1511,9 +1512,9 @@ def find_stale_routes_by_db(
         )
     except Exception as e:
         logger.warning("Failed to query NGFW routes for DB cleanup check: %s", e)
-        return []
+        result = None
 
-    if not result.success or not result.stdout:
+    if not result or not result.success or not result.stdout:
         return []
 
     # Extract all range IDs from route names in hierarchical config format
@@ -1534,7 +1535,7 @@ def find_stale_routes_by_db(
 
     # Query DB for these range IDs to find which are stale
     range_ids = list(routes_by_range.keys())
-    stale_routes = []
+    stale_routes: list[str] = []
 
     try:
         with get_db_connection() as conn, conn.cursor() as cur:
@@ -1560,13 +1561,13 @@ def find_stale_routes_by_db(
 
     except psycopg.Error as e:
         logger.warning("Failed to query DB for stale routes: %s", e)
-        return []
+        stale_routes = []
 
     return stale_routes
 
 
 def configure_ngfw_subnets(
-    subnets: list[dict],
+    subnets: list[dict[str, Any]],
     range_id: int,
     management_ip: str,
     ssh_key_secret_arn: str,
@@ -1616,13 +1617,12 @@ def configure_ngfw_subnets(
         poll_interval=15,
     )
 
-    # Wait for boot autocommit to complete before attempting configuration
-    # The NGFW runs an autocommit at boot that must finish before we can commit changes
     logger.info("Waiting for NGFW autocommit to complete...")
     wait_for_autocommit(
         ssh_executor=ssh_executor,
         host=management_ip,
-        timeout_seconds=600,  # 10 min max for autocommit
+        # 10 min max for autocommit
+        timeout_seconds=600,
         poll_interval=15,
     )
 
@@ -1657,10 +1657,11 @@ def configure_ngfw_subnets(
 
     orchestrator = SetupOrchestrator(ssh_executor)
     logger.info("Running NGFW subnet configuration via SetupOrchestrator...")
+    # No template variables - steps are pre-built
     result = orchestrator.orchestrate(
         instance_id=management_ip,
         plan=plan,
-        context={},  # No template variables - steps are pre-built
+        context={},
     )
 
     if not result.success:
@@ -1674,6 +1675,29 @@ def configure_ngfw_subnets(
 
 
 _LINUX_VICTIM_OS_TYPES = ("kali", "ubuntu", "amazon-linux")
+
+
+@dataclass(frozen=True)
+class _DomainJoinSpec:
+    """Bundle of optional-domain-join parameters for Windows victim setup."""
+
+    join_domain: bool
+    dc_ip: str | None
+    domain_name: str | None
+
+
+@dataclass(frozen=True)
+class _InstanceSetupSpec:
+    """Bundle of per-instance setup inputs that aren't on the execution context."""
+
+    role: str
+    os_type: str
+    public_key: str
+    agent_presigned_url: str
+    xdr_required: bool
+    instance_name: str
+    range_id: int
+    domain_join: _DomainJoinSpec
 
 
 class _InstanceSetupCtx:
@@ -1700,9 +1724,9 @@ def _resolve_setup_hostname(instance_name: str, instance_id: str) -> str:
 
 def _run_setup_plan(
     orchestrator: SetupOrchestrator,
-    execution: Any,
-    plan: Any,
-    context: Any,
+    execution: GuestExecutionContext,
+    plan: SetupPlan,
+    context: dict[str, Any],
     document_name: str,
     failure_prefix: str,
 ) -> None:
@@ -1729,11 +1753,9 @@ def _resolve_rdp_password_from_secret_ref(rdp_password_secret_arn: str | None) -
 
 def _set_local_password_or_raise(
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
     ctx: _InstanceSetupCtx,
     instance_data: dict[str, Any],
-    document_name: str,
-    instance_id: str,
     platform: str,
     failure_prefix: str,
 ) -> None:
@@ -1760,6 +1782,7 @@ def _set_local_password_or_raise(
     error.
     """
     cloud_provider = _get_cloud_provider()
+    instance_id = execution.target
     rdp_token: str
     if cloud_provider == "aws":
         ssm_param_name = instance_data.get("rdp_password_ssm_param_name")
@@ -1788,7 +1811,7 @@ def _set_local_password_or_raise(
         execution,
         plan,
         context,
-        document_name,
+        execution.document_name,
         failure_prefix=failure_prefix,
     )
     logger.info("Per-instance RDP password set on %s (%s)", instance_id, platform)
@@ -1796,11 +1819,9 @@ def _set_local_password_or_raise(
 
 def _setup_attacker_role(
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
     ctx: _InstanceSetupCtx,
     instance_data: dict[str, Any],
-    document_name: str,
-    instance_id: str,
 ) -> None:
     """Run the Kali bootstrap plan for an attacker-role instance."""
     plan = LinuxBootstrapPlan()
@@ -1809,7 +1830,7 @@ def _setup_attacker_role(
         execution,
         plan,
         plan.get_context(ctx),
-        document_name,
+        execution.document_name,
         failure_prefix="Kali setup failed",
     )
     _set_local_password_or_raise(
@@ -1817,26 +1838,23 @@ def _setup_attacker_role(
         execution,
         ctx,
         instance_data,
-        document_name,
-        instance_id,
         platform="linux",
         failure_prefix="Kali RDP password push failed",
     )
-    logger.info("Kali setup complete for %s", instance_id)
+    logger.info("Kali setup complete for %s", execution.target)
 
 
 def _install_xdr_or_raise(
     orchestrator: SetupOrchestrator,
-    execution: Any,
-    plan_cls: Any,
-    document_name: str,
-    instance_id: str,
+    execution: GuestExecutionContext,
+    plan_cls: type[SetupPlan],
     agent_presigned_url: str,
     xdr_required: bool,
     failure_prefix: str,
     success_log: str,
 ) -> None:
     """Install the XDR agent or raise/log according to ``xdr_required``."""
+    instance_id = execution.target
     if agent_presigned_url:
         plan = plan_cls()
         ctx_obj = plan.get_context({"agent_presigned_url": agent_presigned_url})
@@ -1845,7 +1863,7 @@ def _install_xdr_or_raise(
             execution,
             plan,
             ctx_obj,
-            document_name,
+            execution.document_name,
             failure_prefix=failure_prefix,
         )
         logger.info(success_log, instance_id)
@@ -1857,22 +1875,21 @@ def _install_xdr_or_raise(
 
 def _setup_linux_victim(
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
     ctx: _InstanceSetupCtx,
     instance_data: dict[str, Any],
-    document_name: str,
-    instance_id: str,
     agent_presigned_url: str,
     xdr_required: bool,
 ) -> None:
     """Run the linux victim path: bootstrap, per-instance RDP password, optional XDR install."""
+    instance_id = execution.target
     plan = LinuxBootstrapPlan()
     _run_setup_plan(
         orchestrator,
         execution,
         plan,
         plan.get_context(ctx),
-        document_name,
+        execution.document_name,
         failure_prefix="Linux bootstrap failed",
     )
     logger.info("Linux bootstrap complete for %s", instance_id)
@@ -1881,8 +1898,6 @@ def _setup_linux_victim(
         execution,
         ctx,
         instance_data,
-        document_name,
-        instance_id,
         platform="linux",
         failure_prefix="Linux RDP password push failed",
     )
@@ -1890,8 +1905,6 @@ def _setup_linux_victim(
         orchestrator,
         execution,
         LinuxXDRAgentInstallPlan,
-        document_name,
-        instance_id,
         agent_presigned_url,
         xdr_required,
         failure_prefix="Linux XDR install failed",
@@ -1901,27 +1914,24 @@ def _setup_linux_victim(
 
 def _join_windows_domain(
     orchestrator: SetupOrchestrator,
-    execution: Any,
-    document_name: str,
-    instance_id: str,
-    join_domain: bool,
-    dc_ip: str | None,
-    domain_name: str | None,
+    execution: GuestExecutionContext,
+    dj: _DomainJoinSpec,
 ) -> None:
     """Join the Windows victim to its domain, or raise per the explicit policy."""
-    if not join_domain:
+    if not dj.join_domain:
         return
-    if not (dc_ip and domain_name):
+    instance_id = execution.target
+    if not (dj.dc_ip and dj.domain_name):
         raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
     domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
     if not domain_password:
         raise SetupError(f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}")
-    logger.info("Joining domain %s for %s...", domain_name, instance_id)
+    logger.info("Joining domain %s for %s...", dj.domain_name, instance_id)
     plan = DomainJoinPlan()
     dj_context = plan.get_context(
         {
-            "dc_ip": dc_ip,
-            "domain_name": domain_name,
+            "dc_ip": dj.dc_ip,
+            "domain_name": dj.domain_name,
             "domain_admin_password": domain_password,
         }
     )
@@ -1930,7 +1940,7 @@ def _join_windows_domain(
         execution,
         plan,
         dj_context,
-        document_name,
+        execution.document_name,
         failure_prefix=f"Domain join failed for {instance_id}",
     )
     logger.info("Domain join complete for %s", instance_id)
@@ -1938,25 +1948,22 @@ def _join_windows_domain(
 
 def _setup_windows_victim(
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
     ctx: _InstanceSetupCtx,
     instance_data: dict[str, Any],
-    document_name: str,
-    instance_id: str,
     agent_presigned_url: str,
     xdr_required: bool,
-    join_domain: bool,
-    dc_ip: str | None,
-    domain_name: str | None,
+    dj: _DomainJoinSpec,
 ) -> None:
     """Run the windows victim path: bootstrap, per-instance Admin password, XDR install, optional domain join."""
+    instance_id = execution.target
     plan = BootstrapPlan()
     _run_setup_plan(
         orchestrator,
         execution,
         plan,
         plan.get_context(ctx),
-        document_name,
+        execution.document_name,
         failure_prefix="Windows bootstrap failed",
     )
     logger.info("Windows bootstrap complete for %s", instance_id)
@@ -1973,8 +1980,6 @@ def _setup_windows_victim(
         execution,
         pw_ctx,
         instance_data,
-        document_name,
-        instance_id,
         platform="windows",
         failure_prefix="Windows Administrator password push failed",
     )
@@ -1982,56 +1987,36 @@ def _setup_windows_victim(
         orchestrator,
         execution,
         XDRAgentInstallPlan,
-        document_name,
-        instance_id,
         agent_presigned_url,
         xdr_required,
         failure_prefix="Windows XDR install failed",
         success_log="Windows XDR agent installed on %s",
     )
-    _join_windows_domain(
-        orchestrator,
-        execution,
-        document_name,
-        instance_id,
-        join_domain,
-        dc_ip,
-        domain_name,
-    )
+    _join_windows_domain(orchestrator, execution, dj)
 
 
 def _dispatch_instance_setup_role(
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
     ctx: _InstanceSetupCtx,
     instance_data: dict[str, Any],
-    document_name: str,
-    instance_id: str,
-    role: str,
-    os_type: str,
-    agent_presigned_url: str,
-    xdr_required: bool,
-    join_domain: bool,
-    dc_ip: str | None,
-    domain_name: str | None,
+    spec: _InstanceSetupSpec,
 ) -> None:
     """Route an instance through the correct role/os setup path."""
-    if role == "attacker":
-        _setup_attacker_role(orchestrator, execution, ctx, instance_data, document_name, instance_id)
+    if spec.role == "attacker":
+        _setup_attacker_role(orchestrator, execution, ctx, instance_data)
         return
-    if role != "victim":
+    if spec.role != "victim":
         # Unknown role: leave behavior identical to pre-refactor (no plan runs).
         return
-    if os_type in _LINUX_VICTIM_OS_TYPES:
+    if spec.os_type in _LINUX_VICTIM_OS_TYPES:
         _setup_linux_victim(
             orchestrator,
             execution,
             ctx,
             instance_data,
-            document_name,
-            instance_id,
-            agent_presigned_url,
-            xdr_required,
+            spec.agent_presigned_url,
+            spec.xdr_required,
         )
         return
     _setup_windows_victim(
@@ -2039,44 +2024,23 @@ def _dispatch_instance_setup_role(
         execution,
         ctx,
         instance_data,
-        document_name,
-        instance_id,
-        agent_presigned_url,
-        xdr_required,
-        join_domain,
-        dc_ip,
-        domain_name,
+        spec.agent_presigned_url,
+        spec.xdr_required,
+        spec.domain_join,
     )
 
 
 def _run_single_instance_setup(
     instance_data: dict[str, Any],
     instance_id: str,
-    role: str,
-    os_type: str,
-    public_key: str,
-    agent_presigned_url: str,
-    join_domain: bool,
-    dc_ip: str | None,
-    domain_name: str | None,
-    xdr_required: bool = False,
-    instance_name: str = "",
-    range_id: int = 0,
+    spec: _InstanceSetupSpec,
 ) -> bool:
     """Run setup for a single non-DC instance.
 
     Args:
+        instance_data: Provisioner output for the instance.
         instance_id: Provider-specific instance identifier (or name).
-        role: Instance role ('attacker' or 'victim').
-        os_type: OS type ('kali', 'ubuntu', 'windows').
-        public_key: SSH public key for terminal access.
-        agent_presigned_url: Pre-signed URL for XDR agent download.
-        join_domain: Whether to join the domain.
-        dc_ip: DC private IP (for domain join).
-        domain_name: Domain FQDN (for domain join).
-        xdr_required: If True, fail hard when XDR agent URL is missing.
-        instance_name: Friendly display name for hostname (e.g., "target-ubuntu").
-        range_id: Range ID for hostname generation.
+        spec: Bundled role/OS/agent/domain-join parameters for this instance.
 
     Returns:
         True on success.
@@ -2084,39 +2048,24 @@ def _run_single_instance_setup(
     Raises:
         SetupError: If setup fails or XDR required but URL missing.
     """
-    logger.info("Starting setup for %s instance %s...", role, instance_id)
+    logger.info("Starting setup for %s instance %s...", spec.role, instance_id)
 
-    execution = build_guest_execution_context(instance_data, os_type=os_type, role=role)
+    execution = build_guest_execution_context(instance_data, os_type=spec.os_type, role=spec.role)
     orchestrator = SetupOrchestrator(executor=execution.executor)
-    document_name = execution.document_name
 
     logger.info("Waiting for %s connectivity on %s...", execution.transport_name, execution.target)
     execution.wait_for_ready(timeout_seconds=300)
     logger.info("Target %s is ready via %s", execution.target, execution.transport_name)
 
     ctx = _InstanceSetupCtx(
-        hostname=_resolve_setup_hostname(instance_name, instance_id),
-        public_key=public_key,
-        agent_presigned_url=agent_presigned_url,
-        ssh_user=get_ssh_username(os_type, role),
+        hostname=_resolve_setup_hostname(spec.instance_name, instance_id),
+        public_key=spec.public_key,
+        agent_presigned_url=spec.agent_presigned_url,
+        ssh_user=get_ssh_username(spec.os_type, spec.role),
     )
 
     try:
-        _dispatch_instance_setup_role(
-            orchestrator,
-            execution,
-            ctx,
-            instance_data,
-            document_name,
-            instance_id,
-            role,
-            os_type,
-            agent_presigned_url,
-            xdr_required,
-            join_domain,
-            dc_ip,
-            domain_name,
-        )
+        _dispatch_instance_setup_role(orchestrator, execution, ctx, instance_data, spec)
         return True
     finally:
         execution.close()
@@ -2193,6 +2142,8 @@ def _run_polaris_range_bootstrap(
     plan = PolarisRangeBootstrapPlan()
 
     class _PolarisCtx:
+        """Local context shim for PolarisRangeBootstrapPlan template variables."""
+
         def __init__(self) -> None:
             self.dc_ip = dc_ip
             self.public_key = public_key
@@ -2212,7 +2163,7 @@ def _run_polaris_range_bootstrap(
 def _run_dc_setup(
     instance_data: dict[str, Any],
     instance_id: str,
-    dc_config: dict,
+    dc_config: dict[str, Any],
     agent_presigned_url: str,
     public_key: str = "",
     xdr_required: bool = False,
@@ -2287,17 +2238,19 @@ def _run_dc_setup(
         execution.close()
 
 
-def _build_uuid_to_config(range_spec: dict) -> dict[str, dict]:
+def _build_uuid_to_config(range_spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Return a {instance uuid → instance config} lookup from the range spec."""
     return {
         inst.get("uuid", ""): inst for subnet in range_spec.get("subnets", []) for inst in subnet.get("instances", [])
     }
 
 
-def _partition_pod_vs_vm(instances_output: list[dict]) -> tuple[list[dict], list[dict]]:
+def _partition_pod_vs_vm(
+    instances_output: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split scanned instances into (pod-backed, VM-backed) lists."""
-    pods: list[dict] = []
-    vms: list[dict] = []
+    pods: list[dict[str, Any]] = []
+    vms: list[dict[str, Any]] = []
     for inst in instances_output:
         if inst.get("asset_type", "vm_runtime_vm") == "scenario_pod":
             pods.append(inst)
@@ -2306,10 +2259,12 @@ def _partition_pod_vs_vm(instances_output: list[dict]) -> tuple[list[dict], list
     return pods, vms
 
 
-def _partition_dc_vs_other(vm_instances: list[dict]) -> tuple[list[dict], list[dict]]:
+def _partition_dc_vs_other(
+    vm_instances: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split VM-backed instances into (DC, non-DC) lists."""
-    dcs: list[dict] = []
-    others: list[dict] = []
+    dcs: list[dict[str, Any]] = []
+    others: list[dict[str, Any]] = []
     for inst in vm_instances:
         if inst.get("role") == "dc":
             dcs.append(inst)
@@ -2318,7 +2273,10 @@ def _partition_dc_vs_other(vm_instances: list[dict]) -> tuple[list[dict], list[d
     return dcs, others
 
 
-def _setup_dc_instances_blocking(dc_instances: list[dict], uuid_to_config: dict[str, dict]) -> None:
+def _setup_dc_instances_blocking(
+    dc_instances: list[dict[str, Any]],
+    uuid_to_config: dict[str, dict[str, Any]],
+) -> None:
     """Run DC setup for every DC instance synchronously (domain joins depend on it)."""
     for dc_inst in dc_instances:
         inst_uuid = dc_inst.get("uuid", "")
@@ -2336,8 +2294,8 @@ def _setup_dc_instances_blocking(dc_instances: list[dict], uuid_to_config: dict[
 
 
 def _resolve_dc_ip_and_domain(
-    dc_instances: list[dict],
-    uuid_to_config: dict[str, dict],
+    dc_instances: list[dict[str, Any]],
+    uuid_to_config: dict[str, dict[str, Any]],
     dc_ip: str | None,
     domain_name: str | None,
 ) -> tuple[str | None, str | None]:
@@ -2351,8 +2309,8 @@ def _resolve_dc_ip_and_domain(
 
 
 def _setup_one_other_instance(
-    inst: dict,
-    uuid_to_config: dict[str, dict],
+    inst: dict[str, Any],
+    uuid_to_config: dict[str, dict[str, Any]],
     actual_dc_ip: str | None,
     actual_domain: str | None,
     range_id: int,
@@ -2361,21 +2319,22 @@ def _setup_one_other_instance(
     inst_id = inst["instance_id"]
     inst_uuid = inst.get("uuid", "")
     inst_config = uuid_to_config.get(inst_uuid, {})
-    try:
-        _run_single_instance_setup(
-            instance_data=inst,
-            instance_id=inst_id,
-            role=inst.get("role", "victim"),
-            os_type=inst.get("os", "ubuntu"),
-            public_key=inst.get("public_key", ""),
-            agent_presigned_url=get_agent_presigned_url(inst_config) or "",
+    spec = _InstanceSetupSpec(
+        role=inst.get("role", "victim"),
+        os_type=inst.get("os", "ubuntu"),
+        public_key=inst.get("public_key", ""),
+        agent_presigned_url=get_agent_presigned_url(inst_config) or "",
+        xdr_required=bool(inst_config.get("agent")),
+        instance_name=inst.get("hostname", "") or inst.get("name", ""),
+        range_id=range_id,
+        domain_join=_DomainJoinSpec(
             join_domain=inst_config.get("join_domain", False),
             dc_ip=actual_dc_ip,
             domain_name=actual_domain,
-            xdr_required=bool(inst_config.get("agent")),
-            instance_name=inst.get("hostname", "") or inst.get("name", ""),
-            range_id=range_id,
-        )
+        ),
+    )
+    try:
+        _run_single_instance_setup(instance_data=inst, instance_id=inst_id, spec=spec)
         # Per-scenario post-bootstrap: the polaris VM AMI is pre-baked with
         # a docker compose stack hardcoded to range 0's DC IP and the
         # bake-time kali pubkey. After LinuxBootstrapPlan finishes, rewrite
@@ -2397,8 +2356,8 @@ def _setup_one_other_instance(
 
 
 def _setup_other_instances_parallel(
-    other_instances: list[dict],
-    uuid_to_config: dict[str, dict],
+    other_instances: list[dict[str, Any]],
+    uuid_to_config: dict[str, dict[str, Any]],
     actual_dc_ip: str | None,
     actual_domain: str | None,
     range_id: int,
@@ -2426,8 +2385,8 @@ def _setup_other_instances_parallel(
 
 
 def run_instance_setup(
-    instances_output: list[dict],
-    range_spec: dict,
+    instances_output: list[dict[str, Any]],
+    range_spec: dict[str, Any],
     dc_ip: str | None = None,
     domain_name: str | None = None,
     range_id: int = 0,
@@ -2485,7 +2444,7 @@ def _recover_aws_ngfw_stuck_resuming(ec2_instance_id: str, ngfw_request_id: str)
         aws_executor.wait_for_running(ec2_instance_id)
 
 
-def _resume_aws_ngfw_for_provisioning(ngfw_data: dict) -> None:
+def _resume_aws_ngfw_for_provisioning(ngfw_data: dict[str, Any]) -> None:
     """Bring an AWS NGFW back into running state before range provisioning."""
     ngfw_status = ngfw_data.get("status")
     ec2_instance_id = ngfw_data.get("ec2_instance_id")
@@ -2529,7 +2488,7 @@ def _release_subnet_allocations_best_effort(request_id: str) -> None:
         logger.warning("Failed to release subnet allocations: %s", e)
 
 
-def _attempt_terraform_auto_cleanup(request_id: str, range_id: int, user_id: int, range_spec: dict) -> None:
+def _attempt_terraform_auto_cleanup(request_id: str, range_id: int, user_id: int, range_spec: dict[str, Any]) -> None:
     """Best-effort `terraform destroy` after a failed provision."""
     logger.error(
         "Provision failed for range_id=%s request_id=%s - attempting Terraform cleanup...",
@@ -2553,7 +2512,7 @@ def _attempt_terraform_auto_cleanup(request_id: str, range_id: int, user_id: int
 
 
 def _dispatch_terraform_operation(
-    operation: str, request_id: str, range_id: int, user_id: int, range_spec: dict
+    operation: str, request_id: str, range_id: int, user_id: int, range_spec: dict[str, Any]
 ) -> None:
     """Run the requested Terraform operation; raise ValueError for unknown ops."""
     if operation == "up":
@@ -2608,7 +2567,7 @@ def _run_terraform_provision(
     request_id: str,
     range_id: int,
     user_id: int,
-    range_spec: dict,
+    range_spec: dict[str, Any],
 ) -> None:
     """Run Terraform apply for range, then run instance setup.
 
@@ -2677,7 +2636,8 @@ def _run_terraform_provision(
     publish_ready(request_id=request_id, range_id=range_id, user_id=user_id)
 
 
-def _allocate_range_subnet_cidrs(request_id: str, range_id: int, range_spec: dict) -> list[dict]:
+def _allocate_range_subnet_cidrs(request_id: str, range_id: int, range_spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Allocate subnet CIDRs from the active VPC and persist them onto the range spec."""
     spec_subnets = range_spec.get("subnets", [])
     if not spec_subnets:
         return spec_subnets
@@ -2705,7 +2665,8 @@ def _allocate_range_subnet_cidrs(request_id: str, range_id: int, range_spec: dic
     return spec_subnets
 
 
-def _validate_ngfw_range_attachment(range_spec: dict, user_id: int) -> None:
+def _validate_ngfw_range_attachment(range_spec: dict[str, Any], user_id: int) -> None:
+    """Raise if a NGFW-required range is not actually attachable to the user's NGFW."""
     if not range_spec.get("ngfw", False):
         return
     ngfw_data = get_user_ngfw_data(user_id)
@@ -2721,6 +2682,7 @@ def _build_ngfw_subnet_payloads(
     spec_subnets: list[dict[str, Any]],
     subnets_output: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    """Build the NGFW subnet-config payloads from per-subnet provisioner outputs."""
     provider = _get_cloud_provider()
     subnets_for_ngfw = []
     for spec_subnet in spec_subnets:
@@ -2750,10 +2712,11 @@ def _configure_ngfw_for_range(
     request_id: str,
     range_id: int,
     user_id: int,
-    range_spec: dict,
+    range_spec: dict[str, Any],
     spec_subnets: list[dict[str, Any]],
     subnets_output: dict[str, dict[str, Any]],
 ) -> None:
+    """Configure routes/rules on the user's NGFW for this range, if a NGFW is attached."""
     if not range_spec.get("ngfw", False):
         return
 
@@ -2785,13 +2748,17 @@ def _configure_ngfw_for_range(
 
 
 class _DCBootstrapContext:
-    def __init__(self, hostname: str, public_key: str):
+    """Template-context shim for the DC BootstrapPlan."""
+
+    def __init__(self, hostname: str, public_key: str) -> None:
         self.hostname = hostname
         self.public_key = public_key
 
 
 class _DCPromoteConfig:
-    def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
+    """Template-context shim for the DC promotion plan."""
+
+    def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str) -> None:
         self.domain_name = domain_name
         self.netbios_name = netbios_name
         self.dsrm_password = dsrm_password
@@ -2805,8 +2772,9 @@ def _run_dc_bootstrap_plan(
     instance_id: str,
     public_key: str,
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
 ) -> None:
+    """Run BootstrapPlan against a DC instance when the provider requires it."""
     if not _should_run_dc_bootstrap_plan(provider):
         return
 
@@ -2830,11 +2798,12 @@ def _run_dc_bootstrap_plan(
 
 def _configure_dc_ssh_access(
     *,
-    executor: Any,
-    execution: Any,
+    executor: Executor,
+    execution: GuestExecutionContext,
     instance_id: str,
     public_key: str,
 ) -> None:
+    """Write the per-instance SSH authorized key onto the DC and restart sshd."""
     if not public_key:
         logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
         return
@@ -2880,8 +2849,9 @@ def _verify_dc_setup(
     domain_name: str,
     netbios_name: str,
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
 ) -> None:
+    """Run DCSetupPlan against the DC and raise SetupError on verification failure."""
     logger.info("Verifying Domain Controller (%s)...", domain_name)
     runtime_promotion = _should_promote_dc_at_runtime(provider)
     logger.info(
@@ -2907,11 +2877,12 @@ def _verify_dc_setup(
 def _install_dc_xdr(
     *,
     orchestrator: SetupOrchestrator,
-    execution: Any,
+    execution: GuestExecutionContext,
     instance_id: str,
     agent_presigned_url: str,
     xdr_required: bool,
 ) -> None:
+    """Install the XDR agent on the DC, or raise per the `xdr_required` policy."""
     if agent_presigned_url:
         logger.info("Installing XDR agent on DC %s...", instance_id)
         xdr_plan = XDRAgentInstallPlan()
@@ -2932,7 +2903,7 @@ def _install_dc_xdr(
     logger.info("No XDR agent URL provided for DC (not required)")
 
 
-def _remove_ngfw_attachments_for_destroy(user_id: int, range_id: int, range_spec: dict) -> None:
+def _remove_ngfw_attachments_for_destroy(user_id: int, range_id: int, range_spec: dict[str, Any]) -> None:
     """Best-effort detach of NGFW subnets / range attachment before terraform destroy.
 
     Failures are logged and swallowed; terraform destroy runs regardless.
@@ -2953,7 +2924,7 @@ def _remove_ngfw_attachments_for_destroy(user_id: int, range_id: int, range_spec
         logger.warning("NGFW subnet removal failed (continuing): %s", e)
 
 
-def _recover_missing_subnet_cidrs(range_id: int, range_spec: dict) -> None:
+def _recover_missing_subnet_cidrs(range_id: int, range_spec: dict[str, Any]) -> None:
     """If range_spec lost its subnet CIDRs, repopulate from the allocation table."""
     spec_subnets = range_spec.get("subnets", [])
     if not spec_subnets or spec_subnets[0].get("cidr"):
@@ -2967,7 +2938,7 @@ def _recover_missing_subnet_cidrs(range_id: int, range_spec: dict) -> None:
             subnet["cidr"] = allocated[i]
 
 
-def _post_destroy_cleanup(request_id: str, range_id: int, user_id: int) -> None:
+def _post_destroy_cleanup(request_id: str, range_id: int) -> None:
     """Mark range destroyed, release subnet allocations, optionally pause NGFW.
 
     Called only if terraform destroy succeeded. All steps are best-effort.
@@ -2998,21 +2969,27 @@ def _maybe_pause_user_ngfw(user_id: int, range_id: int) -> None:
         logger.warning("Failed to pause NGFW (non-fatal): %s", e)
 
 
-def _run_terraform_destroy(
-    request_id: str,
-    range_id: int,
-    user_id: int,
-    range_spec: dict,
-) -> None:
-    """Run Terraform destroy for range."""
+def _ensure_range_is_active(request_id: str, range_id: int) -> bool:
+    """Return True if the range exists and is not already destroyed."""
     try:
         range_data = get_range_data_by_request_id(request_id)
     except ValueError as e:
         logger.warning("Range not found for request %s, skipping destroy: %s", request_id, e)
-        return
-
+        return False
     if range_data.get("status") == "destroyed":
         logger.info("Range %d already destroyed, skipping", range_id)
+        return False
+    return True
+
+
+def _run_terraform_destroy(
+    request_id: str,
+    range_id: int,
+    user_id: int,
+    range_spec: dict[str, Any],
+) -> None:
+    """Run Terraform destroy for range."""
+    if not _ensure_range_is_active(request_id, range_id):
         return
 
     _remove_ngfw_attachments_for_destroy(user_id, range_id, range_spec)
@@ -3028,7 +3005,7 @@ def _run_terraform_destroy(
         range_terraform_runner.cleanup_range_state(request_id)
     finally:
         if terraform_succeeded:
-            _post_destroy_cleanup(request_id, range_id, user_id)
+            _post_destroy_cleanup(request_id, range_id)
         _maybe_pause_user_ngfw(user_id, range_id)
 
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
@@ -3036,13 +3013,13 @@ def _run_terraform_destroy(
 
 def _resolve_tf_os_type(role: str, os_type: str) -> str:
     """Map spec role + os_type to the terraform module's os_type enum."""
-    if role == "dc":
-        return "windows"
-    if role == "attacker" or os_type == "kali":
-        return "kali"
-    if os_type == "windows":
-        return "windows"
-    return "ubuntu"
+    if role == "dc" or os_type == "windows":
+        resolved = "windows"
+    elif role == "attacker" or os_type == "kali":
+        resolved = "kali"
+    else:
+        resolved = "ubuntu"
+    return resolved
 
 
 def _resolve_instance_type(role: str, tf_os_type: str, override: str | None) -> str:
@@ -3053,17 +3030,19 @@ def _resolve_instance_type(role: str, tf_os_type: str, override: str | None) -> 
     needs a much bigger box than the global KALI_INSTANCE_TYPE default.
     """
     if override:
-        return override
-    if role == "attacker":
-        return _get_kali_instance_type()
-    if role == "dc":
-        return _get_dc_instance_type()
-    if tf_os_type == "windows":
-        return _get_windows_instance_type()
-    return _get_victim_instance_type()
+        resolved = override
+    elif role == "attacker":
+        resolved = _get_kali_instance_type()
+    elif role == "dc":
+        resolved = _get_dc_instance_type()
+    elif tf_os_type == "windows":
+        resolved = _get_windows_instance_type()
+    else:
+        resolved = _get_victim_instance_type()
+    return resolved
 
 
-def _resolve_agent_presigned_url(inst: dict) -> str:
+def _resolve_agent_presigned_url(inst: dict[str, Any]) -> str:
     """Generate a presigned URL for the instance's XDR agent S3 object, if any."""
     agent_data = inst.get("agent") or {}
     agent_s3_key = agent_data.get("s3_key")
@@ -3075,7 +3054,12 @@ def _resolve_agent_presigned_url(inst: dict) -> str:
     )
 
 
-def _build_tf_instance(inst: dict) -> dict:
+def _resolve_agent_presigned_url_from_inst(inst: dict[str, Any]) -> str:
+    """Generate a presigned URL for the instance's XDR agent S3 object, if any."""
+    return _resolve_agent_presigned_url(inst)
+
+
+def _build_tf_instance(inst: dict[str, Any]) -> dict[str, Any]:
     """Map one spec instance into the dict shape the terraform module expects."""
     os_type = inst.get("os_type", "ubuntu")
     role = inst.get("role", "victim")
@@ -3095,13 +3079,14 @@ def _build_tf_instance(inst: dict) -> dict:
     }
 
 
-def _build_tf_subnets(spec_subnets: list[dict]) -> list[dict]:
+def _build_tf_subnets(spec_subnets: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Translate spec subnets+instances into the terraform module's nested format."""
     return [
         {
             "name": subnet.get("name", ""),
             "uuid": subnet.get("uuid", ""),
-            "cidr": subnet.get("cidr", ""),  # Pre-allocated CIDR.
+            # Pre-allocated CIDR.
+            "cidr": subnet.get("cidr", ""),
             "connected_to": subnet.get("connected_to", []),
             "instances": [_build_tf_instance(inst) for inst in subnet.get("instances", [])],
         }
@@ -3146,7 +3131,7 @@ def _resolve_ngfw_for_range(user_id: int, range_id: int) -> tuple[str, dict[str,
     return attachment.data_attachment_id, attachment_block
 
 
-def _build_aws_extra_tf_variables() -> dict:
+def _build_aws_extra_tf_variables() -> dict[str, Any]:
     """AWS-only Terraform variables: per-OS AMI IDs + instance profile + Secrets Manager CMK.
 
     `secrets_kms_key_arn` is AWS-only: it encrypts per-instance SSH-key secrets
@@ -3168,8 +3153,8 @@ def _build_range_terraform_variables(
     request_id: str,
     range_id: int,
     user_id: int,
-    range_spec: dict,
-) -> dict:
+    range_spec: dict[str, Any],
+) -> dict[str, Any]:
     """Build Terraform variables dict from range spec and environment.
 
     Args:
@@ -3215,6 +3200,7 @@ def _build_range_terraform_variables(
 
 
 def _validate_ngfw_operation(operation: str) -> tuple[str, str]:
+    """Map an NGFW operation name to its (in-progress, success) status pair."""
     status_map = {
         "start": ("resuming", "ready"),
         "stop": ("pausing", "paused"),
@@ -3225,6 +3211,7 @@ def _validate_ngfw_operation(operation: str) -> tuple[str, str]:
 
 
 def _publish_ngfw_runtime_status(request_id: str, instance_uuid: str, app_id: str, status: str) -> None:
+    """Persist the new NGFW runtime status and emit the corresponding lifecycle event."""
     update_instance_state(request_id, status)
     publish_ngfw_event(
         request_id=request_id,
@@ -3241,6 +3228,7 @@ def _run_gcp_ngfw_operation(
     app_id: str,
     state: dict[str, Any],
 ) -> None:
+    """Drive a start/stop power operation against a GCP VM-Series NGFW."""
     import gdc_vmseries_ngfw
 
     in_progress_status, success_status = _validate_ngfw_operation(operation)
@@ -3260,7 +3248,8 @@ def _run_gcp_ngfw_operation(
     _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, success_status)
 
 
-def _load_ngfw_ops_plan(operation: str):
+def _load_ngfw_ops_plan(operation: str) -> SetupPlan:
+    """Lazily import and instantiate the SetupPlan for the requested NGFW operation."""
     import importlib
 
     plan_map = {
@@ -3280,6 +3269,7 @@ def _run_aws_ngfw_operation(
     ec2_instance_id: str,
     **kwargs: str,
 ) -> None:
+    """Drive a start/stop power operation against an AWS-attached NGFW EC2 instance."""
     in_progress_status, success_status = _validate_ngfw_operation(operation)
     _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
 
@@ -3337,18 +3327,17 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
 
     # Get NGFW data from database including state with EC2 instance ID
     ngfw_data = get_ngfw_data_by_request_id(request_id)
-    instance_uuid = ngfw_data["instance_id"]  # Our UUID, not AWS instance ID
+    # Our UUID, not AWS instance ID
+    instance_uuid = ngfw_data["instance_id"]
     app_id = ngfw_data["app_id"]
     state = ngfw_data.get("state", {})
     provider = resolve_ngfw_attachment_config(state).cloud_provider
 
-    if provider != "aws":
-        if provider != "gcp":
-            raise RuntimeError(
-                f"NGFW runtime operation {operation!r} is not implemented for cloud_provider={provider!r}"
-            )
+    if provider == "gcp":
         _run_gcp_ngfw_operation(operation, request_id, instance_uuid, app_id, state)
         return
+    if provider != "aws":
+        raise RuntimeError(f"NGFW runtime operation {operation!r} is not implemented for cloud_provider={provider!r}")
 
     # EC2 instance ID is stored in state after Terraform provisioning
     ec2_instance_id = state.get("ec2_instance_id")

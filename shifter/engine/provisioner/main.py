@@ -10,7 +10,6 @@ It handles:
 import json
 import logging
 import os
-import time
 from typing import Any
 
 import psycopg
@@ -70,7 +69,6 @@ from executors.aws_executor import AWSExecutor as AWSExecutor
 from executors.factory import (
     build_guest_execution_context as build_guest_execution_context,
 )
-from executors.ngfw_executor import NGFWExecutor
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import (
     OpsOrchestrator as OpsOrchestrator,
@@ -81,7 +79,6 @@ from orchestrators.setup_orchestrator import (
 from plans.base import SetupStep
 from plans.bootstrap import BootstrapPlan as BootstrapPlan
 from plans.dc_setup import DCSetupPlan as DCSetupPlan
-from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan, NGFWRemoveSubnetsPlan
 from state_helpers import (
     _should_promote_dc_at_runtime as _should_promote_dc_at_runtime,
 )
@@ -611,112 +608,6 @@ def _remove_ngfw_range_attachment(
     )
 
 
-def remove_ngfw_subnets(user_id: int, subnets: list[dict[str, Any]], range_id: int) -> None:
-    """Remove subnet addresses and security rules from user's NGFW.
-
-    Resumes the NGFW if paused, waits for SSH, then runs the remove plan.
-
-    Args:
-        user_id: Django User ID who owns the NGFW.
-        subnets: List of subnet dicts with 'name' and 'connected_to'.
-        range_id: Range ID for naming of addresses/rules to remove.
-
-    Raises:
-        RuntimeError: If NGFW configuration removal fails.
-    """
-    # Get user's NGFW
-    ngfw_data = get_user_ngfw_data(user_id)
-    if not ngfw_data:
-        logger.warning("User %s has no NGFW, skipping subnet removal", user_id)
-        return
-
-    ngfw_request_id = ngfw_data["ngfw_request_id"]
-    management_ip = ngfw_data["management_ip"]
-    ssh_key_secret_arn = ngfw_data["ssh_key_secret_arn"]
-    status = ngfw_data["status"]
-
-    if not management_ip or not ssh_key_secret_arn:
-        logger.warning("NGFW missing management_ip or ssh_key, skipping removal")
-        return
-
-    # NGFW should NEVER be paused while ranges are active - this indicates a bug
-    if status == "paused":
-        logger.error(
-            "NGFW is paused during range destroy - this should never happen! "
-            "range_id=%s user_id=%s ngfw_request_id=%s. Skipping NGFW cleanup.",
-            range_id,
-            user_id,
-            ngfw_request_id,
-        )
-        return
-
-    # Get SSH private key from Secrets Manager
-    from cloud import get_secrets_store
-
-    secrets = get_secrets_store()
-    private_key = secrets.get_secret(ssh_key_secret_arn)
-
-    # Create NGFW executor and wait for NGFW to be ready
-    ssh_executor = NGFWExecutor(private_key=private_key)
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
-
-    # Wait for management plane to be ready
-    logger.info("Verifying NGFW management plane is ready...")
-    poll_for_serial_number(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        timeout_seconds=300,  # 5 min - should be quick since NGFW is running
-        poll_interval=15,
-    )
-
-    # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
-    has_endpoints = bool(os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR"))
-    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id, has_endpoints)
-    plan = DynamicPlan(name="ngfw_remove_subnets", steps=steps)
-
-    orchestrator = SetupOrchestrator(ssh_executor)
-    logger.info("Running NGFW subnet removal via SetupOrchestrator...")
-    result = orchestrator.orchestrate(
-        instance_id=management_ip,
-        plan=plan,
-        context={},
-    )
-
-    if not result.success:
-        raise RuntimeError(f"NGFW subnet removal failed: {result.error or 'unknown error'}")
-
-    logger.info("NGFW subnet removal complete for range %s", range_id)
-
-
-def user_has_active_ranges(user_id: int, exclude_range_id: int) -> bool:
-    """Check if user has any active ranges besides the one being destroyed.
-
-    Args:
-        user_id: Django User ID.
-        exclude_range_id: Range ID to exclude from the check.
-
-    Returns:
-        True if user has other active ranges, False otherwise.
-    """
-    logger.debug("user_has_active_ranges: user_id=%s exclude_range_id=%s", user_id, exclude_range_id)
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT COUNT(*)
-            FROM mission_control_range
-            WHERE user_id = %s
-              AND id != %s
-              AND status IN ('ready', 'provisioning')
-            """,
-            (user_id, exclude_range_id),
-        )
-        row = cur.fetchone()
-        count = row[0] if row else 0
-        logger.debug("user_has_active_ranges: found %d active ranges", count)
-        return count > 0
-
-
 def get_ngfw_data_by_request_id(request_id: str) -> dict[str, Any]:
     """Read NGFW request and instance data from Engine database.
 
@@ -867,718 +758,57 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
         }
 
 
-def parse_serial_number(system_info_output: str) -> str | None:
-    """Extract serial number from PAN-OS 'show system info' output.
-
-    PAN-OS format includes a line like:
-        serial: 007200001267
-
-    Args:
-        system_info_output: stdout from 'show system info' command.
-
-    Returns:
-        Serial number string if found and valid, None otherwise.
-        Returns None for placeholder values like "unknown" or empty strings.
-    """
-    import re
-
-    # Match "serial:" followed by the serial number value
-    match = re.search(r"serial:\s*(\S+)", system_info_output, re.IGNORECASE)
-    if not match:
-        logger.warning("Serial number not found in system info output")
-        return None
-
-    serial = match.group(1).strip()
-
-    # Reject placeholder/invalid values
-    if not serial or serial.lower() in ("unknown", "none", "n/a", ""):
-        logger.warning("Serial number is placeholder value: %s", serial)
-        return None
-
-    logger.info("Extracted NGFW serial number: %s", serial)
-    return serial
-
-
-def poll_for_serial_number(
-    ssh_executor: NGFWExecutor,
-    host: str,
-    timeout_seconds: int = 600,
-    poll_interval: int = 30,
-) -> str:
-    """Poll NGFW for serial number until it appears or timeout.
-
-    License registration with Palo Alto CSP can take 10-20 minutes after boot.
-    This function polls 'show system info' until a valid serial number appears.
-
-    Args:
-        ssh_executor: NGFWExecutor instance for running commands.
-        host: NGFW management IP address.
-        timeout_seconds: Maximum time to wait for serial (default 10 min).
-        poll_interval: Seconds between poll attempts (default 30s).
-
-    Returns:
-        Serial number string.
-
-    Raises:
-        RuntimeError: If serial not found within timeout.
-    """
-
-    start_time = time.time()
-
-    while True:
-        elapsed = time.time() - start_time
-        if elapsed > timeout_seconds:
-            raise RuntimeError(
-                f"NGFW serial number not found after {timeout_seconds}s - license registration may have failed"
-            )
-
-        logger.info(
-            "Polling for NGFW serial number... (%.0fs / %ds)",
-            elapsed,
-            timeout_seconds,
-        )
-
-        try:
-            result = ssh_executor.run_command(
-                instance_id=host,
-                script="show system info",
-                timeout_seconds=60,
-            )
-            serial = parse_serial_number(result.stdout)
-            if serial:
-                logger.info(
-                    "NGFW serial number found after %.0fs: %s",
-                    elapsed,
-                    serial,
-                )
-                return serial
-
-            logger.info("Serial not yet available, retrying in %ds...", poll_interval)
-
-        except Exception as e:
-            logger.warning("Error polling for serial (will retry): %s", e)
-
-        time.sleep(poll_interval)
-
-
-def parse_device_certificate_status(system_info_output: str) -> str | None:
-    """Extract device certificate status from PAN-OS 'show system info' output.
-
-    PAN-OS format includes a line like:
-        device-certificate-status: Valid
-
-    Args:
-        system_info_output: stdout from 'show system info' command.
-
-    Returns:
-        Certificate status string if found (e.g., "Valid"), None otherwise.
-    """
-    import re
-
-    match = re.search(r"device-certificate-status:\s*(\S+)", system_info_output, re.IGNORECASE)
-    if not match:
-        return None
-
-    return match.group(1).strip()
-
-
-def _format_serial_cert_status(serial_value: str | None, cert_status: str | None) -> str:
-    """Format the per-poll serial/cert progress string for the retry log line."""
-    serial_part = f"serial={serial_value}" if serial_value else "serial=waiting"
-    cert_part = f"cert={cert_status}" if cert_status == "Valid" else f"cert={cert_status or 'waiting'}"
-    return f"{serial_part}, {cert_part}"
-
-
-def _raise_serial_cert_timeout(timeout_seconds: int, serial_value: str | None, cert_status: str | None) -> None:
-    """Raise RuntimeError describing which of serial/cert were still missing at timeout."""
-    missing = []
-    if not serial_value:
-        missing.append("serial number")
-    if cert_status != "Valid":
-        missing.append(f"device certificate (status: {cert_status or 'not found'})")
-    raise RuntimeError(f"NGFW verification failed after {timeout_seconds}s - missing: {', '.join(missing)}")
-
-
-def poll_for_serial_and_cert(
-    ssh_executor: NGFWExecutor,
-    host: str,
-    timeout_seconds: int = 1800,
-    poll_interval: int = 30,
-) -> str:
-    """Poll NGFW until both serial number AND device certificate are present.
-
-    License registration and certificate provisioning can take 10-30 minutes
-    after boot. This function polls until both are valid, tracking each
-    independently since they may appear at different times.
-
-    Args:
-        ssh_executor: NGFWExecutor instance for running commands.
-        host: NGFW management IP address.
-        timeout_seconds: Maximum time to wait (default 30 min).
-        poll_interval: Seconds between poll attempts (default 30s).
-
-    Returns:
-        Serial number string when both serial and cert are valid.
-
-    Raises:
-        RuntimeError: If either check fails within timeout, with details
-            on which check(s) failed.
-    """
-
-    start_time = time.time()
-    serial_value: str | None = None
-    cert_status: str | None = None
-
-    while True:
-        elapsed = time.time() - start_time
-        if elapsed > timeout_seconds:
-            _raise_serial_cert_timeout(timeout_seconds, serial_value, cert_status)
-
-        logger.info(
-            "Polling for NGFW serial and certificate... (%.0fs / %ds)",
-            elapsed,
-            timeout_seconds,
-        )
-
-        try:
-            result = ssh_executor.run_command(
-                instance_id=host,
-                script="show system info",
-                timeout_seconds=60,
-            )
-
-            # Debug: log raw output to diagnose parsing issues
-            logger.debug("Raw SSH output (first 500 chars): %r", result.stdout[:500])
-
-            serial_value = parse_serial_number(result.stdout)
-            cert_status = parse_device_certificate_status(result.stdout)
-
-            if serial_value and cert_status == "Valid":
-                logger.info(
-                    "NGFW verification complete after %.0fs: serial=%s, cert=%s",
-                    elapsed,
-                    serial_value,
-                    cert_status,
-                )
-                return serial_value
-
-            logger.info(
-                "NGFW not ready (%s), retrying in %ds...",
-                _format_serial_cert_status(serial_value, cert_status),
-                poll_interval,
-            )
-
-        except Exception as e:
-            logger.warning("Error polling NGFW (will retry): %s", e)
-
-        time.sleep(poll_interval)
-
-
-def wait_for_autocommit(
-    ssh_executor: NGFWExecutor,
-    host: str,
-    timeout_seconds: int = 600,
-    poll_interval: int = 15,
-) -> None:
-    """Wait for NGFW boot autocommit to complete before configuring.
-
-    After boot, PAN-OS runs an autocommit that must complete before any
-    configuration changes can be made. This function polls 'show jobs all'
-    until there are no active (ACT) commit jobs.
-
-    Args:
-        ssh_executor: NGFWExecutor instance for running commands.
-        host: NGFW management IP address.
-        timeout_seconds: Maximum time to wait (default 10 min).
-        poll_interval: Seconds between poll attempts (default 15s).
-
-    Raises:
-        RuntimeError: If autocommit doesn't complete within timeout.
-    """
-    import re
-    import time
-
-    start_time = time.time()
-
-    while True:
-        elapsed = time.time() - start_time
-        if elapsed > timeout_seconds:
-            raise RuntimeError(
-                f"NGFW autocommit did not complete after {timeout_seconds}s - management plane may be stuck"
-            )
-
-        logger.info(
-            "Checking for active NGFW jobs... (%.0fs / %ds)",
-            elapsed,
-            timeout_seconds,
-        )
-
-        try:
-            result = ssh_executor.run_command(
-                instance_id=host,
-                script="show jobs all",
-                timeout_seconds=60,
-            )
-
-            # Parse job output for any active (ACT) jobs
-            # Output format has Status column with ACT (active) or FIN (finished)
-            # We look for "ACT" which indicates a job is still running
-            output = result.stdout
-
-            # Check for active jobs - look for ACT in the output
-            # The output format is tabular with columns like:
-            # Enqueued  ID  Type  Status  Result  Completed
-            has_active_jobs = bool(re.search(r"\bACT\b", output))
-
-            if not has_active_jobs:
-                logger.info(
-                    "No active NGFW jobs found after %.0fs - ready for configuration",
-                    elapsed,
-                )
-                return
-
-            # Log which jobs are active
-            active_lines = [line.strip() for line in output.split("\n") if "ACT" in line]
-            logger.info(
-                "Found %d active job(s), waiting %ds: %s",
-                len(active_lines),
-                poll_interval,
-                # Show first 3 for brevity
-                active_lines[:3],
-            )
-
-        except Exception as e:
-            logger.warning("Error checking NGFW jobs (will retry): %s", e)
-
-        time.sleep(poll_interval)
-
-
-def update_instance_state(request_id: str, status: str, **state_updates) -> None:
-    """Update NGFW Instance and App status/state in Engine database.
-
-    Updates both the engine_instance and engine_app records for the NGFW
-    associated with the given request_id. This is the single source of truth
-    for state - events are lightweight notifications only.
-
-    Args:
-        request_id: UUID string of the Request.
-        status: New status value (e.g., 'provisioning', 'ready', 'failed', 'destroyed').
-        **state_updates: Key-value pairs to merge into Instance.state JSON.
-            Common keys: ec2_instance_id, management_ip, dataplane_ip,
-            service_name, data_eni_id, pulumi_stack, error_message.
-    """
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            # Get instance id, app id, and current state
-            cur.execute(
-                """
-                SELECT i.id, i.state, a.id
-                FROM engine_request r
-                JOIN engine_instance i ON i.request_id = r.id
-                LEFT JOIN engine_app a ON a.instance_id = i.id
-                WHERE r.request_id = %s
-                  AND i.role = 'ngfw'
-                """,
-                (request_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise ValueError(f"NGFW instance not found for request: {request_id}")
-
-            instance_id = row[0]
-            current_state = row[1] if row[1] else {}
-            app_id = row[2]
-
-            # Merge state updates into current state
-            if state_updates:
-                current_state.update(state_updates)
-
-            # Update Instance with new status and merged state
-            if status == STATUS_DESTROYED:
-                cur.execute(
-                    """
-                    UPDATE engine_instance
-                    SET status = %s, state = %s, updated_at = NOW(), destroyed_at = NOW()
-                    WHERE id = %s
-                    """,
-                    (status, json.dumps(current_state), instance_id),
-                )
-            else:
-                cur.execute(
-                    """
-                    UPDATE engine_instance
-                    SET status = %s, state = %s, updated_at = NOW()
-                    WHERE id = %s
-                    """,
-                    (status, json.dumps(current_state), instance_id),
-                )
-
-            # Update App status (if app exists)
-            if app_id:
-                if status == STATUS_DESTROYED:
-                    cur.execute(
-                        """
-                        UPDATE engine_app
-                        SET status = %s, updated_at = NOW(), destroyed_at = NOW()
-                        WHERE id = %s
-                        """,
-                        (status, app_id),
-                    )
-                else:
-                    cur.execute(
-                        """
-                        UPDATE engine_app
-                        SET status = %s, updated_at = NOW()
-                        WHERE id = %s
-                        """,
-                        (status, app_id),
-                    )
-
-        conn.commit()
-
-
-# =============================================================================
-# Post-Pulumi Setup Functions
-# These run AFTER pulumi up creates infrastructure, BEFORE marking range ready
-# =============================================================================
-
-
-def find_stale_routes_by_cidr(
-    ssh_executor: NGFWExecutor,
-    management_ip: str,
-    target_cidrs: set[str],
-) -> list[str]:
-    """Find existing NGFW static routes that match target CIDRs.
-
-    Queries the NGFW running config for static routes and returns names of
-    any routes whose destination matches one of the target CIDRs. Used to
-    clean up stale routes from destroyed ranges when CIDRs are recycled.
-
-    Args:
-        ssh_executor: SSH executor for NGFW connection.
-        management_ip: NGFW management IP address.
-        target_cidrs: Set of CIDRs to match against.
-
-    Returns:
-        List of route names that should be deleted.
-    """
-    import re
-
-    # Query the running static route config using configure mode
-    # 'show config running | match static-route' only returns lines with "static-route"
-    # We need the full hierarchical output to parse route names and destinations
-    query_cmd = "set cli pager off\nconfigure\nshow network virtual-router default routing-table ip static-route\nexit"
-    try:
-        result = ssh_executor.run_command(
-            instance_id=management_ip,
-            script="",
-            stdin_input=query_cmd + "\nexit\n",
-            timeout_seconds=30,
-        )
-    except Exception as e:
-        logger.warning("Failed to query NGFW routes for cleanup: %s", e)
-        return []
-
-    if not result.success or not result.stdout:
-        return []
-
-    # Parse output to find route entries with matching destinations
-    # Configure mode 'show' returns hierarchical format:
-    #   range-146-dc_network {
-    #     destination 10.1.2.0/28;
-    #     ...
-    #   }
-    stale_routes = []
-
-    # Match route name and destination in hierarchical config format
-    # Pattern matches: range-{id}-{name} { ... destination X.X.X.X/Y; ... }
-    # Uses [^}]* to stay within the route block (stops at closing brace)
-    route_pattern = re.compile(r"(range-\d+-\w+)\s*\{[^}]*destination\s+([\d./]+);", re.DOTALL)
-
-    for match in route_pattern.finditer(result.stdout):
-        route_name = match.group(1)
-        cidr = match.group(2)
-        if cidr in target_cidrs:
-            logger.info(
-                "Found stale route %s with CIDR %s - will delete",
-                route_name,
-                cidr,
-            )
-            stale_routes.append(route_name)
-
-    return stale_routes
-
-
-def find_stale_routes_by_db(
-    ssh_executor: NGFWExecutor,
-    management_ip: str,
-    current_range_id: int,
-) -> list[str]:
-    """Find NGFW routes belonging to destroyed/failed ranges via DB lookup.
-
-    Queries all NGFW routes matching the range-{id}-{name} pattern, extracts
-    the range IDs, and checks the database to find routes belonging to ranges
-    that are destroyed, failed, or no longer exist.
-
-    This is a secondary check to catch routes that weren't cleaned up during
-    range destruction, complementing find_stale_routes_by_cidr.
-
-    Args:
-        ssh_executor: SSH executor for NGFW connection.
-        management_ip: NGFW management IP address.
-        current_range_id: Current range ID (to exclude from stale detection).
-
-    Returns:
-        List of route names that should be deleted.
-    """
-    import re
-
-    # Query the running static route config using configure mode
-    # 'show config running | match static-route' only returns lines with "static-route"
-    # We need the full hierarchical output to parse route names
-    query_cmd = "set cli pager off\nconfigure\nshow network virtual-router default routing-table ip static-route\nexit"
-    try:
-        result = ssh_executor.run_command(
-            instance_id=management_ip,
-            script="",
-            stdin_input=query_cmd + "\nexit\n",
-            timeout_seconds=30,
-        )
-    except Exception as e:
-        logger.warning("Failed to query NGFW routes for DB cleanup check: %s", e)
-        result = None
-
-    if not result or not result.success or not result.stdout:
-        return []
-
-    # Extract all range IDs from route names in hierarchical config format
-    # Pattern matches: range-{id}-{name} { (route block opening)
-    route_pattern = re.compile(r"(range-(\d+)-\w+)\s*\{")
-    routes_by_range: dict[int, list[str]] = {}
-
-    for match in route_pattern.finditer(result.stdout):
-        route_name = match.group(1)
-        range_id = int(match.group(2))
-        if range_id != current_range_id:
-            if range_id not in routes_by_range:
-                routes_by_range[range_id] = []
-            routes_by_range[range_id].append(route_name)
-
-    if not routes_by_range:
-        return []
-
-    # Query DB for these range IDs to find which are stale
-    range_ids = list(routes_by_range.keys())
-    stale_routes: list[str] = []
-
-    try:
-        with get_db_connection() as conn, conn.cursor() as cur:
-            # Find ranges that are active (not stale)
-            # Stale = destroyed, failed, or doesn't exist
-            query = sql.SQL("""
-                SELECT id FROM mission_control_range
-                WHERE id IN ({})
-                AND status NOT IN ('destroyed', 'failed')
-                """).format(sql.SQL(", ").join(sql.Placeholder() * len(range_ids)))
-            cur.execute(query, range_ids)
-            active_range_ids = {row[0] for row in cur.fetchall()}
-
-        # Routes belonging to ranges NOT in active_range_ids are stale
-        for range_id, routes in routes_by_range.items():
-            if range_id not in active_range_ids:
-                logger.info(
-                    "Found %d stale routes for range %d (destroyed/failed/missing)",
-                    len(routes),
-                    range_id,
-                )
-                stale_routes.extend(routes)
-
-    except psycopg.Error as e:
-        logger.warning("Failed to query DB for stale routes: %s", e)
-        stale_routes = []
-
-    return stale_routes
-
-
-def configure_ngfw_subnets(
-    subnets: list[dict[str, Any]],
-    range_id: int,
-    management_ip: str,
-    ssh_key_secret_arn: str,
-    route_next_hop_ip: str,
-    ssm_endpoints_subnet_cidr: str = "",
-) -> None:
-    """Configure NGFW with routes for range subnets.
-
-    This runs after range infrastructure exists and before instance setup.
-    Configures static routes on the NGFW so traffic can flow between subnets.
-    When ssm_endpoints_subnet_cidr is provided, also configures routing for
-    Bedrock/SSM endpoint traffic through the NGFW.
-
-    Args:
-        subnets: List of dicts with 'name', 'cidr', 'connected_to'.
-        range_id: Range ID for unique naming.
-        management_ip: NGFW management IP for SSH.
-        ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
-        route_next_hop_ip: Next-hop IP address for range subnet routes.
-        ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
-    """
-    logger.info(
-        "Configuring NGFW: %d subnets, next_hop=%s",
-        len(subnets),
-        route_next_hop_ip,
-    )
-
-    # Get SSH private key from Secrets Manager
-    from cloud import get_secrets_store
-
-    secrets = get_secrets_store()
-    private_key = secrets.get_secret(ssh_key_secret_arn)
-
-    # Create NGFW executor
-    ssh_executor = NGFWExecutor(private_key=private_key)
-
-    # Wait for SSH to be available
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
-
-    # Wait for management plane to be ready (especially important after NGFW start)
-    logger.info("Verifying NGFW management plane is ready...")
-    poll_for_serial_number(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        timeout_seconds=300,
-        poll_interval=15,
-    )
-
-    logger.info("Waiting for NGFW autocommit to complete...")
-    wait_for_autocommit(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        # 10 min max for autocommit
-        timeout_seconds=600,
-        poll_interval=15,
-    )
-
-    # Find stale routes using two methods:
-    # 1. CIDR match - routes with same destination as our target subnets
-    # 2. DB lookup - routes belonging to destroyed/failed/missing ranges
-    target_cidrs = {s["cidr"] for s in subnets if s.get("cidr")}
-    stale_by_cidr = find_stale_routes_by_cidr(ssh_executor, management_ip, target_cidrs)
-    stale_by_db = find_stale_routes_by_db(ssh_executor, management_ip, range_id)
-
-    # Combine and deduplicate
-    stale_routes = list(set(stale_by_cidr + stale_by_db))
-    if stale_routes:
-        logger.info(
-            "Found %d stale routes to clean up: %s (cidr=%d, db=%d)",
-            len(stale_routes),
-            stale_routes,
-            len(stale_by_cidr),
-            len(stale_by_db),
-        )
-
-    # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
-    # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWConfigureSubnetsPlan().get_steps(
-        subnets,
-        range_id,
-        route_next_hop_ip,
-        stale_routes,
-        ssm_endpoints_subnet_cidr,
-    )
-    plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
-
-    orchestrator = SetupOrchestrator(ssh_executor)
-    logger.info("Running NGFW subnet configuration via SetupOrchestrator...")
-    # No template variables - steps are pre-built
-    result = orchestrator.orchestrate(
-        instance_id=management_ip,
-        plan=plan,
-        context={},
-    )
-
-    if not result.success:
-        raise RuntimeError(f"NGFW subnet configuration failed: {result.error or 'unknown error'}")
-
-    logger.info(
-        "NGFW configuration complete for range %s (%d subnets)",
-        range_id,
-        len(subnets),
-    )
-
-
-from instance_setup import (  # noqa: E402
-    _LINUX_VICTIM_OS_TYPES,  # noqa: F401
-    _build_uuid_to_config,
-    _configure_dc_ssh_access,
-    _DCBootstrapContext,
-    _DCPromoteConfig,
-    _dispatch_instance_setup_role,
-    _DomainJoinSpec,
-    _install_dc_xdr,
-    _install_xdr_or_raise,
-    _InstanceSetupCtx,
-    _InstanceSetupSpec,
-    _join_windows_domain,
-    _partition_dc_vs_other,
-    _partition_pod_vs_vm,
-    _resolve_dc_ip_and_domain,
-    _resolve_rdp_password_from_secret_ref,
-    _resolve_setup_hostname,
-    _run_dc_bootstrap_plan,
-    _run_dc_setup,
-    _run_polaris_range_bootstrap,
-    _run_setup_plan,
-    _run_single_instance_setup,
-    _set_local_password_or_raise,
-    _setup_attacker_role,
-    _setup_dc_instances_blocking,
-    _setup_linux_victim,
-    _setup_one_other_instance,
-    _setup_other_instances_parallel,
-    _setup_windows_victim,
-    _verify_dc_setup,
-    run_instance_setup,
-)
-
-_INSTANCE_SETUP_REEXPORTS_USED = (
-    _build_uuid_to_config,
-    _DCBootstrapContext,
-    _DCPromoteConfig,
-    _dispatch_instance_setup_role,
-    _DomainJoinSpec,
-    _install_dc_xdr,
-    _install_xdr_or_raise,
-    _InstanceSetupCtx,
-    _InstanceSetupSpec,
-    _join_windows_domain,
-    _partition_dc_vs_other,
-    _partition_pod_vs_vm,
-    _resolve_dc_ip_and_domain,
-    _resolve_rdp_password_from_secret_ref,
-    _resolve_setup_hostname,
-    _run_dc_bootstrap_plan,
-    _run_dc_setup,
-    _run_polaris_range_bootstrap,
-    _run_setup_plan,
-    _run_single_instance_setup,
-    _set_local_password_or_raise,
-    _setup_attacker_role,
-    _setup_dc_instances_blocking,
-    _setup_linux_victim,
-    _setup_one_other_instance,
-    _setup_other_instances_parallel,
-    _setup_windows_victim,
-    _verify_dc_setup,
-    _configure_dc_ssh_access,
-    run_instance_setup,
-)
-
-
 # Re-exports from sibling modules (S104 file-split, issue #780). These
 # imports preserve `patch("main.X")` test mocks for callers that still
 # reach in through ``main`` instead of the new sibling module path.
+from instance_setup import (  # noqa: E402
+    _LINUX_VICTIM_OS_TYPES,
+    _build_uuid_to_config,
+    _configure_dc_ssh_access,
+    _DCBootstrapContext,
+    _DCPromoteConfig,
+    _dispatch_instance_setup_role,
+    _DomainJoinSpec,
+    _install_dc_xdr,
+    _install_xdr_or_raise,
+    _InstanceSetupCtx,
+    _InstanceSetupSpec,
+    _join_windows_domain,
+    _partition_dc_vs_other,
+    _partition_pod_vs_vm,
+    _resolve_dc_ip_and_domain,
+    _resolve_rdp_password_from_secret_ref,
+    _resolve_setup_hostname,
+    _run_dc_bootstrap_plan,
+    _run_dc_setup,
+    _run_polaris_range_bootstrap,
+    _run_setup_plan,
+    _run_single_instance_setup,
+    _set_local_password_or_raise,
+    _setup_attacker_role,
+    _setup_dc_instances_blocking,
+    _setup_linux_victim,
+    _setup_one_other_instance,
+    _setup_other_instances_parallel,
+    _setup_windows_victim,
+    _verify_dc_setup,
+    run_instance_setup,
+)
+from ngfw_runtime import (  # noqa: E402
+    _format_serial_cert_status,
+    _raise_serial_cert_timeout,
+    configure_ngfw_subnets,
+    find_stale_routes_by_cidr,
+    find_stale_routes_by_db,
+    parse_device_certificate_status,
+    parse_serial_number,
+    poll_for_serial_and_cert,
+    poll_for_serial_number,
+    remove_ngfw_subnets,
+    update_instance_state,
+    user_has_active_ranges,
+    wait_for_autocommit,
+)
 from ngfw_runtime_ops import (  # noqa: E402
     _load_ngfw_ops_plan,
     _publish_ngfw_runtime_status,
@@ -1618,7 +848,7 @@ from terraform_ops import (  # noqa: E402
     run_range_terraform,
 )
 
-_TERRAFORM_REEXPORTS_USED = (
+_SIBLING_REEXPORTS_USED = (
     _allocate_range_subnet_cidrs,
     _attempt_terraform_auto_cleanup,
     _build_aws_extra_tf_variables,
@@ -1647,17 +877,57 @@ _TERRAFORM_REEXPORTS_USED = (
     _run_terraform_provision,
     _validate_ngfw_range_attachment,
     run_range_terraform,
+    _load_ngfw_ops_plan,
+    _publish_ngfw_runtime_status,
+    _run_aws_ngfw_operation,
+    _run_gcp_ngfw_operation,
+    _validate_ngfw_operation,
+    run_ngfw_operation,
+    _format_serial_cert_status,
+    _raise_serial_cert_timeout,
+    configure_ngfw_subnets,
+    find_stale_routes_by_cidr,
+    find_stale_routes_by_db,
+    parse_device_certificate_status,
+    parse_serial_number,
+    poll_for_serial_and_cert,
+    poll_for_serial_number,
+    remove_ngfw_subnets,
+    update_instance_state,
+    user_has_active_ranges,
+    wait_for_autocommit,
+    _build_uuid_to_config,
+    _DCBootstrapContext,
+    _DCPromoteConfig,
+    _dispatch_instance_setup_role,
+    _DomainJoinSpec,
+    _install_dc_xdr,
+    _install_xdr_or_raise,
+    _InstanceSetupCtx,
+    _InstanceSetupSpec,
+    _join_windows_domain,
+    _LINUX_VICTIM_OS_TYPES,
+    _partition_dc_vs_other,
+    _partition_pod_vs_vm,
+    _resolve_dc_ip_and_domain,
+    _resolve_rdp_password_from_secret_ref,
+    _resolve_setup_hostname,
+    _run_dc_bootstrap_plan,
+    _run_dc_setup,
+    _run_polaris_range_bootstrap,
+    _run_setup_plan,
+    _run_single_instance_setup,
+    _set_local_password_or_raise,
+    _setup_attacker_role,
+    _setup_dc_instances_blocking,
+    _setup_linux_victim,
+    _setup_one_other_instance,
+    _setup_other_instances_parallel,
+    _setup_windows_victim,
+    _verify_dc_setup,
+    _configure_dc_ssh_access,
+    run_instance_setup,
 )
-
-__all__ = [
-    "_load_ngfw_ops_plan",
-    "_publish_ngfw_runtime_status",
-    "_run_aws_ngfw_operation",
-    "_run_gcp_ngfw_operation",
-    "_validate_ngfw_operation",
-    "run_ngfw_operation",
-    "run_range_terraform",
-]
 
 
 if __name__ == "__main__":
@@ -1670,7 +940,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Shifter Engine for provisioning cyber ranges and NGFW operations")
     subparsers = parser.add_subparsers(dest="resource", required=True, help="Resource type")
 
-    # Range operations - use request_id (UUID) like NGFW pattern
     range_parser = subparsers.add_parser("range", help="Range lifecycle operations")
     range_parser.add_argument(
         "operation",
@@ -1685,16 +954,10 @@ if __name__ == "__main__":
         help="UUID of the Request for this Range",
     )
 
-    # NGFW operations
     ngfw_parser = subparsers.add_parser("ngfw", help="NGFW runtime operations")
     ngfw_parser.add_argument(
         "operation",
-        choices=[
-            "provision",
-            "deprovision",
-            "start",
-            "stop",
-        ],
+        choices=["provision", "deprovision", "start", "stop"],
         help="NGFW operation to perform",
     )
     ngfw_parser.add_argument(
@@ -1712,21 +975,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Handle resource-based dispatch
     if args.resource == "ngfw":
         logger.info("Starting NGFW %s for request_id=%s", args.operation, args.request_id)
         logger.info("Environment: %s", os.environ.get("ENVIRONMENT", "unknown"))
 
-        # Infrastructure operations use Terraform, runtime operations use boto3
         if args.operation in ("provision", "deprovision"):
             tf_op = "up" if args.operation == "provision" else "destroy"
             run_ngfw_terraform(tf_op, args.request_id)
         else:
-            # Runtime operations (start, stop)
-            kwargs = {}
+            kwargs: dict[str, str] = {}
             if args.ec2_instance_id:
                 kwargs["ec2_instance_id"] = args.ec2_instance_id
-
             run_ngfw_operation(args.operation, args.request_id, **kwargs)
 
         logger.info("Completed NGFW %s for request_id=%s", args.operation, args.request_id)
@@ -1739,7 +998,6 @@ if __name__ == "__main__":
         logger.info("Environment: %s", os.environ.get("ENVIRONMENT", "unknown"))
 
         if args.operation in ("provision", "destroy"):
-            # Use Terraform for ranges
             run_range_terraform(tf_op, request_id)
         elif args.operation == "pause":
             from range_ops import run_range_pause

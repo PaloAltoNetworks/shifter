@@ -47,7 +47,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_355 / CKV_AWS_290 / CKV_AWS_289 (IAM wildcard resource / unconstrained write / unconstrained permissions management): the engine provisioner orchestrates EC2, ELBv2 (GWLB), VPC endpoints, Security Groups, Route Tables, NAT Gateways, and Internet Gateways across arbitrary ranges. Many AWS APIs require Resource = '*' by design (e.g. CreateRouteTable, CreateSubnet, ec2:CreateTags). The runtime path is constrained by tag-based StringEquals conditions (aws:RequestTag / ec2:ResourceTag) where the API supports it. Narrowing further would require tagging at create time on every API call which is not universally supported.",
+    "reason": "CKV_AWS_355 / CKV_AWS_290 / CKV_AWS_289 (IAM wildcard resource / unconstrained write / unconstrained permissions management): the engine provisioner orchestrates EC2, VPC endpoints, Security Groups, Route Tables, NAT Gateways, and Internet Gateways across arbitrary ranges. Many AWS APIs require Resource = '*' by design (e.g. CreateRouteTable, CreateSubnet, ec2:CreateTags). The runtime path is constrained by tag-based StringEquals conditions (aws:RequestTag / ec2:ResourceTag) where the API supports it. Narrowing further would require tagging at create time on every API call which is not universally supported. ELBv2 (GWLB) wildcards were narrowed in #46: the gwlb policy now scopes mutable actions to Gateway Load Balancer ARNs with ownership tag conditions and is regression-checked by scripts/check_tf_iam_elb_scope.",
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/engine-provisioner/iam.tf"

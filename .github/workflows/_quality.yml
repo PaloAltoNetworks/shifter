@@ -104,6 +104,16 @@ jobs:
             platform/terraform/modules/portal/ec2/main.tf \
             platform/terraform/modules/guacamole/iam.tf
 
+      # Issue #46: ELBv2 (Gateway Load Balancer) IAM scoping on the
+      # engine provisioner ECS task role. Mirrors check-tf-iam-ec2-scope:
+      # rejects Resource=* and wildcard ELBv2 actions on the GWLB
+      # mutation statements and requires the Shifter ownership tag
+      # conditions. Pre-commit also enforces it locally.
+      - name: Run check-tf-iam-elb-scope
+        run: |
+          python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py \
+            platform/terraform/modules/engine-provisioner/iam.tf
+
       # Pin the behavior of the check_tf_* IAM/security checkers
       # themselves. The live-file invocations above only exercise the
       # happy-path shape; the test suites cover wildcards, list
@@ -117,6 +127,7 @@ jobs:
       - name: Run check_tf_* checker tests
         run: |
           python3 -m unittest scripts.check_tf_iam_ec2_scope.test_check_tf_iam_ec2_scope
+          python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs
           python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
 

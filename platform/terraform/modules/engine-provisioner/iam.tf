@@ -496,32 +496,103 @@ resource "aws_iam_role_policy" "gwlb" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "GWLBOperations"
+        # ELBv2 Describe APIs require Resource = "*" per the AWS service
+        # authorization reference. Actions are enumerated so the wildcard
+        # statement cannot grow silently to additional read APIs.
+        Sid    = "GWLBDescribe"
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetHealth",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeTags"
+        ]
+        Resource = "*"
+      },
+      {
+        # GWLB resource creation. Scoped to Gateway Load Balancer
+        # resource types and gated on Shifter ownership request tags so
+        # this statement cannot create ALB/NLB resources or untagged
+        # resources.
+        Sid    = "GWLBCreate"
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:DeleteLoadBalancer",
           "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:CreateListener"
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # Existing-resource mutations. Restricted to Shifter-owned GWLB
+        # resources via ELBv2 resource tags so the runtime cannot delete
+        # or reconfigure load balancers it does not own.
+        Sid    = "GWLBMutateOwned"
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DeleteLoadBalancer",
           "elasticloadbalancing:DeleteTargetGroup",
-          "elasticloadbalancing:CreateListener",
           "elasticloadbalancing:DeleteListener",
           "elasticloadbalancing:RegisterTargets",
           "elasticloadbalancing:DeregisterTargets",
           "elasticloadbalancing:ModifyLoadBalancerAttributes",
           "elasticloadbalancing:ModifyTargetGroup",
           "elasticloadbalancing:ModifyTargetGroupAttributes",
-          "elasticloadbalancing:AddTags",
           "elasticloadbalancing:RemoveTags"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:ResourceTag/shifter:system"      = "shifter"
+            "elasticloadbalancing:ResourceTag/shifter:environment" = var.environment
+            "elasticloadbalancing:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
       },
       {
-        Sid    = "GWLBDescribe"
+        # Tagging at create time. Bound to the GWLB create APIs and the
+        # Shifter ownership request tags so this statement cannot tag
+        # arbitrary ELBv2 resources or strip ownership tags later.
+        Sid    = "GWLBTagOnCreate"
         Effect = "Allow"
         Action = [
-          "elasticloadbalancing:Describe*"
+          "elasticloadbalancing:AddTags"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:CreateAction" = [
+              "CreateLoadBalancer",
+              "CreateTargetGroup",
+              "CreateListener"
+            ]
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
       }
     ]
   })

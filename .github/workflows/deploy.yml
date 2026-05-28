@@ -103,6 +103,7 @@ jobs:
               # is verified, but it shouldn't trigger any deploy — the
               # `mcp` filter is the existing "Quality-only" route.
               - 'scripts/check_tf_iam_ec2_scope/**'
+              - 'scripts/check_tf_iam_elb_scope/**'
               - 'scripts/check_tf_sg_cidrs/**'
               - 'scripts/check_tf_kms_secrets_grant/**'
               # Guardrail / ADR-registry surfaces. A change to any of

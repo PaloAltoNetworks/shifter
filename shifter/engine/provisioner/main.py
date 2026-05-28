@@ -272,20 +272,22 @@ from instance_setup import (  # noqa: E402
     _setup_linux_victim,
     _setup_windows_victim,
 )
-from ngfw_runtime import (  # noqa: E402
+from ngfw_polling import (  # noqa: E402
     _format_serial_cert_status,
     _raise_serial_cert_timeout,
-    configure_ngfw_subnets,
-    find_stale_routes_by_cidr,
-    find_stale_routes_by_db,
     parse_device_certificate_status,
     parse_serial_number,
     poll_for_serial_and_cert,
     poll_for_serial_number,
+    wait_for_autocommit,
+)
+from ngfw_runtime import (  # noqa: E402
+    configure_ngfw_subnets,
+    find_stale_routes_by_cidr,
+    find_stale_routes_by_db,
     remove_ngfw_subnets,
     update_instance_state,
     user_has_active_ranges,
-    wait_for_autocommit,
 )
 from ngfw_runtime_ops import (  # noqa: E402
     _load_ngfw_ops_plan,
@@ -299,11 +301,7 @@ from polaris_bootstrap import _run_polaris_range_bootstrap  # noqa: E402
 from terraform_ops import (  # noqa: E402
     _allocate_range_subnet_cidrs,
     _attempt_terraform_auto_cleanup,
-    _build_aws_extra_tf_variables,
     _build_ngfw_subnet_payloads,
-    _build_range_terraform_variables,
-    _build_tf_instance,
-    _build_tf_subnets,
     _configure_ngfw_for_range,
     _describe_ec2_state,
     _dispatch_terraform_operation,
@@ -315,16 +313,22 @@ from terraform_ops import (  # noqa: E402
     _recover_missing_subnet_cidrs,
     _release_subnet_allocations_best_effort,
     _remove_ngfw_attachments_for_destroy,
-    _resolve_agent_presigned_url,
-    _resolve_agent_presigned_url_from_inst,
-    _resolve_instance_type,
-    _resolve_ngfw_for_range,
-    _resolve_tf_os_type,
     _resume_aws_ngfw_for_provisioning,
     _run_terraform_destroy,
     _run_terraform_provision,
     _validate_ngfw_range_attachment,
     run_range_terraform,
+)
+from terraform_vars import (  # noqa: E402
+    _build_aws_extra_tf_variables,
+    _build_range_terraform_variables,
+    _build_tf_instance,
+    _build_tf_subnets,
+    _resolve_agent_presigned_url,
+    _resolve_agent_presigned_url_from_inst,
+    _resolve_instance_type,
+    _resolve_ngfw_for_range,
+    _resolve_tf_os_type,
 )
 
 _SIBLING_REEXPORTS_USED = (

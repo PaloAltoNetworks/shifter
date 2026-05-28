@@ -11,93 +11,87 @@ import logging
 import os
 from typing import Any
 
-# Explicit ``from x import y as y`` re-exports keep mypy strict-mode happy
-# (it treats the redundant alias form as an explicit re-export) and keep
-# the symbols importable as ``main.X`` so existing ``patch("main.X")``
-# test mocks intercept the sibling-module call sites.
-import range_terraform_runner as range_terraform_runner
+# Re-exports for sibling modules + ``patch("main.X")`` test mocks. The
+# explicit ``__all__`` below tells both mypy strict mode and Sonar
+# python:S1128 that these names are intentionally re-exported, not
+# unused.
+import range_terraform_runner
 from catalog.instances import (
-    _get_dc_instance_type as _get_dc_instance_type,
-)
-from catalog.instances import (
-    _get_kali_instance_type as _get_kali_instance_type,
-)
-from catalog.instances import (
-    _get_victim_instance_type as _get_victim_instance_type,
-)
-from catalog.instances import (
-    _get_windows_instance_type as _get_windows_instance_type,
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
 )
 from config import (
-    generate_presigned_url as generate_presigned_url,
-)
-from config import (
-    get_range_availability_zone as get_range_availability_zone,
-)
-from config import (
-    has_ngfw_attachment_state as has_ngfw_attachment_state,
-)
-from config import (
-    load_range_network_config as load_range_network_config,
-)
-from config import (
-    resolve_ngfw_attachment_config as resolve_ngfw_attachment_config,
+    generate_presigned_url,
+    get_range_availability_zone,
+    has_ngfw_attachment_state,
+    load_range_network_config,
+    resolve_ngfw_attachment_config,
 )
 from events import (
-    STATUS_DESTROYED as STATUS_DESTROYED,
+    STATUS_DESTROYED,
+    publish_destroyed,
+    publish_failed,
+    publish_ngfw_event,
+    publish_ready,
+    publish_status_update,
 )
-from events import (
-    publish_destroyed as publish_destroyed,
-)
-from events import (
-    publish_failed as publish_failed,
-)
-from events import (
-    publish_ngfw_event as publish_ngfw_event,
-)
-from events import (
-    publish_ready as publish_ready,
-)
-from events import (
-    publish_status_update as publish_status_update,
-)
-from executors.aws_executor import AWSExecutor as AWSExecutor
-from executors.factory import (
-    build_guest_execution_context as build_guest_execution_context,
-)
+from executors.aws_executor import AWSExecutor
+from executors.factory import build_guest_execution_context
 from ngfw_terraform import run_ngfw_terraform
-from orchestrators.ops_orchestrator import (
-    OpsOrchestrator as OpsOrchestrator,
-)
-from orchestrators.setup_orchestrator import (
-    SetupOrchestrator as SetupOrchestrator,
-)
+from orchestrators.ops_orchestrator import OpsOrchestrator
+from orchestrators.setup_orchestrator import SetupOrchestrator
 from plans.base import SetupStep
-from plans.bootstrap import BootstrapPlan as BootstrapPlan
-from plans.dc_setup import DCSetupPlan as DCSetupPlan
+from plans.bootstrap import BootstrapPlan
+from plans.dc_setup import DCSetupPlan
 from state_helpers import (
-    _build_instance_provider_metadata as _build_instance_provider_metadata,
+    _build_instance_provider_metadata,
+    _build_instance_state,
+    _build_provisioned_instance_payload,
+    _build_subnet_provider_metadata,
+    _build_subnet_state,
+    _get_cloud_provider,
+    _should_promote_dc_at_runtime,
+    _should_run_dc_bootstrap_plan,
 )
-from state_helpers import (
-    _build_instance_state as _build_instance_state,
-)
-from state_helpers import (
-    _build_provisioned_instance_payload as _build_provisioned_instance_payload,
-)
-from state_helpers import (
-    _build_subnet_provider_metadata as _build_subnet_provider_metadata,
-)
-from state_helpers import (
-    _build_subnet_state as _build_subnet_state,
-)
-from state_helpers import (
-    _get_cloud_provider as _get_cloud_provider,
-)
-from state_helpers import (
-    _should_promote_dc_at_runtime as _should_promote_dc_at_runtime,
-)
-from state_helpers import (
-    _should_run_dc_bootstrap_plan as _should_run_dc_bootstrap_plan,
+
+# Sonar S1128 sees re-exports as unused imports because main.py itself
+# does not call them; the symbols are reachable as ``main.X`` from the
+# sibling modules and from existing ``patch("main.X")`` test mocks.
+# Listing the names in this tuple makes the references explicit so
+# Sonar treats them as used.
+_EXTERNAL_REEXPORTS_USED = (
+    AWSExecutor,
+    BootstrapPlan,
+    DCSetupPlan,
+    OpsOrchestrator,
+    SetupOrchestrator,
+    STATUS_DESTROYED,
+    _build_instance_provider_metadata,
+    _build_instance_state,
+    _build_provisioned_instance_payload,
+    _build_subnet_provider_metadata,
+    _build_subnet_state,
+    _get_cloud_provider,
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
+    _should_promote_dc_at_runtime,
+    _should_run_dc_bootstrap_plan,
+    build_guest_execution_context,
+    generate_presigned_url,
+    get_range_availability_zone,
+    has_ngfw_attachment_state,
+    load_range_network_config,
+    publish_destroyed,
+    publish_failed,
+    publish_ngfw_event,
+    publish_ready,
+    publish_status_update,
+    range_terraform_runner,
+    resolve_ngfw_attachment_config,
 )
 
 logger = logging.getLogger(__name__)

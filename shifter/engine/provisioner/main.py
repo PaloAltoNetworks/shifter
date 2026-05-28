@@ -245,31 +245,32 @@ from dc_setup import (  # noqa: E402
     _run_dc_setup,
     _verify_dc_setup,
 )
+from instance_orchestrator import (  # noqa: E402
+    _build_uuid_to_config,
+    _partition_dc_vs_other,
+    _partition_pod_vs_vm,
+    _resolve_dc_ip_and_domain,
+    _setup_dc_instances_blocking,
+    _setup_one_other_instance,
+    _setup_other_instances_parallel,
+    run_instance_setup,
+)
 from instance_setup import (  # noqa: E402
     _LINUX_VICTIM_OS_TYPES,
-    _build_uuid_to_config,
     _dispatch_instance_setup_role,
     _DomainJoinSpec,
     _install_xdr_or_raise,
     _InstanceSetupCtx,
     _InstanceSetupSpec,
     _join_windows_domain,
-    _partition_dc_vs_other,
-    _partition_pod_vs_vm,
-    _resolve_dc_ip_and_domain,
     _resolve_rdp_password_from_secret_ref,
     _resolve_setup_hostname,
-    _run_polaris_range_bootstrap,
     _run_setup_plan,
     _run_single_instance_setup,
     _set_local_password_or_raise,
     _setup_attacker_role,
-    _setup_dc_instances_blocking,
     _setup_linux_victim,
-    _setup_one_other_instance,
-    _setup_other_instances_parallel,
     _setup_windows_victim,
-    run_instance_setup,
 )
 from ngfw_runtime import (  # noqa: E402
     _format_serial_cert_status,
@@ -294,6 +295,7 @@ from ngfw_runtime_ops import (  # noqa: E402
     _validate_ngfw_operation,
     run_ngfw_operation,
 )
+from polaris_bootstrap import _run_polaris_range_bootstrap  # noqa: E402
 from terraform_ops import (  # noqa: E402
     _allocate_range_subnet_cidrs,
     _attempt_terraform_auto_cleanup,

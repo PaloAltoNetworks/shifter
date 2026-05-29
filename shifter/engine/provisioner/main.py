@@ -42,7 +42,7 @@ from executors.factory import build_guest_execution_context
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupOrchestrator
-from plans.base import SetupStep
+from plans.base import SetupPlan, SetupStep
 from plans.bootstrap import BootstrapPlan
 from plans.dc_setup import DCSetupPlan
 from state_helpers import (
@@ -67,6 +67,7 @@ _EXTERNAL_REEXPORTS_USED = (
     DCSetupPlan,
     OpsOrchestrator,
     SetupOrchestrator,
+    SetupPlan,
     STATUS_DESTROYED,
     _build_instance_provider_metadata,
     _build_instance_state,
@@ -130,11 +131,16 @@ def get_agent_presigned_url(inst_config: dict[str, Any]) -> str | None:
 class DynamicPlan:
     """Simple wrapper for dynamically-built setup plans.
 
-    Wraps a list of steps to satisfy the SetupPlan protocol
-    when steps are built at runtime (e.g., from subnet lists).
+    Structurally satisfies the SetupPlan protocol (``steps``,
+    ``verify_step``, ``get_context``) via duck typing — does NOT
+    inherit from the Protocol class because SetupPlan declares
+    ``steps`` as a read-only ``@property``, which conflicts with
+    storing the value as an instance attribute. The orchestrator
+    accepts SetupPlan-shaped objects at runtime regardless.
     """
 
     def __init__(self, name: str, steps: list[SetupStep]) -> None:
+        """Bundle a name and pre-built steps for SetupOrchestrator."""
         self.name = name
         self.steps = steps
         self.verify_step: SetupStep | None = None
@@ -205,7 +211,7 @@ NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500
 # Re-exports from sibling modules (S104 file-split, issue #780). These
 # imports preserve `patch("main.X")` test mocks for callers that still
 # reach in through ``main`` instead of the new sibling module path.
-from provisioner_db import (  # noqa: E402
+from provisioner_db import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _append_kwarg_assignment,
     _build_ngfw_range_attachment_record,
     _record_ngfw_range_attachment,
@@ -236,7 +242,7 @@ _DB_REEXPORTS_USED = (
 )
 
 
-from dc_setup import (  # noqa: E402
+from dc_setup import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _configure_dc_ssh_access,
     _DCBootstrapContext,
     _DCPromoteConfig,
@@ -245,7 +251,7 @@ from dc_setup import (  # noqa: E402
     _run_dc_setup,
     _verify_dc_setup,
 )
-from instance_orchestrator import (  # noqa: E402
+from instance_orchestrator import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _build_uuid_to_config,
     _partition_dc_vs_other,
     _partition_pod_vs_vm,
@@ -255,7 +261,7 @@ from instance_orchestrator import (  # noqa: E402
     _setup_other_instances_parallel,
     run_instance_setup,
 )
-from instance_setup import (  # noqa: E402
+from instance_setup import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _LINUX_VICTIM_OS_TYPES,
     _dispatch_instance_setup_role,
     _DomainJoinSpec,
@@ -272,7 +278,7 @@ from instance_setup import (  # noqa: E402
     _setup_linux_victim,
     _setup_windows_victim,
 )
-from ngfw_polling import (  # noqa: E402
+from ngfw_polling import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _format_serial_cert_status,
     _raise_serial_cert_timeout,
     parse_device_certificate_status,
@@ -281,7 +287,7 @@ from ngfw_polling import (  # noqa: E402
     poll_for_serial_number,
     wait_for_autocommit,
 )
-from ngfw_runtime import (  # noqa: E402
+from ngfw_runtime import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     configure_ngfw_subnets,
     find_stale_routes_by_cidr,
     find_stale_routes_by_db,
@@ -289,7 +295,7 @@ from ngfw_runtime import (  # noqa: E402
     update_instance_state,
     user_has_active_ranges,
 )
-from ngfw_runtime_ops import (  # noqa: E402
+from ngfw_runtime_ops import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _load_ngfw_ops_plan,
     _publish_ngfw_runtime_status,
     _run_aws_ngfw_operation,
@@ -297,8 +303,10 @@ from ngfw_runtime_ops import (  # noqa: E402
     _validate_ngfw_operation,
     run_ngfw_operation,
 )
-from polaris_bootstrap import _run_polaris_range_bootstrap  # noqa: E402
-from terraform_ops import (  # noqa: E402
+from polaris_bootstrap import (  # noqa: E402 - sibling-module re-export must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+    _run_polaris_range_bootstrap,
+)
+from terraform_ops import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _allocate_range_subnet_cidrs,
     _attempt_terraform_auto_cleanup,
     _build_ngfw_subnet_payloads,
@@ -319,7 +327,7 @@ from terraform_ops import (  # noqa: E402
     _validate_ngfw_range_attachment,
     run_range_terraform,
 )
-from terraform_vars import (  # noqa: E402
+from terraform_vars import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
     _build_aws_extra_tf_variables,
     _build_range_terraform_variables,
     _build_tf_instance,

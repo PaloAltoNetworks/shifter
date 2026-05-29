@@ -5,10 +5,13 @@ from __future__ import annotations
 import logging
 import os
 import re
-import subprocess  # nosec B404 - used for kubectl virt runtime operations
+
+# Bandit B404 suppressed; the subprocess module is used for kubectl virt runtime operations.
+import subprocess  # nosec B404
 import tempfile
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +45,8 @@ _SECRETMANAGER_MODULE = "google.cloud.secretmanager"
 _GOOGLE_EXCEPTIONS_MODULE = "google.api_core.exceptions"
 
 
-def _import_kubernetes_modules():
+def _import_kubernetes_modules() -> tuple[Any, Any, Any, Any]:
+    """Import the kubernetes client modules used by the asset runner."""
     try:
         import kubernetes
         from kubernetes import client, config
@@ -54,13 +58,15 @@ def _import_kubernetes_modules():
 
 
 def _sanitize_name(value: str, *, max_length: int = 63) -> str:
+    """Return a DNS/Kubernetes-safe name derived from ``value``."""
     normalized = re.sub(r"[^a-z0-9-]+", "-", value.strip().lower())
     normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
     normalized = normalized[:max_length].rstrip("-")
     return normalized or "range"
 
 
-def _build_kube_api_client(kubeconfig_yaml: str):
+def _build_kube_api_client(kubeconfig_yaml: str) -> Any:
+    """Build a kubernetes ``ApiClient`` from a kubeconfig YAML payload."""
     _, client, config, _ = _import_kubernetes_modules()
     import yaml
 
@@ -75,6 +81,7 @@ def _build_kube_api_client(kubeconfig_yaml: str):
 
 
 def _instance_token(instance: dict[str, Any]) -> str:
+    """Return a short stable token derived from the instance identity."""
     uuid_value = str(instance.get("uuid", "")).strip()
     if uuid_value:
         return _sanitize_name(uuid_value.split("-")[-1], max_length=12)
@@ -101,16 +108,19 @@ def _is_vm_runtime_asset(instance: dict[str, Any]) -> bool:
 
 
 def _vm_name(range_id: int, subnet_name: str, instance: dict[str, Any]) -> str:
+    """Return the GDC VirtualMachine resource name for an instance."""
     token = _instance_token(instance)
     role = _sanitize_name(str(instance.get("role", "vm")), max_length=12)
     return _sanitize_name(f"range-{range_id}-{subnet_name}-{role}-{token}")
 
 
 def _disk_name(vm_name: str) -> str:
+    """Return the GDC VirtualMachineDisk name for a given VM."""
     return _sanitize_name(f"{vm_name}-boot")
 
 
 def _build_instance_hostname(instance: dict[str, Any], vm_name: str) -> str:
+    """Return the guest hostname for an instance, falling back to the VM name."""
     display_name = str(instance.get("name", "")).strip()
     if display_name:
         return sanitize_hostname(display_name)
@@ -134,7 +144,8 @@ def _build_instance_secret_name(range_id: int, instance: dict[str, Any], *, kind
     )
 
 
-def _load_template(name: str):
+def _load_template(name: str) -> Any:
+    """Load a Jinja template from the provisioner ``templates/`` directory."""
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATES_DIR)),
         autoescape=select_autoescape(
@@ -163,39 +174,44 @@ def _render_user_data(instance: dict[str, Any], hostname: str, public_key: str) 
 
     if role == "dc":
         template = _load_template("dc_windows.ps1.j2")
-        return template.render(public_key=public_key)
-    if os_type == "windows":
+        rendered = template.render(public_key=public_key)
+    elif os_type == "windows":
         template = _load_template("victim_windows.ps1.j2")
-        return template.render(public_key=public_key)
-    if role == "attacker" or os_type == "kali":
+        rendered = template.render(public_key=public_key)
+    elif role == "attacker" or os_type == "kali":
         template = _load_template("kali.sh.j2")
-        return template.render(hostname=hostname, public_key=public_key)
-
-    template = _load_template("victim_linux.sh.j2")
-    return template.render(public_key=public_key, ssh_user=get_ssh_username(os_type, role))
+        rendered = template.render(hostname=hostname, public_key=public_key)
+    else:
+        template = _load_template("victim_linux.sh.j2")
+        rendered = template.render(public_key=public_key, ssh_user=get_ssh_username(os_type, role))
+    return rendered
 
 
 def _resolve_image_source(source_url: str, gcs_secret_name: str | None) -> dict[str, Any]:
+    """Translate a Shifter image source URL into a GDC disk-source spec."""
     if source_url.startswith("gs://"):
         gcs_source: dict[str, Any] = {"url": source_url}
         if gcs_secret_name:
             gcs_source["secretRef"] = gcs_secret_name
-        return {"gcs": gcs_source}
-    if source_url.startswith("https://"):
-        return {"http": {"url": source_url}}
-    if source_url.startswith("docker://"):
-        return {"registry": {"url": source_url}}
-    if source_url.startswith("registry://"):
-        return {"registry": {"url": f"docker://{source_url.removeprefix('registry://')}"}}
-    if source_url.startswith("oci://"):
-        return {"registry": {"url": f"docker://{source_url.removeprefix('oci://')}"}}
-    raise RuntimeError(
-        f"Unsupported GDC VM Runtime image source {source_url!r}. "
-        "Use gs://, https://, docker://, registry://, or oci://."
-    )
+        resolved: dict[str, Any] = {"gcs": gcs_source}
+    elif source_url.startswith("https://"):
+        resolved = {"http": {"url": source_url}}
+    elif source_url.startswith("docker://"):
+        resolved = {"registry": {"url": source_url}}
+    elif source_url.startswith("registry://"):
+        resolved = {"registry": {"url": f"docker://{source_url.removeprefix('registry://')}"}}
+    elif source_url.startswith("oci://"):
+        resolved = {"registry": {"url": f"docker://{source_url.removeprefix('oci://')}"}}
+    else:
+        raise RuntimeError(
+            f"Unsupported GDC VM Runtime image source {source_url!r}. "
+            "Use gs://, https://, docker://, registry://, or oci://."
+        )
+    return resolved
 
 
 def _asset_labels(range_id: int, request_uuid: str, subnet_name: str, instance_uuid: str) -> dict[str, str]:
+    """Return the standard Shifter labels applied to GDC asset resources."""
     labels = {
         "app.kubernetes.io/managed-by": _MANAGED_BY_LABEL,
         "shifter.dev/range-id": str(range_id),
@@ -218,6 +234,7 @@ def _build_disk_manifest(
     storage_class_name: str,
     labels: dict[str, str],
 ) -> dict[str, Any]:
+    """Build the ``VirtualMachineDisk`` custom resource manifest."""
     return {
         "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
         "kind": "VirtualMachineDisk",
@@ -248,6 +265,7 @@ def _build_vm_manifest(
     memory: str,
     labels: dict[str, str],
 ) -> dict[str, Any]:
+    """Build the ``VirtualMachine`` custom resource manifest."""
     prefix_length = subnet_cidr.split("/", 1)[1]
     return {
         "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
@@ -288,15 +306,16 @@ def _build_vm_manifest(
 
 
 def _apply_namespaced_custom_object(
-    custom_api,
+    custom_api: Any,
     *,
     group: str,
     version: str,
     plural: str,
     namespace: str,
     body: dict[str, Any],
-    api_exception,
+    api_exception: Any,
 ) -> None:
+    """Create-or-patch a namespaced GDC custom resource."""
     name = body["metadata"]["name"]
     try:
         custom_api.create_namespaced_custom_object(
@@ -322,15 +341,16 @@ def _apply_namespaced_custom_object(
 
 
 def _delete_namespaced_custom_object(
-    custom_api,
+    custom_api: Any,
     *,
     group: str,
     version: str,
     plural: str,
     namespace: str,
     name: str,
-    api_exception,
+    api_exception: Any,
 ) -> None:
+    """Delete a namespaced GDC custom resource, ignoring 404s."""
     try:
         custom_api.delete_namespaced_custom_object(
             group=group,
@@ -345,7 +365,8 @@ def _delete_namespaced_custom_object(
             raise
 
 
-def _wait_for_disk_ready(custom_api, namespace: str, disk_name: str, api_exception) -> dict[str, Any]:
+def _wait_for_disk_ready(custom_api: Any, namespace: str, disk_name: str, api_exception: Any) -> dict[str, Any]:
+    """Poll a VirtualMachineDisk until it reports ``Succeeded`` or fails."""
     deadline = time.monotonic() + _DISK_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -374,6 +395,7 @@ def _wait_for_disk_ready(custom_api, namespace: str, disk_name: str, api_excepti
 
 
 def _extract_vm_ip(vm: dict[str, Any]) -> str:
+    """Return the first reported VM IPv4 address, or an empty string."""
     status = vm.get("status", {})
     for interface in status.get("interfaces", []) or []:
         ip_addresses = interface.get("ipAddresses") or []
@@ -382,7 +404,8 @@ def _extract_vm_ip(vm: dict[str, Any]) -> str:
     return ""
 
 
-def _wait_for_vm_ready(custom_api, namespace: str, vm_name: str, api_exception) -> dict[str, Any]:
+def _wait_for_vm_ready(custom_api: Any, namespace: str, vm_name: str, api_exception: Any) -> dict[str, Any]:
+    """Poll a VirtualMachine until it is running with a network IP."""
     deadline = time.monotonic() + _VM_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -411,7 +434,8 @@ def _wait_for_vm_ready(custom_api, namespace: str, vm_name: str, api_exception) 
     raise RuntimeError(f"Timed out waiting for VirtualMachine {namespace}/{vm_name} to become ready")
 
 
-def _wait_for_vm_stopped(custom_api, namespace: str, vm_name: str, api_exception) -> dict[str, Any]:
+def _wait_for_vm_stopped(custom_api: Any, namespace: str, vm_name: str, api_exception: Any) -> dict[str, Any]:
+    """Poll a VirtualMachine until it reaches the stopped state."""
     deadline = time.monotonic() + _VM_STOP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -440,14 +464,15 @@ def _wait_for_vm_stopped(custom_api, namespace: str, vm_name: str, api_exception
 
 
 def _wait_for_deleted(
-    custom_api,
+    custom_api: Any,
     namespace: str,
     name: str,
     group: str,
     version: str,
     plural: str,
-    api_exception,
+    api_exception: Any,
 ) -> None:
+    """Poll until a custom resource is gone (404) or the deadline elapses."""
     deadline = time.monotonic() + _DELETE_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -468,6 +493,7 @@ def _wait_for_deleted(
 
 
 def _read_secret_payload(secret_id: str) -> tuple[str, str]:
+    """Read the latest GCP Secret Manager payload for ``secret_id``."""
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     client = secretmanager.SecretManagerServiceClient()
     if secret_id.startswith("projects/"):
@@ -479,6 +505,7 @@ def _read_secret_payload(secret_id: str) -> tuple[str, str]:
 
 
 def _ensure_ssh_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, str]:
+    """Create-or-read the per-instance SSH key secret and return its reference and public key."""
     project_id = get_project_id()
     if not project_id:
         raise RuntimeError("GCP project ID is required to manage GDC VM Runtime SSH secrets")
@@ -513,6 +540,7 @@ def _ensure_ssh_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, st
 
 
 def _delete_ssh_secret(range_id: int, instance: dict[str, Any]) -> None:
+    """Delete the per-instance SSH key secret, ignoring NotFound."""
     project_id = get_project_id()
     if not project_id:
         return
@@ -570,6 +598,7 @@ def _ensure_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> tupl
 
 
 def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None:
+    """Delete the per-instance RDP password secret, ignoring NotFound."""
     project_id = get_project_id()
     if not project_id:
         return
@@ -588,12 +617,13 @@ def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None
 
 
 def _ensure_gcs_image_secret(
-    core_api,
-    client_module,
+    core_api: Any,
+    client_module: Any,
     namespace: str,
     vm_config: GDCVMRuntimeConfig,
-    api_exception,
+    api_exception: Any,
 ) -> str | None:
+    """Create-or-patch the GCS image-pull Kubernetes secret if one is configured."""
     if not vm_config.image_gcs_secret_id:
         return None
 
@@ -614,7 +644,8 @@ def _ensure_gcs_image_secret(
     return _IMAGE_IMPORT_SECRET_SUFFIX
 
 
-def _collect_vmi_metadata(custom_api, namespace: str, vm_name: str, api_exception) -> dict[str, Any]:
+def _collect_vmi_metadata(custom_api: Any, namespace: str, vm_name: str, api_exception: Any) -> dict[str, Any]:
+    """Return VirtualMachineInstance metadata (VMI name, node name) for a VM."""
     try:
         vmi = custom_api.get_namespaced_custom_object(
             group=_VMI_GROUP,
@@ -637,6 +668,7 @@ def _collect_vmi_metadata(custom_api, namespace: str, vm_name: str, api_exceptio
 
 
 def _get_runtime_metadata(state: dict[str, Any]) -> dict[str, Any]:
+    """Return the GCP/GDC provider_metadata block for an instance state."""
     provider_metadata = state.get("provider_metadata")
     if not isinstance(provider_metadata, dict):
         return {}
@@ -650,6 +682,7 @@ def _get_runtime_metadata(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_power_target(state: dict[str, Any]) -> tuple[str, str]:
+    """Return the ``(namespace, vm_name)`` target for a power operation."""
     metadata = _get_runtime_metadata(state)
     namespace = str(metadata.get("namespace") or state.get("gdc_namespace", "")).strip()
     vm_name = str(metadata.get("vm_name") or state.get("gdc_vm_name") or state.get("instance_id", "")).strip()
@@ -659,10 +692,12 @@ def _resolve_power_target(state: dict[str, Any]) -> tuple[str, str]:
 
 
 def _instance_os_label(os_type: str) -> str:
+    """Return the GDC ``osType`` label for an instance's OS."""
     return "Windows" if os_type == "windows" else "Linux"
 
 
 def _select_namespace(range_id: int, subnet_outputs: dict[str, dict[str, Any]], access: GDCNetworkAccessConfig) -> str:
+    """Return the GDC namespace to provision VM assets into."""
     for subnet_output in subnet_outputs.values():
         namespace = str(subnet_output.get("gdc_namespace", "")).strip()
         if namespace:
@@ -671,14 +706,15 @@ def _select_namespace(range_id: int, subnet_outputs: dict[str, dict[str, Any]], 
 
 
 def _delete_vm_runtime_resource(
-    custom_api,
+    custom_api: Any,
     *,
     namespace: str,
     name: str,
     plural: str,
     label: str,
-    api_exception,
+    api_exception: Any,
 ) -> None:
+    """Delete a GDC VM-Runtime resource and wait for its removal, logging timeouts."""
     _delete_namespaced_custom_object(
         custom_api,
         group=_VM_GROUP,
@@ -699,26 +735,41 @@ def _delete_vm_runtime_resource(
         )
 
 
+@dataclass(frozen=True)
+class _KubeAccess:
+    """Bundle the kubernetes API handle and ApiException type for a runner call."""
+
+    custom_api: Any
+    api_exception: Any
+
+
+@dataclass(frozen=True)
+class _SubnetContext:
+    """Per-subnet network details needed to build VM Runtime resources."""
+
+    namespace: str
+    subnet_name: str
+    subnet_cidr: str
+    network_name: str
+    asset_ip_assignments: dict[str, Any]
+
+
 def _build_pending_vm_runtime_instance(
     *,
     range_id: int,
     request_uuid: str,
-    namespace: str,
-    subnet_name: str,
     instance: dict[str, Any],
     index: int,
-    asset_ip_assignments: dict[str, Any],
-    subnet_cidr: str,
-    network_name: str,
+    subnet: _SubnetContext,
     vm_config: GDCVMRuntimeConfig,
     gcs_secret_name: str | None,
-    custom_api,
-    api_exception,
+    kube: _KubeAccess,
 ) -> dict[str, Any]:
-    static_ip = str(asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
+    """Apply disk + VM manifests for a single instance and return its pending record."""
+    static_ip = str(subnet.asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
     if not static_ip:
         raise RuntimeError(f"Missing deterministic IP assignment for VM Runtime asset {instance!r}")
-    vm_name = _vm_name(range_id, subnet_name, instance)
+    vm_name = _vm_name(range_id, subnet.subnet_name, instance)
     disk_name = _disk_name(vm_name)
     hostname = _build_instance_hostname(instance, vm_name)
     ssh_secret_ref, public_key = _ensure_ssh_secret(range_id, instance)
@@ -735,9 +786,9 @@ def _build_pending_vm_runtime_instance(
     user_data = _render_user_data(instance, hostname, public_key)
     os_type = str(instance.get("os_type", "ubuntu"))
     profile = vm_config.get_profile(role=str(instance.get("role", "victim")), os_type=os_type)
-    labels = _asset_labels(range_id, request_uuid, subnet_name, str(instance.get("uuid", "")))
+    labels = _asset_labels(range_id, request_uuid, subnet.subnet_name, str(instance.get("uuid", "")))
     disk_manifest = _build_disk_manifest(
-        namespace=namespace,
+        namespace=subnet.namespace,
         disk_name=disk_name,
         source_url=profile.source_url,
         gcs_secret_name=gcs_secret_name if profile.source_url.startswith("gs://") else None,
@@ -746,23 +797,23 @@ def _build_pending_vm_runtime_instance(
         labels=labels,
     )
     _apply_namespaced_custom_object(
-        custom_api,
+        kube.custom_api,
         group=_VM_GROUP,
         version=_VM_VERSION,
         plural=_VM_DISK_PLURAL,
-        namespace=namespace,
+        namespace=subnet.namespace,
         body=disk_manifest,
-        api_exception=api_exception,
+        api_exception=kube.api_exception,
     )
-    _wait_for_disk_ready(custom_api, namespace, disk_name, api_exception)
+    _wait_for_disk_ready(kube.custom_api, subnet.namespace, disk_name, kube.api_exception)
 
     vm_manifest = _build_vm_manifest(
-        namespace=namespace,
+        namespace=subnet.namespace,
         vm_name=vm_name,
         disk_name=disk_name,
-        network_name=network_name,
+        network_name=subnet.network_name,
         static_ip=static_ip,
-        subnet_cidr=subnet_cidr,
+        subnet_cidr=subnet.subnet_cidr,
         user_data=user_data,
         os_label=_instance_os_label(os_type),
         vcpus=profile.vcpus,
@@ -770,17 +821,17 @@ def _build_pending_vm_runtime_instance(
         labels=labels,
     )
     _apply_namespaced_custom_object(
-        custom_api,
+        kube.custom_api,
         group=_VM_GROUP,
         version=_VM_VERSION,
         plural=_VM_PLURAL,
-        namespace=namespace,
+        namespace=subnet.namespace,
         body=vm_manifest,
-        api_exception=api_exception,
+        api_exception=kube.api_exception,
     )
     return {
         "instance": instance,
-        "subnet_name": subnet_name,
+        "subnet_name": subnet.subnet_name,
         "vm_name": vm_name,
         "disk_name": disk_name,
         "hostname": hostname,
@@ -795,9 +846,10 @@ def _build_vm_runtime_output(
     *,
     namespace: str,
     pending: dict[str, Any],
-    custom_api,
-    api_exception,
+    custom_api: Any,
+    api_exception: Any,
 ) -> dict[str, Any]:
+    """Wait for a pending VM to become ready and return its provisioner output dict."""
     vm = _wait_for_vm_ready(custom_api, namespace, pending["vm_name"], api_exception)
     private_ip = _extract_vm_ip(vm) or pending["static_ip"]
     vmi_metadata = _collect_vmi_metadata(custom_api, namespace, pending["vm_name"], api_exception)
@@ -840,6 +892,7 @@ def _build_vm_runtime_output(
 
 
 def _iter_vm_runtime_instances(subnets: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
+    """Return ``(subnet_name, instance)`` pairs for every VM Runtime asset across subnets."""
     assets: list[tuple[str, dict[str, Any]]] = []
     for subnet in subnets:
         subnet_name = str(subnet.get("name", "")).strip()
@@ -851,12 +904,13 @@ def _iter_vm_runtime_instances(subnets: list[dict[str, Any]]) -> list[tuple[str,
 
 def _destroy_vm_runtime_vms(
     *,
-    custom_api,
+    custom_api: Any,
     namespace: str,
     range_id: int,
     assets: list[tuple[str, dict[str, Any]]],
-    api_exception,
+    api_exception: Any,
 ) -> None:
+    """Delete every VirtualMachine resource owned by a range."""
     for subnet_name, instance in assets:
         vm_name = _vm_name(range_id, subnet_name, instance)
         _delete_vm_runtime_resource(
@@ -871,12 +925,13 @@ def _destroy_vm_runtime_vms(
 
 def _destroy_vm_runtime_disks_and_secrets(
     *,
-    custom_api,
+    custom_api: Any,
     namespace: str,
     range_id: int,
     assets: list[tuple[str, dict[str, Any]]],
-    api_exception,
+    api_exception: Any,
 ) -> None:
+    """Delete every VirtualMachineDisk and per-instance secret owned by a range."""
     for subnet_name, instance in assets:
         disk_name = _disk_name(_vm_name(range_id, subnet_name, instance))
         _delete_vm_runtime_resource(
@@ -893,10 +948,11 @@ def _destroy_vm_runtime_disks_and_secrets(
 
 def _delete_image_import_secret_if_needed(
     *,
-    core_api,
+    core_api: Any,
     namespace: str,
-    api_exception,
+    api_exception: Any,
 ) -> None:
+    """Delete the GCS image-pull Secret if one was configured for the range plane."""
     image_gcs_secret_id = load_gdc_vmruntime_config().image_gcs_secret_id
     if not image_gcs_secret_id:
         return
@@ -905,6 +961,66 @@ def _delete_image_import_secret_if_needed(
     except api_exception as exc:
         if exc.status != 404:
             raise
+
+
+def _build_subnet_context(subnet: dict[str, Any], subnet_outputs: dict[str, dict[str, Any]]) -> _SubnetContext:
+    """Build a ``_SubnetContext`` from a scenario subnet plus its network output."""
+    subnet_name = str(subnet.get("name", "")).strip()
+    subnet_output = subnet_outputs.get(subnet_name, {})
+    subnet_cidr = str(subnet_output.get("subnet_cidr", "")).strip()
+    network_name = str(subnet_output.get("gdc_network_name", "")).strip()
+    if not subnet_name or not subnet_cidr or not network_name:
+        raise RuntimeError(f"GDC subnet output missing network details for {subnet_name!r}")
+    return _SubnetContext(
+        namespace="",
+        subnet_name=subnet_name,
+        subnet_cidr=subnet_cidr,
+        network_name=network_name,
+        asset_ip_assignments=dict(subnet_output.get("gdc_asset_ip_assignments") or {}),
+    )
+
+
+def _build_subnet_pending_instances(
+    *,
+    subnet: dict[str, Any],
+    subnet_outputs: dict[str, dict[str, Any]],
+    namespace: str,
+    range_id: int,
+    request_uuid: str,
+    vm_config: GDCVMRuntimeConfig,
+    gcs_secret_name: str | None,
+    kube: _KubeAccess,
+) -> list[dict[str, Any]]:
+    """Apply VM Runtime manifests for every asset in ``subnet`` and return pending records."""
+    base_context = _build_subnet_context(subnet, subnet_outputs)
+    context = _SubnetContext(
+        namespace=namespace,
+        subnet_name=base_context.subnet_name,
+        subnet_cidr=base_context.subnet_cidr,
+        network_name=base_context.network_name,
+        asset_ip_assignments=base_context.asset_ip_assignments,
+    )
+    subnet_output = subnet_outputs.get(base_context.subnet_name, {})
+    pending: list[dict[str, Any]] = []
+    for index, instance in enumerate(list(subnet.get("instances") or [])):
+        if not _is_vm_runtime_asset(instance):
+            continue
+        pending.append(
+            {
+                **_build_pending_vm_runtime_instance(
+                    range_id=range_id,
+                    request_uuid=request_uuid,
+                    instance=instance,
+                    index=index,
+                    subnet=context,
+                    vm_config=vm_config,
+                    gcs_secret_name=gcs_secret_name,
+                    kube=kube,
+                ),
+                "subnet_output": subnet_output,
+            }
+        )
+    return pending
 
 
 def apply_range_assets(
@@ -925,6 +1041,7 @@ def apply_range_assets(
     api_client = _build_kube_api_client(access.kubeconfig)
     custom_api = client_module.CustomObjectsApi(api_client)
     core_api = client_module.CoreV1Api(api_client)
+    kube = _KubeAccess(custom_api=custom_api, api_exception=api_exception)
 
     range_id = int(variables["range_id"])
     namespace = _select_namespace(range_id, subnet_outputs, access)
@@ -932,38 +1049,18 @@ def apply_range_assets(
 
     pending_instances: list[dict[str, Any]] = []
     for subnet in variables.get("subnets", []):
-        subnet_name = str(subnet.get("name", "")).strip()
-        subnet_output = subnet_outputs.get(subnet_name, {})
-        asset_ip_assignments = dict(subnet_output.get("gdc_asset_ip_assignments") or {})
-        subnet_cidr = str(subnet_output.get("subnet_cidr", "")).strip()
-        network_name = str(subnet_output.get("gdc_network_name", "")).strip()
-        if not subnet_name or not subnet_cidr or not network_name:
-            raise RuntimeError(f"GDC subnet output missing network details for {subnet_name!r}")
-
-        instances = list(subnet.get("instances") or [])
-        for index, instance in enumerate(instances):
-            if not _is_vm_runtime_asset(instance):
-                continue
-            pending_instances.append(
-                {
-                    **_build_pending_vm_runtime_instance(
-                        range_id=range_id,
-                        request_uuid=request_uuid,
-                        namespace=namespace,
-                        subnet_name=subnet_name,
-                        instance=instance,
-                        index=index,
-                        asset_ip_assignments=asset_ip_assignments,
-                        subnet_cidr=subnet_cidr,
-                        network_name=network_name,
-                        vm_config=vm_config,
-                        gcs_secret_name=gcs_secret_name,
-                        custom_api=custom_api,
-                        api_exception=api_exception,
-                    ),
-                    "subnet_output": subnet_output,
-                }
+        pending_instances.extend(
+            _build_subnet_pending_instances(
+                subnet=subnet,
+                subnet_outputs=subnet_outputs,
+                namespace=namespace,
+                range_id=range_id,
+                request_uuid=request_uuid,
+                vm_config=vm_config,
+                gcs_secret_name=gcs_secret_name,
+                kube=kube,
             )
+        )
 
     return [
         _build_vm_runtime_output(
@@ -1040,6 +1137,9 @@ def run_power_operation(operation: str, state: dict[str, Any]) -> None:
 
     try:
         command = ["kubectl", "--kubeconfig", kubeconfig_path, "virt", operation, vm_name, "--namespace", namespace]
+
+        # tokens (see _sanitize_name) and the binary path is resolved via PATH; not a
+        # user-controlled command line.
         subprocess.run(command, check=True, capture_output=True)  # noqa: S603
     except FileNotFoundError as exc:
         raise RuntimeError("GDC VM Runtime power operations require kubectl with the virt plugin") from exc

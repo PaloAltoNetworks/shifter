@@ -9,7 +9,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from cloud.aws.base import BaseAWSAdapter
 from cloud.exceptions import CloudSecretsError
-from log_redact import safe_log_id, safe_log_value
+from log_redact import safe_log_id
 
 logger = logging.getLogger(__name__)
 
@@ -29,5 +29,5 @@ class AWSSecretsStore(BaseAWSAdapter):
             # Binary secret — base64-decode to string
             return base64.b64decode(response["SecretBinary"]).decode("utf-8")
         except (ClientError, BotoCoreError) as e:
-            logger.error("get_secret: failed secret_id=%s error=%s", safe_log_id(secret_id), safe_log_value(e))
+            logger.exception("get_secret: failed secret_id=%s", safe_log_id(secret_id))
             raise CloudSecretsError(f"Failed to retrieve secret: {e}") from e

@@ -61,7 +61,7 @@ def _run_gcp_ngfw_operation(
     try:
         gdc_vmseries_ngfw.run_power_operation(operation, state)
     except Exception as e:
-        logger.error("GDC VM-Series NGFW operation failed: %s", e)
+        logger.exception("GDC VM-Series NGFW operation failed")
         main.update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
         main.publish_ngfw_event(
             request_id=request_id,

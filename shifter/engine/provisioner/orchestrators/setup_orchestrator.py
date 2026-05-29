@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 class SetupError(Exception):
     """Raised when setup fails at any step."""
 
-    def __init__(self, message: str, step_name: str | None = None, cause: Exception | None = None):
+    def __init__(self, message: str, step_name: str | None = None, cause: Exception | None = None) -> None:
+        """Store the step name and underlying cause for the failure summary."""
         self.step_name = step_name
         self.cause = cause
         super().__init__(message)
@@ -109,7 +110,7 @@ class SetupOrchestrator:
     )
     SENSITIVE_CONTEXT_KEY_PARTS = ("password", "secret", "token")
 
-    def __init__(self, executor: Executor):
+    def __init__(self, executor: Executor) -> None:
         """Initialize orchestrator with an executor.
 
         Args:
@@ -525,7 +526,8 @@ class SetupOrchestrator:
         normalized_key = key.lower()
         return any(part in normalized_key for part in cls.SENSITIVE_CONTEXT_KEY_PARTS)
 
-    def _check_commit_success(self, output: str) -> bool:
+    @staticmethod
+    def _check_commit_success(output: str) -> bool:
         """Check if PAN-OS commit succeeded.
 
         PAN-OS outputs "Configuration committed successfully" on successful commits.
@@ -554,8 +556,8 @@ class SetupOrchestrator:
         output_lower = output.lower()
         return ("fin" in output_lower) and ("ok" in output_lower)
 
+    @staticmethod
     def _render_script(
-        self,
         script: str,
         context: dict[str, Any],
         step_name: str,
@@ -604,7 +606,8 @@ class SetupOrchestrator:
 
         return result
 
-    def _parse_panos_job_id(self, output: str) -> str | None:
+    @staticmethod
+    def _parse_panos_job_id(output: str) -> str | None:
         """Parse PAN-OS job ID from command output.
 
         Looks for patterns like "job enqueued with jobid 19" in the output.

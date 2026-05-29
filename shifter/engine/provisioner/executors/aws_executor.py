@@ -38,7 +38,7 @@ class AWSExecutor:
         self,
         session: boto3.Session | None = None,
         region_name: str | None = None,
-    ):
+    ) -> None:
         """Initialize AWSExecutor.
 
         Args:

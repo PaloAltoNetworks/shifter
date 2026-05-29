@@ -116,13 +116,12 @@ def _attempt_terraform_auto_cleanup(request_id: str, range_id: int, user_id: int
         main.range_terraform_runner.destroy_range(request_id, variables=tf_variables)
         main.range_terraform_runner.cleanup_range_state(request_id)
         logger.info("Auto-cleanup succeeded for range_id=%s", range_id)
-    except Exception as cleanup_error:
-        logger.error(
-            "Auto-cleanup FAILED for range_id=%s request_id=%s: %s. "
+    except Exception:
+        logger.exception(
+            "Auto-cleanup FAILED for range_id=%s request_id=%s. "
             "Orphaned cloud resources may exist and require manual cleanup.",
             range_id,
             request_id,
-            cleanup_error,
         )
     _release_subnet_allocations_best_effort(request_id)
 
@@ -248,9 +247,13 @@ def _allocate_range_subnet_cidrs(request_id: str, range_id: int, range_spec: dic
 
     from components.network import allocate_subnets
 
+    # Fallback CIDR used only when the network config has no explicit network_cidr;
+    # matches the dev environment's default range VPC. Production callers always
+    # populate range_network.network_cidr from environment terraform.
+    _DEFAULT_RANGE_VPC_CIDR = "10.1.0.0/16"
     range_network = main.load_range_network_config()
     vpc_id = range_network.network_id
-    vpc_cidr = range_network.network_cidr or "10.1.0.0/16"
+    vpc_cidr = range_network.network_cidr or _DEFAULT_RANGE_VPC_CIDR
     cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
     subnet_count = len(spec_subnets)
     logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
@@ -398,8 +401,8 @@ def _post_destroy_cleanup(request_id: str, range_id: int) -> None:
 
     try:
         main.mark_range_instances_destroyed(range_id)
-    except Exception as e:
-        logger.error("Failed to mark range %d as destroyed: %s", range_id, e)
+    except Exception:
+        logger.exception("Failed to mark range %d as destroyed", range_id)
 
     try:
         from components.network import release_subnet_allocations

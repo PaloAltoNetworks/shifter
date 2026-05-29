@@ -128,7 +128,12 @@ class NGFWExecutor:
         command_input = self._build_command_input(script, stdin_input)
         ssh_args = self._build_ssh_args(host)
 
-        logger.info("Piping command to %s: %s", safe_log_value(host), safe_log_value(command_input[:100]))
+        # Do NOT log command_input itself — PAN-OS commands the provisioner
+        # constructs can include passwords (set mgt-config users / api-key,
+        # request password-hash password ..., set rulebase ... password-profile
+        # secret, etc.). Logging just the byte count keeps operator visibility
+        # for "did we send anything?" without leaking sensitive material.
+        logger.info("Piping command to %s (%d bytes)", safe_log_value(host), len(command_input))
 
         try:
             result = subprocess.run(  # noqa: S603  # NOSONAR — trusted ssh binary with controlled args

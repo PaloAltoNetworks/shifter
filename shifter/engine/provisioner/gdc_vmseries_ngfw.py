@@ -35,6 +35,7 @@ from gdc_vmruntime_assets import (
     _wait_for_disk_ready,
     _wait_for_vm_ready,
 )
+from log_redact import safe_log_fingerprint
 from utils.crypto import derive_ssh_public_key, generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
@@ -154,12 +155,20 @@ def _ensure_gcs_image_secret(
     )
     try:
         core_api.create_namespaced_secret(namespace=namespace, body=body)
-        logger.info("Created GDC VM-Series image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
+        logger.info(
+            "Created GDC VM-Series image access secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            _IMAGE_IMPORT_SECRET_SUFFIX,
+        )
     except api_exception as exc:
         if exc.status != 409:
             raise
         core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace, body=body)
-        logger.info("Updated GDC VM-Series image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
+        logger.info(
+            "Updated GDC VM-Series image access secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            _IMAGE_IMPORT_SECRET_SUFFIX,
+        )
     return _IMAGE_IMPORT_SECRET_SUFFIX
 
 

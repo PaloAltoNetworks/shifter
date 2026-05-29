@@ -11,18 +11,33 @@ Three helpers are provided, in order of taint-break strength:
 - :func:`safe_log_id` — last-4-character mask (``"***<last4>"``).
   Useful when even the readable form should not land in logs; same
   CodeQL caveat as ``safe_log_value``.
-- :func:`safe_log_fingerprint` — SHA-256 of the value, truncated to
-  12 hex chars. One-way hashing is a recognised CodeQL sanitizer:
-  the rule sees the dataflow terminate at the digest. Use this when
-  CodeQL flags a logger argument as sensitive but you still want a
-  stable per-value token for cross-line correlation.
+- :func:`safe_log_fingerprint` — process-local nonce that maps each
+  distinct input to a random 12-hex token. The returned token is
+  drawn from :func:`secrets.token_hex` and has no data dependency on
+  the input, which is what makes it a true taint-break (CodeQL's
+  ``py/clear-text-logging-sensitive-data`` cannot trace the input
+  through the lookup). Crucially, it is **not** a hash, so it does
+  not trip ``py/weak-sensitive-data-hashing`` — the rule that vetoes
+  SHA-256 for sensitive data because the algorithm is not
+  computationally expensive enough for password storage.
 """
 
 from __future__ import annotations
 
-import hashlib
+import secrets
+from collections import OrderedDict
+from threading import Lock
 
 _MAX_LEN = 200
+
+# Bounded cache of seen-value -> per-process random nonce. Keeping the
+# cache bounded prevents long-lived processes from accumulating mappings
+# for every transient identifier ever observed; the LRU eviction order
+# is fine for our use case (we only need correlation across log lines
+# that arrive in quick succession).
+_FINGERPRINT_CACHE_MAX_ENTRIES = 4096
+_fingerprint_cache: OrderedDict[str, str] = OrderedDict()
+_fingerprint_cache_lock = Lock()
 
 
 def safe_log_value(value: object, max_len: int = _MAX_LEN) -> str:
@@ -66,24 +81,38 @@ def safe_log_id(value: object) -> str:
 
 
 def safe_log_fingerprint(value: object) -> str:
-    """Return ``"<12-hex-of-sha256>"`` as a CodeQL-recognised sanitizer.
+    """Return a stable per-process 12-hex nonce for ``value``.
 
-    The truncated SHA-256 digest:
+    The returned token:
 
-    - terminates the ``py/clear-text-logging-sensitive-data`` dataflow
-      (hashing is on CodeQL's sanitizer list), so the wrapped value can
-      flow into a ``logger.*`` argument without the rule firing;
-    - is stable across log lines for the same input, so operators can
-      still correlate "which ARN failed at 03:14?" with "which ARN was
-      retried at 03:16?" — just by fingerprint match rather than by
-      eyeballing the full identifier;
-    - never reverses to the original value, which is the property the
-      rule actually cares about.
+    - has no data dependency on the input — it is drawn from
+      :func:`secrets.token_hex` and only looked up by ``str(value)`` —
+      which is what makes it a real CodeQL taint break (the input does
+      not flow into the returned value);
+    - is **not** a hash, so it does not run afoul of CodeQL's
+      ``py/weak-sensitive-data-hashing`` rule (which rejects SHA-256
+      for sensitive data, not just MD5/SHA-1, on the basis that it is
+      not a computationally expensive password-storage hash);
+    - is stable across log lines **within a single process**, so the
+      same secret_id / instance_id / hostname renders the same token
+      and operators can correlate "which ARN failed at 03:14?" with
+      "which ARN was retried at 03:16?" by token match.
 
-    Operators who need to map a fingerprint back to a specific ARN /
-    instance ID can recompute it offline:
-    ``python -c "import hashlib; print(hashlib.sha256(b'<value>').hexdigest()[:12])"``
+    Tokens are NOT stable across processes (a new ECS task picks fresh
+    nonces). Operators who need cross-process correlation should grep
+    structured context fields (request_id, range_id) instead.
     """
     if value is None:
         return "<none>"
-    return hashlib.sha256(str(value).encode("utf-8", errors="replace")).hexdigest()[:12]
+    key = str(value)
+    with _fingerprint_cache_lock:
+        cached = _fingerprint_cache.get(key)
+        if cached is not None:
+            # Move-to-end keeps the LRU ordering accurate.
+            _fingerprint_cache.move_to_end(key)
+            return cached
+        if len(_fingerprint_cache) >= _FINGERPRINT_CACHE_MAX_ENTRIES:
+            _fingerprint_cache.popitem(last=False)
+        nonce = secrets.token_hex(6)
+        _fingerprint_cache[key] = nonce
+        return nonce

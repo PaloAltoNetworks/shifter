@@ -16,7 +16,7 @@ from typing import Any
 from _gdc_vm_naming import _build_instance_secret_name
 from cloud.gcp.base import get_project_id, import_google_module
 from config import GDCVMRuntimeConfig
-from log_redact import safe_log_value
+from log_redact import safe_log_fingerprint
 from utils.crypto import derive_ssh_public_key, generate_rdp_password, generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def _delete_ssh_secret(range_id: int, instance: dict[str, Any]) -> None:
     secret_name = f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='ssh')}"
     try:
         client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC SSH secret %s", safe_log_value(secret_name))
+        logger.info("Deleted GDC SSH secret secret_fp=%s", safe_log_fingerprint(secret_name))
     except google_exceptions.NotFound:
         return
 
@@ -145,7 +145,7 @@ def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None
     )
     try:
         client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC RDP password secret %s", safe_log_value(secret_name))
+        logger.info("Deleted GDC RDP password secret secret_fp=%s", safe_log_fingerprint(secret_name))
     except google_exceptions.NotFound:
         return
 
@@ -169,10 +169,18 @@ def _ensure_gcs_image_secret(
     )
     try:
         core_api.create_namespaced_secret(namespace=namespace, body=body)
-        logger.info("Created GDC VM image access secret %s/%s", safe_log_value(namespace), _IMAGE_IMPORT_SECRET_SUFFIX)
+        logger.info(
+            "Created GDC VM image access secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            _IMAGE_IMPORT_SECRET_SUFFIX,
+        )
     except api_exception as exc:
         if exc.status != 409:
             raise
         core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace, body=body)
-        logger.info("Updated GDC VM image access secret %s/%s", safe_log_value(namespace), _IMAGE_IMPORT_SECRET_SUFFIX)
+        logger.info(
+            "Updated GDC VM image access secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            _IMAGE_IMPORT_SECRET_SUFFIX,
+        )
     return _IMAGE_IMPORT_SECRET_SUFFIX

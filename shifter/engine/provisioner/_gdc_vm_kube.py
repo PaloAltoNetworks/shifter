@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any
 
-from log_redact import safe_log_value
+from log_redact import safe_log_fingerprint, safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,12 @@ def _delete_namespaced_custom_object(
             namespace=namespace,
             name=name,
         )
-        logger.info("Deleted %s %s/%s", safe_log_value(plural), safe_log_value(namespace), safe_log_value(name))
+        logger.info(
+            "Deleted %s ns_fp=%s/name_fp=%s",
+            safe_log_value(plural),
+            safe_log_fingerprint(namespace),
+            safe_log_fingerprint(name),
+        )
     except api_exception as exc:
         if exc.status != 404:
             raise

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
-
+import log_redact
 from log_redact import safe_log_fingerprint, safe_log_id, safe_log_value
 
 
@@ -59,6 +58,11 @@ class TestSafeLogId:
 
 
 class TestSafeLogFingerprint:
+    def setup_method(self):
+        # Each test starts from a clean cache so cross-test nonce assignments
+        # don't leak in.
+        log_redact._fingerprint_cache.clear()
+
     def test_none_returns_none_marker(self):
         assert safe_log_fingerprint(None) == "<none>"
 
@@ -67,22 +71,49 @@ class TestSafeLogFingerprint:
         assert len(result) == 12
         assert all(c in "0123456789abcdef" for c in result)
 
-    def test_stable_across_calls(self):
-        assert safe_log_fingerprint("abc") == safe_log_fingerprint("abc")
+    def test_stable_within_process(self):
+        first = safe_log_fingerprint("abc")
+        second = safe_log_fingerprint("abc")
+        assert first == second
 
     def test_distinct_inputs_distinct_outputs(self):
         assert safe_log_fingerprint("abc") != safe_log_fingerprint("def")
 
-    def test_matches_sha256_truncation(self):
-        expected = hashlib.sha256(b"arn:aws:secretsmanager:us-east-2:1:secret:foo").hexdigest()[:12]
-        assert safe_log_fingerprint("arn:aws:secretsmanager:us-east-2:1:secret:foo") == expected
-
-    def test_integer_input_stringified_first(self):
-        expected = hashlib.sha256(b"42").hexdigest()[:12]
-        assert safe_log_fingerprint(42) == expected
+    def test_integer_input_uses_string_form(self):
+        # Cached under str(value), so int 42 and str "42" alias.
+        assert safe_log_fingerprint(42) == safe_log_fingerprint("42")
 
     def test_does_not_leak_input_substring(self):
         secret = "supersecretpasswordvalue"
         result = safe_log_fingerprint(secret)
         assert secret not in result
         assert "password" not in result
+
+    def test_not_derived_from_input(self):
+        # New process state -> same input maps to a different random token
+        # than the previous process would have produced. The token must be
+        # *purely* random, not derived from the input value.
+        log_redact._fingerprint_cache.clear()
+        first_run = safe_log_fingerprint("arn:aws:secret:foo")
+        log_redact._fingerprint_cache.clear()
+        second_run = safe_log_fingerprint("arn:aws:secret:foo")
+        # Two independent random tokens for the same input across cache
+        # resets — collision odds are 1 in 2^48.
+        assert first_run != second_run
+
+    def test_cache_evicts_oldest_at_capacity(self):
+        log_redact._fingerprint_cache.clear()
+        original_limit = log_redact._FINGERPRINT_CACHE_MAX_ENTRIES
+        log_redact._FINGERPRINT_CACHE_MAX_ENTRIES = 3
+        try:
+            a = safe_log_fingerprint("a")  # cache: {a}
+            safe_log_fingerprint("b")  # cache: {a, b}
+            safe_log_fingerprint("c")  # cache: {a, b, c}
+            safe_log_fingerprint("d")  # evicts "a", cache: {b, c, d}
+            new_a = safe_log_fingerprint("a")  # evicts "b", cache: {c, d, a}
+            assert new_a != a  # fresh nonce after eviction
+            assert "b" not in log_redact._fingerprint_cache
+            assert {"c", "d", "a"} == set(log_redact._fingerprint_cache.keys())
+        finally:
+            log_redact._FINGERPRINT_CACHE_MAX_ENTRIES = original_limit
+            log_redact._fingerprint_cache.clear()

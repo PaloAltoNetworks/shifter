@@ -11,10 +11,10 @@ import logging
 import os
 from typing import Any
 
-# Re-exports for sibling modules + ``patch("main.X")`` test mocks. The
-# explicit ``__all__`` below tells both mypy strict mode and Sonar
-# python:S1128 that these names are intentionally re-exported, not
-# unused.
+# Re-exports listed in ``__all__`` below are the canonical Python idiom
+# for "these names are imported here on purpose so callers can access
+# them via ``main.X`` and ``patch('main.X')``." Sonar python:S1128 and
+# mypy both honor ``__all__`` and skip the unused-import check.
 import range_terraform_runner
 from catalog.instances import (
     _get_dc_instance_type,
@@ -56,44 +56,41 @@ from state_helpers import (
     _should_run_dc_bootstrap_plan,
 )
 
-# Sonar S1128 sees re-exports as unused imports because main.py itself
-# does not call them; the symbols are reachable as ``main.X`` from the
-# sibling modules and from existing ``patch("main.X")`` test mocks.
-# Listing the names in this tuple makes the references explicit so
-# Sonar treats them as used.
-_EXTERNAL_REEXPORTS_USED = (
-    AWSExecutor,
-    BootstrapPlan,
-    DCSetupPlan,
-    OpsOrchestrator,
-    SetupOrchestrator,
-    SetupPlan,
-    STATUS_DESTROYED,
-    _build_instance_provider_metadata,
-    _build_instance_state,
-    _build_provisioned_instance_payload,
-    _build_subnet_provider_metadata,
-    _build_subnet_state,
-    _get_cloud_provider,
-    _get_dc_instance_type,
-    _get_kali_instance_type,
-    _get_victim_instance_type,
-    _get_windows_instance_type,
-    _should_promote_dc_at_runtime,
-    _should_run_dc_bootstrap_plan,
-    build_guest_execution_context,
-    generate_presigned_url,
-    get_range_availability_zone,
-    has_ngfw_attachment_state,
-    load_range_network_config,
-    publish_destroyed,
-    publish_failed,
-    publish_ngfw_event,
-    publish_ready,
-    publish_status_update,
-    range_terraform_runner,
-    resolve_ngfw_attachment_config,
-)
+__all__ = [
+    "STATUS_DESTROYED",
+    "AWSExecutor",
+    "BootstrapPlan",
+    "DCSetupPlan",
+    "OpsOrchestrator",
+    "SetupOrchestrator",
+    "SetupPlan",
+    "SetupStep",
+    "_build_instance_provider_metadata",
+    "_build_instance_state",
+    "_build_provisioned_instance_payload",
+    "_build_subnet_provider_metadata",
+    "_build_subnet_state",
+    "_get_cloud_provider",
+    "_get_dc_instance_type",
+    "_get_kali_instance_type",
+    "_get_victim_instance_type",
+    "_get_windows_instance_type",
+    "_should_promote_dc_at_runtime",
+    "_should_run_dc_bootstrap_plan",
+    "build_guest_execution_context",
+    "generate_presigned_url",
+    "get_range_availability_zone",
+    "has_ngfw_attachment_state",
+    "load_range_network_config",
+    "publish_destroyed",
+    "publish_failed",
+    "publish_ngfw_event",
+    "publish_ready",
+    "publish_status_update",
+    "range_terraform_runner",
+    "resolve_ngfw_attachment_config",
+    "run_ngfw_terraform",
+]
 
 logger = logging.getLogger(__name__)
 

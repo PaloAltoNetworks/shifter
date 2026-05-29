@@ -49,7 +49,7 @@ from typing import Any
 from uuid import uuid4
 
 from cloud import get_event_bus
-from log_redact import safe_log_value
+from log_redact import safe_log_fingerprint, safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -139,17 +139,17 @@ def _publish_event(event: dict[str, Any]) -> None:
         )
 
         logger.debug(
-            "Published event: request_id=%s range_id=%s event_type=%s",
-            safe_log_value(event.get("request_id")),
-            safe_log_value(event.get("range_id")),
+            "Published event: request_id_fp=%s range_id_fp=%s event_type=%s",
+            safe_log_fingerprint(event.get("request_id")),
+            safe_log_fingerprint(event.get("range_id")),
             safe_log_value(event.get("event_type")),
         )
 
     except Exception as e:
         logger.error(
-            "Failed to publish event: request_id=%s range_id=%s error=%s",
-            safe_log_value(event.get("request_id")),
-            safe_log_value(event.get("range_id")),
+            "Failed to publish event: request_id_fp=%s range_id_fp=%s error=%s",
+            safe_log_fingerprint(event.get("request_id")),
+            safe_log_fingerprint(event.get("range_id")),
             safe_log_value(e),
         )
 
@@ -180,10 +180,10 @@ def publish_status_update(
     )
 
     logger.info(
-        "Publishing status update: request_id=%s range_id=%s new_status=%s",
-        request_id,
-        range_id,
-        new_status,
+        "Publishing status update: request_id_fp=%s range_id_fp=%s new_status=%s",
+        safe_log_fingerprint(request_id),
+        safe_log_fingerprint(range_id),
+        safe_log_value(new_status),
     )
 
     _publish_event(event)
@@ -222,9 +222,9 @@ def publish_ready(
     )
 
     logger.info(
-        "Publishing ready event: request_id=%s range_id=%s",
-        request_id,
-        range_id,
+        "Publishing ready event: request_id_fp=%s range_id_fp=%s",
+        safe_log_fingerprint(request_id),
+        safe_log_fingerprint(range_id),
     )
 
     _publish_event(event)
@@ -275,7 +275,11 @@ def publish_destroyed(request_id: str, range_id: int, user_id: int) -> None:
         user_id=user_id,
     )
 
-    logger.info("Publishing destroyed event: request_id=%s range_id=%s", request_id, range_id)
+    logger.info(
+        "Publishing destroyed event: request_id_fp=%s range_id_fp=%s",
+        safe_log_fingerprint(request_id),
+        safe_log_fingerprint(range_id),
+    )
 
     _publish_event(event)
 
@@ -295,7 +299,11 @@ def publish_cancelled(request_id: str, range_id: int, user_id: int) -> None:
         user_id=user_id,
     )
 
-    logger.info("Publishing cancelled event: request_id=%s range_id=%s", request_id, range_id)
+    logger.info(
+        "Publishing cancelled event: request_id_fp=%s range_id_fp=%s",
+        safe_log_fingerprint(request_id),
+        safe_log_fingerprint(range_id),
+    )
 
     _publish_event(event)
 
@@ -340,12 +348,12 @@ def publish_ngfw_event(
         event["serial_number"] = serial_number
 
     logger.info(
-        "Publishing NGFW event: request_id=%s instance_id=%s app_id=%s status=%s serial=%s",
-        safe_log_value(request_id),
-        safe_log_value(instance_id),
-        safe_log_value(app_id),
+        "Publishing NGFW event: request_id_fp=%s instance_id_fp=%s app_id_fp=%s status=%s serial_fp=%s",
+        safe_log_fingerprint(request_id),
+        safe_log_fingerprint(instance_id),
+        safe_log_fingerprint(app_id),
         safe_log_value(status),
-        safe_log_value(serial_number or "N/A"),
+        safe_log_fingerprint(serial_number) if serial_number else "<none>",
     )
 
     _publish_event(event)

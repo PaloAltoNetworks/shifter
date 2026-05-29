@@ -1,8 +1,10 @@
-"""Tests for log_redact.safe_log_value and safe_log_id."""
+"""Tests for log_redact.safe_log_value, safe_log_id, and safe_log_fingerprint."""
 
 from __future__ import annotations
 
-from log_redact import safe_log_id, safe_log_value
+import hashlib
+
+from log_redact import safe_log_fingerprint, safe_log_id, safe_log_value
 
 
 class TestSafeLogValue:
@@ -54,3 +56,33 @@ class TestSafeLogId:
         # safe_log_value handles printable unicode; safe_log_id slices the tail
         result = safe_log_id("alpha-beta-gamma")
         assert result == "***amma"
+
+
+class TestSafeLogFingerprint:
+    def test_none_returns_none_marker(self):
+        assert safe_log_fingerprint(None) == "<none>"
+
+    def test_returns_twelve_hex_chars(self):
+        result = safe_log_fingerprint("any-value")
+        assert len(result) == 12
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_stable_across_calls(self):
+        assert safe_log_fingerprint("abc") == safe_log_fingerprint("abc")
+
+    def test_distinct_inputs_distinct_outputs(self):
+        assert safe_log_fingerprint("abc") != safe_log_fingerprint("def")
+
+    def test_matches_sha256_truncation(self):
+        expected = hashlib.sha256(b"arn:aws:secretsmanager:us-east-2:1:secret:foo").hexdigest()[:12]
+        assert safe_log_fingerprint("arn:aws:secretsmanager:us-east-2:1:secret:foo") == expected
+
+    def test_integer_input_stringified_first(self):
+        expected = hashlib.sha256(b"42").hexdigest()[:12]
+        assert safe_log_fingerprint(42) == expected
+
+    def test_does_not_leak_input_substring(self):
+        secret = "supersecretpasswordvalue"
+        result = safe_log_fingerprint(secret)
+        assert secret not in result
+        assert "password" not in result

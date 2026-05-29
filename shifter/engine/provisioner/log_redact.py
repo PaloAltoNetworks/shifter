@@ -1,27 +1,26 @@
 """Log-value sanitizer for the Shifter Engine provisioner package.
 
-Breaks the dataflow that CodeQL's ``py/clear-text-logging-sensitive-data``
-and SonarCloud's S5145 / CWE-117 see between potentially-sensitive
-values (secret IDs, ARNs, hosts, command strings) and ``logger.*``
-calls. The character substitution that ``safe_log_value`` performs is
-the recognised sanitizer pattern: CodeQL's Python taint tracker treats
-the returned ``str`` as a sanitized value.
+Three helpers are provided, in order of taint-break strength:
 
-Two helpers are provided:
-
-- :func:`safe_log_value` — character-substituting sanitizer for arbitrary
-  values that flow into a ``%s`` placeholder. Use this for IDs, ARNs,
-  IPs, hostnames, and other potentially-sensitive identifiers that you
-  still want to see (in sanitized form) in the log line.
-- :func:`safe_log_id` — convenience wrapper that returns ``"***<last4>"``
-  for opaque secret IDs/ARNs where the operator only needs the trailing
-  few characters for correlation.
-
-The two helpers compose: ``safe_log_value`` is the canonical sanitizer;
-``safe_log_id`` calls into it and then applies the masking format.
+- :func:`safe_log_value` — character-substituting sanitizer (CR/LF/non-
+  printable escaping, length cap). Defends against log-injection
+  (S5145 / CWE-117) and against pathological control chars but does
+  NOT break CodeQL's ``py/clear-text-logging-sensitive-data`` data
+  flow because that rule tracks values by source identifier, not by
+  transformation.
+- :func:`safe_log_id` — last-4-character mask (``"***<last4>"``).
+  Useful when even the readable form should not land in logs; same
+  CodeQL caveat as ``safe_log_value``.
+- :func:`safe_log_fingerprint` — SHA-256 of the value, truncated to
+  12 hex chars. One-way hashing is a recognised CodeQL sanitizer:
+  the rule sees the dataflow terminate at the digest. Use this when
+  CodeQL flags a logger argument as sensitive but you still want a
+  stable per-value token for cross-line correlation.
 """
 
 from __future__ import annotations
+
+import hashlib
 
 _MAX_LEN = 200
 
@@ -64,3 +63,27 @@ def safe_log_id(value: object) -> str:
     if len(sanitized) <= 8:
         return "***"
     return f"***{sanitized[-4:]}"
+
+
+def safe_log_fingerprint(value: object) -> str:
+    """Return ``"<12-hex-of-sha256>"`` as a CodeQL-recognised sanitizer.
+
+    The truncated SHA-256 digest:
+
+    - terminates the ``py/clear-text-logging-sensitive-data`` dataflow
+      (hashing is on CodeQL's sanitizer list), so the wrapped value can
+      flow into a ``logger.*`` argument without the rule firing;
+    - is stable across log lines for the same input, so operators can
+      still correlate "which ARN failed at 03:14?" with "which ARN was
+      retried at 03:16?" — just by fingerprint match rather than by
+      eyeballing the full identifier;
+    - never reverses to the original value, which is the property the
+      rule actually cares about.
+
+    Operators who need to map a fingerprint back to a specific ARN /
+    instance ID can recompute it offline:
+    ``python -c "import hashlib; print(hashlib.sha256(b'<value>').hexdigest()[:12])"``
+    """
+    if value is None:
+        return "<none>"
+    return hashlib.sha256(str(value).encode("utf-8", errors="replace")).hexdigest()[:12]

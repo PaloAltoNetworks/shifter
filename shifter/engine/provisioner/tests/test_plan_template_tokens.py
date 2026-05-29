@@ -23,7 +23,10 @@ from pathlib import Path
 import pytest
 
 PLANS_DIR = Path(__file__).resolve().parent.parent / "plans"
-_ORCHESTRATOR = PLANS_DIR.parent / "orchestrators" / "setup_orchestrator.py"
+# `_render_script` was split out of `setup_orchestrator.py` into the
+# `_setup_logging` mixin module (see SetupOrchestrator's docstring); the
+# AST scan must follow it to keep the runtime regex as its source of truth.
+_ORCHESTRATOR = PLANS_DIR.parent / "orchestrators" / "_setup_logging.py"
 
 # Modules under plans/ that define no SetupOrchestrator-rendered plan.
 _NON_PLAN_MODULES = {"base.py", "__init__.py"}

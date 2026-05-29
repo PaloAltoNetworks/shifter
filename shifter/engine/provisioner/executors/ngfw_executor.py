@@ -14,7 +14,7 @@ import tempfile
 import time
 
 from executors.base import CommandResult, ExecutorConnectionError, ExecutorError, ExecutorTimeoutError
-from log_redact import safe_log_value
+from log_redact import safe_log_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ class NGFWExecutor:
         # request password-hash password ..., set rulebase ... password-profile
         # secret, etc.). Logging just the byte count keeps operator visibility
         # for "did we send anything?" without leaking sensitive material.
-        logger.info("Piping command to %s (%d bytes)", safe_log_value(host), len(command_input))
+        logger.info("Piping command to host_fp=%s (%d bytes)", safe_log_fingerprint(host), len(command_input))
 
         try:
             result = subprocess.run(  # noqa: S603  # NOSONAR — trusted ssh binary with controlled args
@@ -207,14 +207,14 @@ class NGFWExecutor:
                     timeout_seconds=15,
                 )
                 if result.success and self._is_system_info_ready(result.stdout):
-                    logger.info("NGFW ready at %s after %.1fs", safe_log_value(host), elapsed)
+                    logger.info("NGFW ready at host_fp=%s after %.1fs", safe_log_fingerprint(host), elapsed)
                     return True
             except (NGFWTimeoutError, NGFWConnectionError):
                 pass
 
             logger.info(
-                "Waiting for NGFW at %s... (%.1fs / %ds)",
-                safe_log_value(host),
+                "Waiting for NGFW at host_fp=%s... (%.1fs / %ds)",
+                safe_log_fingerprint(host),
                 elapsed,
                 timeout_seconds,
             )

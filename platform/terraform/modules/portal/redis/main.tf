@@ -35,13 +35,27 @@ resource "aws_security_group" "this" {
 }
 
 resource "aws_security_group_rule" "ingress_redis" {
+  count = length(var.allowed_cidr_blocks) > 0 ? 1 : 0
+
   type              = "ingress"
   from_port         = 6379
   to_port           = 6379
   protocol          = "tcp"
   cidr_blocks       = var.allowed_cidr_blocks
   security_group_id = aws_security_group.this.id
-  description       = "Redis access"
+  description       = "Redis access (CIDR-based)"
+}
+
+resource "aws_security_group_rule" "ingress_redis_sg" {
+  count = length(var.allowed_security_group_ids)
+
+  type                     = "ingress"
+  from_port                = 6379
+  to_port                  = 6379
+  protocol                 = "tcp"
+  source_security_group_id = var.allowed_security_group_ids[count.index]
+  security_group_id        = aws_security_group.this.id
+  description              = "Redis access (SG-based)"
 }
 
 resource "aws_security_group_rule" "egress_all" {
@@ -77,13 +91,21 @@ resource "aws_elasticache_cluster" "single_node" {
   # Maintenance window (UTC) - Sunday 3-4 AM
   maintenance_window = "sun:03:00-sun:04:00"
 
-  # Snapshot retention disabled for single-node (not supported)
-  snapshot_retention_limit = 0
+  # Daily snapshot (CKV_AWS_134). Mirrors the replication-group window.
+  snapshot_retention_limit = 1
+  snapshot_window          = "01:00-02:00"
 
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-redis"
     Module = "redis"
   })
+
+  lifecycle {
+    precondition {
+      condition     = length(var.allowed_security_group_ids) > 0 || length(var.allowed_cidr_blocks) > 0
+      error_message = "portal/redis: at least one of allowed_security_group_ids or allowed_cidr_blocks must be non-empty so the Redis security group has an ingress source."
+    }
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -123,6 +145,13 @@ resource "aws_elasticache_replication_group" "ha" {
     Name   = "${var.name_prefix}-redis"
     Module = "redis"
   })
+
+  lifecycle {
+    precondition {
+      condition     = length(var.allowed_security_group_ids) > 0 || length(var.allowed_cidr_blocks) > 0
+      error_message = "portal/redis: at least one of allowed_security_group_ids or allowed_cidr_blocks must be non-empty so the Redis security group has an ingress source."
+    }
+  }
 }
 
 # ------------------------------------------------------------------------------

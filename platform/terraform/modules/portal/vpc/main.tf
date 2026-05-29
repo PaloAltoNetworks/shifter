@@ -82,15 +82,19 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_route_table" "public" {
+  count = var.az_count
+
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-public-rt"
+    Name = "${var.name_prefix}-public-rt-${local.azs[count.index]}"
   })
 }
 
 resource "aws_route" "public_internet" {
-  route_table_id         = aws_route_table.public.id
+  count = var.az_count
+
+  route_table_id         = aws_route_table.public[count.index].id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.this.id
 }
@@ -99,7 +103,7 @@ resource "aws_route_table_association" "public" {
   count = var.az_count
 
   subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
+  route_table_id = aws_route_table.public[count.index].id
 }
 
 # ------------------------------------------------------------------------------
@@ -149,17 +153,27 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_route_table" "private" {
+  count = var.az_count
+
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-private-rt"
+    Name = "${var.name_prefix}-private-rt-${local.azs[count.index]}"
   })
 }
 
 resource "aws_route" "private_nat" {
-  count = var.enable_nat_gateway ? 1 : 0
+  # When portal inspection is enabled, each private route table's default
+  # route is owned by inspection.tf (private 0/0 -> same-AZ firewall
+  # endpoint -> NAT) so private egress traverses the same firewall
+  # endpoint as the NAT return path. Keeping a direct private->NAT
+  # default here would make the inspection path asymmetric: NAT return
+  # packets would enter the firewall via the public route table while
+  # the initiating leg bypassed it, breaking stateful inspection for
+  # unrelated private egress flows.
+  count = var.enable_nat_gateway && !var.enable_portal_inspection ? var.az_count : 0
 
-  route_table_id         = aws_route_table.private.id
+  route_table_id         = aws_route_table.private[count.index].id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.this[0].id
 }
@@ -168,7 +182,7 @@ resource "aws_route_table_association" "private" {
   count = var.az_count
 
   subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
+  route_table_id = aws_route_table.private[count.index].id
 }
 
 # ------------------------------------------------------------------------------

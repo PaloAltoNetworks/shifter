@@ -185,6 +185,7 @@
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/portal/alb/main.tf",
+      "platform/terraform/modules/portal/vpc/inspection.tf",
       "platform/terraform/modules/range/vpc/firewall.tf"
     ]
   },

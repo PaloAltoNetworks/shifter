@@ -364,7 +364,12 @@ resource "aws_wafv2_web_acl_association" "this" {
 # ------------------------------------------------------------------------------
 
 resource "aws_wafv2_web_acl_logging_configuration" "this" {
-  count = var.enable_waf && var.enable_waf_logging && var.waf_log_destination_arn != "" ? 1 : 0
+  # The previous guard `var.waf_log_destination_arn != ""` becomes
+  # apply-time when the caller wires the ARN from a Firehose output, so
+  # plan can't determine the count. Rely on the boolean toggle: callers
+  # must set `enable_waf_logging = false` (and may pass any value for
+  # waf_log_destination_arn) when WAF logging is off.
+  count = var.enable_waf && var.enable_waf_logging ? 1 : 0
 
   log_destination_configs = [var.waf_log_destination_arn]
   resource_arn            = aws_wafv2_web_acl.this[0].arn

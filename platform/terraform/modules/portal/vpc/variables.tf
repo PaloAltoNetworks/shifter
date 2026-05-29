@@ -38,3 +38,28 @@ variable "log_retention_days" {
   description = "CloudWatch log retention in days for VPC flow logs"
   type        = number
 }
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+variable "enable_portal_inspection" {
+  description = "Insert an AWS Network Firewall east-west inspection boundary between the portal public (ALB) tier and the private (Django / RDS / Redis / Guacamole) tier."
+  type        = bool
+}
+
+variable "enable_log_aggregation" {
+  description = "Whether the env root's log aggregation pipeline is enabled. Used only to fail closed: enable_portal_inspection requires enable_log_aggregation = true so firewall FLOW / ALERT logs reach the existing pipeline instead of dead-ending in CloudWatch."
+  type        = bool
+}
+
+variable "firewall_log_retention_days" {
+  description = "CloudWatch retention in days for Network Firewall FLOW / ALERT logs."
+  type        = number
+}
+
+variable "firewall_subnet_cidr" {
+  description = "CIDR block for the dedicated portal inspection firewall subnet. Must not overlap with public, private, or other reserved subnets in vpc_cidr. Default places it at the top of the VPC /16 to avoid collision with the public/private /20 tiers."
+  type        = string
+  default     = ""
+}

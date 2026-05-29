@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from config import GDCNetworkAccessConfig, load_gdc_network_access_config
+from log_redact import safe_log_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,8 @@ _NAD_PLURAL = "network-attachment-definitions"
 _MANAGED_BY_LABEL = "shifter-provisioner"
 
 
-def _import_kubernetes_modules():
+def _import_kubernetes_modules() -> tuple[Any, Any, Any, Any]:
+    """Import the kubernetes client modules used by the network runner."""
     try:
         import kubernetes
         from kubernetes import client, config
@@ -35,6 +37,7 @@ def _import_kubernetes_modules():
 
 
 def _sanitize_name(value: str, *, max_length: int = 63) -> str:
+    """Return a DNS/Kubernetes-safe name derived from ``value``."""
     normalized = re.sub(r"[^a-z0-9-]+", "-", value.strip().lower())
     normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
     normalized = normalized[:max_length].rstrip("-")
@@ -42,14 +45,17 @@ def _sanitize_name(value: str, *, max_length: int = 63) -> str:
 
 
 def _range_namespace_name(config: GDCNetworkAccessConfig, range_id: int) -> str:
+    """Return the Kubernetes namespace name for a range."""
     return _sanitize_name(f"{config.namespace_prefix}-{range_id}")
 
 
 def _network_name(range_id: int, subnet_name: str) -> str:
+    """Return the GDC Network resource name for a subnet."""
     return _sanitize_name(f"range-{range_id}-{subnet_name}")
 
 
 def _network_labels(range_id: int, request_uuid: str, subnet_name: str) -> dict[str, str]:
+    """Return the standard Shifter labels applied to GDC network resources."""
     return {
         "app.kubernetes.io/managed-by": _MANAGED_BY_LABEL,
         "shifter.dev/range-id": str(range_id),
@@ -59,7 +65,8 @@ def _network_labels(range_id: int, request_uuid: str, subnet_name: str) -> dict[
     }
 
 
-def _build_kube_api_client(kubeconfig_yaml: str):
+def _build_kube_api_client(kubeconfig_yaml: str) -> Any:
+    """Build a kubernetes ``ApiClient`` from a kubeconfig YAML payload."""
     _, client, config, _ = _import_kubernetes_modules()
 
     kubeconfig_dict = yaml.safe_load(kubeconfig_yaml)
@@ -77,12 +84,14 @@ def _compute_network_allocation(
     *,
     static_ip_reservation_count: int,
 ) -> tuple[str, list[str], list[str]]:
+    """Compute gateway/static/exclude IPs for a GDC subnet CIDR."""
     network = ipaddress.ip_network(cidr)
     if not isinstance(network, ipaddress.IPv4Network):
         raise RuntimeError(f"GDC scenario networks must be IPv4, got {cidr}")
 
     usable_hosts = list(network.hosts())
-    required_reserved = static_ip_reservation_count + 1  # gateway + static reservations
+    # gateway + static reservations
+    required_reserved = static_ip_reservation_count + 1
     if len(usable_hosts) <= required_reserved:
         raise RuntimeError(
             f"Subnet {cidr} is too small for {static_ip_reservation_count} reserved static IPs plus a gateway"
@@ -150,6 +159,7 @@ def _build_network_manifest(
     labels: dict[str, str],
     access: GDCNetworkAccessConfig,
 ) -> dict[str, Any]:
+    """Build the GDC ``Network`` custom resource manifest for a subnet."""
     return {
         "apiVersion": f"{_NETWORK_GROUP}/{_NETWORK_VERSION}",
         "kind": "Network",
@@ -180,6 +190,7 @@ def _build_nad_manifest(
     labels: dict[str, str],
     access: GDCNetworkAccessConfig,
 ) -> dict[str, Any]:
+    """Build the ``NetworkAttachmentDefinition`` manifest for a subnet."""
     return {
         "apiVersion": f"{_NAD_GROUP}/{_NAD_VERSION}",
         "kind": "NetworkAttachmentDefinition",
@@ -208,7 +219,8 @@ def _build_nad_manifest(
     }
 
 
-def _ensure_namespace(core_api, namespace: str, labels: dict[str, str], api_exception) -> None:
+def _ensure_namespace(core_api: Any, namespace: str, labels: dict[str, str], api_exception: Any) -> None:
+    """Create or label the GDC range namespace, ignoring already-exists."""
     body = {
         "metadata": {
             "name": namespace,
@@ -224,7 +236,8 @@ def _ensure_namespace(core_api, namespace: str, labels: dict[str, str], api_exce
         core_api.patch_namespace(name=namespace, body={"metadata": {"labels": labels}})
 
 
-def _apply_cluster_custom_object(custom_api, body: dict[str, Any], api_exception) -> None:
+def _apply_cluster_custom_object(custom_api: Any, body: dict[str, Any], api_exception: Any) -> None:
+    """Create-or-patch a cluster-scoped GDC ``Network`` custom resource."""
     name = body["metadata"]["name"]
     try:
         custom_api.create_cluster_custom_object(
@@ -233,7 +246,7 @@ def _apply_cluster_custom_object(custom_api, body: dict[str, Any], api_exception
             plural=_NETWORK_PLURAL,
             body=body,
         )
-        logger.info("Created GDC Network %s", name)
+        logger.info("Created GDC Network name_fp=%s", safe_log_fingerprint(name))
     except api_exception as exc:
         if exc.status != 409:
             raise
@@ -244,10 +257,11 @@ def _apply_cluster_custom_object(custom_api, body: dict[str, Any], api_exception
             name=name,
             body=body,
         )
-        logger.info("Updated GDC Network %s", name)
+        logger.info("Updated GDC Network name_fp=%s", safe_log_fingerprint(name))
 
 
-def _apply_namespaced_custom_object(custom_api, body: dict[str, Any], namespace: str, api_exception) -> None:
+def _apply_namespaced_custom_object(custom_api: Any, body: dict[str, Any], namespace: str, api_exception: Any) -> None:
+    """Create-or-patch a namespaced NAD custom resource."""
     name = body["metadata"]["name"]
     try:
         custom_api.create_namespaced_custom_object(
@@ -257,7 +271,7 @@ def _apply_namespaced_custom_object(custom_api, body: dict[str, Any], namespace:
             namespace=namespace,
             body=body,
         )
-        logger.info("Created NAD %s/%s", namespace, name)
+        logger.info("Created NAD ns_fp=%s/name_fp=%s", safe_log_fingerprint(namespace), safe_log_fingerprint(name))
     except api_exception as exc:
         if exc.status != 409:
             raise
@@ -269,10 +283,11 @@ def _apply_namespaced_custom_object(custom_api, body: dict[str, Any], namespace:
             name=name,
             body=body,
         )
-        logger.info("Updated NAD %s/%s", namespace, name)
+        logger.info("Updated NAD ns_fp=%s/name_fp=%s", safe_log_fingerprint(namespace), safe_log_fingerprint(name))
 
 
-def _delete_namespaced_custom_object(custom_api, namespace: str, name: str, api_exception) -> None:
+def _delete_namespaced_custom_object(custom_api: Any, namespace: str, name: str, api_exception: Any) -> None:
+    """Delete a namespaced NAD custom resource, ignoring 404s."""
     try:
         custom_api.delete_namespaced_custom_object(
             group=_NAD_GROUP,
@@ -287,7 +302,8 @@ def _delete_namespaced_custom_object(custom_api, namespace: str, name: str, api_
             raise
 
 
-def _delete_cluster_custom_object(custom_api, name: str, api_exception) -> None:
+def _delete_cluster_custom_object(custom_api: Any, name: str, api_exception: Any) -> None:
+    """Delete a cluster-scoped GDC ``Network`` custom resource, ignoring 404s."""
     try:
         custom_api.delete_cluster_custom_object(
             group=_NETWORK_GROUP,
@@ -301,7 +317,8 @@ def _delete_cluster_custom_object(custom_api, name: str, api_exception) -> None:
             raise
 
 
-def _delete_namespace(core_api, namespace: str, api_exception) -> None:
+def _delete_namespace(core_api: Any, namespace: str, api_exception: Any) -> None:
+    """Delete the GDC range namespace, ignoring 404s."""
     try:
         core_api.delete_namespace(name=namespace)
         logger.info("Deleted GDC range namespace %s", namespace)

@@ -18,7 +18,7 @@ from config import (
     load_gdc_palo_alto_vmseries_config,
 )
 from gdc_vmruntime_assets import (
-    _IMAGE_IMPORT_SECRET_SUFFIX,
+    _IMAGE_IMPORT_K8S_NAME,
     _VM_DISK_PLURAL,
     _VM_GROUP,
     _VM_PLURAL,
@@ -35,6 +35,7 @@ from gdc_vmruntime_assets import (
     _wait_for_disk_ready,
     _wait_for_vm_ready,
 )
+from log_redact import safe_log_fingerprint
 from utils.crypto import derive_ssh_public_key, generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
@@ -148,19 +149,27 @@ def _ensure_gcs_image_secret(
 
     secret_data, _full_secret_name = _read_secret_payload(config.image_gcs_secret_id)
     body = client_module.V1Secret(
-        metadata=client_module.V1ObjectMeta(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace),
+        metadata=client_module.V1ObjectMeta(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace),
         type="Opaque",
         string_data={"creds-gcp.json": secret_data},
     )
     try:
         core_api.create_namespaced_secret(namespace=namespace, body=body)
-        logger.info("Created GDC VM-Series image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
+        logger.info(
+            "Created GDC VM-Series image access secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            _IMAGE_IMPORT_K8S_NAME,
+        )
     except api_exception as exc:
         if exc.status != 409:
             raise
-        core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace, body=body)
-        logger.info("Updated GDC VM-Series image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
-    return _IMAGE_IMPORT_SECRET_SUFFIX
+        core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace, body=body)
+        logger.info(
+            "Updated GDC VM-Series image access secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            _IMAGE_IMPORT_K8S_NAME,
+        )
+    return _IMAGE_IMPORT_K8S_NAME
 
 
 def _delete_ssh_secret(secret_ref: str) -> None:
@@ -620,7 +629,7 @@ def _delete_vm_series_resource(
 
 def _delete_image_import_secret(core_api, namespace: str, api_exception) -> None:
     try:
-        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace)
+        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace)
     except api_exception as exc:
         if exc.status != 404:
             raise

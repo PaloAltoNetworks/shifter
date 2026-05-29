@@ -22,7 +22,7 @@ instances:
   - name: Workstation
     role: victim
     os_type: from_agent  # OS determined by the user's uploaded agent
-    xdr_agent: true      # Agent installed during provisioning
+    xdr_agent: false     # No Cortex XDR agent — bring your own EDR/agent
 
 subnets:
   - name: core
@@ -82,7 +82,7 @@ id: ad_attack_lab
 name: AD Attack Lab
 description: Active Directory attack lab with domain controller, Kali attacker, and domain-joined Windows victim.
 enabled: true
-ngfw: true
+ngfw: false
 
 instances:
   - name: Attacker
@@ -94,7 +94,7 @@ instances:
     role: dc                  # Domain controller role
     os_type: windows
     domain_controller: true   # Triggers AD provisioning
-    xdr_agent: true
+    xdr_agent: false
     dc_config:
       domain_name: internal.shifter
       netbios_name: INTSHIFTER
@@ -102,7 +102,7 @@ instances:
   - name: Workstation
     role: victim
     os_type: from_agent
-    xdr_agent: true
+    xdr_agent: false
     join_domain: true         # Joins the internal.shifter domain
 
 subnets:
@@ -115,16 +115,16 @@ Key points:
 - `domain_controller: true` + `dc_config` -- the Domain Controller instance sets up Active Directory with the `internal.shifter` domain
 - `join_domain: true` on the Workstation -- after the DC is provisioned, the workstation joins the domain
 - `role: dc` -- tells the Engine this is a domain controller, affecting provisioning order
-- All instances in a single subnet despite `ngfw: true` -- the NGFW inspects traffic to/from the range but there is no inter-subnet segmentation
+- `ngfw: false` and `xdr_agent: false` everywhere -- pure AD without Palo Alto-specific tooling
 
-## Cortex BYOT (Bring Your Own Threat)
+## AD Attack Lab with NGFW
 
-`cortex_byot.yaml` -- Full enterprise environment with multiple subnets.
+`ad_attack_lab_ngfw.yaml` -- Same topology as the AD Attack Lab, with NGFW segmentation and Cortex XDR on the Windows instances.
 
 ```yaml
-id: cortex_byot
-name: Cortex BYOT
-description: The classic Cortex XDR BYOT range with a ngfw, domain controller, two workstations, a server, and an attacker.
+id: ad_attack_lab_ngfw
+name: AD Attack Lab with NGFW
+description: Active Directory attack lab with NGFW segmentation, domain controller, Kali attacker, and domain-joined Windows victim. Cortex XDR agent on Windows instances.
 enabled: true
 ngfw: true
 
@@ -133,7 +133,6 @@ instances:
     role: attacker
     os_type: kali
     xdr_agent: false
-    join_domain: false
 
   - name: Domain Controller
     role: dc
@@ -144,127 +143,27 @@ instances:
       domain_name: internal.shifter
       netbios_name: INTSHIFTER
 
-  - name: Cortex Host
+  - name: Workstation
     role: victim
-    os_type: ubuntu          # Fixed Ubuntu, not from_agent
-    xdr_agent: true
-    join_domain: true
-
-  - name: Workstation 1
-    role: victim
-    os_type: windows         # Fixed Windows
-    xdr_agent: true
-    join_domain: true
-
-  - name: Workstation 2
-    role: victim
-    os_type: windows
-    xdr_agent: true
-    join_domain: true
-
-  - name: Server
-    role: victim
-    os_type: ubuntu
+    os_type: from_agent
     xdr_agent: true
     join_domain: true
 
 subnets:
-  - name: dc_network
-    instances: [Domain Controller, Cortex Host]
-    connected_to: [workstation_network, server_network, attacker_network]
-
-  - name: workstation_network
-    instances: [Workstation 1, Workstation 2]
-    connected_to: [dc_network, server_network, attacker_network]
-
-  - name: server_network
-    instances: [Server]
-    connected_to: [dc_network, workstation_network, attacker_network]
-
-  - name: attacker_network
+  - name: attack
     instances: [Attacker]
-    connected_to: [dc_network, workstation_network, server_network]
+    connected_to: [target]
+
+  - name: target
+    instances: [Domain Controller, Workstation]
+    connected_to: [attack]
 ```
 
 Key points:
 
-- Six instances across four subnets -- full enterprise topology
-- Full mesh `connected_to` -- every subnet can reach every other subnet through the NGFW
-- Mixed OS types -- Windows DCs and workstations, Ubuntu servers and Cortex host
-- All victims have `xdr_agent: true` and `join_domain: true`
-- Fixed OS types (no `from_agent`) -- this scenario requires both Windows and Linux agents
+- Same AD topology as `ad_attack_lab` plus NGFW-routed attack/target segmentation
+- `xdr_agent: true` on the Windows DC and Workstation -- end-to-end Cortex XDR + NGFW traffic visibility
 
-## Cortex Deployment Experience
+## (Removed)
 
-`cortex_deployment_experience.yaml` -- Same topology as Cortex BYOT but with `xdr_agent: false` on all instances.
-
-```yaml
-id: cortex_deployment_experience
-name: Cortex Deployment Experience
-description: A range designed for use in the Cortex Deployment Experience. Includes a domain controller, two workstations, a server, and an attacker.
-enabled: true
-ngfw: true
-
-instances:
-  - name: Attacker
-    role: attacker
-    os_type: kali
-    xdr_agent: false
-    join_domain: false
-
-  - name: Domain Controller
-    role: dc
-    os_type: windows
-    domain_controller: true
-    xdr_agent: false         # No pre-installed agent
-    dc_config:
-      domain_name: internal.shifter
-      netbios_name: INTSHIFTER
-
-  - name: Cortex Host
-    role: victim
-    os_type: ubuntu
-    xdr_agent: false
-    join_domain: true
-
-  - name: Workstation 1
-    role: victim
-    os_type: windows
-    xdr_agent: false
-    join_domain: true
-
-  - name: Workstation 2
-    role: victim
-    os_type: windows
-    xdr_agent: false
-    join_domain: true
-
-  - name: Server
-    role: victim
-    os_type: ubuntu
-    xdr_agent: false
-    join_domain: true
-
-subnets:
-  - name: dc_network
-    instances: [Domain Controller, Cortex Host]
-    connected_to: [workstation_network, server_network, attacker_network]
-
-  - name: workstation_network
-    instances: [Workstation 1, Workstation 2]
-    connected_to: [dc_network, server_network, attacker_network]
-
-  - name: server_network
-    instances: [Server]
-    connected_to: [dc_network, workstation_network, attacker_network]
-
-  - name: attacker_network
-    instances: [Attacker]
-    connected_to: [dc_network, workstation_network, server_network]
-```
-
-Key points:
-
-- Identical topology to Cortex BYOT
-- `xdr_agent: false` everywhere -- the user deploys agents manually as part of the Cortex Deployment Experience exercise
-- Does not require agent upload at launch time since `requires_agent()` returns `false`
+Earlier releases shipped two additional Cortex-specific templates (`cortex_byot` and `cortex_deployment_experience`). They have been removed; use `ad_attack_lab_ngfw` for a Windows AD + NGFW topology with Cortex XDR.

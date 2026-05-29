@@ -45,7 +45,7 @@ The canonical identifier for the scenario. Used in:
 - UI: scenario selection, URL routing
 - Metadata: `ScenarioMetadata.scenario_id`
 
-Convention: lowercase, underscores for word separation (e.g., `ad_attack_lab`, `cortex_byot`).
+Convention: lowercase, underscores for word separation (e.g., `ad_attack_lab`, `ad_attack_lab_ngfw`).
 
 ### `ngfw`
 

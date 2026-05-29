@@ -54,7 +54,7 @@ from _gdc_vm_runner import (
     _SubnetContext,
 )
 from _gdc_vm_secrets import (
-    _IMAGE_IMPORT_SECRET_SUFFIX,
+    _IMAGE_IMPORT_K8S_NAME,
     _delete_rdp_password_secret,
     _delete_ssh_secret,
     _ensure_gcs_image_secret,
@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 # Re-exports for ``gdc_vmseries_ngfw`` and test patches; keep them in
 # ``__all__`` so Pyflakes (F401) does not flag them as unused imports.
 __all__ = [
-    "_IMAGE_IMPORT_SECRET_SUFFIX",
+    "_IMAGE_IMPORT_K8S_NAME",
     "_VM_DISK_PLURAL",
     "_VM_GROUP",
     "_VM_PLURAL",
@@ -316,7 +316,7 @@ def _delete_image_import_secret_if_needed(
     if not image_gcs_secret_id:
         return
     try:
-        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace)
+        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace)
     except api_exception as exc:
         if exc.status != 404:
             raise

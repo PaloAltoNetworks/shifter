@@ -21,7 +21,7 @@ from utils.crypto import derive_ssh_public_key, generate_rdp_password, generate_
 
 logger = logging.getLogger(__name__)
 
-_IMAGE_IMPORT_SECRET_SUFFIX = "-".join(("gdc", "vm", "image", "gcs"))
+_IMAGE_IMPORT_K8S_NAME = "-".join(("gdc", "vm", "image", "gcs"))
 _SECRETMANAGER_MODULE = "google.cloud.secretmanager"
 _GOOGLE_EXCEPTIONS_MODULE = "google.api_core.exceptions"
 
@@ -163,7 +163,7 @@ def _ensure_gcs_image_secret(
 
     secret_data, _full_secret_name = _read_secret_payload(vm_config.image_gcs_secret_id)
     body = client_module.V1Secret(
-        metadata=client_module.V1ObjectMeta(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace),
+        metadata=client_module.V1ObjectMeta(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace),
         type="Opaque",
         string_data={"creds-gcp.json": secret_data},
     )
@@ -172,15 +172,15 @@ def _ensure_gcs_image_secret(
         logger.info(
             "Created GDC VM image access secret ns_fp=%s/%s",
             safe_log_fingerprint(namespace),
-            _IMAGE_IMPORT_SECRET_SUFFIX,
+            _IMAGE_IMPORT_K8S_NAME,
         )
     except api_exception as exc:
         if exc.status != 409:
             raise
-        core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace, body=body)
+        core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace, body=body)
         logger.info(
             "Updated GDC VM image access secret ns_fp=%s/%s",
             safe_log_fingerprint(namespace),
-            _IMAGE_IMPORT_SECRET_SUFFIX,
+            _IMAGE_IMPORT_K8S_NAME,
         )
-    return _IMAGE_IMPORT_SECRET_SUFFIX
+    return _IMAGE_IMPORT_K8S_NAME

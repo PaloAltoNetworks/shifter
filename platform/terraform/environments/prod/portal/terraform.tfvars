@@ -118,7 +118,9 @@ log_level = "INFO"
 # ------------------------------------------------------------------------------
 
 # Disabled for initial deployment - enable when ready for XDR integration
-enable_log_aggregation = false
+# Enabled so portal Network Firewall FLOW / ALERT logs reach the existing
+# CloudWatch -> Firehose -> S3 / SQS pipeline (#122 fail-closed contract).
+enable_log_aggregation = true
 
 # ------------------------------------------------------------------------------
 # Phase 5: Additional Log Sources
@@ -128,6 +130,13 @@ enable_alb_access_logs = true
 enable_vpc_flow_logs   = true
 enable_rds_log_exports = true
 enable_waf_logging     = true
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+enable_portal_inspection    = true
+firewall_log_retention_days = 365
 
 # ------------------------------------------------------------------------------
 # Engine Provisioner

@@ -281,6 +281,20 @@ variable "enable_waf_logging" {
 }
 
 # ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+variable "enable_portal_inspection" {
+  description = "Insert an AWS Network Firewall east-west inspection boundary between the portal public (ALB) tier and the private services tier. Requires enable_log_aggregation = true."
+  type        = bool
+}
+
+variable "firewall_log_retention_days" {
+  description = "CloudWatch retention in days for portal Network Firewall FLOW / ALERT logs."
+  type        = number
+}
+
+# ------------------------------------------------------------------------------
 # Engine Provisioner
 # ------------------------------------------------------------------------------
 

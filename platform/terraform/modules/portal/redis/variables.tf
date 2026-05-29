@@ -16,8 +16,15 @@ variable "subnet_ids" {
 }
 
 variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access Redis"
+  description = "CIDR blocks allowed to access Redis. Prefer allowed_security_group_ids; CIDRs are kept for callers that genuinely cannot pass an SG."
   type        = list(string)
+  default     = []
+}
+
+variable "allowed_security_group_ids" {
+  description = "Security group IDs allowed to access Redis. Preferred over allowed_cidr_blocks for microsegmentation. At least one of allowed_cidr_blocks or allowed_security_group_ids must be non-empty (enforced by a precondition on the Redis instance)."
+  type        = list(string)
+  default     = []
 }
 
 variable "node_type" {

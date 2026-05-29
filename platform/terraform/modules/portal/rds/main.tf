@@ -36,13 +36,27 @@ resource "aws_security_group" "this" {
 }
 
 resource "aws_security_group_rule" "ingress_postgres" {
+  count = length(var.allowed_cidr_blocks) > 0 ? 1 : 0
+
   type              = "ingress"
   from_port         = 5432
   to_port           = 5432
   protocol          = "tcp"
   cidr_blocks       = var.allowed_cidr_blocks
   security_group_id = aws_security_group.this.id
-  description       = "PostgreSQL access"
+  description       = "PostgreSQL access (CIDR-based)"
+}
+
+resource "aws_security_group_rule" "ingress_postgres_sg" {
+  count = length(var.allowed_security_group_ids)
+
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = var.allowed_security_group_ids[count.index]
+  security_group_id        = aws_security_group.this.id
+  description              = "PostgreSQL access (SG-based)"
 }
 
 resource "aws_security_group_rule" "egress_all" {
@@ -151,6 +165,13 @@ resource "aws_db_instance" "this" {
   # Whether class/storage/parameter changes apply during the deploy or wait
   # for the maintenance window. Set true in dev, false in prod.
   apply_immediately = var.apply_immediately
+
+  lifecycle {
+    precondition {
+      condition     = length(var.allowed_security_group_ids) > 0 || length(var.allowed_cidr_blocks) > 0
+      error_message = "portal/rds: at least one of allowed_security_group_ids or allowed_cidr_blocks must be non-empty so the RDS security group has an ingress source."
+    }
+  }
 
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-db"

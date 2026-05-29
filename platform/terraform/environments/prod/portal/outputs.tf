@@ -29,9 +29,9 @@ output "availability_zones" {
   value       = module.vpc.availability_zones
 }
 
-output "private_route_table_id" {
-  description = "ID of the private route table (for NAT gateway access)"
-  value       = module.vpc.private_route_table_id
+output "private_route_table_ids" {
+  description = "IDs of the per-AZ private route tables, ordered by availability_zones."
+  value       = module.vpc.private_route_table_ids
 }
 
 # ------------------------------------------------------------------------------

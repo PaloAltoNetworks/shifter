@@ -232,6 +232,11 @@ module "vpc" {
   # Phase 5: VPC Flow Logs
   enable_flow_logs   = var.enable_vpc_flow_logs
   log_retention_days = var.log_retention_days
+
+  # Portal east-west inspection (#122)
+  enable_portal_inspection    = var.enable_portal_inspection
+  enable_log_aggregation      = var.enable_log_aggregation
+  firewall_log_retention_days = var.firewall_log_retention_days
 }
 
 # ------------------------------------------------------------------------------
@@ -241,11 +246,11 @@ module "vpc" {
 module "rds" {
   source = "../../../modules/portal/rds"
 
-  name_prefix         = local.name_prefix
-  secrets_kms_key_arn = aws_kms_key.secrets_manager.arn
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_subnet_ids
-  allowed_cidr_blocks = [module.vpc.vpc_cidr]
+  name_prefix                = local.name_prefix
+  secrets_kms_key_arn        = aws_kms_key.secrets_manager.arn
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  allowed_security_group_ids = [module.ec2.security_group_id]
 
   db_name               = var.db_name
   db_username           = var.db_username
@@ -298,13 +303,13 @@ module "alb" {
 module "redis" {
   source = "../../../modules/portal/redis"
 
-  name_prefix         = local.name_prefix
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_subnet_ids
-  allowed_cidr_blocks = [module.vpc.vpc_cidr]
-  node_type           = var.redis_node_type
-  engine_version      = var.redis_engine_version
-  enable_replication  = var.redis_enable_replication
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  allowed_security_group_ids = [module.ec2.security_group_id]
+  node_type                  = var.redis_node_type
+  engine_version             = var.redis_engine_version
+  enable_replication         = var.redis_enable_replication
 
   # CloudWatch Alarms
   enable_alarms = var.alarm_email != ""
@@ -566,9 +571,11 @@ resource "aws_vpc_peering_connection" "portal_to_range" {
   })
 }
 
-# Route from Portal private subnets to Range VPC via peering
+# Route from Portal private subnets to Range VPC via peering (per-AZ).
 resource "aws_route" "portal_to_range" {
-  route_table_id            = module.vpc.private_route_table_id
+  count = length(module.vpc.private_route_table_ids)
+
+  route_table_id            = module.vpc.private_route_table_ids[count.index]
   destination_cidr_block    = data.terraform_remote_state.range.outputs.vpc_cidr
   vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
 }
@@ -790,6 +797,8 @@ module "log_aggregation" {
     module.engine_provisioner.log_group_names,
     # Guacamole logs
     module.guacamole.log_group_names,
+    # Portal east-west inspection (#122)
+    var.enable_portal_inspection ? [module.vpc.firewall_log_group_name] : [],
   ) : []
 
   # Monitoring

@@ -105,7 +105,7 @@ def get_db_connection() -> psycopg.Connection:
     )
 
 
-def _append_kwarg_assignment(assignments: list[Any], values: list[Any], key: str, value: Any) -> None:
+def _append_kwarg_assignment(assignments: list[Any], values: list[Any], key: str, value: str | int | None) -> None:
     """Append one SET-clause fragment for an UPDATE, handling NOW() specially."""
     if value == "NOW()":
         assignments.append(sql.SQL("{} = NOW()").format(sql.Identifier(key)))

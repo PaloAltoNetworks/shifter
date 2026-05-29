@@ -59,6 +59,10 @@ class AWSExecutor:
         self._clients: dict[str, Any] = {}
         logger.info("__init__: AWSExecutor initialized region=%s", self.session.region_name)
 
+    # NOSONAR S6542 - boto3.client() returns botocore.client.BaseClient whose
+    # method surface varies by service name; static typing is intentionally Any
+    # so callers can dispatch on service-specific methods (describe_instances,
+    # describe_vpc_endpoints, etc.) without a per-service overload.
     def get_client(self, service: str) -> Any:
         """Get a boto3 client for the specified service.
 

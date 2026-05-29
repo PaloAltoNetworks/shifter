@@ -86,6 +86,25 @@ class _AttemptFailHard(_AttemptOutcomeBase):
 _AttemptOutcome = _AttemptSuccess | _AttemptRetry | _AttemptFailHard
 
 
+@dataclass(frozen=True)
+class _StepAttemptContext:
+    """Bundle of the eight parameters _run_one_attempt would otherwise take.
+
+    Carries the per-attempt inputs that the retry loop passes through to the
+    single-attempt executor, so the retry loop's call site stays readable and
+    the executor function fits inside Sonar's S107 7-parameter ceiling.
+    """
+
+    instance_id: str
+    step: SetupStep
+    rendered_script: str
+    rendered_stdin: str
+    context: dict[str, Any]
+    document_name: str
+    attempt: int
+    max_retries: int
+
+
 class SetupOrchestrator:
     """Orchestrates setup plan execution.
 
@@ -251,14 +270,16 @@ class SetupOrchestrator:
                 time.sleep(15)
 
             outcome = self._run_one_attempt(
-                instance_id,
-                step,
-                rendered_script,
-                rendered_stdin,
-                context,
-                document_name,
-                attempt,
-                max_retries,
+                _StepAttemptContext(
+                    instance_id=instance_id,
+                    step=step,
+                    rendered_script=rendered_script,
+                    rendered_stdin=rendered_stdin,
+                    context=context,
+                    document_name=document_name,
+                    attempt=attempt,
+                    max_retries=max_retries,
+                )
             )
             if isinstance(outcome, _AttemptSuccess):
                 self._log_step_success(step, outcome.result, context)
@@ -283,39 +304,30 @@ class SetupOrchestrator:
             stderr=last_result.stderr if last_result else "",
         )
 
-    def _run_one_attempt(
-        self,
-        instance_id: str,
-        step: SetupStep,
-        rendered_script: str,
-        rendered_stdin: str,
-        context: dict[str, Any],
-        document_name: str,
-        attempt: int,
-        max_retries: int,
-    ) -> _AttemptOutcome:
+    def _run_one_attempt(self, attempt_ctx: _StepAttemptContext) -> _AttemptOutcome:
         """Execute one attempt and classify the outcome."""
+        step = attempt_ctx.step
         try:
             result = self.executor.run_command(
-                instance_id=instance_id,
-                script=rendered_script,
+                instance_id=attempt_ctx.instance_id,
+                script=attempt_ctx.rendered_script,
                 timeout_seconds=step.timeout_seconds,
-                document_name=document_name,
-                stdin_input=rendered_stdin if rendered_stdin else None,
+                document_name=attempt_ctx.document_name,
+                stdin_input=attempt_ctx.rendered_stdin if attempt_ctx.rendered_stdin else None,
             )
         except (ExecutorConnectionError, ExecutorTimeoutError) as e:
             logger.warning(
                 "_execute_step: transport error step=%s attempt=%d: %s",
                 step.name,
-                attempt + 1,
+                attempt_ctx.attempt + 1,
                 e,
             )
             return (
                 _AttemptRetry(last_result=None)
-                if attempt < max_retries
+                if attempt_ctx.attempt < attempt_ctx.max_retries
                 else _AttemptFailHard(
                     SetupError(
-                        f"Step '{step.name}' failed: transport error after {max_retries + 1} attempts: {e}",
+                        f"Step '{step.name}' failed: transport error after {attempt_ctx.max_retries + 1} attempts: {e}",
                         step_name=step.name,
                         cause=e,
                     )
@@ -323,17 +335,17 @@ class SetupOrchestrator:
             )
 
         if not result.success:
-            self._log_step_failure(step, result, attempt, max_retries, context)
+            self._log_step_failure(step, result, attempt_ctx.attempt, attempt_ctx.max_retries, attempt_ctx.context)
             return _AttemptRetry(last_result=result)
 
         return self._classify_successful_attempt(
-            instance_id,
+            attempt_ctx.instance_id,
             step,
             result,
-            context,
-            document_name,
-            attempt,
-            max_retries,
+            attempt_ctx.context,
+            attempt_ctx.document_name,
+            attempt_ctx.attempt,
+            attempt_ctx.max_retries,
         )
 
     def _classify_successful_attempt(
@@ -542,19 +554,22 @@ class SetupOrchestrator:
         Returns:
             True if no commit was attempted or commit succeeded, False if commit failed
         """
-        if not output:
-            return True
-        # Check if this was a commit operation
-        if "commit" not in output.lower():
-            return True
-        # If commit was attempted, check for success messages
-        if "Configuration committed successfully" in output:
-            return True
-        if "There are no changes to commit" in output:
-            return True
-        # If we polled a commit job, the stdout may include job status output
-        output_lower = output.lower()
-        return ("fin" in output_lower) and ("ok" in output_lower)
+        # Empty output, or output without a "commit" mention, means no commit was
+        # attempted; treat that as success (idempotent no-op). The two literal
+        # status strings cover the operative success cases.
+        commit_success_markers = (
+            "Configuration committed successfully",
+            "There are no changes to commit",
+        )
+        no_commit_attempted = not output or "commit" not in output.lower()
+        if no_commit_attempted or any(marker in output for marker in commit_success_markers):
+            success = True
+        else:
+            # If we polled a commit job, the stdout may include job status output
+            # with "FIN OK" tokens — accept either-order presence as success.
+            output_lower = output.lower()
+            success = ("fin" in output_lower) and ("ok" in output_lower)
+        return success
 
     @staticmethod
     def _render_script(

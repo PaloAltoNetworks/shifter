@@ -191,36 +191,62 @@ def create_rdp_connection_params(req: RDPConnectionParams) -> dict[str, str]:
 _RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 502, 503, 504})
 
 
-def _classify_token_exchange_error(
-    exc: Exception,
-) -> tuple[bool, str, tuple[Any, ...], str]:
-    """Classify a token-exchange exception for the retry loop.
+def _attempt_token_exchange(req: urllib.request.Request) -> str:
+    """Single POST against Guacamole's /api/tokens; returns the auth token.
 
-    Returns ``(retryable, log_template, log_args, error_message)`` so the
-    caller can decide whether to retry, what to log, and what user-facing
-    ValueError to raise on exhaustion / non-retryable failure.
+    Raises ``urllib.error.HTTPError`` / ``URLError`` on transport failure and
+    ``KeyError`` / ``json.JSONDecodeError`` on malformed responses. The
+    surrounding retry loop classifies which of those are retryable.
     """
+    # NOSONAR — req.full_url is built from settings.GUACAMOLE_API_BASE_URL,
+    # a server-controlled https endpoint, not user input. ruff S310 / bandit
+    # B310 both want the scheme to be explicitly verified; the URL is fixed
+    # by deployment configuration so the check would be cosmetic.
+    with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310  # nosec B310
+        return json.loads(response.read().decode("utf-8"))["authToken"]
+
+
+def _retry_or_raise_token_exchange(
+    exc: Exception,
+    attempt: int,
+    attempts: int,
+    base_delay_ms: int,
+) -> None:
+    """Decide whether the failed attempt is retryable and either sleep, or raise.
+
+    On a retryable error with attempts left, logs a warning and sleeps for the
+    backoff delay. Otherwise logs the final error and raises ``ValueError``.
+    """
+    attempts_left = attempt + 1 < attempts
+    delay_ms = base_delay_ms * (2**attempt)
     if isinstance(exc, urllib.error.HTTPError):
-        retryable = exc.code in _RETRYABLE_HTTP_STATUSES
-        return (
-            retryable,
-            "Guacamole token request returned %s",
-            (exc.code,),
-            f"Failed to get Guacamole auth token: {exc.reason}",
-        )
+        if exc.code in _RETRYABLE_HTTP_STATUSES and attempts_left:
+            logger.warning(
+                "Guacamole token request returned %s on attempt %d/%d; retrying in %dms",
+                exc.code,
+                attempt + 1,
+                attempts,
+                delay_ms,
+            )
+            time.sleep(delay_ms / 1000.0)
+            return
+        logger.exception("Guacamole token request failed: %s %s", exc.code, exc.reason)
+        raise ValueError(f"Failed to get Guacamole auth token: {exc.reason}") from exc
     if isinstance(exc, urllib.error.URLError):
-        return (
-            True,
-            "Guacamole token request failed to connect",
-            (),
-            f"Failed to connect to Guacamole: {exc.reason}",
-        )
-    return (
-        False,
-        "Invalid Guacamole token response",
-        (),
-        "Invalid response from Guacamole",
-    )
+        if attempts_left:
+            logger.warning(
+                "Guacamole token request failed to connect on attempt %d/%d; retrying in %dms",
+                attempt + 1,
+                attempts,
+                delay_ms,
+            )
+            time.sleep(delay_ms / 1000.0)
+            return
+        logger.exception("Guacamole token request failed: %s", exc.reason)
+        raise ValueError(f"Failed to connect to Guacamole: {exc.reason}") from exc
+    # KeyError or json.JSONDecodeError — always fatal, no retry.
+    logger.exception("Invalid Guacamole token response: %s", exc)
+    raise ValueError("Invalid response from Guacamole") from exc
 
 
 def get_guacamole_auth_token(
@@ -268,36 +294,22 @@ def get_guacamole_auth_token(
     token_url = f"{base_url}/api/tokens"
 
     req_data = urlencode({"data": encrypted_data}).encode("utf-8")
-
-    # which is a server-controlled https endpoint, not user input.
+    # NOSONAR — token_url is built from settings.GUACAMOLE_API_BASE_URL, a
+    # server-controlled https endpoint; same trust boundary as the urlopen
+    # call inside _attempt_token_exchange.
     req = urllib.request.Request(token_url, data=req_data)  # noqa: S310
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
 
     for attempt in range(attempts):
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310  # nosec B310
-                result = json.loads(response.read().decode("utf-8"))
-                return result["authToken"]
+            return _attempt_token_exchange(req)
         except (
             urllib.error.HTTPError,
             urllib.error.URLError,
             KeyError,
             json.JSONDecodeError,
         ) as e:
-            retryable, log_template, log_args, err_msg = _classify_token_exchange_error(e)
-            if retryable and attempt + 1 < attempts:
-                delay_ms = base_delay_ms * (2**attempt)
-                logger.warning(
-                    log_template + " on attempt %d/%d; retrying in %dms",
-                    *log_args,
-                    attempt + 1,
-                    attempts,
-                    delay_ms,
-                )
-                time.sleep(delay_ms / 1000.0)
-                continue
-            logger.exception(log_template, *log_args)
-            raise ValueError(err_msg) from e
+            _retry_or_raise_token_exchange(e, attempt, attempts, base_delay_ms)
 
     # Unreachable: every branch above either returns or raises.
     raise ValueError("Failed to get Guacamole auth token: exhausted attempts")

@@ -87,7 +87,7 @@ class TestApiInstanceSSHURL:
         data = _json(response)
         status = _status_response(rf, mock_user, data["request_id"])
         assert status.status_code == 200
-        assert _json(status)["url"].startswith("https://guac.example.com")
+        assert _json(status)["url"] == "https://guac.example.com/#/client/abc?token=xyz"
 
     def test_calls_service_with_user_and_uuid(self, rf, mock_user, mock_ssh_info, settings):
         settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"

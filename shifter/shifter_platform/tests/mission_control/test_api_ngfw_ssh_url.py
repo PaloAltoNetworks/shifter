@@ -98,7 +98,7 @@ class TestApiNGFWSSHURL:
         data = _json(response)
         status = _status_response(rf, mock_user, data["request_id"])
         assert status.status_code == 200
-        assert _json(status)["url"].startswith("https://guac.example.com")
+        assert _json(status)["url"] == "https://guac.example.com/#/client/abc?token=xyz"
 
     def test_calls_connect_ngfw_terminal_with_user_and_uuid(self, rf, mock_user, mock_ssh_connection, settings):
         """View calls connect_ngfw_terminal with authenticated user and NGFW UUID."""

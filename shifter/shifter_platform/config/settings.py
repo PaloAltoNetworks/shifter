@@ -51,6 +51,21 @@ def _env_list(name: str) -> list[str]:
     return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
 
 
+def _env_int(name: str, default: int) -> int:
+    """Parse an integer environment variable, falling back to ``default``.
+
+    An empty/unset value uses the default; a non-integer value is a
+    configuration error and fails loud rather than silently degrading.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+
+
 # Security
 _test_secret_key_default = "django-tests-secret-key" if IS_TEST_RUN else None
 
@@ -169,6 +184,29 @@ ASGI_APPLICATION = "config.asgi.application"
 REDIS_HOST = os.environ.get("REDIS_HOST", "")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 CHANNEL_LAYERS = _build_channel_layers(os.environ)
+
+# ------------------------------------------------------------------------------
+# Terminal WebSocket capacity controls (issue #847)
+# ------------------------------------------------------------------------------
+# Browser SSH terminals run inside the portal ASGI process: each active session
+# holds a websocket FD, an SSH socket, asyncssh connection/process state, and a
+# read task. During a live event a burst of sessions (or a reconnect storm) can
+# saturate the event loop and exhaust file descriptors, making the whole portal
+# look unreliable. These bounds cap concurrency and reclaim idle/abandoned
+# sessions. They are env-tunable so limits can be adjusted during an event
+# without a redeploy; the caps are per ASGI process, which matches how the
+# portal is deployed. A value <= 0 disables that individual limit.
+#
+# TERMINAL_READ_POLL_SECONDS is how often an idle session's read loop wakes to
+# enforce the timeouts; it does NOT add latency to terminal output (output is
+# delivered as soon as it arrives). The previous hard-coded 0.1s poll woke every
+# idle terminal ~10x/second; a multi-second interval cuts idle CPU by orders of
+# magnitude. See docs/architecture/terminal-websocket-capacity-preflight-847.md.
+TERMINAL_MAX_SESSIONS = _env_int("TERMINAL_MAX_SESSIONS", 200)
+TERMINAL_MAX_SESSIONS_PER_USER = _env_int("TERMINAL_MAX_SESSIONS_PER_USER", 10)
+TERMINAL_IDLE_TIMEOUT_SECONDS = _env_int("TERMINAL_IDLE_TIMEOUT_SECONDS", 1800)
+TERMINAL_MAX_SESSION_SECONDS = _env_int("TERMINAL_MAX_SESSION_SECONDS", 28800)
+TERMINAL_READ_POLL_SECONDS = _env_int("TERMINAL_READ_POLL_SECONDS", 30)
 
 # Database
 # Use SQLite for local dev/tests, PostgreSQL for deployed environments

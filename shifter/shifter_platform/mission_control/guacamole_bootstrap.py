@@ -41,26 +41,31 @@ class BootstrapFailure(Exception):
 
 
 def _normalise_status_code(status_code: int) -> int:
+    """Clamp persisted failure codes to HTTP error statuses."""
     if 400 <= status_code <= 599:
         return status_code
     return 500
 
 
 def _clean_error_message(message: str) -> str:
+    """Return a bounded single-line error string for polling clients."""
     cleaned = message.replace("\r", " ").replace("\n", " ").strip()
     return cleaned[:500] or "Guacamole session bootstrap failed"
 
 
 def _ttl_seconds() -> int:
+    """Return the configured bootstrap record lifetime."""
     raw_value = int(getattr(settings, "GUACAMOLE_BOOTSTRAP_TTL_SECONDS", _DEFAULT_TTL_SECONDS))
     return max(30, raw_value)
 
 
 def _worker_limit() -> int:
+    """Return the configured per-process worker limit."""
     return max(1, int(getattr(settings, "GUACAMOLE_BOOTSTRAP_WORKERS", _DEFAULT_WORKERS)))
 
 
 def _get_slots() -> BoundedSemaphore:
+    """Return the semaphore that bounds in-process bootstrap concurrency."""
     global _slot_limit, _slots
     worker_limit = _worker_limit()
     if _slots is None or _slot_limit != worker_limit:
@@ -70,6 +75,7 @@ def _get_slots() -> BoundedSemaphore:
 
 
 def _get_executor() -> ThreadPoolExecutor:
+    """Return the lazily-created bootstrap worker pool."""
     global _executor
     if _executor is None:
         _executor = ThreadPoolExecutor(max_workers=_worker_limit(), thread_name_prefix="guacamole-bootstrap")
@@ -78,6 +84,7 @@ def _get_executor() -> ThreadPoolExecutor:
 
 
 def _user_id_from_value(value: int | str) -> int:
+    """Normalize Django user identifiers for storage."""
     return int(value)
 
 
@@ -123,6 +130,7 @@ def enqueue_guacamole_bootstrap(
 
 
 def _run_bootstrap(request_id: UUID, build_url: Callable[[], str], slots: BoundedSemaphore) -> None:
+    """Run a single blocking Guacamole URL build and persist the result."""
     close_old_connections()
     started = time.perf_counter()
     try:
@@ -193,4 +201,5 @@ def _finish_failure(
 
 
 def _duration_ms(started: float) -> int:
+    """Return elapsed milliseconds since a monotonic start time."""
     return max(0, int((time.perf_counter() - started) * 1000))

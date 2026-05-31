@@ -35,6 +35,11 @@ urlpatterns = [
         views.guacamole_bootstrap_status,
         name="guacamole_bootstrap_status",
     ),
+    path(
+        "api/guacamole/bootstrap/<uuid:request_id>/open/",
+        views.guacamole_bootstrap_open,
+        name="guacamole_bootstrap_open",
+    ),
     # NGFW views
     path("ngfw/", views.ngfw_list, name="ngfw_list"),
     path("ngfw/setup/", views.ngfw_wizard, name="ngfw_wizard"),

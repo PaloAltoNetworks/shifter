@@ -5,13 +5,11 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING, Any, Protocol
-from uuid import UUID
 
 from django.conf import settings as django_settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
-from django.urls import reverse
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_POST
 
 from mission_control.models import GuacamoleBootstrapRequest
 from shared.errors import classify_user_message
@@ -23,6 +21,7 @@ from ._common import (
     INTERNAL_SERVER_ERROR,
     _get_user,
 )
+from ._guacamole_bootstrap import guacamole_bootstrap_response
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -85,17 +84,6 @@ def _get_guac_settings(service_name: str) -> tuple[str, str, str | None]:
     return guacamole_signing_secret, base_url, api_url
 
 
-def _authenticated_user_id(user: User) -> int:
-    """Return the authenticated user's integer id."""
-    for attr in ("pk", "id"):
-        value = getattr(user, attr, None)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, str) and value.isdigit():
-            return int(value)
-    raise _ViewError(JsonResponse({"error": "Authenticated user id unavailable"}, status=500))
-
-
 def _response_error_message(response: JsonResponse, default: str) -> str:
     """Extract a safe error string from a JsonResponse."""
     try:
@@ -115,99 +103,6 @@ def _wrap_bootstrap_error(operation: str, callback):
     except _ViewError as err:
         message = _response_error_message(err.response, f"Failed to generate {operation} URL")
         raise BootstrapFailure(message, status_code=err.response.status_code) from err
-
-
-def _bootstrap_response(
-    *,
-    user: User,
-    protocol: str,
-    target_id: str,
-    build_url,
-) -> JsonResponse:
-    """Enqueue Guacamole bootstrap work and return a pollable response."""
-    from mission_control.guacamole_bootstrap import BootstrapQueueFull, enqueue_guacamole_bootstrap
-
-    try:
-        bootstrap = enqueue_guacamole_bootstrap(
-            user_id=_authenticated_user_id(user),
-            protocol=protocol,
-            target_id=target_id,
-            build_url=build_url,
-        )
-    except _ViewError as err:
-        return err.response
-    except BootstrapQueueFull:
-        logger.warning(
-            "Guacamole bootstrap worker capacity exhausted: user=%s protocol=%s target_id=%s",
-            safe_log_value(user.email),
-            safe_log_value(protocol),
-            safe_log_value(target_id),
-        )
-        response = JsonResponse({"error": "Guacamole session service is busy. Try again shortly."}, status=503)
-        response["Retry-After"] = "1"
-        return response
-
-    status_url = reverse("mission_control:guacamole_bootstrap_status", kwargs={"request_id": bootstrap.id})
-    response = JsonResponse(
-        {
-            "request_id": str(bootstrap.id),
-            "status": bootstrap.status,
-            "status_url": status_url,
-        },
-        status=202,
-    )
-    response["Location"] = status_url
-    response["Retry-After"] = "1"
-    return response
-
-
-@login_required
-@require_GET
-def guacamole_bootstrap_status(request: HttpRequest, request_id: UUID) -> JsonResponse:
-    """Return the current status for an asynchronous Guacamole bootstrap."""
-    user = _get_user(request)
-    try:
-        bootstrap = GuacamoleBootstrapRequest.objects.get(pk=request_id, user_id=_authenticated_user_id(user))
-    except GuacamoleBootstrapRequest.DoesNotExist:
-        return JsonResponse({"error": "Guacamole bootstrap request not found"}, status=404)
-    except _ViewError as err:
-        return err.response
-
-    if bootstrap.is_expired:
-        if bootstrap.status in {
-            GuacamoleBootstrapRequest.Status.PENDING,
-            GuacamoleBootstrapRequest.Status.RUNNING,
-        }:
-            bootstrap.status = GuacamoleBootstrapRequest.Status.FAILED
-            bootstrap.error_message = "Guacamole session request expired"
-            bootstrap.error_status_code = 410
-            bootstrap.save(update_fields=("status", "error_message", "error_status_code", "updated_at"))
-        return JsonResponse(
-            {
-                "request_id": str(bootstrap.id),
-                "status": bootstrap.status,
-                "error": bootstrap.error_message or "Guacamole session request expired",
-            },
-            status=410,
-        )
-
-    payload: dict[str, Any] = {
-        "request_id": str(bootstrap.id),
-        "status": bootstrap.status,
-    }
-    if bootstrap.duration_ms is not None:
-        payload["duration_ms"] = bootstrap.duration_ms
-
-    if bootstrap.status == GuacamoleBootstrapRequest.Status.SUCCEEDED:
-        payload["url"] = bootstrap.result_url
-        return JsonResponse(payload)
-    if bootstrap.status == GuacamoleBootstrapRequest.Status.FAILED:
-        payload["error"] = bootstrap.error_message or "Guacamole session bootstrap failed"
-        return JsonResponse(payload, status=bootstrap.error_status_code)
-
-    response = JsonResponse(payload)
-    response["Retry-After"] = "1"
-    return response
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +216,7 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
     except _ViewError as err:
         return err.response
 
-    return _bootstrap_response(
+    return guacamole_bootstrap_response(
         user=user,
         protocol=GuacamoleBootstrapRequest.Protocol.RDP,
         target_id=instance_uuid,
@@ -450,7 +345,7 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
         safe_log_value(user.email),
         safe_log_value(app_id),
     )
-    return _bootstrap_response(
+    return guacamole_bootstrap_response(
         user=user,
         protocol=GuacamoleBootstrapRequest.Protocol.NGFW_SSH,
         target_id=str(app_id),
@@ -573,7 +468,7 @@ def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
         instance_ip,
         cloud_provider_name,
     )
-    return _bootstrap_response(
+    return guacamole_bootstrap_response(
         user=user,
         protocol=GuacamoleBootstrapRequest.Protocol.RANGE_SSH,
         target_id=instance_uuid,

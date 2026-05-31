@@ -54,7 +54,32 @@ def _get_status(rf, user, request_id):
     return guacamole_bootstrap_status(request, request_id)
 
 
+def _get_open(rf, user, request_id):
+    from mission_control.views import guacamole_bootstrap_open
+
+    request = rf.get(f"/mc/api/guacamole/bootstrap/{request_id}/open/")
+    request.user = user
+    return guacamole_bootstrap_open(request, request_id)
+
+
 class TestGuacamoleBootstrapStatus:
+    def _bootstrap(self, mock_user, *, status, **overrides):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        defaults = {
+            "user_id": mock_user.id,
+            "protocol": GuacamoleBootstrapRequest.Protocol.RDP,
+            "target_id": "vm-1",
+            "status": status,
+            "expires_at": timezone.now() + timedelta(minutes=5),
+        }
+        defaults.update(overrides)
+        return GuacamoleBootstrapRequest.objects.create(**defaults)
+
     def test_returns_404_for_other_user(self, rf, mock_user):
         from datetime import timedelta
 
@@ -74,6 +99,32 @@ class TestGuacamoleBootstrapStatus:
         response = _get_status(rf, mock_user, bootstrap.id)
 
         assert response.status_code == 404
+
+    def test_returns_retry_after_for_pending_bootstrap(self, rf, mock_user):
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        bootstrap = self._bootstrap(mock_user, status=GuacamoleBootstrapRequest.Status.PENDING)
+
+        response = _get_status(rf, mock_user, bootstrap.id)
+
+        assert response.status_code == 200
+        assert response["Retry-After"] == "1"
+        assert _json(response)["status"] == GuacamoleBootstrapRequest.Status.PENDING
+
+    def test_returns_saved_error_for_failed_bootstrap(self, rf, mock_user):
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        bootstrap = self._bootstrap(
+            mock_user,
+            status=GuacamoleBootstrapRequest.Status.FAILED,
+            error_message="Guacamole unavailable",
+            error_status_code=503,
+        )
+
+        response = _get_status(rf, mock_user, bootstrap.id)
+
+        assert response.status_code == 503
+        assert _json(response)["error"] == "Guacamole unavailable"
 
     def test_marks_pending_bootstrap_expired(self, rf, mock_user):
         from datetime import timedelta
@@ -96,6 +147,26 @@ class TestGuacamoleBootstrapStatus:
         assert _json(response)["error"] == "Guacamole session request expired"
         bootstrap.refresh_from_db()
         assert bootstrap.status == GuacamoleBootstrapRequest.Status.FAILED
+
+    def test_open_page_contains_status_url_for_owner(self, rf, mock_user):
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        bootstrap = self._bootstrap(mock_user, status=GuacamoleBootstrapRequest.Status.PENDING)
+
+        response = _get_open(rf, mock_user, bootstrap.id)
+
+        assert response.status_code == 200
+        body = response.content.decode("utf-8")
+        assert f"api/guacamole/bootstrap/{bootstrap.id}/" in body
+
+    def test_open_page_returns_404_for_other_user(self, rf, mock_user):
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        bootstrap = self._bootstrap(mock_user, user_id=2, status=GuacamoleBootstrapRequest.Status.PENDING)
+
+        response = _get_open(rf, mock_user, bootstrap.id)
+
+        assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +382,24 @@ class TestGuacamoleSSHURL:
         status = _get_status(rf, mock_user, data["request_id"])
         assert status.status_code == 200
         assert _json(status)["url"] == "https://guac/x"
+
+    def test_returns_503_when_bootstrap_workers_are_full(self, rf, mock_user, settings):
+        from mission_control.guacamole_bootstrap import BootstrapQueueFull
+        from mission_control.views import guacamole_ssh_url
+
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": str(uuid4())}, mock_user)
+        with (
+            patch("engine.services.get_ssh_connection_info", return_value=self._ssh_info()),
+            patch(
+                "mission_control.views._guacamole_bootstrap.enqueue_guacamole_bootstrap",
+                side_effect=BootstrapQueueFull,
+            ),
+        ):
+            response = guacamole_ssh_url(request)
+
+        assert response.status_code == 503
+        assert response["Retry-After"] == "1"
 
     def test_status_returns_500_when_url_gen_raises_valueerror(self, rf, mock_user, settings):
         from mission_control.views import guacamole_ssh_url

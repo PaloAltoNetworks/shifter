@@ -138,38 +138,6 @@ function openRdpSession(button, instanceUuid) {
     var originalText = button.textContent;
     button.textContent = 'Opening...';
 
-    function pollGuacamoleStatus(statusUrl, attemptsLeft) {
-        return fetch(statusUrl, {headers: {'Accept': 'application/json'}})
-            .then(function(response) {
-                return response.json().then(function(data) {
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Failed to generate access URL');
-                    }
-                    if (data.url) {
-                        return data.url;
-                    }
-                    if (attemptsLeft <= 1) {
-                        throw new Error('Session request timed out');
-                    }
-                    return new Promise(function(resolve) {
-                        setTimeout(resolve, 1000);
-                    }).then(function() {
-                        return pollGuacamoleStatus(statusUrl, attemptsLeft - 1);
-                    });
-                });
-            });
-    }
-
-    function resolveGuacamoleUrl(data) {
-        if (data.url) {
-            return Promise.resolve(data.url);
-        }
-        if (data.status_url) {
-            return pollGuacamoleStatus(data.status_url, 60);
-        }
-        return Promise.reject(new Error('Server returned invalid response'));
-    }
-
     fetch('{% url "mission_control:guacamole_rdp_url" %}', {
         method: 'POST',
         headers: {
@@ -187,10 +155,7 @@ function openRdpSession(button, instanceUuid) {
         return response.json();
     })
     .then(function(data) {
-        return resolveGuacamoleUrl(data);
-    })
-    .then(function(sessionUrl) {
-        window.open(sessionUrl, '_blank');
+        window.open(data.url, '_blank');
     })
     .catch(function(error) {
         alert('Failed to open session: ' + error.message);

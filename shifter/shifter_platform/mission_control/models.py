@@ -12,11 +12,15 @@ class GuacamoleBootstrapRequest(models.Model):
     """Pollable state for asynchronous Guacamole URL bootstrap."""
 
     class Protocol(models.TextChoices):
+        """Supported Guacamole bootstrap connection protocols."""
+
         RDP = "rdp", "RDP"
         RANGE_SSH = "range_ssh", "Range SSH"
         NGFW_SSH = "ngfw_ssh", "NGFW SSH"
 
     class Status(models.TextChoices):
+        """Lifecycle states exposed by the bootstrap polling endpoint."""
+
         PENDING = "pending", "Pending"
         RUNNING = "running", "Running"
         SUCCEEDED = "succeeded", "Succeeded"
@@ -36,6 +40,8 @@ class GuacamoleBootstrapRequest(models.Model):
     expires_at = models.DateTimeField(db_index=True)
 
     class Meta:
+        """Ordering and lookup indexes for user-scoped polling."""
+
         ordering = ("-created_at",)
         indexes = [
             models.Index(fields=("user_id", "created_at"), name="mc_guac_boot_user_idx"),

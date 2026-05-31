@@ -37,11 +37,11 @@ async function pollGuacamoleBootstrap(statusUrl, sessionLabel) {
 }
 
 async function resolveGuacamoleUrl(data, sessionLabel) {
-    if (data.url) {
-        return data.url;
-    }
     if (data.status_url) {
         return pollGuacamoleBootstrap(data.status_url, sessionLabel);
+    }
+    if (data.url) {
+        return data.url;
     }
     throw new Error('Server returned invalid response');
 }

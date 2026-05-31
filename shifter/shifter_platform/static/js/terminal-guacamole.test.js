@@ -112,7 +112,11 @@ describe('terminal-guacamole', () => {
         globalThis.fetch
             .mockResolvedValueOnce({
                 ok: true,
-                json: jest.fn().mockResolvedValue({ request_id: 'req-1', status_url: '/api/status/req-1/' }),
+                json: jest.fn().mockResolvedValue({
+                    request_id: 'req-1',
+                    status_url: '/api/status/req-1/',
+                    url: '/api/status/req-1/open/',
+                }),
             })
             .mockResolvedValueOnce({
                 ok: true,

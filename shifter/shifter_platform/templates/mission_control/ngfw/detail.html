@@ -438,51 +438,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function readGuacamoleJson(response) {
-        try {
-            return await response.json();
-        } catch {
-            return {};
-        }
-    }
-
-    function waitForGuacamoleBootstrap(statusUrl) {
-        return new Promise(function(resolve, reject) {
-            let attempts = 0;
-            function poll() {
-                attempts += 1;
-                fetch(statusUrl, {headers: {'Accept': 'application/json'}})
-                    .then(function(response) {
-                        return readGuacamoleJson(response).then(function(data) {
-                            if (!response.ok) {
-                                throw new Error(data.error || 'Failed to generate CLI URL');
-                            }
-                            if (data.url) {
-                                resolve(data.url);
-                                return;
-                            }
-                            if (attempts >= 60) {
-                                throw new Error('CLI request timed out');
-                            }
-                            setTimeout(poll, 1000);
-                        });
-                    })
-                    .catch(reject);
-            }
-            poll();
-        });
-    }
-
-    function resolveGuacamoleUrl(data) {
-        if (data.url) {
-            return Promise.resolve(data.url);
-        }
-        if (data.status_url) {
-            return waitForGuacamoleBootstrap(data.status_url);
-        }
-        return Promise.reject(new Error('Server returned invalid response'));
-    }
-
     // NGFW CLI button handler
     const cliBtn = document.getElementById('ngfw-cli-btn');
     if (cliBtn) {
@@ -501,19 +456,30 @@ document.addEventListener('DOMContentLoaded', () => {
                         'X-CSRFToken': getCookie('csrftoken'),
                         'Content-Type': 'application/json',
                     },
+                    // 10 second timeout for token exchange
+                    signal: AbortSignal.timeout(10000),
                 });
 
-                const data = await readGuacamoleJson(response);
                 if (!response.ok) {
                     let errorMsg = 'Failed to generate CLI URL';
-                    errorMsg = data.error || response.statusText || errorMsg;
+                    try {
+                        const data = await response.json();
+                        errorMsg = data.error || errorMsg;
+                    } catch (e) {
+                        // Response wasn't JSON, use status text
+                        errorMsg = response.statusText || errorMsg;
+                    }
                     throw new Error(errorMsg);
                 }
 
-                const sessionUrl = await resolveGuacamoleUrl(data);
+                const data = await response.json();
+
+                if (!data.url) {
+                    throw new Error('Server returned invalid response');
+                }
 
                 // Open in new tab and check if it was blocked
-                const popup = globalThis.open(sessionUrl, '_blank');
+                const popup = globalThis.open(data.url, '_blank');
                 if (!popup || popup.closed || typeof popup.closed === 'undefined') {
                     // Popup was blocked
                     const popupMessage = [
@@ -522,7 +488,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         'Tip: Allow popups for this site to use CLI access.',
                     ].join('\n');
                     if (confirm(popupMessage)) {
-                        globalThis.location.href = sessionUrl;
+                        globalThis.location.href = data.url;
                     } else {
                         throw new Error('Popup blocked by browser');
                     }

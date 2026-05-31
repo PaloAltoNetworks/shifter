@@ -114,9 +114,15 @@ class CTFBaseModel(models.Model):
     )
 
     objects = SoftDeleteManager()
+    # DJ012 (manager declared after fields would normally fire) is intentionally
+    # suppressed: `all_objects` is the bypass-soft-delete escape hatch and must
+    # be declared next to the active-objects manager for discoverability, not
+    # buried at the top of the class.
     all_objects = models.Manager()  # noqa: DJ012
 
     class Meta:
+        """Django model metadata."""
+
         abstract = True
 
     def save(self, *args, **kwargs) -> None:
@@ -343,6 +349,8 @@ class CTFEvent(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_event"
         ordering = ["-event_start"]
         verbose_name = "CTF Event"
@@ -359,16 +367,22 @@ class CTFEvent(CTFBaseModel):
     def clean(self) -> None:
         """Validate event data."""
         errors: dict[str, list[str]] = {}
+        self._validate_event_times(errors)
+        self._validate_registration_deadline(errors)
+        self._validate_team_settings(errors)
+        self._validate_scoreboard_freeze_time(errors)
+        if errors:
+            raise ValidationError(errors)
 
-        # Validate event times (only if both are set)
+    def _validate_event_times(self, errors: dict[str, list[str]]) -> None:
         if self.event_start and self.event_end and self.event_end <= self.event_start:
             errors.setdefault("event_end", []).append("Event end must be after event start.")
 
-        # Validate registration deadline
+    def _validate_registration_deadline(self, errors: dict[str, list[str]]) -> None:
         if self.registration_deadline and self.event_start and self.registration_deadline > self.event_start:
             errors.setdefault("registration_deadline", []).append("Registration deadline must be before event start.")
 
-        # Validate team settings
+    def _validate_team_settings(self, errors: dict[str, list[str]]) -> None:
         if self.team_mode and not self.team_size_limit:
             errors.setdefault("team_size_limit", []).append("Team size limit is required when team mode is enabled.")
         if not self.team_mode and self.team_size_limit:
@@ -376,17 +390,13 @@ class CTFEvent(CTFBaseModel):
                 "Team size limit should only be set when team mode is enabled."
             )
 
-        # Validate scoreboard freeze time
-        if self.scoreboard_freeze_at:
-            if self.event_start and self.scoreboard_freeze_at <= self.event_start:
-                errors.setdefault("scoreboard_freeze_at", []).append(
-                    "Scoreboard freeze time must be after event start."
-                )
-            if self.event_end and self.scoreboard_freeze_at >= self.event_end:
-                errors.setdefault("scoreboard_freeze_at", []).append("Scoreboard freeze time must be before event end.")
-
-        if errors:
-            raise ValidationError(errors)
+    def _validate_scoreboard_freeze_time(self, errors: dict[str, list[str]]) -> None:
+        if not self.scoreboard_freeze_at:
+            return
+        if self.event_start and self.scoreboard_freeze_at <= self.event_start:
+            errors.setdefault("scoreboard_freeze_at", []).append("Scoreboard freeze time must be after event start.")
+        if self.event_end and self.scoreboard_freeze_at >= self.event_end:
+            errors.setdefault("scoreboard_freeze_at", []).append("Scoreboard freeze time must be before event end.")
 
     @property
     def is_active(self) -> bool:
@@ -573,6 +583,8 @@ class CTFChallenge(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_challenge"
         ordering = ["category", "order", "name"]
         verbose_name = "CTF Challenge"
@@ -596,24 +608,27 @@ class CTFChallenge(CTFBaseModel):
     def clean(self) -> None:
         """Validate challenge data."""
         errors: dict[str, list[str]] = {}
-
-        # Validate release time
-        if self.release_time and hasattr(self, "event") and self.event_id:
-            if self.release_time < self.event.event_start:
-                errors.setdefault("release_time", []).append("Release time cannot be before event start.")
-            if self.release_time > self.event.event_end:
-                errors.setdefault("release_time", []).append("Release time cannot be after event end.")
-
-        # Validate next_challenge
-        if self.next_challenge_id:
-            if self.pk and self.next_challenge_id == self.pk:
-                errors.setdefault("next_challenge", []).append("A challenge cannot be its own next challenge.")
-            nc = self.next_challenge
-            if self.event_id and nc is not None and nc.event_id != self.event_id:
-                errors.setdefault("next_challenge", []).append("Next challenge must belong to the same event.")
-
+        self._validate_release_time(errors)
+        self._validate_next_challenge(errors)
         if errors:
             raise ValidationError(errors)
+
+    def _validate_release_time(self, errors: dict[str, list[str]]) -> None:
+        if not (self.release_time and hasattr(self, "event") and self.event_id):
+            return
+        if self.release_time < self.event.event_start:
+            errors.setdefault("release_time", []).append("Release time cannot be before event start.")
+        if self.release_time > self.event.event_end:
+            errors.setdefault("release_time", []).append("Release time cannot be after event end.")
+
+    def _validate_next_challenge(self, errors: dict[str, list[str]]) -> None:
+        if not self.next_challenge_id:
+            return
+        if self.pk and self.next_challenge_id == self.pk:
+            errors.setdefault("next_challenge", []).append("A challenge cannot be its own next challenge.")
+        nc = self.next_challenge
+        if self.event_id and nc is not None and nc.event_id != self.event_id:
+            errors.setdefault("next_challenge", []).append("Next challenge must belong to the same event.")
 
     @property
     def is_released(self) -> bool:
@@ -686,6 +701,8 @@ class CTFTopic(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_topic"
         ordering = ["name"]
         verbose_name = "CTF Topic"
@@ -720,6 +737,8 @@ class CTFChallengeTag(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_challenge_tag"
         ordering = ["name"]
         verbose_name = "CTF Challenge Tag"
@@ -792,6 +811,8 @@ class CTFChallengeFile(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_challenge_file"
         ordering = ["order", "created_at"]
         verbose_name = "CTF Challenge File"
@@ -845,6 +866,8 @@ class CTFChallengePrerequisite(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_challenge_prerequisite"
         ordering = ["created_at"]
         verbose_name = "CTF Challenge Prerequisite"
@@ -937,6 +960,8 @@ class CTFFlag(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_flag"
         ordering = ["order", "created_at"]
         verbose_name = "CTF Flag"
@@ -985,6 +1010,8 @@ class CTFBracket(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_bracket"
         ordering = ["display_order", "name"]
         verbose_name = "CTF Bracket"
@@ -1043,6 +1070,8 @@ class CTFTeam(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_team"
         ordering = ["name"]
         verbose_name = "CTF Team"
@@ -1169,6 +1198,11 @@ class CTFParticipant(CTFBaseModel):
         related_name="participants",
         help_text="Bracket assignment (for bracket-based events)",
     )
+    # DJ001 (CharField with null=True should not allow blank=True without
+    # choices) is intentionally suppressed: cognito_sub is genuinely optional
+    # for non-Cognito participants (e.g. email-only invites), so both null
+    # and blank are legitimate "no value yet" sentinels rather than
+    # competing zero-value representations.
     cognito_sub = models.CharField(  # noqa: DJ001
         max_length=36,
         null=True,
@@ -1220,6 +1254,8 @@ class CTFParticipant(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_participant"
         ordering = ["name"]
         verbose_name = "CTF Participant"
@@ -1357,6 +1393,8 @@ class CTFSubmission(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_submission"
         ordering = ["-submitted_at"]
         verbose_name = "CTF Submission"
@@ -1430,6 +1468,8 @@ class CTFAward(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_award"
         ordering = ["-created_at"]
         verbose_name = "CTF Award"
@@ -1491,6 +1531,8 @@ class CTFChallengeRating(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_challenge_rating"
         ordering = ["-created_at"]
         verbose_name = "CTF Challenge Rating"
@@ -1544,6 +1586,8 @@ class CTFHint(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_hint"
         ordering = ["order", "created_at"]
         verbose_name = "CTF Hint"
@@ -1584,6 +1628,8 @@ class CTFHintUsage(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_hint_usage"
         ordering = ["unlocked_at"]
         verbose_name = "CTF Hint Usage"
@@ -1693,6 +1739,8 @@ class CTFNotification(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_notification"
         ordering = ["-created_at"]
         verbose_name = "CTF Notification"
@@ -1747,6 +1795,8 @@ class CTFEmailTemplate(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_email_template"
         ordering = ["notification_type"]
         verbose_name = "CTF Email Template"
@@ -1822,6 +1872,8 @@ class CTFScheduledTask(CTFBaseModel):
     )
 
     class Meta:
+        """Django model metadata."""
+
         db_table = "ctf_scheduled_task"
         ordering = ["scheduled_for"]
         verbose_name = "CTF Scheduled Task"

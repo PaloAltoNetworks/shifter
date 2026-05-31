@@ -83,32 +83,32 @@
 
 .badge-registered {
     background: rgba(148, 163, 184, 0.15);
-    color: #94a3b8;
+    color: #64748b; /* darkened from #94a3b8 to meet WCAG AA contrast (css:S7924) */
 }
 
 .badge-active {
     background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
+    color: #15803d; /* darkened from #22c55e to meet WCAG AA contrast (css:S7924) */
 }
 
 .badge-completed {
     background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
+    color: #6b7280; /* darkened from #b8b8b8 to meet WCAG AA contrast */
 }
 
 .badge-disqualified {
     background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
+    color: #b91c1c; /* darkened from #ff4d4f to meet WCAG AA contrast */
 }
 
 .badge-correct {
     background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
+    color: #15803d; /* darkened from #22c55e to meet WCAG AA contrast (css:S7924) */
 }
 
 .badge-incorrect {
     background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
+    color: #b91c1c; /* darkened from #ff4d4f to meet WCAG AA contrast */
 }
 
 .badge-warning {
@@ -118,7 +118,21 @@
 
 .badge-secondary {
     background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
+    color: #6b7280; /* darkened from #b8b8b8 to meet WCAG AA contrast */
+}
+
+.badge-secondary--inline {
+    margin-left: 4px;
+}
+
+.card--gap {
+    margin-bottom: 16px;
+}
+
+.score-timeline-canvas-wrap {
+    position: relative;
+    height: 250px;
+    padding: 0 16px 16px;
 }
 
 .stats-grid {
@@ -186,7 +200,7 @@
                 {% if participant.status == 'invited' %}
                     <button type="button"
                             class="btn btn-secondary"
-                            onclick="resendInvite('{{ participant.pk }}')">
+                            onclick="resendInvite('{{ participant.pk }}', window.__participantCsrfToken)">
                         {% trans "Resend Invite" %}
                     </button>
                 {% endif %}
@@ -307,13 +321,11 @@
         <!-- Right Column: Timeline & Submission History -->
         <div>
             <!-- Score Timeline Chart -->
-            <div class="card" style="margin-bottom: 16px;">
+            <div class="card card--gap">
                 <div class="card-title">
                     {% trans "Score Timeline" %}
                 </div>
-                <div style="position: relative;
-                            height: 250px;
-                            padding: 0 16px 16px">
+                <div class="score-timeline-canvas-wrap">
                     <canvas id="score-timeline-chart"></canvas>
                 </div>
             </div>
@@ -350,7 +362,7 @@
                                         <a href="{{ challenge_url }}">
                                             {{ submission.challenge.name }}
                                         </a>
-                                        <span class="badge badge-secondary" style="margin-left: 4px;">
+                                        <span class="badge badge-secondary badge-secondary--inline">
                                         {{ submission.challenge.category }}
                                         </span>
                                     </td>
@@ -390,47 +402,24 @@
     </div>
 {% endblock %}
 {% block extra_js %}
+    {# Web:S1829 NOSONAR: chart.js and its date-fns adapter are loaded from jsdelivr with SRI integrity hashes + crossorigin=anonymous (subresource-integrity tamper-detection); the CDN host is the project's canonical chart-library source and replacing it with a self-hosted bundle is tracked separately as a build/dependency change, not a per-template fix. #}
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
             integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
             crossorigin="anonymous"></script>
-<script
-src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
-integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
-crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
+            integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
+            crossorigin="anonymous"></script>
     <script src="{% static 'js/score-timeline.js' %}"></script>
+    <script src="{% static 'js/admin-participant-detail.js' %}"></script>
+    <script id="admin-participant-detail-bootstrap" type="application/json">{
+        "participant_id": "{{ participant.pk }}",
+        "csrf_token": "{{ csrf_token }}"
+    }</script>
     <script>
-initScoreTimeline('score-timeline-chart', '/ctf/api/participants/{{ participant.pk }}/score-timeline/');
-    </script>
-    <script>
-function resendInvite(participantId) {
-    if (!confirm('Resend invitation email to this participant?')) return;
-
-    fetch('/ctf/api/participants/' + participantId + '/resend-invite/', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-        if (data.success) {
-            alert('Invitation resent successfully.');
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Failed to resend invite'));
-        }
-    })
-    .catch(function(err) {
-        alert('Error resending invite: ' + err.message);
-    });
-}
-
-function disqualifyParticipant(participantId) {
-    if (!confirm('Are you sure you want to disqualify this participant? This action cannot be undone.')) return;
-
-    // This would call a disqualify API endpoint (to be implemented)
-    alert('Disqualify functionality not yet implemented via API.');
-}
+        (function () {
+            var cfg = JSON.parse(document.getElementById('admin-participant-detail-bootstrap').textContent);
+            window.initParticipantTimeline(cfg.participant_id);
+            window.__participantCsrfToken = cfg.csrf_token;
+        }());
     </script>
 {% endblock %}

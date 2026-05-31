@@ -650,12 +650,15 @@ class CTFChallenge(CTFBaseModel):
             total_hint_penalty: Sum of penalties of all unlocked hints (0-100+).
 
         Returns:
-            Points to award (minimum 1).
+            Points to award. A 100% (or above) cumulative penalty floors at 0
+            per CTF-203 ("the net score for a challenge solve shall never go
+            below zero"). The historical 1-point floor was the bug fixed by
+            issue #519.
         """
         if total_hint_penalty > 0:
             capped = min(total_hint_penalty, 100)
             reduction = (self.points * capped) // 100
-            return max(1, self.points - reduction)
+            return max(0, self.points - reduction)
         return self.points
 
 

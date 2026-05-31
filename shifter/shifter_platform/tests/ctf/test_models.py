@@ -255,12 +255,12 @@ class TestCTFChallengeModel:
         [
             pytest.param(100, 0, 100, id="no-penalty"),
             pytest.param(200, 25, 150, id="25pct-penalty"),
-            pytest.param(100, 100, 1, id="100pct-minimum-1"),
-            pytest.param(200, 150, 1, id="over-100pct-capped"),
+            pytest.param(100, 100, 0, id="100pct-floor-0"),
+            pytest.param(200, 150, 0, id="over-100pct-capped-floor-0"),
         ],
     )
     def test_challenge_calculate_points(self, points, total_penalty, expected):
-        """Test points calculation with cumulative hint penalty."""
+        """Test points calculation with cumulative hint penalty (CTF-203 floor-at-0)."""
         challenge = make_challenge(points=points)
         assert challenge.calculate_points_with_penalty(total_penalty) == expected
 

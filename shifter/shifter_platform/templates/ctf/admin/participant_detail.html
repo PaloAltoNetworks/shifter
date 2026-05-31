@@ -357,13 +357,6 @@
                                     <td>
                                         {% if submission.is_correct %}
                                             <span class="badge badge-correct">{% trans "Correct" %}</span>
-                                            {% if submission.hint_used %}
-<span class="badge badge-warning" style="margin-left: 4px;">
-    {% blocktrans trimmed %}
-        Hint Used
-    {% endblocktrans %}
-</span>
-                                            {% endif %}
                                         {% else %}
                                             <span class="badge badge-incorrect">{% trans "Incorrect" %}</span>
                                         {% endif %}

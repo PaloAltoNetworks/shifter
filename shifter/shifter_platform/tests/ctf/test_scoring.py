@@ -771,20 +771,20 @@ class TestCalculatePointsWithPenalty:
         challenge = self._make_challenge(points=100)
         assert challenge.calculate_points_with_penalty(0) == 100
 
-    def test_100_percent_penalty_guarantees_minimum_1_point(self):
-        """100% penalty still awards at least 1 point."""
+    def test_100_percent_penalty_floors_at_zero(self):
+        """100% cumulative penalty awards 0 points (CTF-203 floor)."""
         challenge = self._make_challenge(points=100)
-        assert challenge.calculate_points_with_penalty(100) == 1
+        assert challenge.calculate_points_with_penalty(100) == 0
 
     def test_partial_penalty_reduces_correctly(self):
         """25% penalty on 200 points = 150 points."""
         challenge = self._make_challenge(points=200)
         assert challenge.calculate_points_with_penalty(25) == 150
 
-    def test_over_100_capped(self):
-        """Penalties over 100% are capped — still awards 1 point."""
+    def test_over_100_capped_floors_at_zero(self):
+        """Penalties over 100% are capped at the floor (0), not historical 1."""
         challenge = self._make_challenge(points=100)
-        assert challenge.calculate_points_with_penalty(150) == 1
+        assert challenge.calculate_points_with_penalty(150) == 0
 
 
 # -----------------------------------------------------------------------------
@@ -1007,10 +1007,49 @@ class TestGetScoreTimeline:
 
 
 class TestScoreboardFreeze:
-    """Tests for the freeze_at parameter on get_scoreboard / get_team_scoreboard."""
+    """Tests for the freeze_at parameter on get_scoreboard / get_team_scoreboard.
 
-    def test_get_scoreboard_accepts_freeze_at(self, mock_participant_objects, mock_queryset):
-        """get_scoreboard with freeze_at runs without error and returns results."""
+    Each "with freeze_at" test pins the chained ``CTFSubmission.objects.filter(...).filter(submitted_at__lt=…)``
+    / ``CTFAward.objects.filter(...).filter(created_at__lt=…)`` calls so a refactor
+    that silently drops the freeze cutoff would fail here. The bare-call tests
+    pin the converse: when ``freeze_at`` is ``None``, no ``submitted_at__lt`` /
+    ``created_at__lt`` kwarg appears on the chained filter.
+    """
+
+    @staticmethod
+    def _collect_filter_kwargs(mock_objects: MagicMock) -> list[dict]:
+        """Return every kwargs dict from every `.filter(...)` call anywhere in
+        the chain starting at `mock_objects.filter`. The team scoreboard chains
+        `.filter(...).filter(eligible_q).filter(submitted_at__lt=...)` so the
+        freeze-at kwarg lives at the third level; the participant scoreboard
+        chains only twice. Walking the chain (rather than hardcoding a depth)
+        keeps the assertion stable under future refactors that insert another
+        chain link. MagicMock auto-creates child mocks on every attribute
+        access, so we bound the walk with a depth cap.
+        """
+        collected: list[dict] = []
+        node = mock_objects.filter
+        # 8 levels is well above any real ORM chain (participant scoreboard
+        # uses 2, team scoreboard uses 3 with bracket_id).
+        for _ in range(8):
+            collected.extend(call.kwargs for call in node.call_args_list)
+            node = node.return_value.filter
+        return collected
+
+    def _has_filter_kwarg(self, mock_objects: MagicMock, kwarg: str, value) -> bool:
+        return any(call.get(kwarg) == value for call in self._collect_filter_kwargs(mock_objects))
+
+    def _filter_kwarg_present(self, mock_objects: MagicMock, kwarg: str) -> bool:
+        return any(kwarg in call for call in self._collect_filter_kwargs(mock_objects))
+
+    def test_get_scoreboard_accepts_freeze_at(
+        self,
+        mock_participant_objects,
+        mock_queryset,
+        mock_submission_objects,
+        mock_award_objects,
+    ):
+        """get_scoreboard with freeze_at chains submitted_at__lt / created_at__lt onto the inner querysets."""
         freeze_time = _NOW - timedelta(hours=1)
         p_alice = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=_NOW)
         mock_participant_objects.filter.return_value = mock_queryset
@@ -1020,9 +1059,17 @@ class TestScoreboardFreeze:
 
         assert len(result) == 1
         assert result[0]["name"] == "Alice"
+        assert self._has_filter_kwarg(mock_submission_objects, "submitted_at__lt", freeze_time)
+        assert self._has_filter_kwarg(mock_award_objects, "created_at__lt", freeze_time)
 
-    def test_get_scoreboard_without_freeze_at(self, mock_participant_objects, mock_queryset):
-        """get_scoreboard with freeze_at=None still works (default behaviour)."""
+    def test_get_scoreboard_without_freeze_at(
+        self,
+        mock_participant_objects,
+        mock_queryset,
+        mock_submission_objects,
+        mock_award_objects,
+    ):
+        """get_scoreboard with freeze_at=None does NOT chain a freeze filter."""
         p_alice = _make_participant("Alice", computed_score=100, solve_count=1)
         mock_participant_objects.filter.return_value = mock_queryset
         mock_queryset.__iter__ = MagicMock(return_value=iter([p_alice]))
@@ -1030,9 +1077,17 @@ class TestScoreboardFreeze:
         result = get_scoreboard(uuid4(), freeze_at=None)
 
         assert len(result) == 1
+        assert not self._filter_kwarg_present(mock_submission_objects, "submitted_at__lt")
+        assert not self._filter_kwarg_present(mock_award_objects, "created_at__lt")
 
-    def test_get_team_scoreboard_accepts_freeze_at(self, mock_team_objects, mock_queryset):
-        """get_team_scoreboard with freeze_at runs without error and returns results."""
+    def test_get_team_scoreboard_accepts_freeze_at(
+        self,
+        mock_team_objects,
+        mock_queryset,
+        mock_submission_objects,
+        mock_award_objects,
+    ):
+        """get_team_scoreboard with freeze_at chains submitted_at__lt / created_at__lt onto the inner querysets."""
         freeze_time = _NOW - timedelta(hours=1)
         t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=3)
         mock_team_objects.filter.return_value = mock_queryset
@@ -1042,9 +1097,17 @@ class TestScoreboardFreeze:
 
         assert len(result) == 1
         assert result[0]["name"] == "Alpha"
+        assert self._has_filter_kwarg(mock_submission_objects, "submitted_at__lt", freeze_time)
+        assert self._has_filter_kwarg(mock_award_objects, "created_at__lt", freeze_time)
 
-    def test_get_team_scoreboard_without_freeze_at(self, mock_team_objects, mock_queryset):
-        """get_team_scoreboard with freeze_at=None still works (default behaviour)."""
+    def test_get_team_scoreboard_without_freeze_at(
+        self,
+        mock_team_objects,
+        mock_queryset,
+        mock_submission_objects,
+        mock_award_objects,
+    ):
+        """get_team_scoreboard with freeze_at=None does NOT chain a freeze filter."""
         t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=3)
         mock_team_objects.filter.return_value = mock_queryset
         mock_queryset.__iter__ = MagicMock(return_value=iter([t_alpha]))
@@ -1052,6 +1115,8 @@ class TestScoreboardFreeze:
         result = get_team_scoreboard(uuid4(), freeze_at=None)
 
         assert len(result) == 1
+        assert not self._filter_kwarg_present(mock_submission_objects, "submitted_at__lt")
+        assert not self._filter_kwarg_present(mock_award_objects, "created_at__lt")
 
 
 class TestIsScoreboardFrozen:

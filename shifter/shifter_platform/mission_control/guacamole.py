@@ -175,40 +175,99 @@ def create_rdp_connection_params(
     return params
 
 
-def get_guacamole_auth_token(base_url: str, encrypted_data: str) -> str:
-    """Get an auth token from Guacamole API.
+# HTTP status codes treated as transient for the Guacamole token exchange.
+# 408 (Request Timeout) and 429 (Too Many Requests) are conventional retry candidates;
+# 502/503/504 cover gateway/proxy not-ready while guacamole-client warms a new session.
+_RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 502, 503, 504})
+
+
+def get_guacamole_auth_token(
+    base_url: str,
+    encrypted_data: str,
+    *,
+    attempts: int | None = None,
+    base_delay_ms: int | None = None,
+) -> str:
+    """Get an auth token from Guacamole API, with bounded readiness retry.
+
+    The Guacamole `/api/tokens` exchange can race with internal session
+    propagation immediately after a JSON-auth session is minted; the symptom
+    is a 5xx (or refused connection) on the first attempt followed by success
+    on the next. This function wraps the POST in a bounded exponential
+    backoff so the user's first click does not get redirected to the
+    Guacamole login page (issue #395). Non-retryable errors (4xx other than
+    408/429, malformed responses) surface immediately.
 
     Args:
         base_url: Base Guacamole URL (e.g., 'https://portal.example.com/guacamole')
         encrypted_data: Base64-encoded encrypted JSON payload
+        attempts: Total attempts (1 initial + N-1 retries). Falls back to
+            settings.GUACAMOLE_TOKEN_RETRY_ATTEMPTS.
+        base_delay_ms: Initial backoff in milliseconds, doubled per attempt.
+            Falls back to settings.GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS.
 
     Returns:
         Auth token string
 
     Raises:
-        ValueError: If token request fails
+        ValueError: If the token request fails (after exhausting retries for
+            transient failures, or immediately for non-retryable failures).
     """
+    from django.conf import settings
+
+    if attempts is None:
+        attempts = getattr(settings, "GUACAMOLE_TOKEN_RETRY_ATTEMPTS", 3)
+    if base_delay_ms is None:
+        base_delay_ms = getattr(settings, "GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS", 200)
+    attempts = max(1, int(attempts))
+    base_delay_ms = max(0, int(base_delay_ms))
+
     base_url = base_url.rstrip("/")
     token_url = f"{base_url}/api/tokens"
 
-    # POST the encrypted data to get a token
     req_data = urlencode({"data": encrypted_data}).encode("utf-8")
     req = urllib.request.Request(token_url, data=req_data)  # noqa: S310
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
 
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310 # nosec B310
-            result = json.loads(response.read().decode("utf-8"))
-            return result["authToken"]
-    except urllib.error.HTTPError as e:
-        logger.error("Guacamole token request failed: %s %s", e.code, e.reason)
-        raise ValueError(f"Failed to get Guacamole auth token: {e.reason}") from e
-    except urllib.error.URLError as e:
-        logger.error("Guacamole token request failed: %s", e.reason)
-        raise ValueError(f"Failed to connect to Guacamole: {e.reason}") from e
-    except (KeyError, json.JSONDecodeError) as e:
-        logger.error("Invalid Guacamole token response: %s", e)
-        raise ValueError("Invalid response from Guacamole") from e
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310 # nosec B310
+                result = json.loads(response.read().decode("utf-8"))
+                return result["authToken"]
+        except urllib.error.HTTPError as e:
+            retryable = e.code in _RETRYABLE_HTTP_STATUSES
+            if retryable and attempt + 1 < attempts:
+                delay_s = (base_delay_ms * (2**attempt)) / 1000.0
+                logger.warning(
+                    "Guacamole token request returned %s on attempt %d/%d; retrying in %dms",
+                    e.code,
+                    attempt + 1,
+                    attempts,
+                    int(delay_s * 1000),
+                )
+                time.sleep(delay_s)
+                continue
+            logger.error("Guacamole token request failed: %s %s", e.code, e.reason)
+            raise ValueError(f"Failed to get Guacamole auth token: {e.reason}") from e
+        except urllib.error.URLError as e:
+            if attempt + 1 < attempts:
+                delay_s = (base_delay_ms * (2**attempt)) / 1000.0
+                logger.warning(
+                    "Guacamole token request failed to connect on attempt %d/%d; retrying in %dms",
+                    attempt + 1,
+                    attempts,
+                    int(delay_s * 1000),
+                )
+                time.sleep(delay_s)
+                continue
+            logger.error("Guacamole token request failed: %s", e.reason)
+            raise ValueError(f"Failed to connect to Guacamole: {e.reason}") from e
+        except (KeyError, json.JSONDecodeError) as e:
+            logger.error("Invalid Guacamole token response: %s", e)
+            raise ValueError("Invalid response from Guacamole") from e
+
+    # Unreachable: every branch above either returns or raises.
+    raise ValueError("Failed to get Guacamole auth token: exhausted attempts")
 
 
 def create_guacamole_rdp_url(

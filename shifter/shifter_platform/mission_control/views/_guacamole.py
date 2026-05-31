@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING, Any, Protocol
+from uuid import UUID
 
 from django.conf import settings as django_settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
-from django.views.decorators.http import require_POST
+from django.urls import reverse
+from django.views.decorators.http import require_GET, require_POST
 
+from mission_control.models import GuacamoleBootstrapRequest
 from shared.errors import classify_user_message
 from shared.log_sanitize import safe_log_value
 
@@ -80,6 +83,131 @@ def _get_guac_settings(service_name: str) -> tuple[str, str, str | None]:
     base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", GUACAMOLE_BASE_PATH)
     api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
     return guacamole_signing_secret, base_url, api_url
+
+
+def _authenticated_user_id(user: User) -> int:
+    """Return the authenticated user's integer id."""
+    for attr in ("pk", "id"):
+        value = getattr(user, attr, None)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    raise _ViewError(JsonResponse({"error": "Authenticated user id unavailable"}, status=500))
+
+
+def _response_error_message(response: JsonResponse, default: str) -> str:
+    """Extract a safe error string from a JsonResponse."""
+    try:
+        payload = json.loads(response.content.decode("utf-8"))
+    except (AttributeError, json.JSONDecodeError, UnicodeDecodeError):
+        return default
+    message = payload.get("error") if isinstance(payload, dict) else None
+    return str(message or default)
+
+
+def _wrap_bootstrap_error(operation: str, callback):
+    """Turn view-style URL generation errors into bootstrap failures."""
+    from mission_control.guacamole_bootstrap import BootstrapFailure
+
+    try:
+        return callback()
+    except _ViewError as err:
+        message = _response_error_message(err.response, f"Failed to generate {operation} URL")
+        raise BootstrapFailure(message, status_code=err.response.status_code) from err
+
+
+def _bootstrap_response(
+    *,
+    user: User,
+    protocol: str,
+    target_id: str,
+    build_url,
+) -> JsonResponse:
+    """Enqueue Guacamole bootstrap work and return a pollable response."""
+    from mission_control.guacamole_bootstrap import BootstrapQueueFull, enqueue_guacamole_bootstrap
+
+    try:
+        bootstrap = enqueue_guacamole_bootstrap(
+            user_id=_authenticated_user_id(user),
+            protocol=protocol,
+            target_id=target_id,
+            build_url=build_url,
+        )
+    except _ViewError as err:
+        return err.response
+    except BootstrapQueueFull:
+        logger.warning(
+            "Guacamole bootstrap worker capacity exhausted: user=%s protocol=%s target_id=%s",
+            safe_log_value(user.email),
+            safe_log_value(protocol),
+            safe_log_value(target_id),
+        )
+        response = JsonResponse({"error": "Guacamole session service is busy. Try again shortly."}, status=503)
+        response["Retry-After"] = "1"
+        return response
+
+    status_url = reverse("mission_control:guacamole_bootstrap_status", kwargs={"request_id": bootstrap.id})
+    response = JsonResponse(
+        {
+            "request_id": str(bootstrap.id),
+            "status": bootstrap.status,
+            "status_url": status_url,
+        },
+        status=202,
+    )
+    response["Location"] = status_url
+    response["Retry-After"] = "1"
+    return response
+
+
+@login_required
+@require_GET
+def guacamole_bootstrap_status(request: HttpRequest, request_id: UUID) -> JsonResponse:
+    """Return the current status for an asynchronous Guacamole bootstrap."""
+    user = _get_user(request)
+    try:
+        bootstrap = GuacamoleBootstrapRequest.objects.get(pk=request_id, user_id=_authenticated_user_id(user))
+    except GuacamoleBootstrapRequest.DoesNotExist:
+        return JsonResponse({"error": "Guacamole bootstrap request not found"}, status=404)
+    except _ViewError as err:
+        return err.response
+
+    if bootstrap.is_expired:
+        if bootstrap.status in {
+            GuacamoleBootstrapRequest.Status.PENDING,
+            GuacamoleBootstrapRequest.Status.RUNNING,
+        }:
+            bootstrap.status = GuacamoleBootstrapRequest.Status.FAILED
+            bootstrap.error_message = "Guacamole session request expired"
+            bootstrap.error_status_code = 410
+            bootstrap.save(update_fields=("status", "error_message", "error_status_code", "updated_at"))
+        return JsonResponse(
+            {
+                "request_id": str(bootstrap.id),
+                "status": bootstrap.status,
+                "error": bootstrap.error_message or "Guacamole session request expired",
+            },
+            status=410,
+        )
+
+    payload: dict[str, Any] = {
+        "request_id": str(bootstrap.id),
+        "status": bootstrap.status,
+    }
+    if bootstrap.duration_ms is not None:
+        payload["duration_ms"] = bootstrap.duration_ms
+
+    if bootstrap.status == GuacamoleBootstrapRequest.Status.SUCCEEDED:
+        payload["url"] = bootstrap.result_url
+        return JsonResponse(payload)
+    if bootstrap.status == GuacamoleBootstrapRequest.Status.FAILED:
+        payload["error"] = bootstrap.error_message or "Guacamole session bootstrap failed"
+        return JsonResponse(payload, status=bootstrap.error_status_code)
+
+    response = JsonResponse(payload)
+    response["Retry-After"] = "1"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -154,13 +282,14 @@ def _generate_rdp_url(
 @require_POST
 def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
     """
-    Generate a signed Guacamole URL for RDP access to a range instance.
+    Queue Guacamole URL bootstrap for RDP access to a range instance.
 
     Request body (JSON):
         - instance_uuid: UUID of the instance to connect to
 
     Response (JSON):
-        - url: Signed Guacamole URL that opens RDP session
+        - request_id: bootstrap request UUID
+        - status_url: URL to poll for the signed Guacamole URL
 
     Security:
         - User must have an active range in READY status
@@ -189,22 +318,24 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
             rdp_os,
             file_transfer_available,
         )
-        url = _generate_rdp_url(
-            user_email=user.email,
-            conn_info=conn_info,
-            guacamole_signing_secret=guacamole_signing_secret,
-            guacamole_base_url=guacamole_base_url,
-            guacamole_api_url=guacamole_api_url,
-        )
     except _ViewError as err:
         return err.response
 
-    logger.info(
-        "Guacamole RDP URL generated: user=%s instance_uuid=%s",
-        safe_log_value(user.email),
-        safe_log_value(instance_uuid),
+    return _bootstrap_response(
+        user=user,
+        protocol=GuacamoleBootstrapRequest.Protocol.RDP,
+        target_id=instance_uuid,
+        build_url=lambda: _wrap_bootstrap_error(
+            "RDP",
+            lambda: _generate_rdp_url(
+                user_email=user.email,
+                conn_info=conn_info,
+                guacamole_signing_secret=guacamole_signing_secret,
+                guacamole_base_url=guacamole_base_url,
+                guacamole_api_url=guacamole_api_url,
+            ),
+        ),
     )
-    return JsonResponse({"url": url})
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +418,7 @@ def _generate_ngfw_ssh_url(
 @login_required
 @require_POST
 def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
-    """Generate Guacamole SSH URL for NGFW CLI access.
+    """Queue Guacamole SSH URL bootstrap for NGFW CLI access.
 
     POST /mc/ngfw/<app_id>/ssh-url/
 
@@ -296,7 +427,7 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
         app_id: NGFW UUID
 
     Returns:
-        JsonResponse with {"url": "https://..."}
+        JsonResponse with {"request_id": "...", "status_url": "..."}
 
     Error Responses:
         400: NGFW not found, not accessible, or permission denied
@@ -311,23 +442,30 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
     try:
         ssh_conn = _resolve_ngfw_ssh(user, app_id)
         guacamole_signing_secret, guacamole_base_url, guacamole_api_url = _get_guac_settings("SSH")
-        url = _generate_ngfw_ssh_url(
-            user_email=user.email,
-            app_id=app_id,
-            ssh_conn=ssh_conn,
-            guacamole_signing_secret=guacamole_signing_secret,
-            guacamole_base_url=guacamole_base_url,
-            guacamole_api_url=guacamole_api_url,
-        )
     except _ViewError as err:
         return err.response
 
     logger.info(
-        "Guacamole SSH URL generated for NGFW: user=%s ngfw_uuid=%s",
+        "Guacamole SSH bootstrap queued for NGFW: user=%s ngfw_uuid=%s",
         safe_log_value(user.email),
         safe_log_value(app_id),
     )
-    return JsonResponse({"url": url})
+    return _bootstrap_response(
+        user=user,
+        protocol=GuacamoleBootstrapRequest.Protocol.NGFW_SSH,
+        target_id=str(app_id),
+        build_url=lambda: _wrap_bootstrap_error(
+            "SSH",
+            lambda: _generate_ngfw_ssh_url(
+                user_email=user.email,
+                app_id=app_id,
+                ssh_conn=ssh_conn,
+                guacamole_signing_secret=guacamole_signing_secret,
+                guacamole_base_url=guacamole_base_url,
+                guacamole_api_url=guacamole_api_url,
+            ),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -410,21 +548,13 @@ def _generate_range_ssh_url(
 @login_required
 @require_POST
 def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
-    """Generate a signed Guacamole URL for SSH access to a range instance."""
+    """Queue signed Guacamole URL bootstrap for SSH access to a range instance."""
     user = _get_user(request)
     try:
         data = _parse_json_body(request)
         instance_uuid = _require_instance_uuid(data)
         ssh_info = _resolve_range_ssh(user, instance_uuid)
         guacamole_signing_secret, guacamole_base_url, guacamole_api_url = _get_guac_settings("SSH")
-        url = _generate_range_ssh_url(
-            user_email=user.email,
-            instance_uuid=instance_uuid,
-            ssh_info=ssh_info,
-            guacamole_signing_secret=guacamole_signing_secret,
-            guacamole_base_url=guacamole_base_url,
-            guacamole_api_url=guacamole_api_url,
-        )
     except _ViewError as err:
         return err.response
 
@@ -437,10 +567,25 @@ def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
     safe_email = user.email.replace("\r", " ").replace("\n", " ")[:200]
     safe_uuid = str(instance_uuid).replace("\r", " ").replace("\n", " ")[:200]
     logger.info(
-        "Guacamole SSH URL generated for range instance: user=%s instance_uuid=%s host=%s provider=%s",
+        "Guacamole SSH bootstrap queued for range instance: user=%s instance_uuid=%s host=%s provider=%s",
         safe_email,
         safe_uuid,
         instance_ip,
         cloud_provider_name,
     )
-    return JsonResponse({"url": url})
+    return _bootstrap_response(
+        user=user,
+        protocol=GuacamoleBootstrapRequest.Protocol.RANGE_SSH,
+        target_id=instance_uuid,
+        build_url=lambda: _wrap_bootstrap_error(
+            "SSH",
+            lambda: _generate_range_ssh_url(
+                user_email=user.email,
+                instance_uuid=instance_uuid,
+                ssh_info=ssh_info,
+                guacamole_signing_secret=guacamole_signing_secret,
+                guacamole_base_url=guacamole_base_url,
+                guacamole_api_url=guacamole_api_url,
+            ),
+        ),
+    )

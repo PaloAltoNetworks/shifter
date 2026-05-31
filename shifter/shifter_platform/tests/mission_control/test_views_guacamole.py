@@ -12,6 +12,8 @@ from uuid import uuid4
 import pytest
 from django.test import RequestFactory
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.fixture
 def rf():
@@ -27,12 +29,73 @@ def mock_user():
     return user
 
 
+@pytest.fixture(autouse=True)
+def guacamole_bootstrap_inline(settings):
+    settings.GUACAMOLE_BOOTSTRAP_INLINE = True
+
+
 def _post(rf, path, payload, user):
     body = json.dumps(payload) if not isinstance(payload, str) else payload
     req = rf.post(path, data=body, content_type="application/json")
     req.user = user
     req.session = {}
     return req
+
+
+def _json(response):
+    return json.loads(response.content)
+
+
+def _get_status(rf, user, request_id):
+    from mission_control.views import guacamole_bootstrap_status
+
+    request = rf.get(f"/mc/api/guacamole/bootstrap/{request_id}/")
+    request.user = user
+    return guacamole_bootstrap_status(request, request_id)
+
+
+class TestGuacamoleBootstrapStatus:
+    def test_returns_404_for_other_user(self, rf, mock_user):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        bootstrap = GuacamoleBootstrapRequest.objects.create(
+            user_id=2,
+            protocol=GuacamoleBootstrapRequest.Protocol.RDP,
+            target_id="vm-1",
+            status=GuacamoleBootstrapRequest.Status.SUCCEEDED,
+            result_url="https://guac/x",
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        response = _get_status(rf, mock_user, bootstrap.id)
+
+        assert response.status_code == 404
+
+    def test_marks_pending_bootstrap_expired(self, rf, mock_user):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        bootstrap = GuacamoleBootstrapRequest.objects.create(
+            user_id=mock_user.id,
+            protocol=GuacamoleBootstrapRequest.Protocol.RDP,
+            target_id="vm-1",
+            status=GuacamoleBootstrapRequest.Status.PENDING,
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+
+        response = _get_status(rf, mock_user, bootstrap.id)
+
+        assert response.status_code == 410
+        assert _json(response)["error"] == "Guacamole session request expired"
+        bootstrap.refresh_from_db()
+        assert bootstrap.status == GuacamoleBootstrapRequest.Status.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +149,7 @@ class TestGuacamoleRDPURL:
             response = guacamole_rdp_url(request)
         assert response.status_code == 400
 
-    def test_returns_url_on_success(self, rf, mock_user, settings):
+    def test_returns_bootstrap_status_url_on_success(self, rf, mock_user, settings):
         from mission_control.views import guacamole_rdp_url
 
         settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
@@ -108,10 +171,14 @@ class TestGuacamoleRDPURL:
             ),
         ):
             response = guacamole_rdp_url(request)
-        assert response.status_code == 200
-        assert json.loads(response.content)["url"] == "https://guac/abc"
+        assert response.status_code == 202
+        data = _json(response)
+        assert data["status"] == "succeeded"
+        status = _get_status(rf, mock_user, data["request_id"])
+        assert status.status_code == 200
+        assert _json(status)["url"] == "https://guac/abc"
 
-    def test_returns_500_when_url_generation_raises(self, rf, mock_user, settings):
+    def test_status_returns_500_when_url_generation_raises(self, rf, mock_user, settings):
         from mission_control.views import guacamole_rdp_url
 
         settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
@@ -132,7 +199,10 @@ class TestGuacamoleRDPURL:
             ),
         ):
             response = guacamole_rdp_url(request)
-        assert response.status_code == 500
+        assert response.status_code == 202
+        status = _get_status(rf, mock_user, _json(response)["request_id"])
+        assert status.status_code == 500
+        assert _json(status)["error"] == "Failed to generate RDP URL"
 
 
 class TestSftpRootHelper:
@@ -222,7 +292,7 @@ class TestGuacamoleSSHURL:
             response = guacamole_ssh_url(request)
         assert response.status_code == 500
 
-    def test_returns_url_on_success(self, rf, mock_user, settings):
+    def test_returns_bootstrap_status_url_on_success(self, rf, mock_user, settings):
         from mission_control.views import guacamole_ssh_url
 
         settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
@@ -235,10 +305,14 @@ class TestGuacamoleSSHURL:
             ),
         ):
             response = guacamole_ssh_url(request)
-        assert response.status_code == 200
-        assert json.loads(response.content)["url"] == "https://guac/x"
+        assert response.status_code == 202
+        data = _json(response)
+        assert data["status"] == "succeeded"
+        status = _get_status(rf, mock_user, data["request_id"])
+        assert status.status_code == 200
+        assert _json(status)["url"] == "https://guac/x"
 
-    def test_returns_500_when_url_gen_raises_valueerror(self, rf, mock_user, settings):
+    def test_status_returns_500_when_url_gen_raises_valueerror(self, rf, mock_user, settings):
         from mission_control.views import guacamole_ssh_url
 
         settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
@@ -251,9 +325,12 @@ class TestGuacamoleSSHURL:
             ),
         ):
             response = guacamole_ssh_url(request)
-        assert response.status_code == 500
+        assert response.status_code == 202
+        status = _get_status(rf, mock_user, _json(response)["request_id"])
+        assert status.status_code == 500
+        assert _json(status)["error"] == "Failed to generate SSH URL"
 
-    def test_returns_500_when_url_gen_raises_unexpected(self, rf, mock_user, settings):
+    def test_status_returns_500_when_url_gen_raises_unexpected(self, rf, mock_user, settings):
         from mission_control.views import guacamole_ssh_url
 
         settings.GUACAMOLE_JSON_AUTH_SECRET = "x" * 32
@@ -266,7 +343,10 @@ class TestGuacamoleSSHURL:
             ),
         ):
             response = guacamole_ssh_url(request)
-        assert response.status_code == 500
+        assert response.status_code == 202
+        status = _get_status(rf, mock_user, _json(response)["request_id"])
+        assert status.status_code == 500
+        assert _json(status)["error"] == "Internal server error"
 
 
 # ---------------------------------------------------------------------------

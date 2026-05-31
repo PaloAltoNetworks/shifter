@@ -108,6 +108,28 @@ describe('terminal-guacamole', () => {
         expect(globalThis.fetch.mock.calls[0][0]).toBe('/api/rdp/');
     });
 
+    test('polls bootstrap status URL before opening popup', async () => {
+        globalThis.fetch
+            .mockResolvedValueOnce({
+                ok: true,
+                json: jest.fn().mockResolvedValue({ request_id: 'req-1', status_url: '/api/status/req-1/' }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: jest.fn().mockResolvedValue({ status: 'succeeded', url: 'https://guac/async' }),
+            });
+        loadScript();
+
+        document.querySelector('.ssh-btn[data-uuid="kali-uuid"]').click();
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        expect(globalThis.fetch.mock.calls[1][0]).toBe('/api/status/req-1/');
+        expect(openMock).toHaveBeenCalledWith('https://guac/async', '_blank');
+    });
+
     test('alerts when no instance UUID is set on the button', async () => {
         loadScript();
         document.querySelector('.ssh-btn[data-uuid=""]').click();

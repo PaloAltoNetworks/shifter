@@ -196,18 +196,25 @@ def get_guacamole_auth_token(base_url: str, encrypted_data: str) -> str:
     req = urllib.request.Request(token_url, data=req_data)  # noqa: S310
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
 
+    started = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310 # nosec B310
             result = json.loads(response.read().decode("utf-8"))
-            return result["authToken"]
+            token = result["authToken"]
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            logger.info("Guacamole token request succeeded: duration_ms=%s", duration_ms)
+            return token
     except urllib.error.HTTPError as e:
-        logger.error("Guacamole token request failed: %s %s", e.code, e.reason)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        logger.error("Guacamole token request failed: %s %s duration_ms=%s", e.code, e.reason, duration_ms)
         raise ValueError(f"Failed to get Guacamole auth token: {e.reason}") from e
     except urllib.error.URLError as e:
-        logger.error("Guacamole token request failed: %s", e.reason)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        logger.error("Guacamole token request failed: %s duration_ms=%s", e.reason, duration_ms)
         raise ValueError(f"Failed to connect to Guacamole: {e.reason}") from e
     except (KeyError, json.JSONDecodeError) as e:
-        logger.error("Invalid Guacamole token response: %s", e)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        logger.error("Invalid Guacamole token response: %s duration_ms=%s", e, duration_ms)
         raise ValueError("Invalid response from Guacamole") from e
 
 

@@ -6,6 +6,46 @@
  * inline JS for the click-handler wiring. Sonar's `Web:LongJavaScriptCheck`
  * (issue #370) flagged the previous inline implementation.
  */
+const BOOTSTRAP_POLL_INTERVAL_MS = 1000;
+const BOOTSTRAP_POLL_ATTEMPTS = 60;
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function readJson(response) {
+    try {
+        return await response.json();
+    } catch {
+        return {};
+    }
+}
+
+async function pollGuacamoleBootstrap(statusUrl, sessionLabel) {
+    for (let attempt = 0; attempt < BOOTSTRAP_POLL_ATTEMPTS; attempt += 1) {
+        const response = await fetch(statusUrl, {
+            headers: { 'Accept': 'application/json' },
+        });
+        const data = await readJson(response);
+        if (!response.ok) {
+            throw new Error(data.error || `Failed to generate ${sessionLabel} URL`);
+        }
+        if (data.url) {
+            return data.url;
+        }
+        await delay(BOOTSTRAP_POLL_INTERVAL_MS);
+    }
+    throw new Error(`${sessionLabel} session request timed out`);
+}
+
+async function resolveGuacamoleUrl(data, sessionLabel) {
+    if (data.url) {
+        return data.url;
+    }
+    if (data.status_url) {
+        return pollGuacamoleBootstrap(data.status_url, sessionLabel);
+    }
+    throw new Error('Server returned invalid response');
+}
+
 async function openGuacamoleSession(button, instanceUuid, endpointUrl, sessionLabel, csrfToken) {
     if (!instanceUuid) {
         alert('Instance not available');
@@ -25,15 +65,16 @@ async function openGuacamoleSession(button, instanceUuid, endpointUrl, sessionLa
             body: JSON.stringify({ instance_uuid: instanceUuid }),
         });
 
-        const data = await response.json();
+        const data = await readJson(response);
         if (!response.ok) {
             throw new Error(data.error || `Failed to generate ${sessionLabel} URL`);
         }
 
-        const popup = globalThis.open(data.url, '_blank');
+        const sessionUrl = await resolveGuacamoleUrl(data, sessionLabel);
+        const popup = globalThis.open(sessionUrl, '_blank');
         if (!popup || popup.closed || popup.closed === undefined) {
             if (confirm(`Popup blocked. Click OK to open the ${sessionLabel} session in this tab.`)) {
-                globalThis.location.href = data.url;
+                globalThis.location.href = sessionUrl;
             } else {
                 throw new Error('Popup blocked by browser');
             }

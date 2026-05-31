@@ -6,7 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.test import RequestFactory
 
-from mission_control.views import guacamole_ssh_url
+from mission_control.views import guacamole_bootstrap_status, guacamole_ssh_url
+
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
@@ -21,6 +23,11 @@ def mock_user():
     user.email = "test@example.com"
     user.is_authenticated = True
     return user
+
+
+@pytest.fixture(autouse=True)
+def guacamole_bootstrap_inline(settings):
+    settings.GUACAMOLE_BOOTSTRAP_INLINE = True
 
 
 @pytest.fixture
@@ -50,6 +57,16 @@ def _post_request(rf, user, payload=None):
     return request
 
 
+def _json(response):
+    return json.loads(response.content)
+
+
+def _status_response(rf, user, request_id):
+    request = rf.get(f"/mc/api/guacamole/bootstrap/{request_id}/")
+    request.user = user
+    return guacamole_bootstrap_status(request, request_id)
+
+
 class TestApiInstanceSSHURL:
     def test_returns_guacamole_url_for_ready_instance(self, rf, mock_user, mock_ssh_info, settings):
         settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
@@ -66,9 +83,11 @@ class TestApiInstanceSSHURL:
         ):
             response = guacamole_ssh_url(request)
 
-        assert response.status_code == 200
-        data = json.loads(response.content)
-        assert data["url"].startswith("https://guac.example.com")
+        assert response.status_code == 202
+        data = _json(response)
+        status = _status_response(rf, mock_user, data["request_id"])
+        assert status.status_code == 200
+        assert _json(status)["url"] == "https://guac.example.com/#/client/abc?token=xyz"
 
     def test_calls_service_with_user_and_uuid(self, rf, mock_user, mock_ssh_info, settings):
         settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"

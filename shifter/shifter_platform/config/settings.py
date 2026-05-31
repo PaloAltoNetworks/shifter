@@ -339,6 +339,12 @@ GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
 GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
 # Internal URL for server-to-server API calls (defaults to base URL if not set)
 GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMOLE_BASE_URL
+# Bounded async bootstrap workers for Guacamole token creation. Each worker may
+# hold a blocking Guacamole /api/tokens request, so keep this intentionally low
+# and scale with portal instance count.
+GUACAMOLE_BOOTSTRAP_WORKERS = int(os.environ.get("GUACAMOLE_BOOTSTRAP_WORKERS", "4"))
+GUACAMOLE_BOOTSTRAP_TTL_SECONDS = int(os.environ.get("GUACAMOLE_BOOTSTRAP_TTL_SECONDS", "300"))
+GUACAMOLE_BOOTSTRAP_INLINE = _env_bool("GUACAMOLE_BOOTSTRAP_INLINE", False)
 
 # ------------------------------------------------------------------------------
 # CTF Configuration

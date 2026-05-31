@@ -84,6 +84,10 @@ from ._guacamole import (
     guacamole_rdp_url,
     guacamole_ssh_url,
 )
+from ._guacamole_bootstrap import (
+    guacamole_bootstrap_open,
+    guacamole_bootstrap_status,
+)
 from ._ngfw import (
     api_ngfw_create,
     api_ngfw_destroy,
@@ -170,6 +174,8 @@ __all__ = (
     "get_active_range",
     "get_allowed_extensions",
     "get_range",
+    "guacamole_bootstrap_open",
+    "guacamole_bootstrap_status",
     "guacamole_rdp_url",
     "guacamole_ssh_url",
     "help_page",

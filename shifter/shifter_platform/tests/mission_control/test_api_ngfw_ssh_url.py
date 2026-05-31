@@ -7,7 +7,9 @@ import pytest
 from django.test import RequestFactory
 
 from engine.ssh import SSHConnection
-from mission_control.views import api_ngfw_ssh_url
+from mission_control.views import api_ngfw_ssh_url, guacamole_bootstrap_status
+
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
@@ -22,6 +24,11 @@ def mock_user():
     user.email = "test@example.com"
     user.is_authenticated = True
     return user
+
+
+@pytest.fixture(autouse=True)
+def guacamole_bootstrap_inline(settings):
+    settings.GUACAMOLE_BOOTSTRAP_INLINE = True
 
 
 @pytest.fixture
@@ -54,6 +61,16 @@ def _post_request(rf, user):
     return request
 
 
+def _json(response):
+    return json.loads(response.content)
+
+
+def _status_response(rf, user, request_id):
+    request = rf.get(f"/mc/api/guacamole/bootstrap/{request_id}/")
+    request.user = user
+    return guacamole_bootstrap_status(request, request_id)
+
+
 class TestApiNGFWSSHURL:
     """Tests for api_ngfw_ssh_url view."""
 
@@ -77,10 +94,11 @@ class TestApiNGFWSSHURL:
         ):
             response = api_ngfw_ssh_url(request, NGFW_UUID)
 
-        assert response.status_code == 200
-        data = json.loads(response.content)
-        assert "url" in data
-        assert data["url"].startswith("https://guac.example.com")
+        assert response.status_code == 202
+        data = _json(response)
+        status = _status_response(rf, mock_user, data["request_id"])
+        assert status.status_code == 200
+        assert _json(status)["url"] == "https://guac.example.com/#/client/abc?token=xyz"
 
     def test_calls_connect_ngfw_terminal_with_user_and_uuid(self, rf, mock_user, mock_ssh_connection, settings):
         """View calls connect_ngfw_terminal with authenticated user and NGFW UUID."""
@@ -236,8 +254,10 @@ class TestApiNGFWSSHURL:
         ):
             response = api_ngfw_ssh_url(request, NGFW_UUID)
 
-        assert response.status_code == 500
-        data = json.loads(response.content)
+        assert response.status_code == 202
+        status = _status_response(rf, mock_user, _json(response)["request_id"])
+        assert status.status_code == 500
+        data = _json(status)
         assert "error" in data
         assert "Failed to generate SSH URL" in data["error"]
 

@@ -114,12 +114,12 @@ class TestApiInstanceSSHURL:
         ):
             guacamole_ssh_url(request)
 
-        call_kwargs = mock_guac.call_args[1]
-        assert call_kwargs["connection_name"] == "target-ubuntu"
-        assert call_kwargs["hostname"] == "10.50.1.10"
-        assert call_kwargs["port"] == 22
-        assert call_kwargs["ssh_username"] == "ubuntu"
-        assert "BEGIN " + "RSA PRIVATE " + "KEY" in call_kwargs["ssh_private_key"]
+        req = mock_guac.call_args[0][0]
+        assert req.connection_name == "target-ubuntu"
+        assert req.hostname == "10.50.1.10"
+        assert req.port == 22
+        assert req.ssh_username == "ubuntu"
+        assert "BEGIN " + "RSA PRIVATE " + "KEY" in req.ssh_private_key
 
     def test_returns_400_for_invalid_json(self, rf, mock_user):
         request = rf.post(

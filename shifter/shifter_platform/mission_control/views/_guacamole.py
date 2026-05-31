@@ -151,22 +151,24 @@ def _generate_rdp_url(
     guacamole_api_url: str | None,
 ) -> str:
     """Generate the Guacamole RDP URL or raise ``_ViewError``."""
-    from mission_control.guacamole import create_guacamole_rdp_url
+    from mission_control.guacamole import GuacRDPUrlRequest, create_guacamole_rdp_url
 
     sftp_root_directory = _sftp_root_for_os(conn_info.get("os_type"))
     try:
         return create_guacamole_rdp_url(
-            base_url=guacamole_base_url,
-            secret_key=guacamole_signing_secret,
-            username=user_email,
-            connection_name=conn_info["connection_name"],
-            hostname=conn_info["private_ip"],
-            expires_minutes=5,
-            rdp_username=conn_info.get("rdp_username"),
-            rdp_password=conn_info.get("rdp_password"),
-            api_base_url=guacamole_api_url,
-            sftp_root_directory=sftp_root_directory,
-            sftp_private_key=conn_info.get("ssh_key"),
+            GuacRDPUrlRequest(
+                base_url=guacamole_base_url,
+                secret_key=guacamole_signing_secret,
+                username=user_email,
+                connection_name=conn_info["connection_name"],
+                hostname=conn_info["private_ip"],
+                expires_minutes=5,
+                rdp_username=conn_info.get("rdp_username"),
+                rdp_password=conn_info.get("rdp_password"),
+                api_base_url=guacamole_api_url,
+                sftp_root_directory=sftp_root_directory,
+                sftp_private_key=conn_info.get("ssh_key"),
+            )
         )
     except ValueError as e:
         logger.exception("Failed to generate Guacamole URL")
@@ -279,20 +281,22 @@ def _generate_ngfw_ssh_url(
     guacamole_api_url: str | None,
 ) -> str:
     """Generate the Guacamole NGFW SSH URL or raise ``_ViewError``."""
-    from mission_control.guacamole import create_guacamole_ssh_url
+    from mission_control.guacamole import GuacSSHUrlRequest, create_guacamole_ssh_url
 
     try:
         return create_guacamole_ssh_url(
-            base_url=guacamole_base_url,
-            secret_key=guacamole_signing_secret,
-            username=user_email,
-            connection_name=f"ngfw-{app_id}",
-            hostname=ssh_conn.host,
-            port=ssh_conn.port,
-            ssh_username=ssh_conn.username,
-            ssh_private_key=ssh_conn.private_key,
-            expires_minutes=5,
-            api_base_url=guacamole_api_url,
+            GuacSSHUrlRequest(
+                base_url=guacamole_base_url,
+                secret_key=guacamole_signing_secret,
+                username=user_email,
+                connection_name=f"ngfw-{app_id}",
+                hostname=ssh_conn.host,
+                port=ssh_conn.port,
+                ssh_username=ssh_conn.username,
+                ssh_private_key=ssh_conn.private_key,
+                expires_minutes=5,
+                api_base_url=guacamole_api_url,
+            )
         )
     except ValueError as e:
         logger.exception(
@@ -409,20 +413,22 @@ def _generate_range_ssh_url(
     guacamole_api_url: str | None,
 ) -> str:
     """Generate the Guacamole range SSH URL or raise ``_ViewError``."""
-    from mission_control.guacamole import create_guacamole_ssh_url
+    from mission_control.guacamole import GuacSSHUrlRequest, create_guacamole_ssh_url
 
     try:
         return create_guacamole_ssh_url(
-            base_url=guacamole_base_url,
-            secret_key=guacamole_signing_secret,
-            username=user_email,
-            connection_name=ssh_info["connection_name"],
-            hostname=ssh_info["host"],
-            port=ssh_info["port"],
-            ssh_username=ssh_info["username"],
-            ssh_private_key=ssh_info["private_key"],
-            expires_minutes=5,
-            api_base_url=guacamole_api_url,
+            GuacSSHUrlRequest(
+                base_url=guacamole_base_url,
+                secret_key=guacamole_signing_secret,
+                username=user_email,
+                connection_name=ssh_info["connection_name"],
+                hostname=ssh_info["host"],
+                port=ssh_info["port"],
+                ssh_username=ssh_info["username"],
+                ssh_private_key=ssh_info["private_key"],
+                expires_minutes=5,
+                api_base_url=guacamole_api_url,
+            )
         )
     except ValueError as e:
         logger.exception(

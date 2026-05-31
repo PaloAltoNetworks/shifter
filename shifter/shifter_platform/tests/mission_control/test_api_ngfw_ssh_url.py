@@ -131,12 +131,12 @@ class TestApiNGFWSSHURL:
             api_ngfw_ssh_url(request, NGFW_UUID)
 
             mock_guac.assert_called_once()
-            call_kwargs = mock_guac.call_args[1]
-            assert call_kwargs["hostname"] == "10.1.5.10"
-            assert call_kwargs["port"] == 22
-            assert call_kwargs["ssh_username"] == "admin"
+            req = mock_guac.call_args[0][0]
+            assert req.hostname == "10.1.5.10"
+            assert req.port == 22
+            assert req.ssh_username == "admin"
             key_marker = "BEGIN " + "RSA PRIVATE " + "KEY"
-            assert key_marker in call_kwargs["ssh_private_key"]
+            assert key_marker in req.ssh_private_key
 
     # -------------------------------------------------------------------------
     # Authorization

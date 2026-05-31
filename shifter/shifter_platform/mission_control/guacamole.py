@@ -14,6 +14,7 @@ import json
 import logging
 import time
 import urllib.request
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
@@ -105,36 +106,45 @@ def sign_and_encrypt_payload(payload: dict[str, Any], secret_key: str) -> str:
     return base64.b64encode(encrypted_data).decode("utf-8")
 
 
-def create_rdp_connection_params(
-    hostname: str,
-    port: int = 3389,
-    username: str | None = None,
-    password: str | None = None,
-    ignore_cert: bool = True,
-    security: str = "any",
-    sftp_root_directory: str | None = None,
-    sftp_private_key: str | None = None,
-) -> dict[str, str]:
+@dataclass(frozen=True)
+class RDPConnectionParams:
+    """Inputs for ``create_rdp_connection_params``.
+
+    Bundling avoids the function's long positional/keyword signature
+    (Sonar python:S107) while preserving every field's semantics.
+    """
+
+    hostname: str
+    port: int = 3389
+    username: str | None = None
+    password: str | None = None
+    ignore_cert: bool = True
+    security: str = "any"
+    sftp_root_directory: str | None = None
+    sftp_private_key: str | None = None
+
+
+def create_rdp_connection_params(req: RDPConnectionParams) -> dict[str, str]:
     """Create RDP connection parameters for Guacamole.
 
     Args:
-        hostname: Target host IP or hostname
-        port: RDP port (default 3389)
-        username: Optional RDP username
-        password: Optional RDP password
-        ignore_cert: Whether to ignore certificate errors
-        security: Security mode ('any', 'nla', 'tls', 'rdp')
-        sftp_root_directory: Root directory for SFTP file transfers
-        sftp_private_key: PEM-encoded private key for SFTP (used instead of password)
+        req: Bundled RDP connection inputs (see ``RDPConnectionParams``).
 
     Returns:
         Dictionary of RDP parameters for Guacamole
     """
+    hostname = req.hostname
+    port = req.port
+    username = req.username
+    password = req.password
+    sftp_root_directory = req.sftp_root_directory
+    sftp_private_key = req.sftp_private_key
+
     params: dict[str, str] = {
         "hostname": hostname,
         "port": str(port),
-        "ignore-cert": "true" if ignore_cert else "false",
-        "security": security,
+        "ignore-cert": "true" if req.ignore_cert else "false",
+        "security": req.security,
         "resize-method": "display-update",
         # Clipboard support
         "disable-copy": "false",
@@ -179,6 +189,38 @@ def create_rdp_connection_params(
 # 408 (Request Timeout) and 429 (Too Many Requests) are conventional retry candidates;
 # 502/503/504 cover gateway/proxy not-ready while guacamole-client warms a new session.
 _RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 502, 503, 504})
+
+
+def _classify_token_exchange_error(
+    exc: Exception,
+) -> tuple[bool, str, tuple[Any, ...], str]:
+    """Classify a token-exchange exception for the retry loop.
+
+    Returns ``(retryable, log_template, log_args, error_message)`` so the
+    caller can decide whether to retry, what to log, and what user-facing
+    ValueError to raise on exhaustion / non-retryable failure.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        retryable = exc.code in _RETRYABLE_HTTP_STATUSES
+        return (
+            retryable,
+            "Guacamole token request returned %s",
+            (exc.code,),
+            f"Failed to get Guacamole auth token: {exc.reason}",
+        )
+    if isinstance(exc, urllib.error.URLError):
+        return (
+            True,
+            "Guacamole token request failed to connect",
+            (),
+            f"Failed to connect to Guacamole: {exc.reason}",
+        )
+    return (
+        False,
+        "Invalid Guacamole token response",
+        (),
+        "Invalid response from Guacamole",
+    )
 
 
 def get_guacamole_auth_token(
@@ -226,64 +268,64 @@ def get_guacamole_auth_token(
     token_url = f"{base_url}/api/tokens"
 
     req_data = urlencode({"data": encrypted_data}).encode("utf-8")
+
+    # which is a server-controlled https endpoint, not user input.
     req = urllib.request.Request(token_url, data=req_data)  # noqa: S310
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
 
     for attempt in range(attempts):
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310 # nosec B310
+            with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310  # nosec B310
                 result = json.loads(response.read().decode("utf-8"))
                 return result["authToken"]
-        except urllib.error.HTTPError as e:
-            retryable = e.code in _RETRYABLE_HTTP_STATUSES
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            KeyError,
+            json.JSONDecodeError,
+        ) as e:
+            retryable, log_template, log_args, err_msg = _classify_token_exchange_error(e)
             if retryable and attempt + 1 < attempts:
-                delay_s = (base_delay_ms * (2**attempt)) / 1000.0
+                delay_ms = base_delay_ms * (2**attempt)
                 logger.warning(
-                    "Guacamole token request returned %s on attempt %d/%d; retrying in %dms",
-                    e.code,
+                    log_template + " on attempt %d/%d; retrying in %dms",
+                    *log_args,
                     attempt + 1,
                     attempts,
-                    int(delay_s * 1000),
+                    delay_ms,
                 )
-                time.sleep(delay_s)
+                time.sleep(delay_ms / 1000.0)
                 continue
-            logger.error("Guacamole token request failed: %s %s", e.code, e.reason)
-            raise ValueError(f"Failed to get Guacamole auth token: {e.reason}") from e
-        except urllib.error.URLError as e:
-            if attempt + 1 < attempts:
-                delay_s = (base_delay_ms * (2**attempt)) / 1000.0
-                logger.warning(
-                    "Guacamole token request failed to connect on attempt %d/%d; retrying in %dms",
-                    attempt + 1,
-                    attempts,
-                    int(delay_s * 1000),
-                )
-                time.sleep(delay_s)
-                continue
-            logger.error("Guacamole token request failed: %s", e.reason)
-            raise ValueError(f"Failed to connect to Guacamole: {e.reason}") from e
-        except (KeyError, json.JSONDecodeError) as e:
-            logger.error("Invalid Guacamole token response: %s", e)
-            raise ValueError("Invalid response from Guacamole") from e
+            logger.exception(log_template, *log_args)
+            raise ValueError(err_msg) from e
 
     # Unreachable: every branch above either returns or raises.
     raise ValueError("Failed to get Guacamole auth token: exhausted attempts")
 
 
-def create_guacamole_rdp_url(
-    base_url: str,
-    secret_key: str,
-    username: str,
-    connection_name: str,
-    hostname: str,
-    port: int = 3389,
-    expires_minutes: int = 5,
-    rdp_username: str | None = None,
-    rdp_password: str | None = None,
-    api_base_url: str | None = None,
-    sftp_root_directory: str | None = None,
-    sftp_private_key: str | None = None,
-) -> str:
+@dataclass(frozen=True)
+class GuacRDPUrlRequest:
+    """Inputs for ``create_guacamole_rdp_url``.
+
+    Bundling collapses the function's long parameter list (Sonar
+    python:S107) into a single object without changing semantics.
+    """
+
+    base_url: str
+    secret_key: str
+    username: str
+    connection_name: str
+    hostname: str
+    port: int = 3389
+    expires_minutes: int = 5
+    rdp_username: str | None = None
+    rdp_password: str | None = None
+    api_base_url: str | None = None
+    sftp_root_directory: str | None = None
+    sftp_private_key: str | None = None
+
+
+def create_guacamole_rdp_url(req: GuacRDPUrlRequest) -> str:
     """Create a signed Guacamole URL for RDP access.
 
     This function:
@@ -292,18 +334,7 @@ def create_guacamole_rdp_url(
     3. Returns a URL that auto-connects to the RDP session
 
     Args:
-        base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
-        secret_key: Hex string key (64 characters / 256-bit preferred)
-        username: User's email/username for Guacamole session
-        connection_name: Identifier for this connection
-        hostname: Target host IP for RDP
-        port: RDP port (default 3389)
-        expires_minutes: Minutes until URL expires
-        rdp_username: Username for RDP login
-        rdp_password: Password for RDP login
-        api_base_url: Internal URL for server-to-server API calls (defaults to base_url)
-        sftp_root_directory: Root directory for SFTP file transfers
-        sftp_private_key: PEM-encoded private key for SFTP (used instead of password)
+        req: Bundled RDP URL inputs (see ``GuacRDPUrlRequest``).
 
     Returns:
         Full Guacamole URL with auth token that auto-connects to RDP
@@ -313,34 +344,36 @@ def create_guacamole_rdp_url(
     """
     # Create connection definition
     connections = {
-        connection_name: {
+        req.connection_name: {
             "protocol": "rdp",
             "parameters": create_rdp_connection_params(
-                hostname,
-                port,
-                username=rdp_username,
-                password=rdp_password,
-                sftp_root_directory=sftp_root_directory,
-                sftp_private_key=sftp_private_key,
+                RDPConnectionParams(
+                    hostname=req.hostname,
+                    port=req.port,
+                    username=req.rdp_username,
+                    password=req.rdp_password,
+                    sftp_root_directory=req.sftp_root_directory,
+                    sftp_private_key=req.sftp_private_key,
+                )
             ),
         }
     }
 
     # Create and sign payload
-    payload = create_guacamole_auth_payload(username, connections, expires_minutes)
-    encrypted_data = sign_and_encrypt_payload(payload, secret_key)
+    payload = create_guacamole_auth_payload(req.username, connections, req.expires_minutes)
+    encrypted_data = sign_and_encrypt_payload(payload, req.secret_key)
 
     # Get auth token from Guacamole API (use internal URL if provided)
-    api_url = (api_base_url or base_url).rstrip("/")
+    api_url = (req.api_base_url or req.base_url).rstrip("/")
     auth_token = get_guacamole_auth_token(api_url, encrypted_data)
 
     # Build client identifier: connection_name + NULL + "c" + NULL + "json"
     # This tells Guacamole to auto-connect to the specified connection from JSON auth
-    client_id = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode().rstrip("=")
+    client_id = base64.b64encode(f"{req.connection_name}\0c\0json".encode()).decode().rstrip("=")
 
     # Return public URL for browser
-    base_url = base_url.rstrip("/")
-    return f"{base_url}/#/client/{client_id}?token={auth_token}"
+    public_url = req.base_url.rstrip("/")
+    return f"{public_url}/#/client/{client_id}?token={auth_token}"
 
 
 def create_ssh_connection_params(
@@ -378,18 +411,27 @@ def create_ssh_connection_params(
     return params
 
 
-def create_guacamole_ssh_url(
-    base_url: str,
-    secret_key: str,
-    username: str,
-    connection_name: str,
-    hostname: str,
-    port: int = 22,
-    ssh_username: str = "admin",
-    ssh_private_key: str | None = None,
-    expires_minutes: int = 5,
-    api_base_url: str | None = None,
-) -> str:
+@dataclass(frozen=True)
+class GuacSSHUrlRequest:
+    """Inputs for ``create_guacamole_ssh_url``.
+
+    Bundling collapses the function's long parameter list (Sonar
+    python:S107) into a single object without changing semantics.
+    """
+
+    base_url: str
+    secret_key: str
+    username: str
+    connection_name: str
+    hostname: str
+    port: int = 22
+    ssh_username: str = "admin"
+    ssh_private_key: str | None = None
+    expires_minutes: int = 5
+    api_base_url: str | None = None
+
+
+def create_guacamole_ssh_url(req: GuacSSHUrlRequest) -> str:
     """Create a signed Guacamole URL for SSH access.
 
     This function:
@@ -398,16 +440,7 @@ def create_guacamole_ssh_url(
     3. Returns a URL that auto-connects to the SSH session
 
     Args:
-        base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
-        secret_key: Hex string key (64 characters / 256-bit preferred)
-        username: User's email/username for Guacamole session
-        connection_name: Identifier for this connection
-        hostname: Target host IP for SSH
-        port: SSH port (default 22)
-        ssh_username: Username for SSH login (default 'admin')
-        ssh_private_key: PEM-encoded private key for authentication
-        expires_minutes: Minutes until URL expires (default 5)
-        api_base_url: Internal URL for server-to-server API calls (defaults to base_url)
+        req: Bundled SSH URL inputs (see ``GuacSSHUrlRequest``).
 
     Returns:
         Full Guacamole URL with auth token that auto-connects to SSH
@@ -417,29 +450,29 @@ def create_guacamole_ssh_url(
     """
     # Create connection definition
     connections = {
-        connection_name: {
+        req.connection_name: {
             "protocol": "ssh",
             "parameters": create_ssh_connection_params(
-                username=ssh_username,
-                hostname=hostname,
-                port=port,
-                ssh_private_key=ssh_private_key,
+                username=req.ssh_username,
+                hostname=req.hostname,
+                port=req.port,
+                ssh_private_key=req.ssh_private_key,
             ),
         }
     }
 
     # Create and sign payload
-    payload = create_guacamole_auth_payload(username, connections, expires_minutes)
-    encrypted_data = sign_and_encrypt_payload(payload, secret_key)
+    payload = create_guacamole_auth_payload(req.username, connections, req.expires_minutes)
+    encrypted_data = sign_and_encrypt_payload(payload, req.secret_key)
 
     # Get auth token from Guacamole API (use internal URL if provided)
-    api_url = (api_base_url or base_url).rstrip("/")
+    api_url = (req.api_base_url or req.base_url).rstrip("/")
     auth_token = get_guacamole_auth_token(api_url, encrypted_data)
 
     # Build client identifier: connection_name + NULL + "c" + NULL + "json"
     # This tells Guacamole to auto-connect to the specified connection from JSON auth
-    client_id = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode().rstrip("=")
+    client_id = base64.b64encode(f"{req.connection_name}\0c\0json".encode()).decode().rstrip("=")
 
     # Return public URL for browser
-    base_url = base_url.rstrip("/")
-    return f"{base_url}/#/client/{client_id}?token={auth_token}"
+    public_url = req.base_url.rstrip("/")
+    return f"{public_url}/#/client/{client_id}?token={auth_token}"

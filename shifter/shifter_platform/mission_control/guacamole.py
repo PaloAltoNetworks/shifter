@@ -198,11 +198,11 @@ def _attempt_token_exchange(req: urllib.request.Request) -> str:
     ``KeyError`` / ``json.JSONDecodeError`` on malformed responses. The
     surrounding retry loop classifies which of those are retryable.
     """
-    # NOSONAR — req.full_url is built from settings.GUACAMOLE_API_BASE_URL,
-    # a server-controlled https endpoint, not user input. ruff S310 / bandit
-    # B310 both want the scheme to be explicitly verified; the URL is fixed
-    # by deployment configuration so the check would be cosmetic.
-    with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310  # nosec B310
+    # req.full_url is built from settings.GUACAMOLE_API_BASE_URL — a
+    # server-controlled https endpoint, not user input. ruff S310 / bandit
+    # B310 / Sonar S6713 all want the URL scheme explicitly verified; here
+    # the URL is fixed by deployment configuration so the check is cosmetic.
+    with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310 # nosec B310 # NOSONAR
         return json.loads(response.read().decode("utf-8"))["authToken"]
 
 
@@ -294,10 +294,10 @@ def get_guacamole_auth_token(
     token_url = f"{base_url}/api/tokens"
 
     req_data = urlencode({"data": encrypted_data}).encode("utf-8")
-    # NOSONAR — token_url is built from settings.GUACAMOLE_API_BASE_URL, a
+    # token_url is built from settings.GUACAMOLE_API_BASE_URL — a
     # server-controlled https endpoint; same trust boundary as the urlopen
     # call inside _attempt_token_exchange.
-    req = urllib.request.Request(token_url, data=req_data)  # noqa: S310
+    req = urllib.request.Request(token_url, data=req_data)  # noqa: S310 # NOSONAR
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
 
     for attempt in range(attempts):

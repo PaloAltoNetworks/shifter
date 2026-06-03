@@ -2,9 +2,10 @@
 
 ## Scope
 
-Issue 769 is a participant-facing security and scoring fix for the CTF hint
-unlock path. The implementation must keep hint authorization, release-state
-checks, durable hint usage, and scoring as one domain contract.
+Issue 769 / GitHub #519 is a participant-facing security and scoring fix for
+the CTF hint unlock path and CTF-002 scoring correctness. The implementation
+must keep hint authorization, release-state checks, durable hint usage, and
+score calculation as one domain contract.
 
 This is not a new hint system. Current code already has progressive hints and a
 durable usage ledger:
@@ -23,6 +24,13 @@ durable usage ledger:
 - The canonical penalty reader is `get_total_hint_penalty(participant_id,
   challenge_id)`. Scoring must continue to consume cumulative unlocked hint
   penalties through `submit_flag`.
+- Hint penalties reduce solve awards to a floor of `0`, not `1`. A 100 percent
+  cumulative hint penalty on a correct solve must persist `points_awarded=0`
+  and the normal scoreboard/timeline aggregations must derive from that stored
+  value.
+- The current supported scoring mode is static challenge points plus awards and
+  hint penalties. Do not introduce dynamic scoring, score recalculation jobs, or
+  a second scoring-mode schema while fixing this issue.
 - Hint unlock authorization belongs in the CTF hint service, not only in the
   Django view. Views may shape HTTP input and responses, but the service must be
   safe against direct/internal callers.
@@ -48,6 +56,10 @@ durable usage ledger:
   idempotent unlock behavior.
 - Scoring: `CTFChallenge.calculate_points_with_penalty` and
   `get_total_hint_penalty`; keep the penalty calculation in one place.
+- Score aggregation: `ctf.services.scoring.calculate_score`,
+  `get_scoreboard`, `get_team_scoreboard`, `get_score_timeline`, and
+  participant/team `total_score` properties already derive scores from
+  persisted `CTFSubmission.points_awarded` and `CTFAward.points`.
 - Observability: module-level `logger` in CTF services with IDs only. Do not log
   hint text, submitted flags, or other challenge secrets.
 - API responses: existing CTF view `JsonResponse({"error": str(e)}, status=...)`
@@ -81,10 +93,20 @@ policy for attachments, connection info, per-hint release times, or organizer
 preview bypasses. If a bypass is needed later, make it an explicit parameter at
 that policy seam, not an implicit view-side branch.
 
+If a future requirement adds dynamic scoring or multiple event-level scoring
+modes, the seam belongs behind one canonical score-award calculator used by
+`submit_flag`; mode selection should be an event-owned setting with an enum and
+model/form/API validation. Scoreboard, timeline, participant, and team totals
+should keep reading persisted awarded points until a deliberate recalculation
+contract is designed.
+
 ## Non-Goals And Anti-Patterns
 
 - Do not design a new scoring model, hint purchase currency, or admin workflow.
 - Do not make hint unlocks submissions.
+- Do not make scoreboards recompute hint penalties from live hint rows after the
+  solve; the solve record's `points_awarded` is the immutable competition
+  result unless a separate audited recomputation feature is designed.
 - Do not bypass the CTF service layer from views to write `CTFHintUsage`
   directly.
 - Do not add duplicate serializers, DTOs, validators, or exception classes for

@@ -77,48 +77,62 @@
 }
 
 .badge-invited {
-    background: rgba(250, 173, 20, 0.15);
-    color: #faad14;
+    background: #fef3c7;
+    color: #78350f; /* WCAG AAA on #fef3c7 */
 }
 
 .badge-registered {
-    background: rgba(148, 163, 184, 0.15);
-    color: #94a3b8;
+    background: #e2e8f0;
+    color: #1e293b; /* WCAG AAA on #e2e8f0 */
 }
 
 .badge-active {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
+    background: #d1fae5;
+    color: #064e3b; /* WCAG AAA on #d1fae5 */
 }
 
 .badge-completed {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
+    background: #e5e7eb;
+    color: #1f2937; /* WCAG AAA on #e5e7eb */
 }
 
 .badge-disqualified {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
+    background: #fee2e2;
+    color: #7f1d1d; /* WCAG AAA on #fee2e2 */
 }
 
 .badge-correct {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
+    background: #d1fae5;
+    color: #064e3b; /* WCAG AAA on #d1fae5 */
 }
 
 .badge-incorrect {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
+    background: #fee2e2;
+    color: #7f1d1d; /* WCAG AAA on #fee2e2 */
 }
 
 .badge-warning {
-    background: rgba(250, 173, 20, 0.15);
-    color: #faad14;
+    background: #fef3c7;
+    color: #78350f; /* WCAG AAA on #fef3c7 */
 }
 
 .badge-secondary {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
+    background: #e5e7eb;
+    color: #1f2937; /* WCAG AAA on #e5e7eb */
+}
+
+.badge-secondary--inline {
+    margin-left: 4px;
+}
+
+.card--gap {
+    margin-bottom: 16px;
+}
+
+.score-timeline-canvas-wrap {
+    position: relative;
+    height: 250px;
+    padding: 0 16px 16px;
 }
 
 .stats-grid {
@@ -186,7 +200,7 @@
                 {% if participant.status == 'invited' %}
                     <button type="button"
                             class="btn btn-secondary"
-                            onclick="resendInvite('{{ participant.pk }}')">
+                            onclick="resendInvite('{{ participant.pk }}', globalThis.__participantCsrfToken)">
                         {% trans "Resend Invite" %}
                     </button>
                 {% endif %}
@@ -307,13 +321,11 @@
         <!-- Right Column: Timeline & Submission History -->
         <div>
             <!-- Score Timeline Chart -->
-            <div class="card" style="margin-bottom: 16px;">
+            <div class="card card--gap">
                 <div class="card-title">
                     {% trans "Score Timeline" %}
                 </div>
-                <div style="position: relative;
-                            height: 250px;
-                            padding: 0 16px 16px">
+                <div class="score-timeline-canvas-wrap">
                     <canvas id="score-timeline-chart"></canvas>
                 </div>
             </div>
@@ -350,20 +362,13 @@
                                         <a href="{{ challenge_url }}">
                                             {{ submission.challenge.name }}
                                         </a>
-                                        <span class="badge badge-secondary" style="margin-left: 4px;">
+                                        <span class="badge badge-secondary badge-secondary--inline">
                                         {{ submission.challenge.category }}
                                         </span>
                                     </td>
                                     <td>
                                         {% if submission.is_correct %}
                                             <span class="badge badge-correct">{% trans "Correct" %}</span>
-                                            {% if submission.hint_used %}
-<span class="badge badge-warning" style="margin-left: 4px;">
-    {% blocktrans trimmed %}
-        Hint Used
-    {% endblocktrans %}
-</span>
-                                            {% endif %}
                                         {% else %}
                                             <span class="badge badge-incorrect">{% trans "Incorrect" %}</span>
                                         {% endif %}
@@ -397,47 +402,19 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
-            integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
-            crossorigin="anonymous"></script>
-<script
-src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
-integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
-crossorigin="anonymous"></script>
+    <script src="{% static 'js/vendor/chart.umd.min.js' %}"></script>
+    <script src="{% static 'js/vendor/chartjs-adapter-date-fns.bundle.min.js' %}"></script>
     <script src="{% static 'js/score-timeline.js' %}"></script>
+    <script src="{% static 'js/admin-participant-detail.js' %}"></script>
+    <script id="admin-participant-detail-bootstrap" type="application/json">{
+        "participant_id": "{{ participant.pk }}",
+        "csrf_token": "{{ csrf_token }}"
+    }</script>
     <script>
-initScoreTimeline('score-timeline-chart', '/ctf/api/participants/{{ participant.pk }}/score-timeline/');
-    </script>
-    <script>
-function resendInvite(participantId) {
-    if (!confirm('Resend invitation email to this participant?')) return;
-
-    fetch('/ctf/api/participants/' + participantId + '/resend-invite/', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-        if (data.success) {
-            alert('Invitation resent successfully.');
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Failed to resend invite'));
-        }
-    })
-    .catch(function(err) {
-        alert('Error resending invite: ' + err.message);
-    });
-}
-
-function disqualifyParticipant(participantId) {
-    if (!confirm('Are you sure you want to disqualify this participant? This action cannot be undone.')) return;
-
-    // This would call a disqualify API endpoint (to be implemented)
-    alert('Disqualify functionality not yet implemented via API.');
-}
+        (function () {
+            var cfg = JSON.parse(document.getElementById('admin-participant-detail-bootstrap').textContent);
+            globalThis.initParticipantTimeline(cfg.participant_id);
+            globalThis.__participantCsrfToken = cfg.csrf_token;
+        }());
     </script>
 {% endblock %}

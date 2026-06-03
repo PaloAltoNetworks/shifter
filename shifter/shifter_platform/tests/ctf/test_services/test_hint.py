@@ -236,8 +236,8 @@ class TestHintPurchaseContext:
         url = reverse("ctf:challenge_detail", kwargs={"challenge_id": active_challenge.pk})
         response = participant_client.get(url)
         assert response.context["penalty_warning"] is True
-        # Points floor at 1
-        assert response.context["points_after_next_hint"] == 1
+        # Points floor at 0 (CTF-203, issue #519).
+        assert response.context["points_after_next_hint"] == 0
 
     def test_no_hints_gives_zero_cost(self, participant_client, active_challenge, participant):
         """When no hints exist, cost variables are zero/default."""
@@ -260,16 +260,16 @@ class TestHintPurchaseContext:
 
         200pt challenge. Hint 1 = 60%, hint 2 = 60%.
         After hint 1: penalty 60%, value = 200 - 120 = 80.
-        After hint 2: penalty 120% capped to 100%, value = 1.
-        Marginal cost of hint 2 = 80 - 1 = 79 (not 120).
+        After hint 2: penalty 120% capped to 100%, value = 0 (CTF-203 floor).
+        Marginal cost of hint 2 = 80 - 0 = 80 (not 120).
         """
         h1 = CTFHint.objects.create(challenge=active_challenge, text="H1", penalty=60, order=0)
         CTFHint.objects.create(challenge=active_challenge, text="H2", penalty=60, order=1)
         use_hint(participant.id, h1.id)
         url = reverse("ctf:challenge_detail", kwargs={"challenge_id": active_challenge.pk})
         response = participant_client.get(url)
-        assert response.context["next_hint_cost"] == 79
-        assert response.context["points_after_next_hint"] == 1
+        assert response.context["next_hint_cost"] == 80
+        assert response.context["points_after_next_hint"] == 0
 
 
 # ============================================================================

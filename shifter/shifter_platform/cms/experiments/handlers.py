@@ -19,6 +19,68 @@ _TERMINAL_EXPERIMENT_STATUSES = ("completed", "failed")
 logger = logging.getLogger(__name__)
 
 
+def _experiment_recipient_id(experiment_id: int) -> int | None:
+    """Return the owning user id for experiment notifications."""
+    try:
+        return Experiment.objects.only("user_id").get(pk=experiment_id).user_id
+    except Experiment.DoesNotExist:
+        return None
+
+
+def _publish_run_status_notification(
+    experiment_id: int,
+    run_id: int,
+    run_number: int,
+    status: str,
+    error_message: str,
+) -> None:
+    """Queue a shared notification for run-status changes."""
+    recipient_id = _experiment_recipient_id(experiment_id)
+    if recipient_id is None:
+        return
+    try:
+        from cms.experiments.notifications import publish_experiment_run_status_notification
+
+        publish_experiment_run_status_notification(
+            experiment_id=experiment_id,
+            recipient_id=recipient_id,
+            run_id=run_id,
+            run_number=run_number,
+            status=status,
+            error_message=error_message,
+        )
+    except Exception:
+        logger.warning(
+            "failed to queue experiment run notification: experiment=%s run=%s status=%s",
+            experiment_id,
+            run_id,
+            status,
+            exc_info=True,
+        )
+
+
+def _publish_experiment_status_notification(experiment_id: int, status: str) -> None:
+    """Queue a shared notification for experiment status changes."""
+    recipient_id = _experiment_recipient_id(experiment_id)
+    if recipient_id is None:
+        return
+    try:
+        from cms.experiments.notifications import publish_experiment_status_notification
+
+        publish_experiment_status_notification(
+            experiment_id=experiment_id,
+            recipient_id=recipient_id,
+            status=status,
+        )
+    except Exception:
+        logger.warning(
+            "failed to queue experiment notification: experiment=%s status=%s",
+            experiment_id,
+            status,
+            exc_info=True,
+        )
+
+
 def _broadcast_run_status(
     experiment_id: int,
     run_id: int,
@@ -34,28 +96,33 @@ def _broadcast_run_status(
         from cms.experiments.consumers import experiment_event_group
 
         channel_layer = get_channel_layer()
-        if channel_layer is None:
-            return
-
-        group = experiment_event_group(experiment_id)
-        async_to_sync(channel_layer.group_send)(
-            group,
-            {
-                "type": "experiment.run_status",
-                "run_id": run_id,
-                "run_number": run_number,
-                "status": status,
-                "error_message": error_message,
-            },
-        )
-        logger.debug(
-            "broadcast run_status: experiment=%s run=%s status=%s",
-            experiment_id,
-            run_id,
-            status,
-        )
+        if channel_layer is not None:
+            group = experiment_event_group(experiment_id)
+            async_to_sync(channel_layer.group_send)(
+                group,
+                {
+                    "type": "experiment.run_status",
+                    "run_id": run_id,
+                    "run_number": run_number,
+                    "status": status,
+                    "error_message": error_message,
+                },
+            )
+            logger.debug(
+                "broadcast run_status: experiment=%s run=%s status=%s",
+                experiment_id,
+                run_id,
+                status,
+            )
     except Exception:
         logger.warning("_broadcast_run_status: channel layer unavailable", exc_info=True)
+    _publish_run_status_notification(
+        experiment_id,
+        run_id,
+        run_number,
+        status,
+        error_message,
+    )
 
 
 def _broadcast_run_status_for(
@@ -97,25 +164,24 @@ def _broadcast_experiment_status(experiment_id: int, status: str) -> None:
         from cms.experiments.consumers import experiment_event_group
 
         channel_layer = get_channel_layer()
-        if channel_layer is None:
-            return
-
-        group = experiment_event_group(experiment_id)
-        async_to_sync(channel_layer.group_send)(
-            group,
-            {
-                "type": "experiment.status",
-                "experiment_id": experiment_id,
-                "status": status,
-            },
-        )
-        logger.debug(
-            "broadcast experiment_status: experiment=%s status=%s",
-            experiment_id,
-            status,
-        )
+        if channel_layer is not None:
+            group = experiment_event_group(experiment_id)
+            async_to_sync(channel_layer.group_send)(
+                group,
+                {
+                    "type": "experiment.status",
+                    "experiment_id": experiment_id,
+                    "status": status,
+                },
+            )
+            logger.debug(
+                "broadcast experiment_status: experiment=%s status=%s",
+                experiment_id,
+                status,
+            )
     except Exception:
         logger.warning("_broadcast_experiment_status: channel layer unavailable", exc_info=True)
+    _publish_experiment_status_notification(experiment_id, status)
 
 
 def process_event(message: str | dict) -> None:

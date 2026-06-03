@@ -21,8 +21,8 @@ spec:
         checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
     spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
-      automountServiceAccountToken: false
-      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      automountServiceAccountToken: true
+      serviceAccountName: {{ .Values.serviceAccounts.ctfScheduler.name }}
       containers:
         - name: ctf-scheduler
           image: {{ include "shifter.portalImage" . }}

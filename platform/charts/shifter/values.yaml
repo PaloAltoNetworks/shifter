@@ -11,6 +11,9 @@ serviceAccounts:
   workers:
     name: workers
     annotations: {}
+  ctfScheduler:
+    name: ctf-scheduler
+    annotations: {}
   provisioner:
     name: provisioner
     annotations: {}

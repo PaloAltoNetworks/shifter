@@ -99,6 +99,10 @@ asg_desired_capacity = 2
 scale_up_threshold   = 70
 scale_down_threshold = 30
 
+# Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
+# Prod runs the portal on Redis (CHANNEL_LAYER_BACKEND=redis), as before.
+enable_redis = true
+
 # ------------------------------------------------------------------------------
 # Redis
 # ------------------------------------------------------------------------------

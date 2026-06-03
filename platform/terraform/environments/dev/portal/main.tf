@@ -428,8 +428,9 @@ module "ssm" {
   sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]
   sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
-  redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
-  enable_redis   = var.enable_autoscaling
+  # Redis wiring is environment-owned and decoupled from autoscaling (ADR-018, #849).
+  redis_endpoint = var.enable_redis ? module.redis.redis_endpoint : ""
+  enable_redis   = var.enable_redis
 
   # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
   db_host_override        = module.rds.db_instance_address
@@ -484,7 +485,7 @@ module "ec2" {
   asg_min_size         = var.asg_min_size
   asg_max_size         = var.asg_max_size
   asg_desired_capacity = var.asg_desired_capacity
-  redis_endpoint       = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+  redis_endpoint       = var.enable_redis ? module.redis.redis_endpoint : ""
   scale_up_threshold   = var.scale_up_threshold
   scale_down_threshold = var.scale_down_threshold
   log_retention_days   = var.log_retention_days

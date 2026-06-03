@@ -26,6 +26,14 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 # Initialize Django ASGI application early to ensure AppRegistry is populated
 django_asgi_app = get_asgi_application()
 
+# Log the active channel-layer backend once per portal process (#849). This is
+# the single ASGI process that serves both HTTP and WebSocket and consumes
+# CHANNEL_LAYERS; logging is configured by get_asgi_application() above. An
+# invalid/redis-without-host posture already fails closed at settings import.
+from config._channels import log_channel_layer_posture  # noqa: E402
+
+log_channel_layer_posture(os.environ)
+
 # Import routing after Django setup
 from cms.experiments.routing import websocket_urlpatterns as experiment_ws_urlpatterns  # noqa: E402
 from mission_control.routing import websocket_urlpatterns  # noqa: E402

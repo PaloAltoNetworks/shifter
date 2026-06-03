@@ -48,6 +48,18 @@ def test_register_experiment_notifications_rejects_non_staff() -> None:
     assert authorize_subscription(non_staff, experiment_topic(100)) is False
 
 
+def test_register_experiment_notifications_rejects_invalid_topics() -> None:
+    """Experiment subscription authorization rejects malformed experiment topics."""
+    register_experiment_notifications()
+    staff_owner = MagicMock(id=7, is_staff=True, is_authenticated=True)
+
+    from shared.notifications import authorize_subscription
+
+    assert authorize_subscription(staff_owner, "range:100") is False
+    assert authorize_subscription(staff_owner, "experiment:not-int") is False
+    assert authorize_subscription(staff_owner, "experiment:0") is False
+
+
 def test_publish_experiment_run_status_notification_projects_safe_payload() -> None:
     """Experiment publishers pass only the browser-safe payload to shared notifications."""
     with patch("cms.experiments.notifications.publish_notification") as mock_publish:

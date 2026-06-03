@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -67,6 +68,69 @@ async def test_rejects_anonymous_user(consumer):
     consumer.accept.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_disconnect_before_auth_returns_without_group_updates(consumer):
+    """Disconnect is a no-op when the socket never authenticated."""
+    await consumer.disconnect(close_code=1000)
+
+    consumer.channel_layer.group_discard.assert_not_awaited()
+    assert consumer.subscriptions == set()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_discards_all_subscription_groups(consumer, user):
+    """Disconnect leaves every joined notification group."""
+    consumer._user_id = user.id
+    consumer.subscriptions = {"experiment:100", "experiment:200"}
+
+    await consumer.disconnect(close_code=1000)
+
+    discarded_groups = {call.args[0] for call in consumer.channel_layer.group_discard.await_args_list}
+    assert discarded_groups == {
+        notification_user_topic_group(user.id, "experiment:100"),
+        notification_user_topic_group(user.id, "experiment:200"),
+    }
+    assert consumer.subscriptions == set()
+
+
+@pytest.mark.asyncio
+async def test_receive_ignores_empty_messages_and_rejects_invalid_json(consumer):
+    """Raw WebSocket messages must be JSON control envelopes."""
+    await consumer.receive(text_data=None)
+    consumer.close.assert_not_awaited()
+
+    await consumer.receive(text_data="{")
+
+    consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.INVALID_REQUEST)
+
+
+@pytest.mark.asyncio
+async def test_receive_json_rejects_unknown_control_message(consumer):
+    """Only subscribe and unsubscribe control messages are accepted."""
+    await consumer.receive_json({"type": "ping", "topic": "experiment:100"})
+
+    consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.INVALID_REQUEST)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_before_auth_closes(consumer):
+    """Subscribe cannot proceed before connect establishes the user id."""
+    await consumer.receive_json({"type": "subscribe", "topic": "experiment:100"})
+
+    consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_AUTHENTICATED)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_rejects_invalid_topic(consumer, user):
+    """Invalid topic syntax closes the socket."""
+    consumer.scope = {"type": "websocket", "user": user}
+    await consumer.connect()
+
+    await consumer.receive_json({"type": "subscribe", "topic": "not valid"})
+
+    consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.INVALID_REQUEST)
+
+
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 async def test_subscribe_replays_pending_notifications_and_marks_delivered(consumer, user, settings):
@@ -95,6 +159,51 @@ async def test_subscribe_replays_pending_notifications_and_marks_delivered(consu
     assert any('"type": "notification"' in message and '"run_id": 7' in message for message in sent_messages)
     await database_sync_to_async(pending.refresh_from_db)()
     assert pending.delivered_at is not None
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_discards_known_topic_and_confirms(consumer, user):
+    """Unsubscribe leaves a joined topic group and sends an acknowledgement."""
+    consumer.scope = {"type": "websocket", "user": user}
+    await consumer.connect()
+    consumer.subscriptions = {"experiment:100"}
+
+    await consumer.receive_json({"type": "unsubscribe", "topic": "experiment:100"})
+
+    consumer.channel_layer.group_discard.assert_awaited_once_with(
+        notification_user_topic_group(user.id, "experiment:100"),
+        "test-channel",
+    )
+    payload = json.loads(consumer.send.await_args.kwargs["text_data"])
+    assert payload == {"type": "unsubscribed", "topic": "experiment:100"}
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_without_user_returns(consumer):
+    """Unsubscribe is a no-op before authentication."""
+    await consumer.receive_json({"type": "unsubscribe", "topic": "experiment:100"})
+
+    consumer.send.assert_not_awaited()
+    consumer.channel_layer.group_discard.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_rejects_invalid_topic(consumer, user):
+    """Invalid unsubscribe topics close the socket."""
+    consumer.scope = {"type": "websocket", "user": user}
+    await consumer.connect()
+
+    await consumer.receive_json({"type": "unsubscribe", "topic": "not valid"})
+
+    consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.INVALID_REQUEST)
+
+
+@pytest.mark.asyncio
+async def test_replay_pending_without_user_returns(consumer):
+    """Replay cannot query without an authenticated user id."""
+    await consumer._replay_pending("experiment:100")
+
+    consumer.send.assert_not_awaited()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -126,6 +235,54 @@ async def test_live_dispatch_sends_notification_and_marks_delivered(consumer, us
     assert notification.delivered_at is not None
 
 
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_live_dispatch_ignores_unusable_notifications(consumer, user):
+    """Live dispatch ignores unauthenticated, missing, unsubscribed, and expired rows."""
+    notification = await database_sync_to_async(WebSocketNotification.objects.create)(
+        recipient=user,
+        notification_type="experiment.run_status",
+        topic="experiment:100",
+        payload={"run_id": 8, "status": "completed"},
+        expires_at=timezone.now() + timedelta(days=1),
+    )
+    expired = await database_sync_to_async(WebSocketNotification.objects.create)(
+        recipient=user,
+        notification_type="experiment.run_status",
+        topic="experiment:100",
+        payload={"run_id": 9, "status": "expired"},
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    await consumer.notification_dispatch({"notification_id": notification.id})
+    consumer.send.assert_not_awaited()
+
+    consumer._user_id = user.id
+    await consumer.notification_dispatch({"notification_id": "not-an-id"})
+    await consumer.notification_dispatch({"notification_id": notification.id})
+
+    consumer.subscriptions = {"experiment:100"}
+    await consumer.notification_dispatch({"notification_id": expired.id})
+
+    consumer.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_notification_without_user_returns(consumer, user):
+    """Notification send is guarded by the authenticated user id."""
+    notification = WebSocketNotification(
+        recipient=user,
+        notification_type="experiment.run_status",
+        topic="experiment:100",
+        payload={"run_id": 8, "status": "completed"},
+        expires_at=timezone.now() + timedelta(days=1),
+    )
+
+    await consumer._send_notification(notification)
+
+    consumer.send.assert_not_awaited()
+
+
 @pytest.mark.django_db
 @pytest.mark.asyncio
 async def test_rejects_unauthorized_subscription(consumer):
@@ -144,3 +301,11 @@ async def test_rejects_unauthorized_subscription(consumer):
     await consumer.receive_json({"type": "subscribe", "topic": "experiment:100"})
 
     consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.PERMISSION_DENIED)
+
+
+def test_shared_notification_websocket_route_targets_consumer():
+    """Shared notification route exposes the generic consumer."""
+    from shared.routing import websocket_urlpatterns
+
+    assert websocket_urlpatterns
+    assert websocket_urlpatterns[0].pattern.regex.pattern == "ws/notifications/$"

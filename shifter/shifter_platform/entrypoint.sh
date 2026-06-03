@@ -168,15 +168,31 @@ python manage.py compilemessages
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# Run command passed as arguments, or default to daphne
+# Run command passed as arguments, or default to gunicorn + uvicorn workers.
+#
+# The production portal web process runs Gunicorn managing a pool of Uvicorn
+# ASGI workers (issue #174). An unhandled exception in any WebSocket consumer
+# only crashes one worker (which Gunicorn restarts) instead of taking down the
+# whole single-process Daphne server. The worker-count, bind address, and
+# timeouts are env-owned so AWS instance sizes and GCP pod limits can tune the
+# pool without rebuilding the image. Defaults are conservative: 4 workers and
+# a 90s timeout (Gunicorn's 30s default would kill long-lived WebSocket and
+# SSH terminal connections that are the portal's main workload). The worker
+# class string is `uvicorn_worker.UvicornWorker` (the supported standalone
+# `uvicorn-worker` package) — `uvicorn.workers.UvicornWorker` is deprecated
+# upstream. `tests/test_asgi_worker_smoke.py` pins the import contract in CI.
 if [[ $# -gt 0 ]]; then
     echo "Running: $@"
     exec "$@"
 else
-    echo "Starting daphne..."
-    exec daphne config.asgi:application \
-        --bind 0.0.0.0 \
-        --port 8000 \
-        --access-log - \
-        --verbosity 1
+    echo "Starting gunicorn (uvicorn workers)..."
+    exec gunicorn config.asgi:application \
+        --worker-class uvicorn_worker.UvicornWorker \
+        --bind "${PORTAL_WEB_BIND:-0.0.0.0:8000}" \
+        --workers "${PORTAL_WEB_WORKERS:-4}" \
+        --timeout "${PORTAL_WEB_TIMEOUT:-90}" \
+        --graceful-timeout "${PORTAL_WEB_GRACEFUL_TIMEOUT:-30}" \
+        --access-logfile - \
+        --error-logfile - \
+        --log-level info
 fi

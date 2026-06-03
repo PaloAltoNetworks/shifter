@@ -176,6 +176,36 @@ class TestCTFEventModel:
 
         assert "team_size_limit" in exc_info.value.message_dict
 
+    def test_event_validation_freeze_at_must_be_after_event_start(self):
+        """scoreboard_freeze_at <= event_start fails validation."""
+        now = timezone.now()
+        event = CTFEvent(
+            name="Frozen Too Early Event",
+            created_by_id=1,
+            event_start=now + timedelta(days=1),
+            event_end=now + timedelta(days=1, hours=8),
+            scoreboard_freeze_at=now,
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            event.clean()
+
+        assert "scoreboard_freeze_at" in exc_info.value.message_dict
+
+    def test_event_validation_freeze_at_must_be_before_event_end(self):
+        """scoreboard_freeze_at >= event_end fails validation."""
+        now = timezone.now()
+        event = CTFEvent(
+            name="Frozen Too Late Event",
+            created_by_id=1,
+            event_start=now + timedelta(days=1),
+            event_end=now + timedelta(days=1, hours=8),
+            scoreboard_freeze_at=now + timedelta(days=2),
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            event.clean()
+
+        assert "scoreboard_freeze_at" in exc_info.value.message_dict
+
     def test_event_soft_delete(self):
         """Test soft delete sets deleted_at and calls save."""
         event = make_ctf_event()

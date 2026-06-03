@@ -1153,7 +1153,7 @@ class TestIsScoreboardFrozen:
         )
         assert event.is_scoreboard_frozen is False
 
-    @patch("ctf.models.timezone")
+    @patch("ctf.models.event.timezone")
     def test_not_frozen_before_freeze_time(self, mock_tz):
         """Event is not frozen when freeze_at is in the future."""
         mock_tz.now.return_value = _NOW

@@ -8,7 +8,6 @@ so ``from ctf.models import X`` keeps working unchanged.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.db import models
@@ -22,9 +21,6 @@ from ctf.enums import (
 )
 
 from ._base import CTFBaseModel
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

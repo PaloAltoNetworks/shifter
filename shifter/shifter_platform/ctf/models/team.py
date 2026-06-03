@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import secrets
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -22,9 +21,6 @@ from ctf.enums import (
 )
 
 from ._base import CTFBaseModel
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -253,13 +249,16 @@ class CTFParticipant(CTFBaseModel):
         help_text="Bracket assignment (for bracket-based events)",
     )
     # DJ001 (CharField with null=True should not allow blank=True without
-    # choices) is intentionally suppressed: cognito_sub is genuinely optional
-    # for non-Cognito participants (e.g. email-only invites), so both null
-    # and blank are legitimate "no value yet" sentinels rather than
-    # competing zero-value representations.
+    # choices) and Sonar's python:S6553 ("remove this null=True") are
+    # intentionally suppressed: cognito_sub is genuinely optional for
+    # non-Cognito participants (e.g. email-only invites), so both null and
+    # blank are legitimate "no value yet" sentinels rather than competing
+    # zero-value representations. Removing null=True would force every
+    # legacy non-Cognito participant row to migrate to an empty-string
+    # sentinel.
     cognito_sub = models.CharField(  # noqa: DJ001
         max_length=36,
-        null=True,
+        null=True,  # NOSONAR
         blank=True,
         db_index=True,
         help_text="Cognito user pool subject identifier",

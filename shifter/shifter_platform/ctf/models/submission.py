@@ -8,7 +8,6 @@ so ``from ctf.models import X`` keeps working unchanged.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -16,9 +15,6 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from ._base import CTFBaseModel
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

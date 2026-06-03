@@ -8,16 +8,13 @@ so ``from ctf.models import X`` keeps working unchanged.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import QuerySet
 from django.utils import timezone
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

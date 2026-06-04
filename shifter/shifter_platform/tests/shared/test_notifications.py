@@ -146,6 +146,24 @@ def test_publish_notification_validates_registration_and_event_id(user) -> None:
 
 
 @pytest.mark.django_db
+def test_publish_notification_generates_event_id_when_not_supplied(user):
+    """Publish generates an idempotency key when the source event has no id."""
+    from shared.notifications import publish_notification
+
+    _register_experiment_type()
+
+    with patch("shared.notifications.get_channel_layer", return_value=None):
+        [notification] = publish_notification(
+            "experiment.run_status",
+            topic="experiment:100",
+            payload={"run_id": 7, "status": "running"},
+            recipient_ids=[user.id],
+        )
+
+    assert isinstance(notification.event_id, UUID)
+
+
+@pytest.mark.django_db
 def test_publish_notification_persists_and_fans_out(user):
     """Publishing stores a per-recipient row and sends to the user/topic group."""
     from shared.notifications import publish_notification

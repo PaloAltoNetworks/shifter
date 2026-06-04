@@ -33,7 +33,8 @@ user-facing paths before the alarm fires.
 Adjacent contracts this preflight respects but does not pre-empt:
 
 - `/health` response body, status codes, and dependency probe set are owned
-  by #477.
+  by #477 and constrained by
+  `docs/architecture/portal-health-readiness-preflight-477.md`.
 - The single-process Daphne runtime model is owned by #174.
 - Browser terminal websocket capacity envelope is owned by #847 and its
   preflight at `terminal-websocket-capacity-preflight-847.md`.
@@ -100,7 +101,8 @@ Adjacent contracts this preflight respects but does not pre-empt:
   (`shifter/shifter_platform/config/settings.py`) but never reached on
   these paths. The same `/health` path is reused as the container-level
   `HEALTHCHECK` in `shifter/shifter_platform/Dockerfile:62`.
-- This behavior is fully tracked by #477 and is not redesigned here.
+- This behavior is fully tracked by #477 and
+  `portal-health-readiness-preflight-477.md`; it is not redesigned here.
 
 ### Runtime
 

@@ -105,6 +105,16 @@ async def test_receive_ignores_empty_messages_and_rejects_invalid_json(consumer)
 
 
 @pytest.mark.asyncio
+async def test_receive_dispatches_valid_json_control_message(consumer):
+    """Raw JSON messages are delegated to the JSON control handler."""
+    consumer.receive_json = AsyncMock()
+
+    await consumer.receive(text_data='{"type": "subscribe", "topic": "experiment:100"}')
+
+    consumer.receive_json.assert_awaited_once_with({"type": "subscribe", "topic": "experiment:100"})
+
+
+@pytest.mark.asyncio
 async def test_receive_json_rejects_unknown_control_message(consumer):
     """Only subscribe and unsubscribe control messages are accepted."""
     await consumer.receive_json({"type": "ping", "topic": "experiment:100"})
@@ -204,6 +214,13 @@ async def test_replay_pending_without_user_returns(consumer):
     await consumer._replay_pending("experiment:100")
 
     consumer.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_get_notification_without_user_returns_none(consumer):
+    """Notification lookup cannot query before authentication."""
+    assert await consumer._get_notification(1) is None
 
 
 @pytest.mark.django_db(transaction=True)

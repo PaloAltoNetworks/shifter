@@ -529,6 +529,7 @@ jobs:
           SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
           SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
           REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
+          CHANNEL_LAYER_BACKEND=$(get_param "$PS_PREFIX/channel-layer-backend" || echo "")
           EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend" || echo "")
           CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email" || echo "")
           PLATFORM_BOOTSTRAP_STAFF_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-staff-emails" || echo "")
@@ -559,6 +560,8 @@ jobs:
           COMMON_ENV="$COMMON_ENV -e ENGINE_PRIVATE_SUBNET_IDS=$ENGINE_PRIVATE_SUBNET_IDS"
           COMMON_ENV="$COMMON_ENV -e SQS_CMS_URL=$SQS_CMS_URL -e SQS_ENGINE_URL=$SQS_ENGINE_URL -e SQS_MC_URL=$SQS_MC_URL"
           [ -n "$REDIS_ENDPOINT" ] && COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
+          # Channel-layer backend posture (ADR-018, #849), mirrors user_data.sh.
+          [ -n "$CHANNEL_LAYER_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e CHANNEL_LAYER_BACKEND=$CHANNEL_LAYER_BACKEND"
           [ -n "$EMAIL_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
           [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
           [ -n "$PLATFORM_BOOTSTRAP_STAFF_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_STAFF_EMAILS=$PLATFORM_BOOTSTRAP_STAFF_EMAILS"

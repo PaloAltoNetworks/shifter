@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from config.dev_auth import dev_login, dev_logout
+from config.health import CoarseHealthCheckView
 from config.views import (
     dashboard_router,
     home,
@@ -26,7 +27,16 @@ urlpatterns = [
     path("api/v1/", include("risk_register.api.urls")),
     path("ctf/", include("ctf.urls")),
     path("admin/", admin.site.urls),
-    path("health/", include("health_check.urls")),
+    # /health and /health/ both resolve to the same dependency-aware probe
+    # view. The no-trailing-slash variant is for the AWS ALB target group
+    # (``platform/terraform/environments/{dev,prod}/portal/terraform.tfvars``
+    # ``health_check_path = "/health"``) which does not follow 3xx redirects;
+    # the trailing-slash variant is the canonical URL used by the GCP
+    # readiness/liveness probes, the Docker HEALTHCHECK, and the
+    # ``shifter/installation`` backend bundle contract. See issue #477 and
+    # ``docs/architecture/portal-health-readiness-preflight-477.md``.
+    path("health/", CoarseHealthCheckView.as_view(), name="portal_health"),
+    path("health", CoarseHealthCheckView.as_view(), name="portal_health_no_slash"),
 ]
 
 urlpatterns.append(path("oidc/authenticate/", legacy_oidc_authenticate, name="legacy_oidc_authenticate"))

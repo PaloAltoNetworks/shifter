@@ -100,10 +100,14 @@ def render_env(outputs: dict[str, object]) -> str:
 
     site_url = f"https://{public_hostname}"
     # The public hostname is the only externally addressable host. Health-check
-    # probes hit /health/, which HealthCheckMiddleware short-circuits before
-    # ALLOWED_HOSTS validation, so the ingress IP is intentionally not an
-    # accepted application host. localhost/127.0.0.1 stay for in-pod probes and
-    # port-forward debugging.
+    # probes hit /health/ with the ingress IP as the Host header; the
+    # path-scoped `HealthCheckMiddleware` overrides that to `localhost` so
+    # `ALLOWED_HOSTS` admits the request, and then the real
+    # `config.health.CoarseHealthCheckView` runs the `django-health-check`
+    # probes (DB / cache / storage). The ingress IP is intentionally not an
+    # accepted application host outside that path. localhost / 127.0.0.1 stay
+    # for in-pod probes and port-forward debugging. See issue #477 and
+    # `docs/architecture/portal-health-readiness-preflight-477.md`.
     allowed_hosts = ",".join(_unique([public_hostname, "localhost", "127.0.0.1"]))
 
     bootstrap_staff_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_STAFF_EMAILS"))

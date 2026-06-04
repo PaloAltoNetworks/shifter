@@ -47,7 +47,8 @@ permissions:
 jobs:
   validate:
     name: Validate (${{ inputs.environment }})
-    runs-on: self-hosted
+    # Validation does not need deploy-network access; keep PR checks off the deploy runner pool.
+    runs-on: ubuntu-latest
     env:
       GCP_ENVIRONMENT: ${{ inputs.environment }}
       KUBECONFORM_VERSION: v0.7.0

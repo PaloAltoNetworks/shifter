@@ -7,6 +7,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from cms.experiments.notifications import (
+    _experiment_id_from_topic,
+    _experiment_status_payload,
+    _run_status_payload,
     experiment_topic,
     publish_experiment_run_status_notification,
     register_experiment_notifications,
@@ -58,6 +61,40 @@ def test_register_experiment_notifications_rejects_invalid_topics() -> None:
     assert authorize_subscription(staff_owner, "range:100") is False
     assert authorize_subscription(staff_owner, "experiment:not-int") is False
     assert authorize_subscription(staff_owner, "experiment:0") is False
+
+
+def test_experiment_id_from_topic_rejects_non_experiment_topic() -> None:
+    """Topic parsing only accepts experiment notification topics."""
+    assert _experiment_id_from_topic("range:100") is None
+
+
+def test_notification_payload_projectors_return_browser_safe_fields() -> None:
+    """Registered payload handlers strip unneeded source fields."""
+    assert _run_status_payload(
+        {
+            "experiment_id": 100,
+            "run_id": 5,
+            "run_number": 2,
+            "status": "completed",
+            "unsafe": "drop",
+        }
+    ) == {
+        "experiment_id": 100,
+        "run_id": 5,
+        "run_number": 2,
+        "status": "completed",
+        "error_message": "",
+    }
+    assert _experiment_status_payload(
+        {
+            "experiment_id": 100,
+            "status": "failed",
+            "unsafe": "drop",
+        }
+    ) == {
+        "experiment_id": 100,
+        "status": "failed",
+    }
 
 
 def test_publish_experiment_run_status_notification_projects_safe_payload() -> None:

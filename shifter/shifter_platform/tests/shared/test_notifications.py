@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.db import IntegrityError
 from django.utils import timezone
 
 from shared.models import WebSocketNotification
@@ -145,6 +146,24 @@ def test_publish_notification_validates_registration_and_event_id(user) -> None:
 
 
 @pytest.mark.django_db
+def test_publish_notification_generates_event_id_when_not_supplied(user):
+    """Publish generates an idempotency key when the source event has no id."""
+    from shared.notifications import publish_notification
+
+    _register_experiment_type()
+
+    with patch("shared.notifications.get_channel_layer", return_value=None):
+        [notification] = publish_notification(
+            "experiment.run_status",
+            topic="experiment:100",
+            payload={"run_id": 7, "status": "running"},
+            recipient_ids=[user.id],
+        )
+
+    assert isinstance(notification.event_id, UUID)
+
+
+@pytest.mark.django_db
 def test_publish_notification_persists_and_fans_out(user):
     """Publishing stores a per-recipient row and sends to the user/topic group."""
     from shared.notifications import publish_notification
@@ -209,6 +228,44 @@ def test_publish_notification_is_idempotent_per_recipient_topic_type_and_event(u
     assert first[0].id == second[0].id
     assert WebSocketNotification.objects.count() == 1
     assert str(WebSocketNotification.objects.get()) == f"experiment.run_status:experiment:100:{user.id}"
+
+
+@pytest.mark.django_db
+def test_publish_notification_handles_concurrent_insert_race(user):
+    """A uniqueness race falls back to the row created by the competing transaction."""
+    from shared.notifications import publish_notification
+
+    _register_experiment_type()
+    event_id = UUID("12345678-1234-5678-1234-567812345678")
+    existing = WebSocketNotification.objects.create(
+        recipient=user,
+        notification_type="experiment.run_status",
+        topic="experiment:100",
+        event_id=event_id,
+        payload={"run_id": 7, "status": "running"},
+        expires_at=timezone.now() + timedelta(days=1),
+    )
+
+    with (
+        patch("shared.notifications.WebSocketNotification.objects.get_or_create", side_effect=IntegrityError),
+        patch("shared.notifications.WebSocketNotification.objects.get", return_value=existing) as mock_get,
+        patch("shared.notifications.get_channel_layer", return_value=None),
+    ):
+        [notification] = publish_notification(
+            "experiment.run_status",
+            topic="experiment:100",
+            payload={"run_id": 7, "status": "running"},
+            recipient_ids=[user.id],
+            event_id=event_id,
+        )
+
+    assert notification == existing
+    mock_get.assert_called_once_with(
+        recipient_id=user.id,
+        topic="experiment:100",
+        notification_type="experiment.run_status",
+        event_id=event_id,
+    )
 
 
 @pytest.mark.django_db

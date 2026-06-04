@@ -3,6 +3,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from cms.experiments.handlers import parse_sns_message, process_event
 from cms.experiments.schemas import RunStatus
 
@@ -131,3 +133,172 @@ class TestNotifications:
         _publish_experiment_status_notification(999, "failed")
 
         mock_recipient.assert_called_once_with(999)
+
+    def test_broadcast_run_status_queues_notification_when_channel_layer_fails(self):
+        from cms.experiments.handlers import _broadcast_run_status
+
+        with (
+            patch("channels.layers.get_channel_layer", side_effect=RuntimeError("unavailable")),
+            patch("cms.experiments.handlers._publish_run_status_notification") as mock_publish,
+        ):
+            _broadcast_run_status(10, 5, 1, RunStatus.FAILED.value, "SSM timeout")
+
+        mock_publish.assert_called_once_with(10, 5, 1, RunStatus.FAILED.value, "SSM timeout")
+
+    def test_broadcast_experiment_status_queues_notification_when_channel_layer_fails(self):
+        from cms.experiments.handlers import _broadcast_experiment_status
+
+        with (
+            patch("channels.layers.get_channel_layer", side_effect=RuntimeError("unavailable")),
+            patch("cms.experiments.handlers._publish_experiment_status_notification") as mock_publish,
+        ):
+            _broadcast_experiment_status(10, "failed")
+
+        mock_publish.assert_called_once_with(10, "failed")
+
+    def test_broadcast_run_status_for_missing_run_returns(self):
+        from cms.experiments.handlers import _broadcast_run_status_for
+        from cms.experiments.models import ExperimentRun
+
+        with (
+            patch("cms.experiments.handlers.ExperimentRun.objects.get", side_effect=ExperimentRun.DoesNotExist),
+            patch("cms.experiments.handlers._broadcast_run_status") as mock_broadcast,
+        ):
+            _broadcast_run_status_for(10, 999)
+
+        mock_broadcast.assert_not_called()
+
+    def test_broadcast_experiment_status_if_terminal_missing_experiment_returns(self):
+        from cms.experiments.handlers import _broadcast_experiment_status_if_terminal
+        from cms.experiments.models import Experiment
+
+        with (
+            patch("cms.experiments.handlers.Experiment.objects.get", side_effect=Experiment.DoesNotExist),
+            patch("cms.experiments.handlers._broadcast_experiment_status") as mock_broadcast,
+        ):
+            _broadcast_experiment_status_if_terminal(999)
+
+        mock_broadcast.assert_not_called()
+
+
+class TestEventHandlers:
+    def test_validate_event_ids_rejects_missing_fields(self):
+        from cms.experiments.handlers import _validate_event_ids
+
+        assert _validate_event_ids({}, "experiment.start", "experiment_id") is None
+
+    @pytest.mark.parametrize(
+        ("handler_name", "event"),
+        [
+            ("_handle_experiment_start", {}),
+            ("_handle_range_provisioned", {"experiment_id": 10}),
+            ("_handle_victim_scripts_completed", {"experiment_id": 10}),
+            ("_handle_attacker_scripts_completed", {"experiment_id": 10}),
+            ("_handle_artifacts_collected", {"experiment_id": 10}),
+            ("_handle_run_failed", {"experiment_id": 10}),
+        ],
+    )
+    def test_event_handlers_ignore_missing_ids(self, handler_name, event):
+        from cms.experiments import handlers
+
+        with (
+            patch.object(handlers, "ExperimentOrchestrator") as mock_orchestrator,
+            patch.object(handlers, "_broadcast_experiment_status") as mock_experiment_broadcast,
+            patch.object(handlers, "_broadcast_run_status_for") as mock_run_broadcast,
+            patch.object(handlers, "_broadcast_experiment_status_if_terminal") as mock_terminal_broadcast,
+        ):
+            getattr(handlers, handler_name)(event)
+
+        mock_orchestrator.assert_not_called()
+        mock_experiment_broadcast.assert_not_called()
+        mock_run_broadcast.assert_not_called()
+        mock_terminal_broadcast.assert_not_called()
+
+    def test_experiment_start_handler_schedules_runs_and_broadcasts_running(self):
+        from cms.experiments import handlers
+
+        mock_orchestrator = MagicMock()
+        with (
+            patch.object(handlers, "ExperimentOrchestrator", return_value=mock_orchestrator) as mock_orchestrator_cls,
+            patch.object(handlers, "_broadcast_experiment_status") as mock_broadcast,
+        ):
+            handlers._handle_experiment_start({"experiment_id": 10})
+
+        mock_orchestrator_cls.assert_called_once_with(10)
+        mock_orchestrator.schedule_runs.assert_called_once()
+        mock_broadcast.assert_called_once_with(10, "running")
+
+    def test_range_provisioned_handler_dispatches_and_broadcasts_run_status(self):
+        from cms.experiments import handlers
+
+        mock_orchestrator = MagicMock()
+        instances = {"attacker": {"id": "i-1"}}
+        with (
+            patch.object(handlers, "ExperimentOrchestrator", return_value=mock_orchestrator) as mock_orchestrator_cls,
+            patch.object(handlers, "_broadcast_run_status_for") as mock_broadcast,
+        ):
+            handlers._handle_range_provisioned({"experiment_id": 10, "run_id": 5, "provisioned_instances": instances})
+
+        mock_orchestrator_cls.assert_called_once_with(10)
+        mock_orchestrator.handle_range_provisioned.assert_called_once_with(5, instances)
+        mock_broadcast.assert_called_once_with(10, 5)
+
+    def test_victim_scripts_completed_handler_dispatches_and_broadcasts_run_status(self):
+        from cms.experiments import handlers
+
+        mock_orchestrator = MagicMock()
+        with (
+            patch.object(handlers, "ExperimentOrchestrator", return_value=mock_orchestrator) as mock_orchestrator_cls,
+            patch.object(handlers, "_broadcast_run_status_for") as mock_broadcast,
+        ):
+            handlers._handle_victim_scripts_completed({"experiment_id": 10, "run_id": 5})
+
+        mock_orchestrator_cls.assert_called_once_with(10)
+        mock_orchestrator.handle_victim_scripts_completed.assert_called_once_with(5)
+        mock_broadcast.assert_called_once_with(10, 5)
+
+    def test_attacker_scripts_completed_handler_dispatches_and_broadcasts_run_status(self):
+        from cms.experiments import handlers
+
+        mock_orchestrator = MagicMock()
+        with (
+            patch.object(handlers, "ExperimentOrchestrator", return_value=mock_orchestrator) as mock_orchestrator_cls,
+            patch.object(handlers, "_broadcast_run_status_for") as mock_broadcast,
+        ):
+            handlers._handle_attacker_scripts_completed({"experiment_id": 10, "run_id": 5})
+
+        mock_orchestrator_cls.assert_called_once_with(10)
+        mock_orchestrator.handle_attacker_scripts_completed.assert_called_once_with(5)
+        mock_broadcast.assert_called_once_with(10, 5)
+
+    def test_artifacts_collected_handler_dispatches_and_broadcasts_statuses(self):
+        from cms.experiments import handlers
+
+        mock_orchestrator = MagicMock()
+        with (
+            patch.object(handlers, "ExperimentOrchestrator", return_value=mock_orchestrator) as mock_orchestrator_cls,
+            patch.object(handlers, "_broadcast_run_status_for") as mock_run_broadcast,
+            patch.object(handlers, "_broadcast_experiment_status_if_terminal") as mock_terminal_broadcast,
+        ):
+            handlers._handle_artifacts_collected({"experiment_id": 10, "run_id": 5})
+
+        mock_orchestrator_cls.assert_called_once_with(10)
+        mock_orchestrator.handle_artifacts_collected.assert_called_once_with(5)
+        mock_run_broadcast.assert_called_once_with(10, 5)
+        mock_terminal_broadcast.assert_called_once_with(10)
+
+    def test_run_failed_handler_dispatches_and_broadcasts_statuses(self):
+        from cms.experiments import handlers
+
+        mock_orchestrator = MagicMock()
+        with (
+            patch.object(handlers, "ExperimentOrchestrator", return_value=mock_orchestrator) as mock_orchestrator_cls,
+            patch.object(handlers, "_broadcast_run_status_for") as mock_run_broadcast,
+            patch.object(handlers, "_broadcast_experiment_status_if_terminal") as mock_terminal_broadcast,
+        ):
+            handlers._handle_run_failed({"experiment_id": 10, "run_id": 5})
+
+        mock_orchestrator_cls.assert_called_once_with(10)
+        mock_orchestrator.handle_run_failed.assert_called_once_with(5, "Unknown error")
+        mock_run_broadcast.assert_called_once_with(10, 5, error_message="Unknown error")
+        mock_terminal_broadcast.assert_called_once_with(10)

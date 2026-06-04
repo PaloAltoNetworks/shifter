@@ -98,3 +98,36 @@ class TestProcessEvent:
         )
         # No exception raised -- event was silently dropped
         mock_orch_cls.assert_not_called()
+
+
+class TestNotifications:
+    @patch("cms.experiments.handlers.Experiment.objects.only")
+    def test_experiment_recipient_missing_experiment_returns_none(self, mock_only):
+        from cms.experiments.handlers import _experiment_recipient_id
+        from cms.experiments.models import Experiment
+
+        mock_only.return_value.get.side_effect = Experiment.DoesNotExist
+
+        assert _experiment_recipient_id(999) is None
+
+    @patch("cms.experiments.handlers._experiment_recipient_id", return_value=None)
+    def test_run_status_notification_skips_missing_recipient(self, mock_recipient):
+        from cms.experiments.handlers import _publish_run_status_notification
+
+        _publish_run_status_notification(
+            experiment_id=999,
+            run_id=5,
+            run_number=1,
+            status=RunStatus.FAILED.value,
+            error_message="missing owner",
+        )
+
+        mock_recipient.assert_called_once_with(999)
+
+    @patch("cms.experiments.handlers._experiment_recipient_id", return_value=None)
+    def test_experiment_status_notification_skips_missing_recipient(self, mock_recipient):
+        from cms.experiments.handlers import _publish_experiment_status_notification
+
+        _publish_experiment_status_notification(999, "failed")
+
+        mock_recipient.assert_called_once_with(999)

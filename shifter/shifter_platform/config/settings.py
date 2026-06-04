@@ -185,6 +185,10 @@ REDIS_HOST = os.environ.get("REDIS_HOST", "")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 CHANNEL_LAYERS = _build_channel_layers(os.environ)
 
+# Shared WebSocket notification replay bounds (issue #679).
+WEBSOCKET_NOTIFICATION_MAX_REPLAY = _env_int("WEBSOCKET_NOTIFICATION_MAX_REPLAY", 100)
+WEBSOCKET_NOTIFICATION_RETENTION_DAYS = _env_int("WEBSOCKET_NOTIFICATION_RETENTION_DAYS", 7)
+
 # ------------------------------------------------------------------------------
 # Terminal WebSocket capacity controls (issue #847)
 # ------------------------------------------------------------------------------

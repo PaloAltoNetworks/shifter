@@ -4,7 +4,6 @@ This module provides the Terraform equivalent of the Pulumi NGFW operations.
 It makes the same DB calls and emits the same SNS events as the Pulumi path.
 """
 
-import json
 import logging
 import os
 import time
@@ -22,6 +21,7 @@ from events import (
     publish_ngfw_event,
 )
 from executors.ngfw_executor import NGFWExecutor
+from log_redact import safe_log_value
 from orchestrators.setup_orchestrator import SetupOrchestrator
 from plans.ngfw_provision import NGFWProvisionPlan
 
@@ -465,7 +465,17 @@ def _run_provision(
 
     # Run Terraform apply and get outputs
     output_data = terraform_runner.apply_ngfw(request_id, tf_variables, terraform_runner.NGFW_MODULE_PATH)
-    logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
+    # Log correlation IDs + a field count, never the full output dict: NGFW
+    # Terraform outputs carry a Secret Manager / Secrets Manager reference
+    # (ssh_key_secret_id / ssh_key_secret_arn), so json.dumps-ing the whole dict
+    # logs it in clear text (CodeQL py/clear-text-logging) and would leak any
+    # future sensitive output field.
+    logger.info(
+        "Terraform apply complete for NGFW: request_id=%s instance_id=%s (%d output fields)",
+        safe_log_value(request_id),
+        safe_log_value(instance_id),
+        len(output_data),
+    )
 
     _run_pan_os_post_provision(
         request_id=request_id,
@@ -501,7 +511,13 @@ def _run_gdc_provision(
         instance_id=instance_id,
         app_spec=app_spec,
     )
-    logger.info("GDC VM-Series outputs: %s", json.dumps(output_data, indent=2))
+    # See _run_provision: log non-sensitive correlation only, not the dict.
+    logger.info(
+        "GDC VM-Series provisioning applied: request_id=%s instance_id=%s (%d output fields)",
+        safe_log_value(request_id),
+        safe_log_value(instance_id),
+        len(output_data),
+    )
 
     # Persist the VM Runtime state before waiting on PAN-OS so failure cleanup has enough context.
     update_instance_state(request_id, STATUS_PROVISIONING, **output_data, **_build_provider_state(output_data))

@@ -141,6 +141,7 @@ SQS_CMS_URL=$(get_param "$PS_PREFIX/sqs-cms-url")
 SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
 SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
 REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
+CHANNEL_LAYER_BACKEND=$(get_param "$PS_PREFIX/channel-layer-backend" 2>/dev/null || echo "")
 GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" 2>/dev/null || echo "")
 DC_DOMAIN_PASSWORD_SECRET_ARN=$(get_param "$PS_PREFIX/dc-domain-password-secret-arn" 2>/dev/null || echo "")
 GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" 2>/dev/null || echo "")
@@ -179,6 +180,13 @@ COMMON_ENV="$COMMON_ENV -e SQS_MC_URL=$SQS_MC_URL"
 # Add Redis if configured
 if [[ -n "$REDIS_ENDPOINT" ]]; then
   COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
+fi
+
+# Channel-layer backend posture (ADR-018, #849), decoupled from autoscaling.
+# When unset (pre-ADR-018 environments) Django falls back to the
+# REDIS_HOST-presence heuristic; when "redis" it fails closed without REDIS_HOST.
+if [[ -n "$CHANNEL_LAYER_BACKEND" ]]; then
+  COMMON_ENV="$COMMON_ENV -e CHANNEL_LAYER_BACKEND=$CHANNEL_LAYER_BACKEND"
 fi
 
 # Add Guacamole config if configured (for RDP integration)

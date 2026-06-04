@@ -122,6 +122,12 @@ asg_desired_capacity = 1
 scale_up_threshold   = 70
 scale_down_threshold = 30
 
+# Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
+# Dev keeps the in-memory channel layer (Redis provisioned but unused). Flip to
+# true to run the portal on Redis for event-representative websocket behavior;
+# no change to enable_autoscaling is required.
+enable_redis = false
+
 # ------------------------------------------------------------------------------
 # Redis
 # ------------------------------------------------------------------------------

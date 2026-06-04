@@ -3,7 +3,7 @@
 # container start; isolated into its own file so the regression tests in
 # `tests/test_entrypoint_lib.sh` can exercise the function without
 # running the entire entrypoint (which migrates the DB, collects static
-# files, and execs daphne).
+# files, and execs the web server).
 
 # ------------------------------------------------------------------------------
 # fetch_runtime_secret

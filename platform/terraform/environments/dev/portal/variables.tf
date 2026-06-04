@@ -265,6 +265,19 @@ variable "enable_autoscaling" {
   type        = bool
 }
 
+variable "enable_redis" {
+  description = <<-EOT
+    Wire Redis as the Django Channels backend for the portal runtime
+    (ADR-018, #849). Environment-owned and INDEPENDENT of enable_autoscaling:
+    a single-instance dev portal may use Redis, and an environment may disable
+    Redis to save cost without changing ASG posture. When true, the Redis
+    endpoint is published to SSM and the container runs with
+    CHANNEL_LAYER_BACKEND=redis (fail-closed if the endpoint is missing); when
+    false, the portal runs CHANNEL_LAYER_BACKEND=in_memory.
+  EOT
+  type        = bool
+}
+
 variable "asg_min_size" {
   description = "Minimum number of instances in the ASG"
   type        = number

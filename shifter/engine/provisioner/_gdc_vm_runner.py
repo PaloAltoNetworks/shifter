@@ -15,18 +15,37 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from _gdc_vm_naming import _sanitize_name
 from config import GDCNetworkAccessConfig, GDCVMRuntimeConfig
+
+if TYPE_CHECKING:
+    from kubernetes.client import CustomObjectsApi
+    from kubernetes.client.exceptions import ApiException
 
 
 @dataclass(frozen=True)
 class _KubeAccess:
     """Bundle the kubernetes API handle and ApiException type for a runner call."""
 
-    custom_api: Any
-    api_exception: Any
+    custom_api: CustomObjectsApi
+    api_exception: type[ApiException]
+
+
+@dataclass(frozen=True)
+class _VMRuntimeRunContext:
+    """Run-constant inputs threaded through every VM Runtime asset build.
+
+    Bundling these (rather than passing each individually) keeps the per-asset
+    build helpers under the parameter-count limit (Sonar S107).
+    """
+
+    range_id: int
+    request_uuid: str
+    vm_config: GDCVMRuntimeConfig
+    gcs_secret_name: str | None
+    kube: _KubeAccess
 
 
 @dataclass(frozen=True)
@@ -116,11 +135,7 @@ def _build_subnet_pending_instances(
     subnet: dict[str, Any],
     subnet_outputs: dict[str, dict[str, Any]],
     namespace: str,
-    range_id: int,
-    request_uuid: str,
-    vm_config: GDCVMRuntimeConfig,
-    gcs_secret_name: str | None,
-    kube: _KubeAccess,
+    run: _VMRuntimeRunContext,
     build_instance: Callable[..., dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Apply VM Runtime manifests for every asset in ``subnet`` and return pending records.
@@ -146,14 +161,10 @@ def _build_subnet_pending_instances(
         pending.append(
             {
                 **build_instance(
-                    range_id=range_id,
-                    request_uuid=request_uuid,
+                    run=run,
                     instance=instance,
                     index=index,
                     subnet=context,
-                    vm_config=vm_config,
-                    gcs_secret_name=gcs_secret_name,
-                    kube=kube,
                 ),
                 "subnet_output": subnet_output,
             }

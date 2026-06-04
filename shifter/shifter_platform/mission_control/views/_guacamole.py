@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 from django.conf import settings as django_settings
@@ -94,7 +95,9 @@ def _response_error_message(response: JsonResponse, default: str) -> str:
     return str(message or default)
 
 
-def _wrap_bootstrap_error(operation: str, callback):
+def _wrap_bootstrap_error[BootstrapResultT](
+    operation: str, callback: Callable[[], BootstrapResultT]
+) -> BootstrapResultT:
     """Turn view-style URL generation errors into bootstrap failures."""
     from mission_control.guacamole_bootstrap import BootstrapFailure
 

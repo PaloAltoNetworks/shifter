@@ -65,6 +65,14 @@ max-complexity = 15
 quote-style = "double"
 indent-style = "space"
 
+[tool.coverage.report]
+# Keep coverage's default (pragma: no cover) and also exclude unreachable
+# abstract-mixin stubs so they need no inline `# pragma` directive (Sonar S139).
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+]
+
 [tool.mypy]
 python_version = "3.12"
 exclude = [

@@ -6,8 +6,8 @@ executors.aws_executor instead.
 
 import json
 import logging
-from typing import Any
 
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 from executors.base import CommandResult
@@ -22,7 +22,7 @@ class _AWSExecutorRouteMixin:
     Relies on ``self.get_client(...)`` from the composing class.
     """
 
-    def get_client(self, service: str) -> Any:  # pragma: no cover - provided by base
+    def get_client(self, service: str) -> BaseClient:
         raise NotImplementedError
 
     def create_route(

@@ -7,8 +7,8 @@ import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import timedelta
-from typing import Any
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -18,6 +18,9 @@ from django.utils import timezone
 
 from shared.channels.groups import notification_user_topic_group
 from shared.models import WebSocketNotification
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,7 @@ def validate_topic(topic: str) -> str:
 
 
 def _validate_notification_type(notification_type: str) -> str:
+    """Validate and return a registered notification type name."""
     if not isinstance(notification_type, str) or not _TYPE_RE.fullmatch(notification_type):
         raise ValueError("notification type must match ^[a-z][a-z0-9_.:-]{0,127}$")
     return notification_type
@@ -96,11 +100,12 @@ def clear_notification_registry() -> None:
 
 
 def _registrations_for_topic(topic: str) -> list[NotificationRegistration]:
+    """Return the registrations whose topic prefix matches ``topic``."""
     topic = validate_topic(topic)
     return [registration for registration in _registry.values() if topic.startswith(registration.topic_prefix)]
 
 
-def authorize_subscription(user: Any, topic: str) -> bool:
+def authorize_subscription(user: AbstractBaseUser | AnonymousUser, topic: str) -> bool:
     """Return whether a user may subscribe to a logical topic."""
     if not getattr(user, "is_authenticated", False):
         return False
@@ -109,10 +114,12 @@ def authorize_subscription(user: Any, topic: str) -> bool:
     except ValueError:
         return False
 
+    authorized = False
     for registration in registrations:
         try:
             if registration.can_subscribe(user, topic):
-                return True
+                authorized = True
+                break
         except Exception:
             logger.warning(
                 "notification authorizer failed: type=%s topic=%s user_id=%s",
@@ -121,10 +128,11 @@ def authorize_subscription(user: Any, topic: str) -> bool:
                 getattr(user, "id", None),
                 exc_info=True,
             )
-    return False
+    return authorized
 
 
 def _registration_for_publish(notification_type: str, topic: str) -> NotificationRegistration:
+    """Return the registration for a publish call, validating type/topic compatibility."""
     notification_type = _validate_notification_type(notification_type)
     topic = validate_topic(topic)
     try:
@@ -137,6 +145,7 @@ def _registration_for_publish(notification_type: str, topic: str) -> Notificatio
 
 
 def _coerce_event_id(event_id: uuid.UUID | str | None) -> uuid.UUID:
+    """Normalize an optional event id into a UUID, generating one when absent."""
     if event_id is None:
         return uuid.uuid4()
     if isinstance(event_id, uuid.UUID):
@@ -144,16 +153,19 @@ def _coerce_event_id(event_id: uuid.UUID | str | None) -> uuid.UUID:
     return uuid.UUID(str(event_id))
 
 
-def _expires_at() -> Any:
+def _expires_at() -> datetime:
+    """Return the retention cutoff for a newly created notification."""
     retention_days = int(getattr(settings, "WEBSOCKET_NOTIFICATION_RETENTION_DAYS", 7))
     return timezone.now() + timedelta(days=max(retention_days, 1))
 
 
 def _max_replay() -> int:
+    """Return the bounded replay-queue size for pending notifications."""
     return max(int(getattr(settings, "WEBSOCKET_NOTIFICATION_MAX_REPLAY", 100)), 1)
 
 
 def _unique_recipient_ids(recipient_ids: Iterable[int]) -> list[int]:
+    """Return recipient ids de-duplicated while preserving first-seen order."""
     seen: set[int] = set()
     unique: list[int] = []
     for recipient_id in recipient_ids:
@@ -171,8 +183,9 @@ def _get_or_create_notification(
     topic: str,
     event_id: uuid.UUID,
     payload: dict[str, Any],
-    expires_at: Any,
+    expires_at: datetime,
 ) -> WebSocketNotification:
+    """Idempotently fetch-or-create the per-recipient notification row."""
     try:
         with transaction.atomic():
             notification, _created = WebSocketNotification.objects.get_or_create(
@@ -221,18 +234,16 @@ def publish_notification(
     ]
 
     channel_layer = get_channel_layer()
-    if channel_layer is None:
-        return notifications
-
-    send = async_to_sync(channel_layer.group_send)
-    for notification in notifications:
-        send(
-            notification_user_topic_group(notification.recipient_id, topic),
-            {
-                "type": "notification.dispatch",
-                "notification_id": notification.id,
-            },
-        )
+    if channel_layer is not None:
+        send = async_to_sync(channel_layer.group_send)
+        for notification in notifications:
+            send(
+                notification_user_topic_group(notification.recipient_id, topic),
+                {
+                    "type": "notification.dispatch",
+                    "notification_id": notification.id,
+                },
+            )
     return notifications
 
 

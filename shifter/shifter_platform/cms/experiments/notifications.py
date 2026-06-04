@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from cms.experiments.models import Experiment
 from shared.notifications import publish_notification, register_notification_type
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractBaseUser, AnonymousUser, User
 
 EXPERIMENT_TOPIC_PREFIX = "experiment:"
 NOTIFICATION_EXPERIMENT_RUN_STATUS = "experiment.run_status"
@@ -20,6 +23,7 @@ def experiment_topic(experiment_id: int | str) -> str:
 
 
 def _experiment_id_from_topic(topic: str) -> int | None:
+    """Parse the positive experiment id from a topic, or None if it does not match."""
     if not topic.startswith(EXPERIMENT_TOPIC_PREFIX):
         return None
     raw_id = topic.removeprefix(EXPERIMENT_TOPIC_PREFIX)
@@ -30,14 +34,15 @@ def _experiment_id_from_topic(topic: str) -> int | None:
     return experiment_id if experiment_id > 0 else None
 
 
-def _can_subscribe_to_experiment(user: Any, topic: str) -> bool:
+def _can_subscribe_to_experiment(user: AbstractBaseUser | AnonymousUser, topic: str) -> bool:
     """Authorize experiment notification subscriptions."""
     if not getattr(user, "is_authenticated", False) or not getattr(user, "is_staff", False):
         return False
     experiment_id = _experiment_id_from_topic(topic)
     if experiment_id is None:
         return False
-    return Experiment.objects.filter(pk=experiment_id, user=user).exists()
+    # Narrowed to a concrete User by the is_authenticated/is_staff guard above.
+    return Experiment.objects.filter(pk=experiment_id, user=cast("User", user)).exists()
 
 
 def _run_status_payload(payload: Mapping[str, Any]) -> dict[str, Any]:

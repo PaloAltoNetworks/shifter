@@ -27,6 +27,7 @@ from events import STATUS_DESTROYED
 from executors.ngfw_executor import NGFWExecutor
 from ngfw_polling import poll_for_serial_number, wait_for_autocommit
 from orchestrators.setup_orchestrator import SetupOrchestrator
+from plans.base import SetupPlan
 from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan, NGFWRemoveSubnetsPlan
 
 logger = logging.getLogger(__name__)
@@ -271,7 +272,7 @@ def configure_ngfw_subnets(
         stale_routes,
         ssm_endpoints_subnet_cidr,
     )
-    plan = main.DynamicPlan(name="ngfw_configure_subnets", steps=steps)
+    plan: SetupPlan = main.DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
     logger.info("Running NGFW subnet configuration via SetupOrchestrator...")
@@ -339,7 +340,7 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict[str, Any]], range_id: i
 
     has_endpoints = bool(os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR"))
     steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id, has_endpoints)
-    plan = main.DynamicPlan(name="ngfw_remove_subnets", steps=steps)
+    plan: SetupPlan = main.DynamicPlan(name="ngfw_remove_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
     logger.info("Running NGFW subnet removal via SetupOrchestrator...")

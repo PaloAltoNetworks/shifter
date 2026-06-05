@@ -30,7 +30,10 @@ Current mechanisms:
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
     Shifter-owned, Terraform-managed instances.
-- `.github/workflows/_quality.yml`: CI architecture gate
+- `.github/workflows/_quality.yml`: CI architecture gate. Its SonarCloud
+  job restores coverage artifacts, sets up Temurin Java 21, and disables
+  SonarScanner JRE auto-provisioning so the quality gate does not depend
+  on downloading a runtime during analysis.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
   runs on push to `dev`, on pull requests against `dev`, and on a

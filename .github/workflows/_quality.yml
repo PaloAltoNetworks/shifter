@@ -1209,6 +1209,12 @@ jobs:
           name: coverage-installation
           path: shifter/installation
 
+      - name: Setup Java for SonarScanner
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: SonarQube Cloud scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
@@ -1220,4 +1226,6 @@ jobs:
           # failing new-code gate fails this job (and, via the Quality
           # caller, the PR Gate check). Branch runs (push to dev) upload
           # analysis without blocking on pre-existing debt.
-          args: ${{ github.event_name == 'pull_request' && '-Dsonar.qualitygate.wait=true' || '' }}
+          args: >-
+            -Dsonar.scanner.skipJreProvisioning=true
+            ${{ github.event_name == 'pull_request' && '-Dsonar.qualitygate.wait=true' || '' }}

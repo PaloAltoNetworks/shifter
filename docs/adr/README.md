@@ -30,7 +30,10 @@ Current mechanisms:
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
     Shifter-owned, Terraform-managed instances.
-- `.github/workflows/_quality.yml`: CI architecture gate
+- `.github/workflows/_quality.yml`: CI architecture gate. Its SonarCloud
+  job restores coverage artifacts, sets up Temurin Java 21, and disables
+  SonarScanner JRE auto-provisioning so the quality gate does not depend
+  on downloading a runtime during analysis.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
   runs on push to `dev`, on pull requests against `dev`, and on a
@@ -44,6 +47,10 @@ Current mechanisms:
   `deprecated`, `removed`, `fixed`, `feat`, `fix`, `chore`, `docs`,
   `refactor`, `test`, `ci`, `build`, `perf`, `revert`. Subject must
   start with a lowercase letter.
+- `.github/workflows/_shifter-engine.yml`: engine image validation and
+  deployment. The validate job runs on GitHub-hosted runners because it
+  only performs a local Docker build; self-hosted runners are reserved
+  for the credentialed build and deploy jobs.
 - `.github/dependabot.yml`: weekly dependency PRs across every uv,
   npm, github-actions, and pre-commit package root in the repo; every
   block targets the `dev` integration branch.

@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
 from executors.factory import get_ssh_username
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
-def _load_template(name: str) -> Any:
+def _load_template(name: str) -> Template:
     """Load a Jinja template from the provisioner ``templates/`` directory."""
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATES_DIR)),

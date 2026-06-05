@@ -53,8 +53,8 @@ from log_redact import safe_log_fingerprint, safe_log_value
 
 logger = logging.getLogger(__name__)
 
-# TODO(#641, b-edwards): consolidate these constants in the shared package
-# Resource event type constants (matching shared.messages.events)
+# Resource event type constants (mirroring shared.messages.events); consolidating
+# these into the shared package is tracked in #641.
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
 EVENT_TYPE_PROVISIONED = "range.provisioned"
 EVENT_TYPE_DESTROYED = "range.destroyed"

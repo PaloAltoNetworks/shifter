@@ -207,8 +207,10 @@ NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500
 
 # Re-exports from sibling modules (S104 file-split, issue #780). These
 # imports preserve `patch("main.X")` test mocks for callers that still
-# reach in through ``main`` instead of the new sibling module path.
-from provisioner_db import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+# reach in through ``main`` instead of the new sibling module path. They
+# must follow the top-level constants above (hence the per-line E402
+# suppressions) so ``main`` exposes the same surface as the pre-split module.
+from provisioner_db import (  # noqa: E402
     _append_kwarg_assignment,
     _build_ngfw_range_attachment_record,
     _record_ngfw_range_attachment,
@@ -239,7 +241,7 @@ _DB_REEXPORTS_USED = (
 )
 
 
-from dc_setup import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from dc_setup import (  # noqa: E402
     _configure_dc_ssh_access,
     _DCBootstrapContext,
     _DCPromoteConfig,
@@ -248,7 +250,7 @@ from dc_setup import (  # noqa: E402 - sibling-module re-exports must follow the
     _run_dc_setup,
     _verify_dc_setup,
 )
-from instance_orchestrator import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from instance_orchestrator import (  # noqa: E402
     _build_uuid_to_config,
     _partition_dc_vs_other,
     _partition_pod_vs_vm,
@@ -258,7 +260,7 @@ from instance_orchestrator import (  # noqa: E402 - sibling-module re-exports mu
     _setup_other_instances_parallel,
     run_instance_setup,
 )
-from instance_setup import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from instance_setup import (  # noqa: E402
     _LINUX_VICTIM_OS_TYPES,
     _dispatch_instance_setup_role,
     _DomainJoinSpec,
@@ -275,7 +277,7 @@ from instance_setup import (  # noqa: E402 - sibling-module re-exports must foll
     _setup_linux_victim,
     _setup_windows_victim,
 )
-from ngfw_polling import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from ngfw_polling import (  # noqa: E402
     _format_serial_cert_status,
     _raise_serial_cert_timeout,
     parse_device_certificate_status,
@@ -284,7 +286,7 @@ from ngfw_polling import (  # noqa: E402 - sibling-module re-exports must follow
     poll_for_serial_number,
     wait_for_autocommit,
 )
-from ngfw_runtime import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from ngfw_runtime import (  # noqa: E402
     configure_ngfw_subnets,
     find_stale_routes_by_cidr,
     find_stale_routes_by_db,
@@ -292,7 +294,7 @@ from ngfw_runtime import (  # noqa: E402 - sibling-module re-exports must follow
     update_instance_state,
     user_has_active_ranges,
 )
-from ngfw_runtime_ops import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from ngfw_runtime_ops import (  # noqa: E402
     _load_ngfw_ops_plan,
     _publish_ngfw_runtime_status,
     _run_aws_ngfw_operation,
@@ -300,10 +302,10 @@ from ngfw_runtime_ops import (  # noqa: E402 - sibling-module re-exports must fo
     _validate_ngfw_operation,
     run_ngfw_operation,
 )
-from polaris_bootstrap import (  # noqa: E402 - sibling-module re-export must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from polaris_bootstrap import (  # noqa: E402
     _run_polaris_range_bootstrap,
 )
-from terraform_ops import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from terraform_ops import (  # noqa: E402
     _allocate_range_subnet_cidrs,
     _attempt_terraform_auto_cleanup,
     _build_ngfw_subnet_payloads,
@@ -324,7 +326,7 @@ from terraform_ops import (  # noqa: E402 - sibling-module re-exports must follo
     _validate_ngfw_range_attachment,
     run_range_terraform,
 )
-from terraform_vars import (  # noqa: E402 - sibling-module re-exports must follow the top-level constants above so the module exposes the same surface as the pre-split main.py
+from terraform_vars import (  # noqa: E402
     _build_aws_extra_tf_variables,
     _build_range_terraform_variables,
     _build_tf_instance,

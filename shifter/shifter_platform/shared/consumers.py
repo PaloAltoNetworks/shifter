@@ -48,7 +48,7 @@ class SharedNotificationConsumer(AsyncWebsocketConsumer):
         """Leave all subscribed topic groups."""
         if self._user_id is None:
             return
-        for topic in list(self.subscriptions):
+        for topic in self.subscriptions:
             await self.channel_layer.group_discard(
                 notification_user_topic_group(self._user_id, topic),
                 self.channel_name,

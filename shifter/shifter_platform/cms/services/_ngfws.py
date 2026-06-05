@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -262,6 +263,17 @@ def _provision_ngfw_request_records(user: User, name: str) -> tuple[UUID, Reques
     return request_id, request, instance, app
 
 
+@dataclass(frozen=True)
+class _NGFWRegistration:
+    """Deployment-profile and registration/credential inputs for an NGFW create."""
+
+    deployment_profile: Credential
+    registration_method: str
+    scm_credential: Credential | None
+    otp_value: str | None
+    otp_folder: str | None
+
+
 def _hydrate_and_dispatch_ngfw(
     request_id: UUID,
     user: User,
@@ -269,11 +281,7 @@ def _hydrate_and_dispatch_ngfw(
     instance: Instance,
     app: App,
     name: str,
-    deployment_profile: Credential,
-    registration_method: str,
-    scm_credential: Credential | None,
-    otp_value: str | None,
-    otp_folder: str | None,
+    registration: _NGFWRegistration,
 ) -> None:
     """Hydrate the NGFW spec, persist for audit, dispatch the engine, and write the audit-log row."""
     from cms.scenarios.hydrator import hydrate_ngfw
@@ -284,11 +292,11 @@ def _hydrate_and_dispatch_ngfw(
         instance=instance,
         app=app,
         request=request,
-        deployment_profile=deployment_profile,
-        registration_method=registration_method,  # type: ignore[arg-type]
-        scm_credential=scm_credential,
-        otp_value=otp_value,
-        otp_folder=otp_folder,
+        deployment_profile=registration.deployment_profile,
+        registration_method=registration.registration_method,  # type: ignore[arg-type]
+        scm_credential=registration.scm_credential,
+        otp_value=registration.otp_value,
+        otp_folder=registration.otp_folder,
     )
     request_spec = RequestSpec(
         request_id=request_id,
@@ -310,7 +318,7 @@ def _hydrate_and_dispatch_ngfw(
         new_state={
             "app_uuid": str(app.id),
             "name": name,
-            "registration_method": registration_method,
+            "registration_method": registration.registration_method,
             "request_id": str(request_id),
         },
         request_id=str(request_id),
@@ -369,11 +377,13 @@ def create_ngfw(
         instance,
         app,
         name,
-        deployment_profile,
-        registration_method,
-        scm_credential,
-        otp_value,
-        otp_folder,
+        _NGFWRegistration(
+            deployment_profile=deployment_profile,
+            registration_method=registration_method,
+            scm_credential=scm_credential,
+            otp_value=otp_value,
+            otp_folder=otp_folder,
+        ),
     )
 
     return NGFWAppRef(

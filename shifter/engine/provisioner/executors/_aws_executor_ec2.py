@@ -6,14 +6,16 @@ executors.aws_executor instead.
 
 import json
 import logging
-from typing import Any
 
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError, WaiterError
 
 from executors.base import CommandResult
 from log_redact import safe_log_fingerprint, safe_log_value
 
 logger = logging.getLogger(__name__)
+
+_UNKNOWN_ERROR = "unknown error"
 
 
 class _AWSExecutorEC2Mixin:
@@ -22,7 +24,7 @@ class _AWSExecutorEC2Mixin:
     Relies on ``self.get_client(...)`` from the composing class.
     """
 
-    def get_client(self, service: str) -> Any:  # pragma: no cover - provided by base
+    def get_client(self, service: str) -> BaseClient:
         raise NotImplementedError
 
     def start_instance(self, instance_id: str) -> CommandResult:
@@ -147,7 +149,7 @@ class _AWSExecutorEC2Mixin:
             failure_stderr = str(e)
         if success_result is not None:
             return success_result
-        return CommandResult(success=False, exit_code=-1, stdout="", stderr=failure_stderr or "unknown error")
+        return CommandResult(success=False, exit_code=-1, stdout="", stderr=failure_stderr or _UNKNOWN_ERROR)
 
     def wait_for_stopped(self, instance_id: str, timeout: int = 900) -> CommandResult:
         """Wait for an EC2 instance to reach the 'stopped' state.
@@ -194,7 +196,7 @@ class _AWSExecutorEC2Mixin:
             failure_stderr = str(e)
         if success_result is not None:
             return success_result
-        return CommandResult(success=False, exit_code=-1, stdout="", stderr=failure_stderr or "unknown error")
+        return CommandResult(success=False, exit_code=-1, stdout="", stderr=failure_stderr or _UNKNOWN_ERROR)
 
     def describe_instance(self, instance_id: str) -> CommandResult:
         """Describe an EC2 instance.
@@ -272,4 +274,4 @@ class _AWSExecutorEC2Mixin:
                 failure_stderr = str(e)
         if success_result is not None:
             return success_result
-        return CommandResult(success=False, exit_code=-1, stdout="", stderr=failure_stderr or "unknown error")
+        return CommandResult(success=False, exit_code=-1, stdout="", stderr=failure_stderr or _UNKNOWN_ERROR)

@@ -11,13 +11,18 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Any
 
 from _gdc_vm_naming import _build_instance_secret_name
 from cloud.gcp.base import get_project_id, import_google_module
 from config import GDCVMRuntimeConfig
 from log_redact import safe_log_fingerprint
 from utils.crypto import derive_ssh_public_key, generate_rdp_password, generate_ssh_keypair
+
+if TYPE_CHECKING:
+    from kubernetes.client import CoreV1Api
+    from kubernetes.client.exceptions import ApiException
 
 logger = logging.getLogger(__name__)
 
@@ -151,11 +156,11 @@ def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None
 
 
 def _ensure_gcs_image_secret(
-    core_api: Any,
-    client_module: Any,
+    core_api: CoreV1Api,
+    client_module: ModuleType,
     namespace: str,
     vm_config: GDCVMRuntimeConfig,
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> str | None:
     """Create-or-patch the GCS image-pull Kubernetes secret if one is configured."""
     if not vm_config.image_gcs_secret_id:

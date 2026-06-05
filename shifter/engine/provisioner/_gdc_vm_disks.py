@@ -6,6 +6,7 @@ secrets/IPs into the custom-resource bodies passed to the GDC API.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from _gdc_vm_image_source import _resolve_image_source
@@ -56,22 +57,36 @@ def _build_disk_manifest(
     }
 
 
+@dataclass(frozen=True)
+class _VMNetworkSpec:
+    """Network attachment inputs for a GDC VirtualMachine manifest."""
+
+    network_name: str
+    static_ip: str
+    subnet_cidr: str
+
+
+@dataclass(frozen=True)
+class _VMComputeSpec:
+    """Compute / OS sizing inputs for a GDC VirtualMachine manifest."""
+
+    os_label: str
+    vcpus: int
+    memory: str
+
+
 def _build_vm_manifest(
     *,
     namespace: str,
     vm_name: str,
     disk_name: str,
-    network_name: str,
-    static_ip: str,
-    subnet_cidr: str,
     user_data: str,
-    os_label: str,
-    vcpus: int,
-    memory: str,
     labels: dict[str, str],
+    network: _VMNetworkSpec,
+    compute: _VMComputeSpec,
 ) -> dict[str, Any]:
     """Build the ``VirtualMachine`` custom resource manifest."""
-    prefix_length = subnet_cidr.split("/", 1)[1]
+    prefix_length = network.subnet_cidr.split("/", 1)[1]
     return {
         "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
         "kind": "VirtualMachine",
@@ -81,16 +96,16 @@ def _build_vm_manifest(
             "labels": labels,
         },
         "spec": {
-            "osType": os_label,
+            "osType": compute.os_label,
             "compute": {
-                "cpu": {"vcpus": vcpus},
-                "memory": {"capacity": memory},
+                "cpu": {"vcpus": compute.vcpus},
+                "memory": {"capacity": compute.memory},
             },
             "interfaces": [
                 {
                     "name": "eth0",
-                    "networkName": network_name,
-                    "ipAddresses": [f"{static_ip}/{prefix_length}"],
+                    "networkName": network.network_name,
+                    "ipAddresses": [f"{network.static_ip}/{prefix_length}"],
                     "default": True,
                 }
             ],

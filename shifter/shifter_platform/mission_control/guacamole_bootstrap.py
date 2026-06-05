@@ -184,6 +184,7 @@ def _finish_failure(
     message: str,
     status_code: int,
 ) -> None:
+    """Mark the bootstrap request FAILED, persisting the error details and duration."""
     duration_ms = _duration_ms(started)
     bootstrap.status = GuacamoleBootstrapRequest.Status.FAILED
     bootstrap.error_message = _clean_error_message(message)

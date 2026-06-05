@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from log_redact import safe_log_fingerprint, safe_log_value
+
+if TYPE_CHECKING:
+    from kubernetes.client import ApiClient, CustomObjectsApi
+    from kubernetes.client.exceptions import ApiException
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +45,7 @@ def _import_kubernetes_modules() -> tuple[Any, Any, Any, Any]:
     return kubernetes, client, config, ApiException
 
 
-def _build_kube_api_client(kubeconfig_yaml: str) -> Any:
+def _build_kube_api_client(kubeconfig_yaml: str) -> ApiClient:
     """Build a kubernetes ``ApiClient`` from a kubeconfig YAML payload."""
     _, client, config, _ = _import_kubernetes_modules()
     import yaml
@@ -57,14 +61,14 @@ def _build_kube_api_client(kubeconfig_yaml: str) -> Any:
 
 
 def _apply_namespaced_custom_object(
-    custom_api: Any,
+    custom_api: CustomObjectsApi,
     *,
     group: str,
     version: str,
     plural: str,
     namespace: str,
     body: dict[str, Any],
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> None:
     """Create-or-patch a namespaced GDC custom resource."""
     name = body["metadata"]["name"]
@@ -92,14 +96,14 @@ def _apply_namespaced_custom_object(
 
 
 def _delete_namespaced_custom_object(
-    custom_api: Any,
+    custom_api: CustomObjectsApi,
     *,
     group: str,
     version: str,
     plural: str,
     namespace: str,
     name: str,
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> None:
     """Delete a namespaced GDC custom resource, ignoring 404s."""
     try:
@@ -121,7 +125,9 @@ def _delete_namespaced_custom_object(
             raise
 
 
-def _wait_for_disk_ready(custom_api: Any, namespace: str, disk_name: str, api_exception: Any) -> dict[str, Any]:
+def _wait_for_disk_ready(
+    custom_api: CustomObjectsApi, namespace: str, disk_name: str, api_exception: type[ApiException]
+) -> dict[str, Any]:
     """Poll a VirtualMachineDisk until it reports ``Succeeded`` or fails."""
     deadline = time.monotonic() + _DISK_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -160,7 +166,9 @@ def _extract_vm_ip(vm: dict[str, Any]) -> str:
     return ""
 
 
-def _wait_for_vm_ready(custom_api: Any, namespace: str, vm_name: str, api_exception: Any) -> dict[str, Any]:
+def _wait_for_vm_ready(
+    custom_api: CustomObjectsApi, namespace: str, vm_name: str, api_exception: type[ApiException]
+) -> dict[str, Any]:
     """Poll a VirtualMachine until it is running with a network IP."""
     deadline = time.monotonic() + _VM_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -190,7 +198,9 @@ def _wait_for_vm_ready(custom_api: Any, namespace: str, vm_name: str, api_except
     raise RuntimeError(f"Timed out waiting for VirtualMachine {namespace}/{vm_name} to become ready")
 
 
-def _wait_for_vm_stopped(custom_api: Any, namespace: str, vm_name: str, api_exception: Any) -> dict[str, Any]:
+def _wait_for_vm_stopped(
+    custom_api: CustomObjectsApi, namespace: str, vm_name: str, api_exception: type[ApiException]
+) -> dict[str, Any]:
     """Poll a VirtualMachine until it reaches the stopped state."""
     deadline = time.monotonic() + _VM_STOP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -220,13 +230,13 @@ def _wait_for_vm_stopped(custom_api: Any, namespace: str, vm_name: str, api_exce
 
 
 def _wait_for_deleted(
-    custom_api: Any,
+    custom_api: CustomObjectsApi,
     namespace: str,
     name: str,
     group: str,
     version: str,
     plural: str,
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> None:
     """Poll until a custom resource is gone (404) or the deadline elapses."""
     deadline = time.monotonic() + _DELETE_TIMEOUT_SECONDS
@@ -248,7 +258,9 @@ def _wait_for_deleted(
     raise RuntimeError(f"Timed out waiting for {plural} {namespace}/{name} to delete")
 
 
-def _collect_vmi_metadata(custom_api: Any, namespace: str, vm_name: str, api_exception: Any) -> dict[str, Any]:
+def _collect_vmi_metadata(
+    custom_api: CustomObjectsApi, namespace: str, vm_name: str, api_exception: type[ApiException]
+) -> dict[str, Any]:
     """Return VirtualMachineInstance metadata (VMI name, node name) for a VM."""
     try:
         vmi = custom_api.get_namespaced_custom_object(

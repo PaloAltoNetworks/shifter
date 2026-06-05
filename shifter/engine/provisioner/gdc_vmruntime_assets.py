@@ -14,12 +14,18 @@ from __future__ import annotations
 import logging
 
 # Bandit B404 suppressed; the subprocess module is used for kubectl virt runtime operations.
-import subprocess  # nosec B404
+import subprocess  # nosec B404  # NOSONAR — bandit suppression must stay inline (S139)
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from _gdc_vm_disks import _asset_labels, _build_disk_manifest, _build_vm_manifest
+from _gdc_vm_disks import (
+    _asset_labels,
+    _build_disk_manifest,
+    _build_vm_manifest,
+    _VMComputeSpec,
+    _VMNetworkSpec,
+)
 from _gdc_vm_image_source import _resolve_image_source
 from _gdc_vm_kube import (
     _VM_DISK_PLURAL,
@@ -52,6 +58,7 @@ from _gdc_vm_runner import (
     _resolve_power_target,
     _select_namespace,
     _SubnetContext,
+    _VMRuntimeRunContext,
 )
 from _gdc_vm_secrets import (
     _IMAGE_IMPORT_K8S_NAME,
@@ -63,9 +70,13 @@ from _gdc_vm_secrets import (
     _read_secret_payload,
 )
 from _gdc_vm_templates import _render_user_data
-from config import GDCVMRuntimeConfig, load_gdc_network_access_config, load_gdc_vmruntime_config
+from config import load_gdc_network_access_config, load_gdc_vmruntime_config
 from executors.factory import get_ssh_username
 from log_redact import safe_log_value
+
+if TYPE_CHECKING:
+    from kubernetes.client import CoreV1Api, CustomObjectsApi
+    from kubernetes.client.exceptions import ApiException
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +106,13 @@ __all__ = [
 
 
 def _delete_vm_runtime_resource(
-    custom_api: Any,
+    custom_api: CustomObjectsApi,
     *,
     namespace: str,
     name: str,
     plural: str,
     label: str,
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> None:
     """Delete a GDC VM-Runtime resource and wait for its removal, logging timeouts."""
     _delete_namespaced_custom_object(
@@ -126,16 +137,17 @@ def _delete_vm_runtime_resource(
 
 def _build_pending_vm_runtime_instance(
     *,
-    range_id: int,
-    request_uuid: str,
+    run: _VMRuntimeRunContext,
     instance: dict[str, Any],
     index: int,
     subnet: _SubnetContext,
-    vm_config: GDCVMRuntimeConfig,
-    gcs_secret_name: str | None,
-    kube: _KubeAccess,
 ) -> dict[str, Any]:
     """Apply disk + VM manifests for a single instance and return its pending record."""
+    range_id = run.range_id
+    request_uuid = run.request_uuid
+    vm_config = run.vm_config
+    gcs_secret_name = run.gcs_secret_name
+    kube = run.kube
     static_ip = str(subnet.asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
     if not static_ip:
         raise RuntimeError(f"Missing deterministic IP assignment for VM Runtime asset {instance!r}")
@@ -181,14 +193,18 @@ def _build_pending_vm_runtime_instance(
         namespace=subnet.namespace,
         vm_name=vm_name,
         disk_name=disk_name,
-        network_name=subnet.network_name,
-        static_ip=static_ip,
-        subnet_cidr=subnet.subnet_cidr,
         user_data=user_data,
-        os_label=_instance_os_label(os_type),
-        vcpus=profile.vcpus,
-        memory=profile.memory,
         labels=labels,
+        network=_VMNetworkSpec(
+            network_name=subnet.network_name,
+            static_ip=static_ip,
+            subnet_cidr=subnet.subnet_cidr,
+        ),
+        compute=_VMComputeSpec(
+            os_label=_instance_os_label(os_type),
+            vcpus=profile.vcpus,
+            memory=profile.memory,
+        ),
     )
     _apply_namespaced_custom_object(
         kube.custom_api,
@@ -216,8 +232,8 @@ def _build_vm_runtime_output(
     *,
     namespace: str,
     pending: dict[str, Any],
-    custom_api: Any,
-    api_exception: Any,
+    custom_api: CustomObjectsApi,
+    api_exception: type[ApiException],
 ) -> dict[str, Any]:
     """Wait for a pending VM to become ready and return its provisioner output dict."""
     vm = _wait_for_vm_ready(custom_api, namespace, pending["vm_name"], api_exception)
@@ -263,11 +279,11 @@ def _build_vm_runtime_output(
 
 def _destroy_vm_runtime_vms(
     *,
-    custom_api: Any,
+    custom_api: CustomObjectsApi,
     namespace: str,
     range_id: int,
     assets: list[tuple[str, dict[str, Any]]],
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> None:
     """Delete every VirtualMachine resource owned by a range."""
     for subnet_name, instance in assets:
@@ -284,11 +300,11 @@ def _destroy_vm_runtime_vms(
 
 def _destroy_vm_runtime_disks_and_secrets(
     *,
-    custom_api: Any,
+    custom_api: CustomObjectsApi,
     namespace: str,
     range_id: int,
     assets: list[tuple[str, dict[str, Any]]],
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> None:
     """Delete every VirtualMachineDisk and per-instance secret owned by a range."""
     for subnet_name, instance in assets:
@@ -307,9 +323,9 @@ def _destroy_vm_runtime_disks_and_secrets(
 
 def _delete_image_import_secret_if_needed(
     *,
-    core_api: Any,
+    core_api: CoreV1Api,
     namespace: str,
-    api_exception: Any,
+    api_exception: type[ApiException],
 ) -> None:
     """Delete the GCS image-pull Secret if one was configured for the range plane."""
     image_gcs_secret_id = load_gdc_vmruntime_config().image_gcs_secret_id
@@ -345,6 +361,13 @@ def apply_range_assets(
     range_id = int(variables["range_id"])
     namespace = _select_namespace(range_id, subnet_outputs, access)
     gcs_secret_name = _ensure_gcs_image_secret(core_api, client_module, namespace, vm_config, api_exception)
+    run = _VMRuntimeRunContext(
+        range_id=range_id,
+        request_uuid=request_uuid,
+        vm_config=vm_config,
+        gcs_secret_name=gcs_secret_name,
+        kube=kube,
+    )
 
     pending_instances: list[dict[str, Any]] = []
     for subnet in variables.get("subnets", []):
@@ -353,11 +376,7 @@ def apply_range_assets(
                 subnet=subnet,
                 subnet_outputs=subnet_outputs,
                 namespace=namespace,
-                range_id=range_id,
-                request_uuid=request_uuid,
-                vm_config=vm_config,
-                gcs_secret_name=gcs_secret_name,
-                kube=kube,
+                run=run,
                 build_instance=_build_pending_vm_runtime_instance,
             )
         )

@@ -6,12 +6,16 @@ import ipaddress
 import json
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from config import GDCNetworkAccessConfig, load_gdc_network_access_config
 from log_redact import safe_log_fingerprint
+
+if TYPE_CHECKING:
+    from kubernetes.client import ApiClient, CoreV1Api, CustomObjectsApi
+    from kubernetes.client.exceptions import ApiException
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +69,7 @@ def _network_labels(range_id: int, request_uuid: str, subnet_name: str) -> dict[
     }
 
 
-def _build_kube_api_client(kubeconfig_yaml: str) -> Any:
+def _build_kube_api_client(kubeconfig_yaml: str) -> ApiClient:
     """Build a kubernetes ``ApiClient`` from a kubeconfig YAML payload."""
     _, client, config, _ = _import_kubernetes_modules()
 
@@ -219,7 +223,9 @@ def _build_nad_manifest(
     }
 
 
-def _ensure_namespace(core_api: Any, namespace: str, labels: dict[str, str], api_exception: Any) -> None:
+def _ensure_namespace(
+    core_api: CoreV1Api, namespace: str, labels: dict[str, str], api_exception: type[ApiException]
+) -> None:
     """Create or label the GDC range namespace, ignoring already-exists."""
     body = {
         "metadata": {
@@ -236,7 +242,9 @@ def _ensure_namespace(core_api: Any, namespace: str, labels: dict[str, str], api
         core_api.patch_namespace(name=namespace, body={"metadata": {"labels": labels}})
 
 
-def _apply_cluster_custom_object(custom_api: Any, body: dict[str, Any], api_exception: Any) -> None:
+def _apply_cluster_custom_object(
+    custom_api: CustomObjectsApi, body: dict[str, Any], api_exception: type[ApiException]
+) -> None:
     """Create-or-patch a cluster-scoped GDC ``Network`` custom resource."""
     name = body["metadata"]["name"]
     try:
@@ -260,7 +268,9 @@ def _apply_cluster_custom_object(custom_api: Any, body: dict[str, Any], api_exce
         logger.info("Updated GDC Network name_fp=%s", safe_log_fingerprint(name))
 
 
-def _apply_namespaced_custom_object(custom_api: Any, body: dict[str, Any], namespace: str, api_exception: Any) -> None:
+def _apply_namespaced_custom_object(
+    custom_api: CustomObjectsApi, body: dict[str, Any], namespace: str, api_exception: type[ApiException]
+) -> None:
     """Create-or-patch a namespaced NAD custom resource."""
     name = body["metadata"]["name"]
     try:
@@ -286,7 +296,9 @@ def _apply_namespaced_custom_object(custom_api: Any, body: dict[str, Any], names
         logger.info("Updated NAD ns_fp=%s/name_fp=%s", safe_log_fingerprint(namespace), safe_log_fingerprint(name))
 
 
-def _delete_namespaced_custom_object(custom_api: Any, namespace: str, name: str, api_exception: Any) -> None:
+def _delete_namespaced_custom_object(
+    custom_api: CustomObjectsApi, namespace: str, name: str, api_exception: type[ApiException]
+) -> None:
     """Delete a namespaced NAD custom resource, ignoring 404s."""
     try:
         custom_api.delete_namespaced_custom_object(
@@ -302,7 +314,7 @@ def _delete_namespaced_custom_object(custom_api: Any, namespace: str, name: str,
             raise
 
 
-def _delete_cluster_custom_object(custom_api: Any, name: str, api_exception: Any) -> None:
+def _delete_cluster_custom_object(custom_api: CustomObjectsApi, name: str, api_exception: type[ApiException]) -> None:
     """Delete a cluster-scoped GDC ``Network`` custom resource, ignoring 404s."""
     try:
         custom_api.delete_cluster_custom_object(
@@ -317,7 +329,7 @@ def _delete_cluster_custom_object(custom_api: Any, name: str, api_exception: Any
             raise
 
 
-def _delete_namespace(core_api: Any, namespace: str, api_exception: Any) -> None:
+def _delete_namespace(core_api: CoreV1Api, namespace: str, api_exception: type[ApiException]) -> None:
     """Delete the GDC range namespace, ignoring 404s."""
     try:
         core_api.delete_namespace(name=namespace)

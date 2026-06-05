@@ -29,6 +29,7 @@ from collections import OrderedDict
 from threading import Lock
 
 _MAX_LEN = 200
+_NONE_SENTINEL = "<none>"
 
 # Bounded cache of seen-value -> per-process random nonce. Keeping the
 # cache bounded prevents long-lived processes from accumulating mappings
@@ -50,7 +51,7 @@ def safe_log_value(value: object, max_len: int = _MAX_LEN) -> str:
     - output is truncated to ``max_len`` characters (with a ``...`` suffix)
     """
     if value is None:
-        return "<none>"
+        return _NONE_SENTINEL
     text = str(value)
     text = text.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
     cleaned_chars: list[str] = []
@@ -73,7 +74,7 @@ def safe_log_id(value: object) -> str:
     the readable form should not land in logs.
     """
     sanitized = safe_log_value(value, max_len=_MAX_LEN)
-    if sanitized in ("<none>",):
+    if sanitized == _NONE_SENTINEL:
         return sanitized
     if len(sanitized) <= 8:
         return "***"
@@ -103,7 +104,7 @@ def safe_log_fingerprint(value: object) -> str:
     structured context fields (request_id, range_id) instead.
     """
     if value is None:
-        return "<none>"
+        return _NONE_SENTINEL
     key = str(value)
     with _fingerprint_cache_lock:
         cached = _fingerprint_cache.get(key)

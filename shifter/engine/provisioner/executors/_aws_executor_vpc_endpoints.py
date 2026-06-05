@@ -7,8 +7,8 @@ executors.aws_executor instead.
 import json
 import logging
 import time
-from typing import Any
 
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 from executors.base import CommandResult
@@ -23,7 +23,7 @@ class _AWSExecutorVPCEndpointMixin:
     Relies on ``self.get_client(...)`` from the composing class.
     """
 
-    def get_client(self, service: str) -> Any:  # pragma: no cover - provided by base
+    def get_client(self, service: str) -> BaseClient:
         raise NotImplementedError
 
     def create_endpoint(
@@ -181,45 +181,8 @@ class _AWSExecutorVPCEndpointMixin:
             safe_log_fingerprint(endpoint_id),
             timeout,
         )
-        success_result: CommandResult | None = None
-        failure_stderr: str | None = None
         try:
-            client = self.get_client("ec2")
-            start_time = time.time()
-            poll_interval = 10  # seconds
-
-            while success_result is None and failure_stderr is None and time.time() - start_time < timeout:
-                response = client.describe_vpc_endpoints(VpcEndpointIds=[endpoint_id])
-                endpoints = response.get("VpcEndpoints", [])
-                if endpoints:
-                    state = endpoints[0].get("State", "")
-                    if state == "available":
-                        logger.info(
-                            "wait_for_endpoint_available: endpoint_id_fp=%s is available",
-                            safe_log_fingerprint(endpoint_id),
-                        )
-                        success_result = CommandResult(
-                            success=True,
-                            exit_code=0,
-                            stdout=f"Endpoint {endpoint_id} is now available",
-                            stderr="",
-                        )
-                    elif state in ("failed", "deleted", "rejected"):
-                        logger.warning(
-                            "wait_for_endpoint_available: endpoint_id_fp=%s terminal state=%s",
-                            safe_log_fingerprint(endpoint_id),
-                            safe_log_value(state),
-                        )
-                        failure_stderr = f"Endpoint reached terminal state: {state}"
-                if success_result is None and failure_stderr is None:
-                    time.sleep(poll_interval)
-
-            if success_result is None and failure_stderr is None:
-                logger.warning(
-                    "wait_for_endpoint_available: timeout endpoint_id_fp=%s",
-                    safe_log_fingerprint(endpoint_id),
-                )
-                failure_stderr = f"Timeout waiting for endpoint {endpoint_id} to become available"
+            return self._poll_endpoint_until_available(endpoint_id, timeout)
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_message = e.response.get("Error", {}).get("Message", str(e))
@@ -228,16 +191,57 @@ class _AWSExecutorVPCEndpointMixin:
                 safe_log_fingerprint(endpoint_id),
                 safe_log_value(error_code),
             )
-            failure_stderr = f"{error_code}: {error_message}"
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=f"{error_code}: {error_message}")
         except Exception as e:
             logger.exception(
                 "wait_for_endpoint_available: unexpected error endpoint_id_fp=%s",
                 safe_log_fingerprint(endpoint_id),
             )
-            failure_stderr = str(e)
-        if success_result is not None:
-            return success_result
-        return CommandResult(success=False, exit_code=-1, stdout="", stderr=failure_stderr or "unknown error")
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
+
+    def _poll_endpoint_until_available(self, endpoint_id: str, timeout: int) -> CommandResult:
+        """Poll a VPC endpoint until it is available, hits a terminal state, or times out."""
+        client = self.get_client("ec2")
+        start_time = time.time()
+        poll_interval = 10  # seconds
+        while time.time() - start_time < timeout:
+            response = client.describe_vpc_endpoints(VpcEndpointIds=[endpoint_id])
+            endpoints = response.get("VpcEndpoints", [])
+            state = endpoints[0].get("State", "") if endpoints else ""
+            if state == "available":
+                logger.info(
+                    "wait_for_endpoint_available: endpoint_id_fp=%s is available",
+                    safe_log_fingerprint(endpoint_id),
+                )
+                return CommandResult(
+                    success=True,
+                    exit_code=0,
+                    stdout=f"Endpoint {endpoint_id} is now available",
+                    stderr="",
+                )
+            if state in ("failed", "deleted", "rejected"):
+                logger.warning(
+                    "wait_for_endpoint_available: endpoint_id_fp=%s terminal state=%s",
+                    safe_log_fingerprint(endpoint_id),
+                    safe_log_value(state),
+                )
+                return CommandResult(
+                    success=False,
+                    exit_code=-1,
+                    stdout="",
+                    stderr=f"Endpoint reached terminal state: {state}",
+                )
+            time.sleep(poll_interval)
+        logger.warning(
+            "wait_for_endpoint_available: timeout endpoint_id_fp=%s",
+            safe_log_fingerprint(endpoint_id),
+        )
+        return CommandResult(
+            success=False,
+            exit_code=-1,
+            stdout="",
+            stderr=f"Timeout waiting for endpoint {endpoint_id} to become available",
+        )
 
     def describe_endpoints(self, service_name: str) -> CommandResult:
         """Describe VPC endpoints filtered by service name.

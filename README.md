@@ -1,12 +1,3 @@
-<p align="center">
-  <img src="assets/logo-wide-short.png" alt="Shifter">
-</p>
-
-[![Deploy](https://github.com/Brad-Edwards/shifter/actions/workflows/deploy.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/deploy.yml)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
-[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
-[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
-
 # Shifter
 
 Self-service agentic cyber range platform. Users provision isolated attack

@@ -26,7 +26,7 @@ def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
     """Late-bound call to ``cms.services.audit_log`` so test patches apply."""
     from cms import services as _cs
 
-    _cs.audit_log(**kwargs)
+    _cs.audit_log(_cs.AuditEvent(**kwargs))
 
 
 def _app_to_ngfw_context(app: App) -> NGFWAppContext:

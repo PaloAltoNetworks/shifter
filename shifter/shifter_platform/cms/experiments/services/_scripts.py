@@ -22,6 +22,7 @@ from cms.experiments import services as _pkg
 from cms.experiments.exceptions import ExperimentError, ScriptUploadError
 from cms.experiments.schemas import ScriptUploadInput
 from risk_register.models import AuditLog
+from risk_register.services import AuditEvent
 from shared.log_sanitize import safe_log_value
 from shared.uploads.inspection import (
     InspectionError as _ScriptInspectionError,
@@ -233,12 +234,14 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         script.save()
 
         _pkg.audit_log(
-            entity_type=AuditLog.EntityType.SCRIPT,
-            entity_id=script.pk,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            new_state={"name": payload["name"], "filename": payload["filename"], "s3_key": s3_key},
+            AuditEvent(
+                entity_type=AuditLog.EntityType.SCRIPT,
+                entity_id=script.pk,
+                action=AuditLog.Action.CREATE,
+                actor_type=AuditLog.ActorType.USER,
+                actor_id=user.id,
+                new_state={"name": payload["name"], "filename": payload["filename"], "s3_key": s3_key},
+            )
         )
         logger.info(
             "complete_script_upload: created script_id=%s user_id=%s s3_key=%s",
@@ -280,12 +283,14 @@ def delete_script(user: User, script_id: int) -> None:
         script.deleted_at = timezone.now()
         script.save(update_fields=["deleted_at"])
         _pkg.audit_log(
-            entity_type=AuditLog.EntityType.SCRIPT,
-            entity_id=script_id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            previous_state={"name": script.name},
+            AuditEvent(
+                entity_type=AuditLog.EntityType.SCRIPT,
+                entity_id=script_id,
+                action=AuditLog.Action.DELETE,
+                actor_type=AuditLog.ActorType.USER,
+                actor_id=user.id,
+                previous_state={"name": script.name},
+            )
         )
         logger.info("delete_script: soft-deleted script_id=%d user_id=%s", script_id, user.pk)
     except (TypeError, ValueError, ExperimentError):

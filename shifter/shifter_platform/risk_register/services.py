@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from risk_register.models import AuditLog
@@ -19,40 +20,49 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def audit_log(
-    entity_type: str,
-    entity_id: int,
-    action: str,
-    *,
-    actor_type: str = "system",
-    actor_id: int | None = None,
-    previous_state: dict[str, Any] | None = None,
-    new_state: dict[str, Any] | None = None,
-    context: str = "",
-    source_ip: str | None = None,
-    user_agent: str = "",
-    request_id: str = "",
-) -> AuditLog | None:
+@dataclass(frozen=True)
+class AuditEvent:
+    """A single auditable event passed to :func:`audit_log`.
+
+    Groups the entity, actor, state-change and request-context fields so
+    audit_log takes one cohesive object instead of a long parameter list.
+    """
+
+    entity_type: str
+    entity_id: int
+    action: str
+    actor_type: str = "system"
+    actor_id: int | None = None
+    previous_state: dict[str, Any] | None = None
+    new_state: dict[str, Any] | None = None
+    context: str = ""
+    source_ip: str | None = None
+    user_agent: str = ""
+    request_id: str = ""
+
+
+def audit_log(event: AuditEvent) -> AuditLog | None:
     """Record an audit event.
 
     Called by all platform apps for auditable operations.
 
     Args:
-        entity_type: Type of entity (use AuditLog.EntityType values)
-        entity_id: ID of the entity being acted upon
-        action: Action performed (use AuditLog.Action values)
-        actor_type: Type of actor (user, apikey, system, cognito)
-        actor_id: ID of the actor (user ID, API key ID, or None for system)
-        previous_state: Entity state before the action (for updates/deletes)
-        new_state: Entity state after the action (for creates/updates)
-        context: Additional context or reason for the action
-        source_ip: Client IP address
-        user_agent: Client user agent string
-        request_id: Request ID for trace correlation
+        event: The auditable event to record (see :class:`AuditEvent`).
 
     Returns:
         The created AuditLog entry
     """
+    entity_type = event.entity_type
+    entity_id = event.entity_id
+    action = event.action
+    actor_type = event.actor_type
+    actor_id = event.actor_id
+    previous_state = event.previous_state
+    new_state = event.new_state
+    context = event.context
+    source_ip = event.source_ip
+    user_agent = event.user_agent
+    request_id = event.request_id
     try:
         entry = AuditLog.log(
             entity_type=entity_type,
@@ -206,17 +216,19 @@ def audit_log_from_request(
     actor_type, actor_id = get_actor_from_request(request)
 
     return audit_log(
-        entity_type=entity_type,
-        entity_id=entity_id,
-        action=action,
-        actor_type=actor_type,
-        actor_id=actor_id,
-        previous_state=previous_state,
-        new_state=new_state,
-        context=context,
-        source_ip=get_client_ip(request),
-        user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
-        request_id=get_request_id(request),
+        AuditEvent(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            previous_state=previous_state,
+            new_state=new_state,
+            context=context,
+            source_ip=get_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
+            request_id=get_request_id(request),
+        )
     )
 
 
@@ -252,15 +264,17 @@ def audit_log_system_event(
     full_context = f"[{source}] {context}" if context else f"[{source}]"
 
     return audit_log(
-        entity_type=entity_type,
-        entity_id=entity_id,
-        action=action,
-        actor_type=AuditLog.ActorType.SYSTEM,
-        actor_id=None,
-        previous_state=previous_state,
-        new_state=new_state,
-        context=full_context,
-        request_id=request_id,
+        AuditEvent(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            actor_type=AuditLog.ActorType.SYSTEM,
+            actor_id=None,
+            previous_state=previous_state,
+            new_state=new_state,
+            context=full_context,
+            request_id=request_id,
+        )
     )
 
 
@@ -297,15 +311,17 @@ def audit_auth_event(
         new_state["cognito_sub"] = cognito_sub
 
     return audit_log(
-        entity_type=AuditLog.EntityType.USER,
-        entity_id=user_id or 0,
-        action=action,
-        actor_type=actor_type,
-        actor_id=None,
-        new_state=new_state if new_state else None,
-        context=context,
-        source_ip=source_ip,
-        user_agent=user_agent,
+        AuditEvent(
+            entity_type=AuditLog.EntityType.USER,
+            entity_id=user_id or 0,
+            action=action,
+            actor_type=actor_type,
+            actor_id=None,
+            new_state=new_state if new_state else None,
+            context=context,
+            source_ip=source_ip,
+            user_agent=user_agent,
+        )
     )
 
 
@@ -347,12 +363,14 @@ def audit_session_event(
 
     # Sessions don't have persistent IDs
     return audit_log(
-        entity_type=AuditLog.EntityType.SESSION,
-        entity_id=0,
-        action=action,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=user_id,
-        new_state=new_state,
-        context=context,
-        source_ip=source_ip,
+        AuditEvent(
+            entity_type=AuditLog.EntityType.SESSION,
+            entity_id=0,
+            action=action,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user_id,
+            new_state=new_state,
+            context=context,
+            source_ip=source_ip,
+        )
     )

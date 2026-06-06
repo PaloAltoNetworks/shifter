@@ -19,7 +19,7 @@ from cms.assets.s3 import S3Error
 from cms.assets.s3 import delete_agent as s3_delete
 from cms.models import AgentConfig, AgentType, OperatingSystem
 from risk_register.models import AuditLog
-from risk_register.services import audit_log
+from risk_register.services import AuditEvent, audit_log
 from shared.exceptions import AssetError
 from shared.log_sanitize import safe_log_value
 
@@ -135,12 +135,14 @@ def create_agent(user: User, spec: AgentUploadSpec) -> AgentConfig:
         new_state["upload_method"] = upload_method
 
     audit_log(
-        entity_type=AuditLog.EntityType.AGENT,
-        entity_id=agent.id,
-        action=AuditLog.Action.CREATE,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=user.id,
-        new_state=new_state,
+        AuditEvent(
+            entity_type=AuditLog.EntityType.AGENT,
+            entity_id=agent.id,
+            action=AuditLog.Action.CREATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state=new_state,
+        )
     )
 
     logger.info("create_agent: success agent_id=%s user_id=%s", agent.id, user.id)
@@ -180,12 +182,14 @@ def delete_agent(agent: AgentConfig) -> None:
 
     # Audit log agent deletion
     audit_log(
-        entity_type=AuditLog.EntityType.AGENT,
-        entity_id=agent.id,
-        action=AuditLog.Action.DELETE,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=agent.user.id,
-        previous_state=previous_state,
+        AuditEvent(
+            entity_type=AuditLog.EntityType.AGENT,
+            entity_id=agent.id,
+            action=AuditLog.Action.DELETE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=agent.user.id,
+            previous_state=previous_state,
+        )
     )
 
     logger.info("delete_agent: success agent_id=%s", agent.id)

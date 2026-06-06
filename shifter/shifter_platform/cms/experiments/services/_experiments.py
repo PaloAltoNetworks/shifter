@@ -27,6 +27,7 @@ from cms.experiments.schemas import (
     ScriptAssignmentInput,
 )
 from risk_register.models import AuditLog
+from risk_register.services import AuditEvent
 from shared.log_sanitize import safe_log_value
 
 from ._common import _validate_user
@@ -209,12 +210,14 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
                 es.save()
 
         _pkg.audit_log(
-            entity_type=AuditLog.EntityType.EXPERIMENT,
-            entity_id=experiment.pk,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            new_state={"name": data.name, "scenario_id": data.scenario_id, "total_runs": data.total_runs},
+            AuditEvent(
+                entity_type=AuditLog.EntityType.EXPERIMENT,
+                entity_id=experiment.pk,
+                action=AuditLog.Action.CREATE,
+                actor_type=AuditLog.ActorType.USER,
+                actor_id=user.id,
+                new_state={"name": data.name, "scenario_id": data.scenario_id, "total_runs": data.total_runs},
+            )
         )
         logger.info(
             "create_experiment: created experiment_id=%s user_id=%s scenario=%s runs=%d",
@@ -296,12 +299,14 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
             )
 
         _pkg.audit_log(
-            entity_type=AuditLog.EntityType.EXPERIMENT,
-            entity_id=experiment.pk,
-            action=AuditLog.Action.PROVISION,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            new_state={"total_runs": experiment.total_runs, "max_parallel_runs": experiment.max_parallel_runs},
+            AuditEvent(
+                entity_type=AuditLog.EntityType.EXPERIMENT,
+                entity_id=experiment.pk,
+                action=AuditLog.Action.PROVISION,
+                actor_type=AuditLog.ActorType.USER,
+                actor_id=user.id,
+                new_state={"total_runs": experiment.total_runs, "max_parallel_runs": experiment.max_parallel_runs},
+            )
         )
         logger.info(
             "start_experiment: queued experiment_id=%d user_id=%s total_runs=%d",
@@ -348,11 +353,13 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
 
         experiment.transition_to(ExperimentStatus.CANCELLED)
         _pkg.audit_log(
-            entity_type=AuditLog.EntityType.EXPERIMENT,
-            entity_id=experiment.pk,
-            action=AuditLog.Action.CANCEL,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
+            AuditEvent(
+                entity_type=AuditLog.EntityType.EXPERIMENT,
+                entity_id=experiment.pk,
+                action=AuditLog.Action.CANCEL,
+                actor_type=AuditLog.ActorType.USER,
+                actor_id=user.id,
+            )
         )
         logger.info("cancel_experiment: cancelled experiment_id=%d user_id=%s", experiment_id, user.pk)
         return experiment

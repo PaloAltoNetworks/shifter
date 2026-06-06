@@ -8,6 +8,7 @@ import pytest
 
 from risk_register.models import AuditLog
 from risk_register.services import (
+    AuditEvent,
     audit_auth_event,
     audit_log,
     audit_log_from_request,
@@ -106,16 +107,18 @@ class TestAuditLog:
             request_id="req-123",
         )
         entry = audit_log(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=42,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=staff_user.id,
-            new_state={"scenario": "test"},
-            context="test context",
-            source_ip="10.0.0.1",
-            user_agent="TestAgent",
-            request_id="req-123",
+            AuditEvent(
+                entity_type=AuditLog.EntityType.RANGE,
+                entity_id=42,
+                action=AuditLog.Action.CREATE,
+                actor_type=AuditLog.ActorType.USER,
+                actor_id=staff_user.id,
+                new_state={"scenario": "test"},
+                context="test context",
+                source_ip="10.0.0.1",
+                user_agent="TestAgent",
+                request_id="req-123",
+            )
         )
         assert entry is not None
         assert entry.entity_type == AuditLog.EntityType.RANGE
@@ -132,9 +135,11 @@ class TestAuditLog:
     @patch("risk_register.services.AuditLog.log", side_effect=Exception("DB error"))
     def test_returns_none_on_db_failure(self, mock_log):
         result = audit_log(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=1,
-            action=AuditLog.Action.CREATE,
+            AuditEvent(
+                entity_type=AuditLog.EntityType.RANGE,
+                entity_id=1,
+                action=AuditLog.Action.CREATE,
+            )
         )
         assert result is None
 

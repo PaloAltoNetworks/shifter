@@ -253,11 +253,11 @@ class TestCreateAgent:
         )
 
         mock_audit_log.assert_called_once()
-        call_kwargs = mock_audit_log.call_args
-        assert call_kwargs.kwargs["entity_id"] == 44
-        assert call_kwargs.kwargs["new_state"]["name"] == "Logged Agent"
-        assert call_kwargs.kwargs["new_state"]["filename"] == "logged.msi"
-        assert call_kwargs.kwargs["actor_id"] == mock_user.id
+        event = mock_audit_log.call_args.args[0]
+        assert event.entity_id == 44
+        assert event.new_state["name"] == "Logged Agent"
+        assert event.new_state["filename"] == "logged.msi"
+        assert event.actor_id == mock_user.id
 
     @patch("cms.assets.services.audit_log")
     @patch("cms.assets.services.AgentConfig")
@@ -284,8 +284,8 @@ class TestCreateAgent:
             ),
         )
 
-        call_kwargs = mock_audit_log.call_args
-        assert call_kwargs.kwargs["new_state"]["upload_method"] == "presigned"
+        event = mock_audit_log.call_args.args[0]
+        assert event.new_state["upload_method"] == "presigned"
 
     @patch("cms.assets.services.OperatingSystem")
     def test_raises_for_invalid_os_slug(self, mock_os_model, mock_user):
@@ -387,10 +387,10 @@ class TestDeleteAgent:
         delete_agent(mock_windows_agent)
 
         mock_audit_log.assert_called_once()
-        call_kwargs = mock_audit_log.call_args
-        assert call_kwargs.kwargs["entity_id"] == mock_windows_agent.id
-        assert call_kwargs.kwargs["previous_state"]["name"] == mock_windows_agent.name
-        assert call_kwargs.kwargs["actor_id"] == mock_windows_agent.user.id
+        event = mock_audit_log.call_args.args[0]
+        assert event.entity_id == mock_windows_agent.id
+        assert event.previous_state["name"] == mock_windows_agent.name
+        assert event.actor_id == mock_windows_agent.user.id
 
     @patch("cms.assets.services.s3_delete")
     def test_raises_if_s3_delete_fails(self, mock_s3_delete, mock_windows_agent):

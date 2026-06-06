@@ -5,7 +5,7 @@ import logging
 from rest_framework import authentication, exceptions
 
 from risk_register.models import APIKey, AuditLog
-from risk_register.services import audit_log, get_client_ip
+from risk_register.services import AuditEvent, audit_log, get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +44,17 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             # Extract prefix if possible for debugging
             key_prefix = api_key[:8] if api_key and len(api_key) >= 8 else "invalid"
             audit_log(
-                entity_type=AuditLog.EntityType.APIKEY,
-                entity_id=0,
-                action=AuditLog.Action.LOGIN_FAILED,
-                actor_type=AuditLog.ActorType.APIKEY,
-                actor_id=None,
-                new_state={"key_prefix": key_prefix, "endpoint": endpoint},
-                context="Invalid or expired API key",
-                source_ip=source_ip,
-                user_agent=user_agent,
+                AuditEvent(
+                    entity_type=AuditLog.EntityType.APIKEY,
+                    entity_id=0,
+                    action=AuditLog.Action.LOGIN_FAILED,
+                    actor_type=AuditLog.ActorType.APIKEY,
+                    actor_id=None,
+                    new_state={"key_prefix": key_prefix, "endpoint": endpoint},
+                    context="Invalid or expired API key",
+                    source_ip=source_ip,
+                    user_agent=user_agent,
+                )
             )
             raise exceptions.AuthenticationFailed("Invalid or expired API key")
 
@@ -61,14 +63,16 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
         # Log successful authentication
         audit_log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=authenticated_key.id,
-            action=AuditLog.Action.LOGIN,
-            actor_type=AuditLog.ActorType.APIKEY,
-            actor_id=authenticated_key.id,
-            new_state={"key_prefix": authenticated_key.prefix, "endpoint": endpoint},
-            source_ip=source_ip,
-            user_agent=user_agent,
+            AuditEvent(
+                entity_type=AuditLog.EntityType.APIKEY,
+                entity_id=authenticated_key.id,
+                action=AuditLog.Action.LOGIN,
+                actor_type=AuditLog.ActorType.APIKEY,
+                actor_id=authenticated_key.id,
+                new_state={"key_prefix": authenticated_key.prefix, "endpoint": endpoint},
+                source_ip=source_ip,
+                user_agent=user_agent,
+            )
         )
 
         # Return (user, auth) - user is None for API key auth

@@ -42,7 +42,7 @@ from engine.services import destroy_range_by_request as engine_destroy_range_by_
 from engine.services import get_instance_ips_by_uuid as engine_get_instance_ips_by_uuid
 from engine.services import pause_range as engine_pause_range
 from engine.services import resume_range as engine_resume_range
-from risk_register.services import audit_log
+from risk_register.services import AuditEvent, audit_log
 
 # --- Public service functions ------------------------------------------------
 from ._agents import (
@@ -104,6 +104,7 @@ from ._uploads import (
 __all__ = (
     "AgentConfig",
     "AgentUploadSpec",
+    "AuditEvent",
     "CMSError",
     "RangeInstance",
     "ScriptUploadError",

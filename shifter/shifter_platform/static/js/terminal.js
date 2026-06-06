@@ -6,6 +6,9 @@
  */
 /* global Split */
 
+const STATUS_INDICATOR_CLASS = 'status-indicator';
+const NOT_CONNECTED_TEXT = 'Not connected';
+
 class TerminalManager {
     constructor(options) {
         this.instances = options.instances || [];
@@ -521,7 +524,7 @@ class TerminalManager {
         // RDP-only instances don't have socket status
         if (termData.isRdpOnly) {
             if (indicator) {
-                indicator.className = 'status-indicator';
+                indicator.className = STATUS_INDICATOR_CLASS;
                 indicator.style.display = 'none';
             }
             if (text) {
@@ -542,16 +545,16 @@ class TerminalManager {
 
         if (indicator) {
             indicator.style.display = '';
-            indicator.className = 'status-indicator ' + status;
+            indicator.className = STATUS_INDICATOR_CLASS + ' ' + status;
         }
 
         if (text) {
             const statusText = {
                 'connecting': 'Connecting...',
                 'connected': 'Connected',
-                'disconnected': 'Not connected',
+                'disconnected': NOT_CONNECTED_TEXT,
             };
-            text.textContent = statusText[status] || 'Not connected'; // eslint-disable-line security/detect-object-injection
+            text.textContent = statusText[status] || NOT_CONNECTED_TEXT; // eslint-disable-line security/detect-object-injection
         }
     }
 
@@ -692,7 +695,7 @@ class TerminalManager {
             const text = statusEl.querySelector('.status-text');
 
             if (indicator) {
-                indicator.className = 'status-indicator ' + status;
+                indicator.className = STATUS_INDICATOR_CLASS + ' ' + status;
             }
 
             if (text) {
@@ -713,7 +716,7 @@ class TerminalManager {
                         text.textContent = 'Failed';
                         break;
                     default:
-                        text.textContent = 'Not connected';
+                        text.textContent = NOT_CONNECTED_TEXT;
                 }
             }
         }

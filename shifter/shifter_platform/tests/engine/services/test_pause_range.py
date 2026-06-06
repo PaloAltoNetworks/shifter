@@ -7,20 +7,8 @@ from uuid import uuid4
 from shared.enums import ResourceStatus
 
 
-class TestPauseRange:
-    """Tests for pause_range() in engine/services.py.
-
-    Tests the service contract:
-    - Inputs: request_id (UUID)
-    - Outputs: bool (True if pause initiated or already paused, False otherwise)
-    - Side effects: sets status to PAUSING, triggers ECS operation
-    - Errors: none raised (returns False for not found/invalid state)
-    - Logging: DEBUG on entry, INFO on status change, WARNING for not found/invalid state
-    """
-
-    # -------------------------------------------------------------------------
-    # Outputs - returns bool indicating success
-    # -------------------------------------------------------------------------
+class TestPauseRangeOutcomes:
+    """Outcome tests for pause_range()."""
 
     def test_returns_true_when_ecs_task_started(self):
         """Service returns True when range exists, can be paused, and ECS task starts."""
@@ -138,9 +126,9 @@ class TestPauseRange:
             result = pause_range(request_id)
             assert result is False
 
-    # -------------------------------------------------------------------------
-    # Side effects - status update and ECS operation
-    # -------------------------------------------------------------------------
+
+class TestPauseRangeStateMutation:
+    """State mutation tests for pause_range()."""
 
     def test_sets_status_to_pausing(self):
         """Service sets range status to PAUSING."""
@@ -229,9 +217,9 @@ class TestPauseRange:
 
             mock_operation.assert_not_called()
 
-    # -------------------------------------------------------------------------
-    # ECS failure recovery (Fix 3)
-    # -------------------------------------------------------------------------
+
+class TestPauseRangeErrorReversion:
+    """Error reversion tests for pause_range()."""
 
     def test_reverts_status_when_ecs_returns_none(self):
         """Service reverts status to READY when ECS returns None."""
@@ -301,9 +289,9 @@ class TestPauseRange:
             result = pause_range(request_id)
             assert result is False
 
-    # -------------------------------------------------------------------------
-    # Logging
-    # -------------------------------------------------------------------------
+
+class TestPauseRangeLogging:
+    """Logging tests for pause_range()."""
 
     def test_logs_debug_on_entry(self, caplog):
         """Service logs debug on entry with request_id."""

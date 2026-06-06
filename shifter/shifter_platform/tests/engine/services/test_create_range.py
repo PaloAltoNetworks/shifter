@@ -37,16 +37,8 @@ def make_request_spec(
     )
 
 
-class TestCreateRange:
-    """Tests for create_range() in engine/services.py.
-
-    Tests the service contract:
-    - Inputs: request_spec (required RequestSpec containing RangeSpec)
-    - Outputs: UUID (request_id for correlation with CMS)
-    - Side effects: interprets spec, looks up User, allocates subnet, creates Range, triggers ECS
-    - Errors: TypeError (wrong type), ValueError (missing RangeSpec/subnet exhausted), User.DoesNotExist
-    - Logging: DEBUG on entry, INFO on range creation, INFO on ECS task start
-    """
+class _TestCreateRangeHelpers:
+    """Shared helpers for split TestCreateRange scenarios."""
 
     @pytest.fixture(autouse=True)
     def _mock_transaction(self):
@@ -54,9 +46,9 @@ class TestCreateRange:
         with patch("engine.services.transaction"):
             yield
 
-    # -------------------------------------------------------------------------
-    # Outputs - returns request_id UUID
-    # -------------------------------------------------------------------------
+
+class TestCreateRangePersistence(_TestCreateRangeHelpers):
+    """Persistence and provisioning tests for create_range()."""
 
     def test_returns_request_id_as_uuid(self):
         """Service returns UUID request_id from the RequestSpec."""
@@ -83,10 +75,6 @@ class TestCreateRange:
             assert isinstance(result, UUID)
             assert result == request_spec.request_id
 
-    # -------------------------------------------------------------------------
-    # Side effects - User lookup
-    # -------------------------------------------------------------------------
-
     def test_looks_up_user_by_range_spec_user_id(self):
         """Service retrieves User by RangeSpec.user_id."""
         from engine import create_range
@@ -111,10 +99,6 @@ class TestCreateRange:
 
             mock_get.assert_called_once_with(id=42)
 
-    # -------------------------------------------------------------------------
-    # Side effects - Subnet allocation
-    # -------------------------------------------------------------------------
-
     def test_allocates_subnet_index(self):
         """Service calls Range.allocate_subnet_index() to get subnet."""
         from engine import create_range
@@ -138,10 +122,6 @@ class TestCreateRange:
             create_range(request_spec)
 
             mock_allocate.assert_called_once()
-
-    # -------------------------------------------------------------------------
-    # Side effects - Range creation
-    # -------------------------------------------------------------------------
 
     def test_creates_range_with_correct_kwargs(self):
         """Service creates Range with correct user, cms_user_id, status, subnet_index, and request."""
@@ -172,10 +152,6 @@ class TestCreateRange:
             assert call_kwargs["status"] == Range.Status.PROVISIONING
             assert call_kwargs["subnet_index"] == 87
             assert call_kwargs["request"] == mock_request
-
-    # -------------------------------------------------------------------------
-    # Side effects - ECS provisioning
-    # -------------------------------------------------------------------------
 
     def test_triggers_ecs_provisioning_with_request_id(self):
         """Service calls start_range_provisioning with request_id."""
@@ -253,9 +229,9 @@ class TestCreateRange:
 
             mock_range.save.assert_not_called()
 
-    # -------------------------------------------------------------------------
-    # Input validation - request_spec parameter
-    # -------------------------------------------------------------------------
+
+class TestCreateRangeErrorValidation(_TestCreateRangeHelpers):
+    """Error and input validation tests for create_range()."""
 
     def test_validates_request_spec_type(self):
         """Service raises TypeError for invalid request_spec types."""
@@ -294,10 +270,6 @@ class TestCreateRange:
         with pytest.raises(ValueError, match="must contain a RangeSpec"):
             create_range(request_spec)
 
-    # -------------------------------------------------------------------------
-    # Error handling - user not found
-    # -------------------------------------------------------------------------
-
     def test_propagates_user_does_not_exist(self):
         """Service propagates User.DoesNotExist when user_id invalid."""
         from engine import create_range
@@ -313,10 +285,6 @@ class TestCreateRange:
             pytest.raises(User.DoesNotExist),
         ):
             create_range(request_spec)
-
-    # -------------------------------------------------------------------------
-    # Error handling - subnet allocation failure
-    # -------------------------------------------------------------------------
 
     def test_propagates_subnet_allocation_error(self):
         """Service propagates ValueError when subnet allocation fails."""
@@ -359,9 +327,9 @@ class TestCreateRange:
 
             mock_create.assert_not_called()
 
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG on entry
-    # -------------------------------------------------------------------------
+
+class TestCreateRangeLogging(_TestCreateRangeHelpers):
+    """Logging tests for create_range()."""
 
     def test_logs_debug_on_entry(self, caplog):
         """Service logs debug on entry with scenario_id and user_id."""
@@ -389,10 +357,6 @@ class TestCreateRange:
         assert "advanced-persistent-threat" in caplog.text
         assert "777" in caplog.text
 
-    # -------------------------------------------------------------------------
-    # Logging - INFO on range creation
-    # -------------------------------------------------------------------------
-
     def test_logs_info_when_range_created(self, caplog):
         """Service logs info with range_id and subnet_index when Range is created."""
         from engine import create_range
@@ -418,10 +382,6 @@ class TestCreateRange:
 
         assert "999" in caplog.text
         assert "123" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - INFO when ECS task started
-    # -------------------------------------------------------------------------
 
     def test_logs_info_when_ecs_task_started(self, caplog):
         """Service logs info when ECS task is started."""

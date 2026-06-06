@@ -8,20 +8,8 @@ import pytest
 from shared.cloud.exceptions import CloudTaskError
 
 
-class TestStartEcsTask:
-    """Tests for _start_ecs_task() internal function.
-
-    Contract:
-    - Inputs: range_id (int), user_id (int), command (str)
-    - Outputs: ECS task ARN (str) if successful, None if ECS not configured
-    - Side effects: Calls TaskRunner.run_task via get_task_runner()
-    - Errors: Raises CloudTaskError if ECS task fails to start
-    - Logging: WARNING when config incomplete, ERROR on failures, INFO on success
-    """
-
-    # -------------------------------------------------------------------------
-    # Happy path - function succeeds
-    # -------------------------------------------------------------------------
+class TestStartEcsTaskSuccess:
+    """Successful ECS task start tests."""
 
     def test_returns_task_arn_on_success(self, settings):
         """Function returns ECS task ARN when task starts successfully."""
@@ -86,9 +74,9 @@ class TestStartEcsTask:
             # Verify exact command format: ["range", "destroy", "--range-id", "99", "--user-id", "7"]
             assert call_kwargs["command"] == ["range", "destroy", "--range-id", "99", "--user-id", "7"]
 
-    # -------------------------------------------------------------------------
-    # Configuration - ECS not configured
-    # -------------------------------------------------------------------------
+
+class TestStartEcsTaskConfigurationValidation:
+    """Configuration validation tests for ECS task start."""
 
     def test_returns_none_when_cluster_arn_missing(self, settings):
         """Function returns None when ENGINE_ECS_CLUSTER_ARN is not set."""
@@ -178,9 +166,9 @@ class TestStartEcsTask:
 
         assert result is None
 
-    # -------------------------------------------------------------------------
-    # Input validation
-    # -------------------------------------------------------------------------
+
+class TestStartEcsTaskInputValidation:
+    """Input validation tests for ECS task start."""
 
     def test_raises_when_range_id_is_none(self, settings):
         """Function raises error when range_id is None."""
@@ -286,9 +274,9 @@ class TestStartEcsTask:
         with pytest.raises((TypeError, ValueError)):
             _start_ecs_task(range_id=42, user_id=7, command="")
 
-    # -------------------------------------------------------------------------
-    # Error handling
-    # -------------------------------------------------------------------------
+
+class TestStartEcsTaskCloudErrors:
+    """Cloud error tests for ECS task start."""
 
     def test_raises_cloud_task_error_when_run_task_fails(self, settings):
         """Function raises CloudTaskError when TaskRunner.run_task fails."""
@@ -342,9 +330,9 @@ class TestStartEcsTask:
             with pytest.raises(RuntimeError, match="Provider not configured"):
                 _start_ecs_task(range_id=42, user_id=7, command="provision")
 
-    # -------------------------------------------------------------------------
-    # Logging
-    # -------------------------------------------------------------------------
+
+class TestStartEcsTaskLogging:
+    """Logging tests for ECS task start."""
 
     def test_logs_warning_when_config_incomplete(self, settings, caplog):
         """Function logs WARNING when ECS configuration is incomplete."""

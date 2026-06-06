@@ -162,12 +162,8 @@ class TestParseSnsMessage:
         assert result["range_id"] == 1
 
 
-class TestProcessRangeEvent:
-    """Tests for process_range_event handler."""
-
-    # ---------------------------------------------------------------------
-    # Happy path - status update
-    # ---------------------------------------------------------------------
+class TestProcessRangeEventStatusUpdates:
+    """Status update tests for process_range_event()."""
 
     def test_updates_range_instance_status(self):
         """Handler updates RangeInstance.status from event."""
@@ -281,9 +277,45 @@ class TestProcessRangeEvent:
             assert mock_instance.status == ResourceStatus.DESTROYED.value
             mock_instance.save.assert_called_once_with(update_fields=["status"])
 
-    # ---------------------------------------------------------------------
-    # Event filtering
-    # ---------------------------------------------------------------------
+    def test_succeeds_with_minimum_required_input(self):
+        """Handler works with minimal event fields."""
+        from unittest.mock import MagicMock
+
+        from cms.handlers import process_range_event
+
+        mock_instance = MagicMock()
+        mock_instance.range_id = 8
+        mock_instance.user_id = 42
+        mock_instance.status = ResourceStatus.PENDING.value
+        mock_instance.pk = 8
+
+        # Minimal SNS message - no error_message
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "range_id": 8,
+                    "new_status": ResourceStatus.PROVISIONING.value,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with (
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
+
+            process_range_event(message)
+
+            assert mock_instance.status == ResourceStatus.PROVISIONING.value
+            mock_instance.save.assert_called_once_with(update_fields=["status"])
+
+
+class TestProcessRangeEventInvalidInputs:
+    """Ignored and invalid input tests for process_range_event()."""
 
     def test_ignores_non_status_events(self):
         """Handler ignores events that are not range.status.updated."""
@@ -304,10 +336,6 @@ class TestProcessRangeEvent:
 
             # Should return early without any DB lookup
             MockRI.objects.get.assert_not_called()
-
-    # ---------------------------------------------------------------------
-    # Error handling - missing data
-    # ---------------------------------------------------------------------
 
     def test_handles_missing_range_instance(self):
         """Handler returns early when RangeInstance lookup fails — no save, no bridge."""
@@ -394,49 +422,9 @@ class TestProcessRangeEvent:
 
             MockRI.objects.get.assert_not_called()
 
-    # ---------------------------------------------------------------------
-    # Minimum required input
-    # ---------------------------------------------------------------------
 
-    def test_succeeds_with_minimum_required_input(self):
-        """Handler works with minimal event fields."""
-        from unittest.mock import MagicMock
-
-        from cms.handlers import process_range_event
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 8
-        mock_instance.user_id = 42
-        mock_instance.status = ResourceStatus.PENDING.value
-        mock_instance.pk = 8
-
-        # Minimal SNS message - no error_message
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 8,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-        ):
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            assert mock_instance.status == ResourceStatus.PROVISIONING.value
-            mock_instance.save.assert_called_once_with(update_fields=["status"])
-
-    # ---------------------------------------------------------------------
-    # request_id lookup (new pattern - range_id=None)
-    # ---------------------------------------------------------------------
+class TestProcessRangeEventRequestLookup:
+    """Request id lookup tests for process_range_event()."""
 
     def test_lookup_by_request_id_when_range_id_is_none(self):
         """Handler finds RangeInstance via request_id when range_id is None.

@@ -181,12 +181,8 @@ def mock_range():
     return _make
 
 
-class TestProcessRangeEvent:
-    """Tests for process_range_event handler."""
-
-    # ---------------------------------------------------------------------
-    # Happy path - status update
-    # ---------------------------------------------------------------------
+class TestProcessRangeEventStatusUpdates:
+    """Status update tests for process_range_event()."""
 
     def test_updates_range_status(self, user, mock_range):
         """Handler updates Range.status from event."""
@@ -300,9 +296,9 @@ class TestProcessRangeEvent:
         assert range_obj.status == ResourceStatus.FAILED.value
         assert range_obj.error_message == "Subnet exhausted"
 
-    # ---------------------------------------------------------------------
-    # Event filtering
-    # ---------------------------------------------------------------------
+
+class TestProcessRangeEventInvalidInputs:
+    """Ignored and invalid input tests for process_range_event()."""
 
     def test_ignores_unknown_event_types(self, caplog):
         """Handler ignores events that are not recognized."""
@@ -322,10 +318,6 @@ class TestProcessRangeEvent:
             process_range_event(message)
 
         assert log_contains(caplog, "Ignoring event_type")
-
-    # ---------------------------------------------------------------------
-    # Error handling - missing data
-    # ---------------------------------------------------------------------
 
     def test_handles_missing_range(self, caplog):
         """Handler logs warning when Range not found."""
@@ -385,10 +377,6 @@ class TestProcessRangeEvent:
         assert range_obj.status == ResourceStatus.PENDING.value
         range_obj.save.assert_not_called()
 
-    # ---------------------------------------------------------------------
-    # Error handling - database failures
-    # ---------------------------------------------------------------------
-
     def test_logs_exception_on_database_error(self, user, mock_range, caplog):
         """Handler logs exception when database save fails."""
         from engine.handlers import process_range_event
@@ -416,9 +404,9 @@ class TestProcessRangeEvent:
         assert log_contains(caplog, "DB error saving Range")
         assert log_contains(caplog, "range_id=1")
 
-    # ---------------------------------------------------------------------
-    # Logging - success
-    # ---------------------------------------------------------------------
+
+class TestProcessRangeEventLogging:
+    """Logging and failed-status tests for process_range_event()."""
 
     def test_logs_info_on_successful_update(self, user, mock_range, caplog):
         """Handler logs INFO when status successfully updated."""
@@ -468,10 +456,6 @@ class TestProcessRangeEvent:
 
         assert log_contains(caplog, "Ignoring event_type")
         assert log_contains(caplog, "range.destroyed")
-
-    # ---------------------------------------------------------------------
-    # Edge cases
-    # ---------------------------------------------------------------------
 
     def test_failed_without_error_message(self, user, mock_range):
         """Handler handles FAILED status even without error_message."""

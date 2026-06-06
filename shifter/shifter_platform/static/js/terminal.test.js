@@ -1,3 +1,4 @@
+require('./terminal-layout.js');
 require('./terminal.js');
 
 describe('TerminalManager', () => {

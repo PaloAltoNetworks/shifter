@@ -279,6 +279,7 @@
         {{ terminal_instances|json_script:"terminal-instances-data" }}
         {{ connection_urls|json_script:"terminal-connection-urls-data" }}
         {{ terminal_guacamole_config|json_script:"terminal-guacamole-config" }}
+        <script src="{% static 'js/terminal-layout.js' %}"></script>
         <script src="{% static 'js/terminal.js' %}"></script>
         <script src="{% static 'js/terminal-init.js' %}"></script>
         <script src="{% static 'js/terminal-guacamole.js' %}"></script>

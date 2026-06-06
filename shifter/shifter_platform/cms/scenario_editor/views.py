@@ -165,85 +165,51 @@ def _parse_scenario_form_post(request: HttpRequest, *, require_id: bool) -> tupl
     )
 
 
+def _handle_scenario_create_post(request: HttpRequest) -> HttpResponse:
+    """Validate the create form and create the scenario, re-rendering the form on error."""
+    fields, errors = _parse_scenario_form_post(request, require_id=True)
+    scenario_ctx = {
+        "id": fields["id"],
+        "name": fields["name"],
+        "description": fields["description"],
+        "ngfw": fields["ngfw"],
+        "instances": fields["instances"],
+        "subnets": fields["subnets"],
+    }
+    if errors:
+        return render(
+            request, "scenario_editor/form.html", {"mode": "create", "scenario": scenario_ctx, "errors": errors}
+        )
+
+    definition = {"instances": fields["instances"], "subnets": fields["subnets"], "ngfw": fields["ngfw"]}
+    try:
+        create_scenario(
+            cast("User", request.user),
+            scenario_id=fields["id"],
+            name=fields["name"],
+            description=fields["description"],
+            definition=definition,
+        )
+    except ScenarioEditorError as e:
+        return render(
+            request, "scenario_editor/form.html", {"mode": "create", "scenario": scenario_ctx, "errors": [str(e)]}
+        )
+
+    logger.info(
+        "scenario_create_form: created scenario_id=%s by user_id=%s", safe_log_value(fields["id"]), request.user.id
+    )
+    messages.success(request, f"Scenario '{fields['name']}' created successfully.")
+    return redirect("scenario_editor:detail", scenario_id=fields["id"])
+
+
 @threat_research_required
 @require_http_methods(["GET", "POST"])
 def scenario_create_form(request: HttpRequest) -> HttpResponse:
     """Form-based scenario creation."""
     try:
         if request.method == "GET":
-            return render(
-                request,
-                "scenario_editor/form.html",
-                {
-                    "mode": "create",
-                    "scenario": None,
-                    "errors": [],
-                },
-            )
-
-        fields, errors = _parse_scenario_form_post(request, require_id=True)
-        scenario_id = fields["id"]
-        name = fields["name"]
-        description = fields["description"]
-        ngfw = fields["ngfw"]
-        instances = fields["instances"]
-        subnets = fields["subnets"]
-
-        if errors:
-            return render(
-                request,
-                "scenario_editor/form.html",
-                {
-                    "mode": "create",
-                    "scenario": {
-                        "id": scenario_id,
-                        "name": name,
-                        "description": description,
-                        "ngfw": ngfw,
-                        "instances": instances,
-                        "subnets": subnets,
-                    },
-                    "errors": errors,
-                },
-            )
-
-        definition = {
-            "instances": instances,
-            "subnets": subnets,
-            "ngfw": ngfw,
-        }
-
-        try:
-            create_scenario(
-                cast("User", request.user),
-                scenario_id=scenario_id,
-                name=name,
-                description=description,
-                definition=definition,
-            )
-        except ScenarioEditorError as e:
-            return render(
-                request,
-                "scenario_editor/form.html",
-                {
-                    "mode": "create",
-                    "scenario": {
-                        "id": scenario_id,
-                        "name": name,
-                        "description": description,
-                        "ngfw": ngfw,
-                        "instances": instances,
-                        "subnets": subnets,
-                    },
-                    "errors": [str(e)],
-                },
-            )
-
-        logger.info(
-            "scenario_create_form: created scenario_id=%s by user_id=%s", safe_log_value(scenario_id), request.user.id
-        )
-        messages.success(request, f"Scenario '{name}' created successfully.")
-        return redirect("scenario_editor:detail", scenario_id=scenario_id)
+            return render(request, "scenario_editor/form.html", {"mode": "create", "scenario": None, "errors": []})
+        return _handle_scenario_create_post(request)
     except Exception:
         logger.exception("scenario_create_form: unexpected error for user_id=%s", request.user.id)
         return render(

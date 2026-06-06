@@ -125,25 +125,32 @@ def get_agent_presigned_url(inst_config: dict[str, Any]) -> str | None:
     return presigned_url
 
 
-class DynamicPlan:
+class DynamicPlan(SetupPlan):
     """Simple wrapper for dynamically-built setup plans.
 
-    Structurally satisfies the SetupPlan protocol (``steps``,
-    ``verify_step``, ``get_context``) via duck typing — does NOT
-    inherit from the Protocol class because SetupPlan declares
-    ``steps`` as a read-only ``@property``, which conflicts with
-    storing the value as an instance attribute. The orchestrator
-    accepts SetupPlan-shaped objects at runtime regardless.
+    Implements the SetupPlan protocol nominally: ``steps`` and ``verify_step``
+    are exposed as read-only ``@property`` accessors (matching the protocol's
+    declarations) backed by values bundled at construction time. Inheriting the
+    Protocol explicitly makes the contract visible to nominal type checkers.
     """
 
     def __init__(self, name: str, steps: list[SetupStep]) -> None:
         """Bundle a name and pre-built steps for SetupOrchestrator."""
         self.name = name
-        self.steps = steps
-        self.verify_step: SetupStep | None = None
+        self._steps = steps
+        self._verify_step: SetupStep | None = None
 
-    @staticmethod
-    def get_context(instance: object) -> dict[str, Any]:
+    @property
+    def steps(self) -> list[SetupStep]:
+        """Pre-built steps to execute in order."""
+        return self._steps
+
+    @property
+    def verify_step(self) -> SetupStep | None:
+        """Dynamically-built plans carry no dedicated verification step."""
+        return self._verify_step
+
+    def get_context(self, instance: object) -> dict[str, Any]:
         """No template variables needed - steps are pre-built."""
         return {}
 

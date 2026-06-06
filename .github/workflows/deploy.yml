@@ -131,6 +131,7 @@ jobs:
               - 'shifter/shifter_platform/cms/experiments/events.py'
               - 'shifter/shifter_platform/shared/management/commands/run_worker.py'
               - 'shifter/shifter_platform/requirements-gcp.txt'
+              - 'shifter/shifter_platform/requirements-gcp.lock'
               - 'shifter/engine/provisioner/requirements-gcp.txt'
               - 'shifter/shifter_platform/Dockerfile'
               - 'shifter/engine/provisioner/Dockerfile'

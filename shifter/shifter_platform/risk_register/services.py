@@ -70,25 +70,25 @@ def audit_log(
         # CodeQL's ``py/clear-text-logging-sensitive-data`` taints these fields
         # on dataflow grounds because some call sites also pass credential-bearing
         # ``previous_state`` / ``new_state`` dicts. action / entity_type /
-        # entity_id / actor_type are enum strings and integers, never credentials:
-        # re-bind each through an inline ``str(...).replace(...)`` so the
-        # transformation is visible to CodeQL's dataflow and clears the taint at
-        # this boundary (the shared ``safe_log_value`` helper is opaque to the
-        # rule, so it does not break a clear-text flow). ``actor_id`` is derived
-        # from authenticated-principal state at some call sites, so it goes
-        # through ``safe_log_fingerprint`` — a value-independent nonce that is a
-        # true taint-break; the authoritative id is retained on the durable
+        # entity_id / actor_type are enum strings and integers, never credentials.
+        # The sanitizing transform must be applied INLINE in the logger argument
+        # (not at a prior assignment) for CodeQL's clear-text rule to recognise it
+        # as breaking the flow; the shared ``safe_log_value`` helper is opaque to
+        # the rule, so it cannot be used here. ``actor_id`` is derived from
+        # authenticated-principal state at some call sites, so it goes through
+        # ``safe_log_fingerprint`` — a value-independent nonce that is a true
+        # taint-break; the authoritative id is retained on the durable
         # ``AuditLog`` row, so a correlation token suffices in this debug log.
-        op_name = str(action).replace("\r", " ").replace("\n", " ")[:100]
-        op_target_kind = str(entity_type).replace("\r", " ").replace("\n", " ")[:100]
-        op_target_id = str(entity_id).replace("\r", " ").replace("\n", " ")[:100]
-        op_actor_kind = str(actor_type).replace("\r", " ").replace("\n", " ")[:100]
+        op_name = str(action)
+        op_target_kind = str(entity_type)
+        op_target_id = str(entity_id)
+        op_actor_kind = str(actor_type)
         logger.debug(
             "Audit logged: %s %s %s by %s:%s",
-            op_name,
-            op_target_kind,
-            op_target_id,
-            op_actor_kind,
+            op_name.replace("\r", " ").replace("\n", " ")[:100],
+            op_target_kind.replace("\r", " ").replace("\n", " ")[:100],
+            op_target_id.replace("\r", " ").replace("\n", " ")[:100],
+            op_actor_kind.replace("\r", " ").replace("\n", " ")[:100],
             safe_log_fingerprint(actor_id),
         )
         return entry

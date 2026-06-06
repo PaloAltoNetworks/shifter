@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from cms.assets.services import (
+    AgentUploadSpec,
     AssetError,
     create_agent,
     delete_agent,
@@ -178,12 +179,14 @@ class TestCreateAgent:
 
         agent = create_agent(
             user=mock_user,
-            name="New Agent",
-            s3_key="agents/1/new.msi",
-            filename="new.msi",
-            os_slug="windows",
-            file_size=2048,
-            sha256="newhash123",
+            spec=AgentUploadSpec(
+                name="New Agent",
+                s3_key="agents/1/new.msi",
+                filename="new.msi",
+                os_slug="windows",
+                file_size=2048,
+                sha256="newhash123",
+            ),
         )
 
         assert agent.id is not None
@@ -214,12 +217,14 @@ class TestCreateAgent:
 
         agent = create_agent(
             user=mock_user,
-            name="Linux Agent",
-            s3_key="agents/1/linux.sh",
-            filename="linux.sh",
-            os_slug="linux-debian",
-            file_size=1024,
-            sha256="linuxhash",
+            spec=AgentUploadSpec(
+                name="Linux Agent",
+                s3_key="agents/1/linux.sh",
+                filename="linux.sh",
+                os_slug="linux-debian",
+                file_size=1024,
+                sha256="linuxhash",
+            ),
         )
 
         assert agent.os == mock_linux_os
@@ -237,12 +242,14 @@ class TestCreateAgent:
 
         create_agent(
             user=mock_user,
-            name="Logged Agent",
-            s3_key="agents/1/logged.msi",
-            filename="logged.msi",
-            os_slug="windows",
-            file_size=1024,
-            sha256="loggedhash",
+            spec=AgentUploadSpec(
+                name="Logged Agent",
+                s3_key="agents/1/logged.msi",
+                filename="logged.msi",
+                os_slug="windows",
+                file_size=1024,
+                sha256="loggedhash",
+            ),
         )
 
         mock_audit_log.assert_called_once()
@@ -266,13 +273,15 @@ class TestCreateAgent:
 
         create_agent(
             user=mock_user,
-            name="Presigned Agent",
-            s3_key="agents/1/presigned.msi",
-            filename="presigned.msi",
-            os_slug="windows",
-            file_size=1024,
-            sha256="presignedhash",
-            upload_method="presigned",
+            spec=AgentUploadSpec(
+                name="Presigned Agent",
+                s3_key="agents/1/presigned.msi",
+                filename="presigned.msi",
+                os_slug="windows",
+                file_size=1024,
+                sha256="presignedhash",
+                upload_method="presigned",
+            ),
         )
 
         call_kwargs = mock_audit_log.call_args
@@ -286,12 +295,14 @@ class TestCreateAgent:
         with pytest.raises(AssetError) as exc_info:
             create_agent(
                 user=mock_user,
-                name="Invalid OS Agent",
-                s3_key="agents/1/invalid.msi",
-                filename="invalid.msi",
-                os_slug="nonexistent-os",
-                file_size=1024,
-                sha256="invalidhash",
+                spec=AgentUploadSpec(
+                    name="Invalid OS Agent",
+                    s3_key="agents/1/invalid.msi",
+                    filename="invalid.msi",
+                    os_slug="nonexistent-os",
+                    file_size=1024,
+                    sha256="invalidhash",
+                ),
             )
 
         assert "not found" in str(exc_info.value).lower()
@@ -311,12 +322,14 @@ class TestCreateAgent:
 
         result = create_agent(
             user=mock_user,
-            name="Return Test",
-            s3_key="agents/1/return.msi",
-            filename="return.msi",
-            os_slug="windows",
-            file_size=1024,
-            sha256="returnhash",
+            spec=AgentUploadSpec(
+                name="Return Test",
+                s3_key="agents/1/return.msi",
+                filename="return.msi",
+                os_slug="windows",
+                file_size=1024,
+                sha256="returnhash",
+            ),
         )
 
         assert isinstance(result, RealAgentConfig)

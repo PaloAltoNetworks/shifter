@@ -25,6 +25,7 @@ from __future__ import annotations
 # Rebound here so the patch target resolves at the package level, which means
 # submodules that look these up at call time through ``cms.services`` honour
 # the mock for free.
+from cms.assets.services import AgentUploadSpec
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.exceptions import CMSError
@@ -102,6 +103,7 @@ from ._uploads import (
 # cms.experiments / cms.signals directly.
 __all__ = (
     "AgentConfig",
+    "AgentUploadSpec",
     "CMSError",
     "RangeInstance",
     "ScriptUploadError",

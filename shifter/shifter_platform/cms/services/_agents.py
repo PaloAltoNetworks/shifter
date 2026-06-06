@@ -71,7 +71,9 @@ def create_agent(user: User, **kwargs: Any) -> AgentConfig:
     logger.debug("create_agent called for user_id=%s", user.id)
 
     try:
-        agent = _assets_create_agent_call(user=user, **kwargs)
+        from cms.assets.services import AgentUploadSpec
+
+        agent = _assets_create_agent_call(user=user, spec=AgentUploadSpec(**kwargs))
 
         if agent is None:
             logger.error(

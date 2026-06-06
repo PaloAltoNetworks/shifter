@@ -9,6 +9,7 @@ This module handles agent (asset) management:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from django.db.models import Sum
@@ -28,6 +29,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class AgentUploadSpec:
+    """Agent file/metadata inputs for :func:`create_agent` (all but the owner).
+
+    Groups the agent record's file and classification fields so create_agent
+    takes a single cohesive object instead of a long positional parameter list.
+    """
+
+    name: str
+    s3_key: str
+    filename: str
+    os_slug: str
+    file_size: int
+    sha256: str = ""
+    upload_method: str | None = None
+    agent_type: str = AgentType.XDR
+
+
 def get_storage_used(user: User) -> int:
     """Get total bytes used by a user's active agents.
 
@@ -43,29 +62,12 @@ def get_storage_used(user: User) -> int:
     return total
 
 
-def create_agent(
-    user: User,
-    name: str,
-    s3_key: str,
-    filename: str,
-    os_slug: str,
-    file_size: int,
-    sha256: str = "",
-    upload_method: str | None = None,
-    agent_type: str = AgentType.XDR,
-) -> AgentConfig:
+def create_agent(user: User, spec: AgentUploadSpec) -> AgentConfig:
     """Create a new agent record.
 
     Args:
         user: The user who owns the agent
-        name: Display name for the agent
-        s3_key: S3 key where the agent file is stored
-        filename: Original filename of the agent
-        os_slug: Operating system slug (e.g., 'windows', 'linux-debian')
-        file_size: Size of the agent file in bytes
-        sha256: SHA256 hash of the agent file (optional, for future server-side compute)
-        upload_method: Optional upload method for logging (e.g., 'presigned')
-        agent_type: Type of agent (xdr, xdr_collector, cloud_identity_engine)
+        spec: Agent file/metadata inputs (see :class:`AgentUploadSpec`)
 
     Returns:
         AgentConfig: The newly created agent record
@@ -73,6 +75,15 @@ def create_agent(
     Raises:
         AssetError: If the operating system is not found or agent_type is invalid
     """
+    name = spec.name
+    s3_key = spec.s3_key
+    filename = spec.filename
+    os_slug = spec.os_slug
+    file_size = spec.file_size
+    sha256 = spec.sha256
+    upload_method = spec.upload_method
+    agent_type = spec.agent_type
+
     # Inline CR/LF stripping at the call site so CodeQL's ``py/log-injection``
     # taint tracker recognises the sanitization (routing through a helper
     # function loses the connection).

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         CTFChallenge,
         CTFEvent,
         CTFHint,
+        CTFNotification,
         CTFParticipant,
         CTFSubmission,
     )
@@ -3458,6 +3459,36 @@ def api_score_timeline(request: HttpRequest, participant_id: UUID) -> JsonRespon
     )
 
 
+def _handle_notification_announce_post(request: HttpRequest, event: CTFEvent) -> JsonResponse:
+    """Send an announcement from the POST body, returning a 201 payload or a 400 error."""
+    from ctf.services import notification
+
+    try:
+        data = _parse_body_object(request)
+        subject = _get_body_str(data, "subject").strip()
+        body = _get_body_str(data, "body").strip()
+        if not subject or not body:
+            raise _BodyParseError("Subject and body are required")
+    except _BodyParseError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    notif = notification.send_announcement(
+        event_id=event.id,
+        subject=subject,
+        body=body,
+        created_by=_get_user(request),
+    )
+    return JsonResponse(
+        {
+            "id": str(notif.id),
+            "subject": notif.subject,
+            "status": notif.status,
+            "sent_count": notif.sent_count,
+        },
+        status=201,
+    )
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "POST"])
@@ -3467,51 +3498,15 @@ def api_notification_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFNotFoundError
     from ctf.models import CTFNotification
-    from ctf.services import get_event
 
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
-
-    if event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    event, error = _resolve_owned_event_json(request, event_id)
+    if error is not None:
+        return error
+    assert event is not None
 
     if request.method == "POST":
-        try:
-            data = _parse_body_object(request)
-        except _BodyParseError as e:
-            return JsonResponse({"error": str(e)}, status=400)
-
-        from ctf.services import notification
-
-        try:
-            subject = _get_body_str(data, "subject").strip()
-            body = _get_body_str(data, "body").strip()
-        except _BodyParseError as e:
-            return JsonResponse({"error": str(e)}, status=400)
-
-        if not subject or not body:
-            return JsonResponse({"error": "Subject and body are required"}, status=400)
-
-        notif = notification.send_announcement(
-            event_id=event.id,
-            subject=subject,
-            body=body,
-            created_by=_get_user(request),
-        )
-
-        return JsonResponse(
-            {
-                "id": str(notif.id),
-                "subject": notif.subject,
-                "status": notif.status,
-                "sent_count": notif.sent_count,
-            },
-            status=201,
-        )
+        return _handle_notification_announce_post(request, event)
 
     # GET: list notifications
     notifications = CTFNotification.objects.filter(event=event).order_by("-created_at")
@@ -3531,29 +3526,19 @@ def api_notification_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     return JsonResponse({"notifications": notification_list})
 
 
-@login_required
-@ctf_organizer_required
-@require_POST
-def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpResponse:
-    """API: Send a notification.
+def _notification_error_response(
+    request: HttpRequest, html_message: str, json_message: str, status: int
+) -> HttpResponse:
+    """Return an HTML or JSON error per the request's Accept header."""
+    if "text/html" in request.headers.get("Accept", ""):
+        return HttpResponse(html_message, status=status)
+    return JsonResponse({"error": json_message}, status=status)
 
-    Args:
-        notification_id: UUID of the notification.
-    """
+
+def _dispatch_notification_send(notif: CTFNotification) -> None:
+    """Send the notification via the handler matching its type (logging an unknown type)."""
     from ctf.enums import NotificationType
-    from ctf.models import CTFNotification
     from ctf.services import notification
-
-    notif = CTFNotification.objects.select_related("event").filter(pk=notification_id).first()
-    if not notif:
-        if "text/html" in request.headers.get("Accept", ""):
-            return HttpResponse("Notification not found", status=404)
-        return JsonResponse({"error": "Notification not found"}, status=404)
-
-    if notif.event.created_by_id != request.user.pk:
-        if "text/html" in request.headers.get("Accept", ""):
-            return HttpResponse("Forbidden: You do not have access to this event", status=403)
-        return JsonResponse({"error": "Forbidden"}, status=403)
 
     type_dispatch = {
         NotificationType.INVITE.value: lambda n: notification.send_invitations(n.event_id),
@@ -3569,6 +3554,11 @@ def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpRe
     else:
         logger.warning("No handler for notification type: %s", notif.notification_type)
 
+
+def _send_notification_response(request: HttpRequest, notif: CTFNotification) -> HttpResponse:
+    """Send the notification and return an HTML redirect (browser) or JSON status."""
+    _dispatch_notification_send(notif)
+
     # Browser form submission: redirect back to notification list
     if "text/html" in request.headers.get("Accept", ""):
         from django.shortcuts import redirect
@@ -3577,10 +3567,33 @@ def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpRe
 
     return JsonResponse(
         {
-            "notification_id": str(notification_id),
+            "notification_id": str(notif.id),
             "status": "sent",
         }
     )
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpResponse:
+    """API: Send a notification.
+
+    Args:
+        notification_id: UUID of the notification.
+    """
+    from ctf.models import CTFNotification
+
+    notif = CTFNotification.objects.select_related("event").filter(pk=notification_id).first()
+    if not notif:
+        return _notification_error_response(request, "Notification not found", "Notification not found", 404)
+
+    if notif.event.created_by_id != request.user.pk:
+        return _notification_error_response(
+            request, "Forbidden: You do not have access to this event", "Forbidden", 403
+        )
+
+    return _send_notification_response(request, notif)
 
 
 def _handle_get_email_template(event: CTFEvent, notification_type: str) -> JsonResponse:
@@ -3626,44 +3639,10 @@ def _validate_template_bodies(html_body: str, text_body: str) -> JsonResponse | 
     return None
 
 
-@login_required
-@ctf_organizer_required
-@require_http_methods(["GET", "PUT", "DELETE"])
-def api_event_email_template(request: HttpRequest, event_id: UUID, notification_type: str) -> JsonResponse:
-    """API: Get, update, or delete a per-event email template override.
-
-    GET returns the custom template (or 404 if using default).
-    PUT creates or updates the custom template.
-    DELETE removes the custom template (reverts to default).
-
-    Args:
-        event_id: UUID of the event.
-        notification_type: Notification type string (e.g. "invitation").
-    """
-    from ctf.enums import NotificationType
-    from ctf.exceptions import CTFNotFoundError
+def _handle_put_email_template(request: HttpRequest, event: CTFEvent, notification_type: str) -> JsonResponse:
+    """Create or update a per-event email template from the PUT body, returning the payload or a 400."""
     from ctf.models import CTFEmailTemplate
-    from ctf.services import get_event
 
-    # Validate notification_type
-    valid_types = {nt.value for nt in NotificationType}
-    if notification_type not in valid_types:
-        return JsonResponse({"error": f"Invalid notification type: {notification_type}"}, status=400)
-
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
-
-    if event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-
-    if request.method == "GET":
-        return _handle_get_email_template(event, notification_type)
-    if request.method == "DELETE":
-        return _handle_delete_email_template(event, notification_type)
-
-    # PUT — create or update
     try:
         body = _parse_body_object(request)
         html_body = _get_body_str(body, "html_body").strip()
@@ -3694,6 +3673,44 @@ def api_event_email_template(request: HttpRequest, event_id: UUID, notification_
             "text_body": template.text_body,
         }
     )
+
+
+def _dispatch_email_template_method(request: HttpRequest, event: CTFEvent, notification_type: str) -> JsonResponse:
+    """Dispatch GET/DELETE/PUT for a resolved, owned event's email template override."""
+    if request.method == "GET":
+        return _handle_get_email_template(event, notification_type)
+    if request.method == "DELETE":
+        return _handle_delete_email_template(event, notification_type)
+    return _handle_put_email_template(request, event, notification_type)
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "PUT", "DELETE"])
+def api_event_email_template(request: HttpRequest, event_id: UUID, notification_type: str) -> JsonResponse:
+    """API: Get, update, or delete a per-event email template override.
+
+    GET returns the custom template (or 404 if using default).
+    PUT creates or updates the custom template.
+    DELETE removes the custom template (reverts to default).
+
+    Args:
+        event_id: UUID of the event.
+        notification_type: Notification type string (e.g. "invitation").
+    """
+    from ctf.enums import NotificationType
+
+    # Validate notification_type
+    valid_types = {nt.value for nt in NotificationType}
+    if notification_type not in valid_types:
+        return JsonResponse({"error": f"Invalid notification type: {notification_type}"}, status=400)
+
+    event, error = _resolve_owned_event_json(request, event_id)
+    if error is not None:
+        return error
+    assert event is not None
+
+    return _dispatch_email_template_method(request, event, notification_type)
 
 
 @login_required
@@ -3778,9 +3795,21 @@ def api_destroy_participant_range(request: HttpRequest, participant_id: UUID) ->
     return _participant_range_action(request, participant_id, range_service.destroy_participant_range)
 
 
-def _participant_range_action(request: HttpRequest, participant_id: UUID, action_fn) -> JsonResponse:
-    """Common logic for organizer range actions (stop, start, restart, etc.)."""
+def _run_participant_range_action(participant_id: UUID, action_fn: Callable[[UUID], Any]) -> JsonResponse:
+    """Run a range action for a participant, returning its result or a 400 on a known range error."""
     from ctf.exceptions import CTFNotFoundError, CTFRangeError
+
+    try:
+        result = action_fn(participant_id)
+    except (CTFNotFoundError, CTFRangeError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse(result)
+
+
+def _participant_range_action(
+    request: HttpRequest, participant_id: UUID, action_fn: Callable[[UUID], Any]
+) -> JsonResponse:
+    """Common logic for organizer range actions (stop, start, restart, etc.)."""
     from ctf.models import CTFParticipant
 
     try:
@@ -3791,11 +3820,7 @@ def _participant_range_action(request: HttpRequest, participant_id: UUID, action
     if participant.event.created_by_id != request.user.pk:
         return JsonResponse({"error": "Forbidden"}, status=403)
 
-    try:
-        result = action_fn(participant_id)
-        return JsonResponse(result)
-    except (CTFNotFoundError, CTFRangeError) as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _run_participant_range_action(participant_id, action_fn)
 
 
 @login_required
@@ -3837,20 +3862,14 @@ def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFNotFoundError
-    from ctf.services import get_event
     from ctf.services.notification import send_invitations
 
     if not _check_invite_rate_limit(_get_user(request).pk):
         return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
 
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
-
-    if event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    _event, error = _resolve_owned_event_json(request, event_id)
+    if error is not None:
+        return error
 
     result = send_invitations(event_id)
     return JsonResponse({"success": True, **result})

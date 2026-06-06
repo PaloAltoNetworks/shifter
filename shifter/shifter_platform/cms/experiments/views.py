@@ -280,8 +280,9 @@ def experiment_start(request: HttpRequest, experiment_id: int) -> HttpResponse:
         services.start_experiment(cast("User", request.user), experiment_id)
         messages.success(request, "Experiment queued for execution.")
     except ExperimentError as e:
-        messages.error(request, str(e))
-    except ExperimentStateError as e:
+        # ExperimentStateError subclasses ExperimentError, so this single
+        # handler covers both; a separate ExperimentStateError clause would be
+        # unreachable (SonarCloud S2190 / duplicate-except).
         messages.error(request, str(e))
     except Exception:
         logger.exception(

@@ -209,7 +209,10 @@ def _wait_for_ngfw_management_plane(output_data: dict[str, Any]) -> tuple[str, N
 
     management_ip, ssh_executor = _build_ngfw_ssh_executor_from_output(output_data)
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    # management_ip is read from the same terraform output dict that carries the
+    # SSH key secret ARN, so CodeQL taints it as sensitive; fingerprint it for
+    # correlation without clear-text logging (py/clear-text-logging-sensitive-data).
+    logger.info("Waiting for SSH on NGFW at %s...", safe_log_fingerprint(management_ip))
     ssh_executor.wait_for_agent(management_ip, timeout_seconds=ssh_timeout)
 
     logger.info("Polling for NGFW serial number (management plane readiness check)...")

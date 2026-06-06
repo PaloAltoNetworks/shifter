@@ -517,4 +517,69 @@ describe('TerminalManager', () => {
             expect(() => manager.connectIfNeeded(null)).not.toThrow();
         });
     });
+
+    // Split-pane layout half (TerminalLayoutBase). The tabs-mode init() path
+    // never exercises these, so cover them directly against the jsdom fixture.
+    describe('split-mode layout (TerminalLayoutBase)', () => {
+        beforeEach(() => {
+            manager.createTerminalInstances();
+        });
+
+        test('createPaneDropdowns populates both pane selects', () => {
+            manager.createPaneDropdowns();
+            expect(document.getElementById('left-pane-select').options.length).toBe(instances.length);
+            expect(document.getElementById('right-pane-select').options.length).toBe(instances.length);
+        });
+
+        test('onPaneSelectChange updates and persists the left pane', () => {
+            manager.onPaneSelectChange('left', 'victim-uuid');
+            expect(manager.leftPaneUuid).toBe('victim-uuid');
+            expect(localStorage.getItem('terminal-left-pane')).toBe('victim-uuid');
+        });
+
+        test('onPaneSelectChange updates and persists the right pane', () => {
+            manager.onPaneSelectChange('right', 'dc-uuid');
+            expect(manager.rightPaneUuid).toBe('dc-uuid');
+            expect(localStorage.getItem('terminal-right-pane')).toBe('dc-uuid');
+        });
+
+        test('setLayoutMode("split") persists the mode and mounts split panes', () => {
+            manager.leftPaneUuid = 'kali-uuid';
+            manager.rightPaneUuid = 'victim-uuid';
+            expect(() => manager.setLayoutMode('split')).not.toThrow();
+            expect(manager.layoutMode).toBe('split');
+            expect(localStorage.getItem('terminal-layout')).toBe('split');
+        });
+
+        test('mountSplitPaneTerminals and mountTerminalToSplitPane run against the fixture', () => {
+            manager.leftPaneUuid = 'kali-uuid';
+            manager.rightPaneUuid = 'victim-uuid';
+            expect(() => manager.mountSplitPaneTerminals()).not.toThrow();
+            expect(() => manager.mountTerminalToSplitPane('left', 'dc-uuid')).not.toThrow();
+        });
+
+        test('updateSplitPaneStatus refreshes the pane status text', () => {
+            expect(() => manager.updateSplitPaneStatus('left', 'kali-uuid')).not.toThrow();
+            expect(document.querySelector('#left-pane-status .status-text')).not.toBeNull();
+        });
+
+        test('restoreTerminalsToTabPanes tears down the split instance', () => {
+            manager.leftPaneUuid = 'kali-uuid';
+            manager.rightPaneUuid = 'victim-uuid';
+            manager.setLayoutMode('split');
+            expect(() => manager.restoreTerminalsToTabPanes()).not.toThrow();
+            expect(manager.splitInstance).toBeNull();
+        });
+
+        test('initSplitJs creates a Split instance when both panes exist', () => {
+            manager.initSplitJs();
+            expect(globalThis.Split).toHaveBeenCalled();
+        });
+
+        test('setupLayoutToggle wires the toggle buttons to setLayoutMode', () => {
+            manager.setupLayoutToggle();
+            document.querySelector('.toggle-btn[data-mode="split"]').click();
+            expect(manager.layoutMode).toBe('split');
+        });
+    });
 });

@@ -435,6 +435,7 @@ def _resolve_bracket_filter(event_id: UUID, bracket_param: str | None) -> tuple[
 # -----------------------------------------------------------------------------
 
 
+@require_GET
 def ctf_register(request: HttpRequest) -> HttpResponse:
     """Authenticate a participant via magic link token.
 
@@ -906,6 +907,7 @@ def team_join(request: HttpRequest) -> HttpResponse:
     return render(request, "ctf/participant/team_join.html", context)
 
 
+@require_GET
 def ctf_help(request: HttpRequest) -> HttpResponse:
     """CTF help page.
 

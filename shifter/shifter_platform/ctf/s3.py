@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from typing import Protocol
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -17,7 +18,8 @@ from shared.s3 import get_s3_client, sanitize_s3_filename
 logger = logging.getLogger(__name__)
 
 # Constraints
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# 50 MB
+MAX_FILE_SIZE = 50 * 1024 * 1024
 MAX_FILES_PER_CHALLENGE = 10
 ALLOWED_EXTENSIONS = {
     # Archives
@@ -95,8 +97,20 @@ class CTFFileError(Exception):
     pass
 
 
+class _UploadableFile(Protocol):
+    """Minimal binary file-like surface upload_challenge_file needs.
+
+    Structurally covers both Django's File / UploadedFile (production) and
+    io.BytesIO (tests) without coupling to either concrete type.
+    """
+
+    def seek(self, offset: int, whence: int = 0, /) -> int: ...
+
+    def read(self, size: int = -1, /) -> bytes: ...
+
+
 def upload_challenge_file(
-    file_obj,
+    file_obj: _UploadableFile,
     event_id: str,
     challenge_id: str,
     filename: str,
@@ -147,7 +161,7 @@ def upload_challenge_file(
             ExtraArgs={"ContentType": "application/octet-stream"},
         )
     except ClientError as e:
-        logger.error("CTF file upload failed: s3_key=%s error=%s", safe_log_value(s3_key), e)
+        logger.exception("CTF file upload failed: s3_key=%s", safe_log_value(s3_key))
         raise CTFFileError(f"Failed to upload to S3: {e}") from e
 
     logger.info("CTF file uploaded: s3_key=%s size=%d", safe_log_value(s3_key), file_size)
@@ -170,8 +184,8 @@ def delete_challenge_file(s3_key: str) -> None:
         client = get_s3_client()
         client.delete_object(Bucket=settings.AWS_S3_BUCKET_NAME, Key=s3_key)
     except ClientError as e:
-        logger.error("CTF file delete failed: s3_key=%s error=%s", safe_log_value(s3_key), e)
-        raise CTFFileError(f"Failed to delete from S3: {e}") from e  # nosec B608
+        logger.exception("CTF file delete failed: s3_key=%s", safe_log_value(s3_key))
+        raise CTFFileError(f"Failed to delete from S3: {e}") from e  # nosec B608  # NOSONAR — bandit suppression must stay inline (S139)
 
     logger.info("CTF file deleted: s3_key=%s", safe_log_value(s3_key))
 
@@ -210,7 +224,7 @@ def generate_download_url(s3_key: str, filename: str, expires_in: int = 300) -> 
             ExpiresIn=expires_in,
         )
     except ClientError as e:
-        logger.error("CTF download URL generation failed: s3_key=%s error=%s", safe_log_value(s3_key), e)
+        logger.exception("CTF download URL generation failed: s3_key=%s", safe_log_value(s3_key))
         raise CTFFileError(f"Failed to generate download URL: {e}") from e
 
     # Validate the presigned URL points to the expected S3 host

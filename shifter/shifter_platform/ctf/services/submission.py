@@ -15,7 +15,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFValidationError
-from ctf.models import CTFChallenge, CTFChallengeRating, CTFParticipant, CTFSubmission
+from ctf.models import CTFChallenge, CTFChallengeRating, CTFEvent, CTFParticipant, CTFSubmission
 from ctf.services.challenge import verify_flag
 from shared.log_sanitize import safe_log_value
 
@@ -42,19 +42,27 @@ def _count_attempts_in_current_window(
     # Also check gap from now to most recent submission
     elapsed_since_last = (timezone.now() - timestamps[0]).total_seconds()
     if elapsed_since_last >= cooldown_seconds:
-        return 0  # window has reset
+        # window has reset
+        return 0
 
-    count = 1  # the most recent submission
+    # the most recent submission
+    count = 1
     for i in range(len(timestamps) - 1):
         gap = (timestamps[i] - timestamps[i + 1]).total_seconds()
         if gap >= cooldown_seconds:
-            break  # found a reset boundary
+            # found a reset boundary
+            break
         count += 1
 
     return count
 
 
-def _check_attempt_limit_or_raise(all_submissions, event, challenge, challenge_id) -> int:
+def _check_attempt_limit_or_raise(
+    all_submissions: QuerySet[CTFSubmission],
+    event: CTFEvent,
+    challenge: CTFChallenge,
+    challenge_id: UUID,
+) -> int:
     """Enforce per-challenge max-attempts (timeout or lockout mode); return the count to record.
 
     Returns the attempt count that the eventual `CTFSubmission` row should be
@@ -99,7 +107,9 @@ def _check_attempt_limit_or_raise(all_submissions, event, challenge, challenge_i
     )
 
 
-def _check_submission_cooldown_or_raise(participant, challenge, challenge_id) -> None:
+def _check_submission_cooldown_or_raise(
+    participant: CTFParticipant, challenge: CTFChallenge, challenge_id: UUID
+) -> None:
     """Enforce the time-based submission cooldown; raise `CTFRateLimitError` if active."""
     cooldown = participant.event.submission_cooldown_seconds
     if cooldown <= 0:

@@ -1,8 +1,11 @@
 """OIDC utilities for Cognito integration."""
 
+from __future__ import annotations
+
 import logging
 import os
 import re
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -14,6 +17,10 @@ from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
 from risk_register.services import AuthPrincipal, audit_auth_event
 from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
+    from django.http import HttpRequest
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +69,7 @@ def generate_username(email: str) -> str:
     return email
 
 
-def provider_logout_url(request):
+def provider_logout_url(request: HttpRequest) -> str:
     """Return Cognito logout URL to clear the identity provider session.
 
     Called by mozilla-django-oidc's OIDCLogoutView when OIDC_OP_LOGOUT_URL_METHOD
@@ -107,7 +114,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
     - custom:ctf_event_id: Sets the active CTF event for participant users
     """
 
-    def create_user(self, claims):
+    def create_user(self, claims: dict[str, Any]) -> User:
         """Create user and populate cognito_sub and user_type from claims."""
         user = super().create_user(claims)
         apply_bootstrap_admin_flags(user, claims.get("email") or user.email)
@@ -124,7 +131,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
 
         return user
 
-    def update_user(self, user, claims):
+    def update_user(self, user: User, claims: dict[str, Any]) -> User:
         """Update user and ensure cognito_sub and user_type are set."""
         user = super().update_user(user, claims)
         apply_bootstrap_admin_flags(user, claims.get("email") or user.email)
@@ -132,7 +139,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         self._update_user_type(user, claims)
         return user
 
-    def authenticate(self, request, **kwargs):
+    def authenticate(self, request: HttpRequest | None, **kwargs: Any) -> User | None:
         """Authenticate and log the event."""
         user = super().authenticate(request, **kwargs)
 
@@ -169,7 +176,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
 
         return user
 
-    def _update_cognito_sub(self, user, claims):
+    def _update_cognito_sub(self, user: User, claims: dict[str, Any]) -> None:
         """Store Cognito sub in user's profile."""
         cognito_sub = claims.get("sub")
         if not cognito_sub:
@@ -178,7 +185,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
 
         update_cognito_sub(user, cognito_sub)
 
-    def _update_user_type(self, user, claims):
+    def _update_user_type(self, user: User, claims: dict[str, Any]) -> None:
         """Update CTF groups and active CTF event from Cognito custom claims.
 
         Reads custom:user_type and custom:ctf_event_id from OIDC claims

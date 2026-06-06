@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 # subprocess drives kubectl virt start/stop runtime operations (see run_power_operation).
-import subprocess  # nosec B404
+import subprocess  # nosec B404  # NOSONAR — bandit suppression must stay inline (S139)
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any

@@ -19,6 +19,15 @@ class TestLoadRootConfig:
         cfg = load_root_config(str(write_config(aws_config)))
         assert cfg.backend == "aws"
 
+    def test_returns_config_when_backend_bundle_unexpectedly_missing(self, write_config, aws_config, monkeypatch):
+        # Defensive branch: a validated backend always resolves to a bundle in
+        # practice, but load_root_config returns the validated config rather
+        # than crashing if the registry unexpectedly yields None.
+        monkeypatch.setattr("installation.loader.registry.get_backend_bundle", lambda name: None)
+        cfg = load_root_config(write_config(aws_config))
+        assert isinstance(cfg, RootConfig)
+        assert cfg.backend == "aws"
+
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(InstallationConfigError) as exc:
             load_root_config(tmp_path / "shifter.yaml")

@@ -212,7 +212,7 @@ class TerminalLayoutBase {
 
         // Fit and focus (only if it has a terminal)
         const termData = this.terminals.get(uuid);
-        if (termData && termData.terminal && termData.fitAddon) {
+        if (termData?.terminal && termData?.fitAddon) {
             setTimeout(() => {
                 termData.fitAddon.fit();
                 termData.terminal.focus();

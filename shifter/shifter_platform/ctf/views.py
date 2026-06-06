@@ -26,6 +26,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from ctf.bridges import get_user_role
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -1626,7 +1627,7 @@ def admin_participant_import(request: HttpRequest, event_id: UUID) -> HttpRespon
                     "User %s imported %d participants to event %s",
                     request.user.email,
                     imported_count,
-                    event_id,
+                    safe_log_value(event_id),
                 )
                 messages.success(request, f"Successfully imported {imported_count} participants.")
                 return redirect("ctf:admin_participant_list", event_id=event_id)
@@ -1738,7 +1739,7 @@ def admin_participant_add(request: HttpRequest, event_id: UUID) -> HttpResponse:
                     "User %s added participant %s to event %s",
                     request.user.email,
                     participant.email,
-                    event_id,
+                    safe_log_value(event_id),
                 )
                 messages.success(request, f"Participant {participant.name} added successfully.")
                 return redirect("ctf:admin_participant_list", event_id=event_id)
@@ -4027,7 +4028,7 @@ def admin_challenge_file_upload(request: HttpRequest, challenge_id: UUID) -> Htt
     except CTFPermissionError:
         return HttpResponse("Forbidden", status=403)
     except (CTFNotFoundError, CTFStateError, CTFValidationError) as e:
-        logger.warning("File upload failed for challenge %s: %s", challenge_id, e)
+        logger.warning("File upload failed for challenge %s: %s", safe_log_value(challenge_id), e)
 
     return redirect("ctf:admin_challenge_detail", challenge_id=challenge_id)
 

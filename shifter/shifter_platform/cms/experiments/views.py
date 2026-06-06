@@ -27,7 +27,7 @@ from cms.experiments.exceptions import (
 from cms.experiments.schemas import ExperimentCreateInput
 from shared.auth import threat_research_required
 from shared.exceptions import CMSError
-from shared.log_sanitize import safe_log
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -71,7 +71,7 @@ def script_upload(request: HttpRequest) -> HttpResponse:
     GET:  Show upload form.
     POST: Initiate upload (returns presigned URL via JSON).
     """
-    logger.info("script_upload: user_id=%s method=%s", request.user.id, request.method)
+    logger.info("script_upload: user_id=%s method=%s", request.user.id, safe_log_value(request.method))
     if request.method == "GET":
         return render(request, "experiments/script_upload.html", {"active_nav": "experiments"})
 
@@ -118,7 +118,7 @@ def script_upload(request: HttpRequest) -> HttpResponse:
 @require_POST
 def script_delete(request: HttpRequest, script_id: int) -> HttpResponse:
     """Soft-delete a script."""
-    logger.info("script_delete: user_id=%s script_id=%s", request.user.id, script_id)
+    logger.info("script_delete: user_id=%s script_id=%s", request.user.id, safe_log_value(script_id))
     try:
         services.delete_script(cast("User", request.user), script_id)
         messages.success(request, "Script deleted.")
@@ -170,7 +170,7 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
     GET:  Show creation form.
     POST: Validate and create experiment.
     """
-    logger.info("experiment_create: user_id=%s method=%s", request.user.id, request.method)
+    logger.info("experiment_create: user_id=%s method=%s", request.user.id, safe_log_value(request.method))
     if request.method == "GET":
         from cms.scenarios.registry import list_all_scenarios
 
@@ -247,7 +247,7 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
 @threat_research_required
 def experiment_detail(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """View experiment details and run status."""
-    logger.info("experiment_detail: user_id=%s experiment_id=%s", request.user.id, experiment_id)
+    logger.info("experiment_detail: user_id=%s experiment_id=%s", request.user.id, safe_log_value(experiment_id))
     try:
         experiment = services.get_experiment(cast("User", request.user), experiment_id)
     except ExperimentError:
@@ -275,7 +275,7 @@ def experiment_detail(request: HttpRequest, experiment_id: int) -> HttpResponse:
 @require_POST
 def experiment_start(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """Start experiment execution."""
-    logger.info("experiment_start: user_id=%s experiment_id=%s", request.user.id, experiment_id)
+    logger.info("experiment_start: user_id=%s experiment_id=%s", request.user.id, safe_log_value(experiment_id))
     try:
         services.start_experiment(cast("User", request.user), experiment_id)
         messages.success(request, "Experiment queued for execution.")
@@ -296,7 +296,7 @@ def experiment_start(request: HttpRequest, experiment_id: int) -> HttpResponse:
 @require_POST
 def experiment_cancel(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """Cancel a running experiment."""
-    logger.info("experiment_cancel: user_id=%s experiment_id=%s", request.user.id, experiment_id)
+    logger.info("experiment_cancel: user_id=%s experiment_id=%s", request.user.id, safe_log_value(experiment_id))
     try:
         services.cancel_experiment(cast("User", request.user), experiment_id)
         messages.success(request, "Experiment cancelled.")
@@ -319,7 +319,7 @@ def experiment_cancel(request: HttpRequest, experiment_id: int) -> HttpResponse:
 @threat_research_required
 def experiment_download(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """Redirect to presigned download URL for experiment bundle."""
-    logger.info("experiment_download: user_id=%s experiment_id=%s", request.user.id, experiment_id)
+    logger.info("experiment_download: user_id=%s experiment_id=%s", request.user.id, safe_log_value(experiment_id))
     try:
         url = services.get_bundle_download_url(cast("User", request.user), experiment_id)
         return redirect(url)
@@ -346,8 +346,8 @@ def artifact_download(
     logger.info(
         "artifact_download: user_id=%s experiment_id=%s artifact_id=%s",
         request.user.id,
-        experiment_id,
-        artifact_id,
+        safe_log_value(experiment_id),
+        safe_log_value(artifact_id),
     )
     try:
         url = services.get_artifact_download_url(cast("User", request.user), experiment_id, artifact_id)
@@ -372,7 +372,7 @@ def artifact_download(
 @threat_research_required
 def scenario_instances(request: HttpRequest, scenario_id: str) -> JsonResponse:
     """Return instance list for a scenario (AJAX)."""
-    logger.info("scenario_instances: user_id=%s scenario_id=%s", request.user.id, safe_log(scenario_id))
+    logger.info("scenario_instances: user_id=%s scenario_id=%s", request.user.id, safe_log_value(scenario_id))
     try:
         instances = services.get_scenario_instances(scenario_id, user=cast("User", request.user))
         return JsonResponse({"instances": instances})

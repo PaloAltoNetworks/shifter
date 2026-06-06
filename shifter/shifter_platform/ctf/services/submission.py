@@ -17,6 +17,7 @@ from django.utils import timezone
 from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFValidationError
 from ctf.models import CTFChallenge, CTFChallengeRating, CTFParticipant, CTFSubmission
 from ctf.services.challenge import verify_flag
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     pass
@@ -153,7 +154,7 @@ def submit_flag(
     logger.info(
         "Flag submission: participant=%s, challenge=%s",
         participant_id,
-        challenge_id,
+        safe_log_value(challenge_id),
     )
 
     # Get participant and challenge
@@ -219,14 +220,14 @@ def submit_flag(
         logger.info(
             "Correct flag submitted: participant=%s, challenge=%s, points=%d",
             participant_id,
-            challenge_id,
+            safe_log_value(challenge_id),
             points,
         )
     else:
         logger.debug(
             "Incorrect flag submitted: participant=%s, challenge=%s",
             participant_id,
-            challenge_id,
+            safe_log_value(challenge_id),
         )
 
     # Create submission
@@ -398,8 +399,8 @@ def rate_challenge(
     logger.info(
         "Challenge rated: participant=%s, challenge=%s, value=%d",
         participant_id,
-        challenge_id,
-        value,
+        safe_log_value(challenge_id),
+        safe_log_value(value),
     )
 
     return rating

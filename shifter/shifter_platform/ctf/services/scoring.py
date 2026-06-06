@@ -15,6 +15,7 @@ from django.db.models.functions import Coalesce
 
 from ctf.models import CTFAward, CTFParticipant, CTFSubmission, CTFTeam
 from ctf.services.participant import eligible_participant_q
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -381,7 +382,7 @@ def get_score_timeline(participant_id: UUID) -> list[dict[str, Any]]:
         List of dicts with timestamp, points, cumulative score, label, and type.
         The first entry is always the event start with cumulative 0.
     """
-    logger.debug("Getting score timeline for participant %s", participant_id)
+    logger.debug("Getting score timeline for participant %s", safe_log_value(participant_id))
 
     participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
     event_start = participant.event.event_start

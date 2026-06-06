@@ -17,7 +17,7 @@ from firebase_admin import auth as firebase_auth
 from config.bootstrap_admin import apply_bootstrap_admin_flags
 from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
-from risk_register.services import audit_auth_event
+from risk_register.services import AuthPrincipal, audit_auth_event
 from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
 
 logger = logging.getLogger(__name__)
@@ -215,9 +215,7 @@ class IdentityPlatformBackend(BaseBackend):
 
         audit_auth_event(
             action=AuditLog.Action.CREATE if created else AuditLog.Action.LOGIN,
-            user_id=user.id,
-            email=user.email,
-            cognito_sub=claims.sub,
+            principal=AuthPrincipal(user_id=user.id, email=user.email, cognito_sub=claims.sub),
             source_ip=(request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() if request else None)
             or (request.META.get("REMOTE_ADDR") if request else None),
             user_agent=(request.META.get("HTTP_USER_AGENT", "")[:500] if request else ""),

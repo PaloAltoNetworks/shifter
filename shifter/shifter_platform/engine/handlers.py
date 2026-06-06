@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from engine.models import Range
 from risk_register.models import AuditLog
-from risk_register.services import audit_log_system_event
+from risk_register.services import StateChange, audit_log_system_event
 from shared.enums import ResourceStatus
 from shared.messages.envelope import parse_sns_message
 from shared.messages.events import (
@@ -142,8 +142,10 @@ def _handle_status_updated(event: dict) -> None:
         entity_id=range_id,
         action=_status_to_action(new_status),
         source="engine.handlers",
-        previous_state={"status": previous_status},
-        new_state={"status": new_status},
+        state=StateChange(
+            previous={"status": previous_status},
+            new={"status": new_status},
+        ),
         context=error_message or "",
         request_id=event_id,
     )
@@ -232,10 +234,12 @@ def _handle_ngfw_event(event: dict) -> None:
         entity_id=app_id or 0,
         action=_status_to_action(status) if status else AuditLog.Action.UPDATE,
         source="engine.handlers",
-        new_state={
-            "status": status,
-            "instance_id": instance_id,
-        },
+        state=StateChange(
+            new={
+                "status": status,
+                "instance_id": instance_id,
+            }
+        ),
         request_id=str(request_id) if request_id else event_id,
     )
 

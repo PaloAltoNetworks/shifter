@@ -41,6 +41,33 @@ class AuditEvent:
     request_id: str = ""
 
 
+@dataclass(frozen=True)
+class StateChange:
+    """Before/after entity state for a system audit event."""
+
+    previous: dict[str, Any] | None = None
+    new: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class AuthPrincipal:
+    """Identity of the principal in an authentication audit event."""
+
+    user_id: int | None = None
+    email: str = ""
+    cognito_sub: str = ""
+
+
+@dataclass(frozen=True)
+class SessionInfo:
+    """Session details for a session audit event."""
+
+    session_id: str
+    range_id: int | None = None
+    session_type: str = ""
+    target_ip: str = ""
+
+
 def audit_log(event: AuditEvent) -> AuditLog | None:
     """Record an audit event.
 
@@ -238,8 +265,7 @@ def audit_log_system_event(
     action: str,
     source: str,
     *,
-    previous_state: dict[str, Any] | None = None,
-    new_state: dict[str, Any] | None = None,
+    state: StateChange | None = None,
     context: str = "",
     request_id: str = "",
 ) -> AuditLog | None:
@@ -253,8 +279,7 @@ def audit_log_system_event(
         entity_id: ID of the entity
         action: Action performed
         source: Source of the event (e.g., "engine.handlers", "provisioner")
-        previous_state: Entity state before the action
-        new_state: Entity state after the action
+        state: Before/after entity state (see :class:`StateChange`)
         context: Additional context
         request_id: Optional request ID for correlation
 
@@ -262,6 +287,7 @@ def audit_log_system_event(
         The created AuditLog entry
     """
     full_context = f"[{source}] {context}" if context else f"[{source}]"
+    state = state or StateChange()
 
     return audit_log(
         AuditEvent(
@@ -270,8 +296,8 @@ def audit_log_system_event(
             action=action,
             actor_type=AuditLog.ActorType.SYSTEM,
             actor_id=None,
-            previous_state=previous_state,
-            new_state=new_state,
+            previous_state=state.previous,
+            new_state=state.new,
             context=full_context,
             request_id=request_id,
         )
@@ -281,9 +307,7 @@ def audit_log_system_event(
 def audit_auth_event(
     action: str,
     *,
-    user_id: int | None = None,
-    email: str = "",
-    cognito_sub: str = "",
+    principal: AuthPrincipal | None = None,
     source_ip: str | None = None,
     user_agent: str = "",
     context: str = "",
@@ -293,9 +317,8 @@ def audit_auth_event(
 
     Args:
         action: login, logout, login_failed
-        user_id: User ID if known
-        email: User email
-        cognito_sub: Cognito subject ID
+        principal: Identity of the authenticating principal
+            (see :class:`AuthPrincipal`)
         source_ip: Client IP
         user_agent: Client user agent
         context: Additional context (e.g., failure reason)
@@ -304,16 +327,17 @@ def audit_auth_event(
     Returns:
         The created AuditLog entry
     """
+    principal = principal or AuthPrincipal()
     new_state: dict[str, Any] = {}
-    if email:
-        new_state["email"] = email
-    if cognito_sub:
-        new_state["cognito_sub"] = cognito_sub
+    if principal.email:
+        new_state["email"] = principal.email
+    if principal.cognito_sub:
+        new_state["cognito_sub"] = principal.cognito_sub
 
     return audit_log(
         AuditEvent(
             entity_type=AuditLog.EntityType.USER,
-            entity_id=user_id or 0,
+            entity_id=principal.user_id or 0,
             action=action,
             actor_type=actor_type,
             actor_id=None,
@@ -329,10 +353,7 @@ def audit_session_event(
     action: str,
     *,
     user_id: int,
-    session_id: str,
-    range_id: int | None = None,
-    session_type: str = "",
-    target_ip: str = "",
+    session: SessionInfo,
     source_ip: str | None = None,
     context: str = "",
 ) -> AuditLog | None:
@@ -341,10 +362,7 @@ def audit_session_event(
     Args:
         action: connect, disconnect, access_denied
         user_id: User ID
-        session_id: Unique session identifier
-        range_id: Associated range ID
-        session_type: "terminal" or "rdp"
-        target_ip: IP of the instance being connected to
+        session: Session details (see :class:`SessionInfo`)
         source_ip: Client IP
         context: Additional context
 
@@ -352,14 +370,14 @@ def audit_session_event(
         The created AuditLog entry
     """
     new_state: dict[str, Any] = {
-        "session_id": session_id,
+        "session_id": session.session_id,
     }
-    if range_id:
-        new_state["range_id"] = range_id
-    if session_type:
-        new_state["session_type"] = session_type
-    if target_ip:
-        new_state["target_ip"] = target_ip
+    if session.range_id:
+        new_state["range_id"] = session.range_id
+    if session.session_type:
+        new_state["session_type"] = session.session_type
+    if session.target_ip:
+        new_state["target_ip"] = session.target_ip
 
     # Sessions don't have persistent IDs
     return audit_log(

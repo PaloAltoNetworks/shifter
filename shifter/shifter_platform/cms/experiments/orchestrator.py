@@ -38,7 +38,7 @@ from cms.experiments.schemas import (
 )
 from engine.services import create_range as engine_create_range
 from risk_register.models import AuditLog
-from risk_register.services import audit_log_system_event
+from risk_register.services import StateChange, audit_log_system_event
 
 logger = logging.getLogger(__name__)
 
@@ -842,7 +842,7 @@ class ExperimentOrchestrator:
                     entity_id=self.experiment_id,
                     action=AuditLog.Action.READY,
                     source="experiments.orchestrator",
-                    new_state={"completed_runs": completed_count, "failed_runs": failed_count},
+                    state=StateChange(new={"completed_runs": completed_count, "failed_runs": failed_count}),
                 )
 
             logger.info(

@@ -12,7 +12,7 @@ from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from config.bootstrap_admin import apply_bootstrap_admin_flags
 from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
-from risk_register.services import audit_auth_event
+from risk_register.services import AuthPrincipal, audit_auth_event
 from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
 
 logger = logging.getLogger(__name__)
@@ -118,9 +118,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         cognito_sub = claims.get("sub", "")
         audit_auth_event(
             action=AuditLog.Action.CREATE,
-            user_id=user.id,
-            email=user.email,
-            cognito_sub=cognito_sub,
+            principal=AuthPrincipal(user_id=user.id, email=user.email, cognito_sub=cognito_sub),
             context="User created via OIDC first login",
         )
 
@@ -150,9 +148,12 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
             # Successful authentication
             audit_auth_event(
                 action=AuditLog.Action.LOGIN,
-                user_id=user.id,
-                email=user.email,
-                cognito_sub=(getattr(user, "userprofile", None) and getattr(user.userprofile, "cognito_sub", "")) or "",
+                principal=AuthPrincipal(
+                    user_id=user.id,
+                    email=user.email,
+                    cognito_sub=(getattr(user, "userprofile", None) and getattr(user.userprofile, "cognito_sub", ""))
+                    or "",
+                ),
                 source_ip=source_ip,
                 user_agent=user_agent,
             )

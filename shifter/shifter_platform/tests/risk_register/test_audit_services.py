@@ -9,6 +9,8 @@ import pytest
 from risk_register.models import AuditLog
 from risk_register.services import (
     AuditEvent,
+    AuthPrincipal,
+    SessionInfo,
     audit_auth_event,
     audit_log,
     audit_log_from_request,
@@ -233,9 +235,11 @@ class TestAuditAuthEvent:
         )
         entry = audit_auth_event(
             action=AuditLog.Action.LOGIN,
-            user_id=staff_user.id,
-            email="test@example.com",
-            cognito_sub="abc-123",
+            principal=AuthPrincipal(
+                user_id=staff_user.id,
+                email="test@example.com",
+                cognito_sub="abc-123",
+            ),
             source_ip="10.0.0.1",
             user_agent="Browser/1.0",
         )
@@ -265,10 +269,12 @@ class TestAuditSessionEvent:
         entry = audit_session_event(
             action=AuditLog.Action.CONNECT,
             user_id=staff_user.id,
-            session_id="sess-abc",
-            range_id=42,
-            session_type="terminal",
-            target_ip="172.16.0.5",
+            session=SessionInfo(
+                session_id="sess-abc",
+                range_id=42,
+                session_type="terminal",
+                target_ip="172.16.0.5",
+            ),
             source_ip="10.0.0.1",
         )
         assert entry is not None

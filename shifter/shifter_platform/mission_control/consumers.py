@@ -15,7 +15,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 
 from mission_control.terminal_sessions import session_registry as _session_registry
-from risk_register.services import audit_session_event
+from risk_register.services import SessionInfo, audit_session_event
 from shared.enums import WebSocketCloseCode
 
 if TYPE_CHECKING:
@@ -100,9 +100,11 @@ class SSHConsumer(AsyncWebsocketConsumer):
             await sync_to_async(audit_session_event)(
                 action="access_denied",
                 user_id=user.id,
-                session_id=self.session_id,
-                range_id=None,
-                session_type="terminal",
+                session=SessionInfo(
+                    session_id=self.session_id,
+                    range_id=None,
+                    session_type="terminal",
+                ),
                 source_ip=client_ip,
                 context=f"Permission denied for instance {instance_uuid}",
             )
@@ -162,10 +164,12 @@ class SSHConsumer(AsyncWebsocketConsumer):
         await sync_to_async(audit_session_event)(
             action="connect",
             user_id=user.id,
-            session_id=self.session_id,
-            range_id=None,
-            session_type="terminal",
-            target_ip=instance_uuid,
+            session=SessionInfo(
+                session_id=self.session_id,
+                range_id=None,
+                session_type="terminal",
+                target_ip=instance_uuid,
+            ),
             source_ip=client_ip,
         )
 
@@ -273,8 +277,10 @@ class SSHConsumer(AsyncWebsocketConsumer):
             await sync_to_async(audit_session_event)(
                 action="disconnect",
                 user_id=self._user_id,
-                session_id=self.session_id,
-                session_type="terminal",
+                session=SessionInfo(
+                    session_id=self.session_id,
+                    session_type="terminal",
+                ),
                 context=f"close_code={close_code}",
             )
 

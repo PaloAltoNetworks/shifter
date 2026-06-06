@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from ctf.models import (
         CTFBracket,
         CTFChallenge,
+        CTFChallengeFile,
         CTFEvent,
         CTFHint,
         CTFNotification,
@@ -3895,38 +3896,38 @@ def api_scenarios(request: HttpRequest) -> JsonResponse:
 # -----------------------------------------------------------------------------
 
 
-@login_required
-@ctf_organizer_required
-@require_POST
-def api_add_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
-    """API: Add a flag to a challenge.
+def _delete_via_service_response(action_fn: Callable[..., Any], target_id: UUID, user: User) -> JsonResponse:
+    """Run a delete-style service action, returning ``{"success": True}`` or a mapped 4xx error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError
 
-    Args:
-        challenge_id: UUID of the challenge.
-    """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
-    from ctf.services.challenge import add_flag, get_challenge
-
+    error: tuple[str, int] | None = None
     try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
+        action_fn(target_id, actor_id=user.pk)
+    except CTFPermissionError:
+        error = ("Forbidden", 403)
+    except CTFNotFoundError as e:
+        error = (str(e), 404)
+    except CTFStateError as e:
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+    return JsonResponse({"success": True})
 
-    forbidden = _check_event_ownership(challenge.event, _get_user(request))
-    if forbidden:
-        return forbidden
+
+def _handle_add_flag(request: HttpRequest, challenge_id: UUID, user: User) -> JsonResponse:
+    """Add a flag from the POST body, returning a 201 payload or a mapped error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+    from ctf.services.challenge import add_flag
 
     try:
         body = _parse_body_object(request)
         flag_value = _get_body_str(body, "flag").strip()
+        flag_type = body.get("flag_type", "static")
+        # Flag value is only required for static and regex types
+        if flag_type in ("static", "regex") and not flag_value:
+            raise _BodyParseError("Flag value is required")
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
-
-    flag_type = body.get("flag_type", "static")
-
-    # Flag value is only required for static and regex types
-    if flag_type in ("static", "regex") and not flag_value:
-        return JsonResponse({"error": "Flag value is required"}, status=400)
 
     flag_data = {
         "flag": flag_value,
@@ -3936,25 +3937,45 @@ def api_add_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
         "validator_config": body.get("validator_config"),
     }
 
+    flag_obj = None
+    error: tuple[str, int] | None = None
     try:
-        flag_obj = add_flag(challenge_id, flag_data, actor_id=_get_user(request).pk)
-        response_data = {
-            "id": str(flag_obj.id),
-            "flag_type": flag_obj.flag_type,
-            "case_sensitive": flag_obj.case_sensitive,
-            "order": flag_obj.order,
-        }
-        if flag_obj.validator_config:
-            response_data["validator_config"] = flag_obj.validator_config
-        return JsonResponse(response_data, status=201)
+        flag_obj = add_flag(challenge_id, flag_data, actor_id=user.pk)
     except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+        error = ("Forbidden", 403)
     except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-    except CTFValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        error = (str(e), 404)
+    except (CTFStateError, CTFValidationError) as e:
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+
+    assert flag_obj is not None
+    response_data: dict[str, Any] = {
+        "id": str(flag_obj.id),
+        "flag_type": flag_obj.flag_type,
+        "case_sensitive": flag_obj.case_sensitive,
+        "order": flag_obj.order,
+    }
+    if flag_obj.validator_config:
+        response_data["validator_config"] = flag_obj.validator_config
+    return JsonResponse(response_data, status=201)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_add_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
+    """API: Add a flag to a challenge.
+
+    Args:
+        challenge_id: UUID of the challenge.
+    """
+    _challenge, error = _resolve_owned_challenge_json(request, challenge_id)
+    if error is not None:
+        return error
+
+    return _handle_add_flag(request, challenge_id, _get_user(request))
 
 
 @login_required
@@ -3966,7 +3987,6 @@ def api_remove_flag(request: HttpRequest, flag_id: UUID) -> JsonResponse:
     Args:
         flag_id: UUID of the flag.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError
     from ctf.models import CTFFlag
     from ctf.services.challenge import remove_flag
 
@@ -3980,20 +4000,40 @@ def api_remove_flag(request: HttpRequest, flag_id: UUID) -> JsonResponse:
     if forbidden:
         return forbidden
 
-    try:
-        remove_flag(flag_id, actor_id=user.pk)
-        return JsonResponse({"success": True})
-    except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-    except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _delete_via_service_response(remove_flag, flag_id, user)
 
 
 # -----------------------------------------------------------------------------
 # Hint Management API Views
 # -----------------------------------------------------------------------------
+
+
+def _handle_add_hint(request: HttpRequest, challenge_id: UUID, user: User) -> JsonResponse:
+    """Add a hint from the POST body, returning a 201 payload or a mapped error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+    from ctf.services.hint import add_hint
+
+    try:
+        body = _parse_body_object(request)
+    except _BodyParseError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    hint = None
+    error: tuple[str, int] | None = None
+    try:
+        hint = add_hint(challenge_id, body, actor_id=user.pk)
+    except CTFPermissionError:
+        error = ("Forbidden", 403)
+    except (CTFNotFoundError, CTFStateError, CTFValidationError) as e:
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+
+    assert hint is not None
+    return JsonResponse(
+        {"id": str(hint.id), "text": hint.text, "penalty": hint.penalty, "order": hint.order},
+        status=201,
+    )
 
 
 @login_required
@@ -4005,19 +4045,12 @@ def api_challenge_hints(request: HttpRequest, challenge_id: UUID) -> JsonRespons
     GET: List all hints for a challenge.
     POST: Add a new hint. Body: {"text": "...", "penalty": 0-100, "order": int}
     """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
-    from ctf.services import get_challenge
-    from ctf.services.hint import add_hint, get_hints
+    from ctf.services.hint import get_hints
 
-    try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
-
+    _challenge, error = _resolve_owned_challenge_json(request, challenge_id)
+    if error is not None:
+        return error
     user = _get_user(request)
-    forbidden = _check_event_ownership(challenge.event, user)
-    if forbidden:
-        return forbidden
 
     if request.method == "GET":
         hints = get_hints(challenge_id)
@@ -4032,22 +4065,7 @@ def api_challenge_hints(request: HttpRequest, challenge_id: UUID) -> JsonRespons
         ]
         return JsonResponse({"hints": data})
 
-    # POST
-    try:
-        body = _parse_body_object(request)
-    except _BodyParseError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    try:
-        hint = add_hint(challenge_id, body, actor_id=user.pk)
-        return JsonResponse(
-            {"id": str(hint.id), "text": hint.text, "penalty": hint.penalty, "order": hint.order},
-            status=201,
-        )
-    except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-    except (CTFNotFoundError, CTFStateError, CTFValidationError) as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _handle_add_hint(request, challenge_id, user)
 
 
 @login_required
@@ -4058,20 +4076,69 @@ def api_hint_delete(request: HttpRequest, hint_id: UUID) -> JsonResponse:
     from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError
     from ctf.services.hint import remove_hint
 
+    error: tuple[str, int] | None = None
     try:
         remove_hint(hint_id, actor_id=_get_user(request).pk)
-        return JsonResponse({}, status=204)
     except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+        error = ("Forbidden", 403)
     except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
+        error = (str(e), 404)
     except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+    return JsonResponse({}, status=204)
 
 
 # -----------------------------------------------------------------------------
 # File Attachment API Views
 # -----------------------------------------------------------------------------
+
+
+def _handle_challenge_file_upload(request: HttpRequest, challenge_id: UUID, user: User) -> JsonResponse:
+    """Upload a file to a challenge from the POST body, returning a 201 payload or a mapped error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+    from ctf.services.attachment import add_challenge_file
+
+    if not request.FILES.get("file"):
+        return JsonResponse({"error": "No file provided"}, status=400)
+
+    from django.core.files.uploadedfile import UploadedFile
+
+    uploaded_file = cast(UploadedFile, request.FILES["file"])
+    display_name = request.POST.get("display_name", "")
+
+    challenge_file = None
+    error: tuple[str, int] | None = None
+    try:
+        challenge_file = add_challenge_file(
+            challenge_id=challenge_id,
+            file_obj=uploaded_file,
+            filename=uploaded_file.name or "unnamed",
+            display_name=display_name,
+            content_type=uploaded_file.content_type or "application/octet-stream",
+            actor_id=user.pk,
+        )
+    except CTFPermissionError:
+        error = ("Forbidden", 403)
+    except CTFNotFoundError as e:
+        error = (str(e), 404)
+    except (CTFStateError, CTFValidationError) as e:
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+
+    assert challenge_file is not None
+    return JsonResponse(
+        {
+            "id": str(challenge_file.id),
+            "filename": challenge_file.filename,
+            "display_name": challenge_file.display_name,
+            "file_size_bytes": challenge_file.file_size_bytes,
+            "file_size_display": challenge_file.file_size_display,
+        },
+        status=201,
+    )
 
 
 @login_required
@@ -4083,18 +4150,11 @@ def api_challenge_files(request: HttpRequest, challenge_id: UUID) -> JsonRespons
     GET: List files for a challenge.
     POST: Upload a file to a challenge.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-    from ctf.services.attachment import add_challenge_file, get_challenge_files
-    from ctf.services.challenge import get_challenge
+    from ctf.services.attachment import get_challenge_files
 
-    try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
-
-    forbidden = _check_event_ownership(challenge.event, _get_user(request))
-    if forbidden:
-        return forbidden
+    _challenge, error = _resolve_owned_challenge_json(request, challenge_id)
+    if error is not None:
+        return error
 
     if request.method == "GET":
         files = get_challenge_files(challenge_id)
@@ -4117,44 +4177,7 @@ def api_challenge_files(request: HttpRequest, challenge_id: UUID) -> JsonRespons
             }
         )
 
-    # POST: Upload file
-    if not request.FILES.get("file"):
-        return JsonResponse({"error": "No file provided"}, status=400)
-
-    from django.core.files.uploadedfile import UploadedFile
-
-    from ctf.exceptions import CTFPermissionError
-
-    uploaded_file = cast(UploadedFile, request.FILES["file"])
-    display_name = request.POST.get("display_name", "")
-
-    try:
-        challenge_file = add_challenge_file(
-            challenge_id=challenge_id,
-            file_obj=uploaded_file,
-            filename=uploaded_file.name or "unnamed",
-            display_name=display_name,
-            content_type=uploaded_file.content_type or "application/octet-stream",
-            actor_id=_get_user(request).pk,
-        )
-        return JsonResponse(
-            {
-                "id": str(challenge_file.id),
-                "filename": challenge_file.filename,
-                "display_name": challenge_file.display_name,
-                "file_size_bytes": challenge_file.file_size_bytes,
-                "file_size_display": challenge_file.file_size_display,
-            },
-            status=201,
-        )
-    except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-    except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-    except CTFValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _handle_challenge_file_upload(request, challenge_id, _get_user(request))
 
 
 @login_required
@@ -4166,7 +4189,6 @@ def api_challenge_file_delete(request: HttpRequest, file_id: UUID) -> JsonRespon
     Args:
         file_id: UUID of the file to delete.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError
     from ctf.models import CTFChallengeFile
     from ctf.services.attachment import remove_challenge_file
 
@@ -4180,15 +4202,58 @@ def api_challenge_file_delete(request: HttpRequest, file_id: UUID) -> JsonRespon
     if forbidden:
         return forbidden
 
+    return _delete_via_service_response(remove_challenge_file, file_id, user)
+
+
+def _is_file_download_allowed(request: HttpRequest, challenge_file: CTFChallengeFile) -> bool:
+    """Return True if the user may download this challenge file.
+
+    Organizer-owners get full access. Otherwise the user must be a
+    non-disqualified participant of the event AND the challenge must be
+    available to them (issue #765/#768/#769, codex cycles 2/5): file
+    downloads apply the same participant-availability policy as flag
+    submission and hint unlock, so a registered participant who knows a file
+    UUID cannot fetch attachments for HIDDEN/LOCKED/unreleased challenges or
+    events outside the competition window.
+    """
+    from ctf.bridges import get_user_role
+    from ctf.exceptions import CTFStateError, CTFValidationError
+    from ctf.services.challenge import assert_challenge_available_for_participant
+    from ctf.services.participant import get_participant_by_user, is_active_participant
+
+    user = _get_user(request)
+    event = challenge_file.challenge.event
+    role = get_user_role(user)
+    if role.is_ctf_organizer and event.created_by_id == user.pk:
+        return True
+    if not is_active_participant(user, event=event):
+        return False
+
+    participant = get_participant_by_user(user, event_id=event.id)
+    allowed = participant is not None
+    if participant is not None:
+        try:
+            assert_challenge_available_for_participant(participant, challenge_file.challenge)
+        except (CTFStateError, CTFValidationError):
+            allowed = False
+    return allowed
+
+
+def _file_download_url_response(file_id: UUID) -> HttpResponse:
+    """Return a JSON presigned download URL for the file, or a 404.
+
+    Returns the presigned URL for client-side navigation instead of a
+    server-side redirect. This avoids open-redirect risk (S5146) since the
+    server never issues an HTTP 302 to a dynamically constructed URL.
+    """
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services.attachment import get_download_url
+
     try:
-        remove_challenge_file(file_id, actor_id=user.pk)
-        return JsonResponse({"success": True})
-    except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+        url, filename = get_download_url(file_id)
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse({"url": url, "filename": filename})
 
 
 @login_required
@@ -4198,9 +4263,7 @@ def api_file_download(request: HttpRequest, file_id: UUID) -> HttpResponse:
 
     Accessible by organizers and participants (for challenges in their event).
     """
-    from ctf.exceptions import CTFNotFoundError
     from ctf.models import CTFChallengeFile
-    from ctf.services.attachment import get_download_url
 
     # Verify access: check the file exists and user has access
     try:
@@ -4208,48 +4271,40 @@ def api_file_download(request: HttpRequest, file_id: UUID) -> HttpResponse:
     except CTFChallengeFile.DoesNotExist:
         return JsonResponse({"error": "File not found"}, status=404)
 
-    user = _get_user(request)
-    event = challenge_file.challenge.event
-
-    # Check: organizer of this event, or non-disqualified participant in it.
-    # Issue #768 (codex cycle 2 class finding): aligning with the
-    # playing-status filter the scoring service uses prevents disqualified
-    # participants from downloading challenge files.
-    from ctf.bridges import get_user_role
-    from ctf.exceptions import CTFStateError, CTFValidationError
-    from ctf.services.challenge import assert_challenge_available_for_participant
-    from ctf.services.participant import get_participant_by_user, is_active_participant
-
-    role = get_user_role(user)
-    is_owner_organizer = role.is_ctf_organizer and event.created_by_id == user.pk
-    if not is_owner_organizer and not is_active_participant(user, event=event):
+    if not _is_file_download_allowed(request, challenge_file):
         return HttpResponse("Forbidden", status=403)
 
-    # Issue #765/#768/#769 (codex cycle 5 class finding): file downloads
-    # MUST apply the same participant availability policy as flag submission
-    # and hint unlock — otherwise a registered participant who knows a
-    # file UUID can fetch attachments for HIDDEN/LOCKED/unreleased
-    # challenges or for events outside the competition window.
-    # Organizer-owners bypass the participant-availability check (they
-    # legitimately need access to all event content for review/preview).
-    if not is_owner_organizer:
-        participant = get_participant_by_user(user, event_id=event.id)
-        if participant is None:
-            return HttpResponse("Forbidden", status=403)
-        try:
-            assert_challenge_available_for_participant(participant, challenge_file.challenge)
-        except (CTFStateError, CTFValidationError):
-            return HttpResponse("Forbidden", status=403)
+    return _file_download_url_response(file_id)
+
+
+def _admin_upload_challenge_file(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
+    """Add the uploaded file (if any) then redirect to the detail page; 403 on permission error."""
+    if not request.FILES.get("file"):
+        return redirect("ctf:admin_challenge_detail", challenge_id=challenge_id)
+
+    from django.core.files.uploadedfile import UploadedFile
+
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+    from ctf.services.attachment import add_challenge_file
+
+    uploaded_file = cast(UploadedFile, request.FILES["file"])
+    display_name = request.POST.get("display_name", "")
 
     try:
-        url, _filename = get_download_url(file_id)
-    except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
+        add_challenge_file(
+            challenge_id=challenge_id,
+            file_obj=uploaded_file,
+            filename=uploaded_file.name or "unnamed",
+            display_name=display_name,
+            content_type=uploaded_file.content_type or "application/octet-stream",
+            actor_id=_get_user(request).pk,
+        )
+    except CTFPermissionError:
+        return HttpResponse("Forbidden", status=403)
+    except (CTFNotFoundError, CTFStateError, CTFValidationError) as e:
+        logger.warning("File upload failed for challenge %s: %s", safe_log_value(challenge_id), e)
 
-    # Return the presigned URL for client-side navigation instead of a
-    # server-side redirect.  This avoids open-redirect risk (S5146) since the
-    # server never issues an HTTP 302 to a dynamically constructed URL.
-    return JsonResponse({"url": url, "filename": _filename})
+    return redirect("ctf:admin_challenge_detail", challenge_id=challenge_id)
 
 
 @login_required
@@ -4260,8 +4315,7 @@ def admin_challenge_file_upload(request: HttpRequest, challenge_id: UUID) -> Htt
 
     Redirects back to the challenge detail page.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-    from ctf.services.attachment import add_challenge_file
+    from ctf.exceptions import CTFNotFoundError
     from ctf.services.challenge import get_challenge
 
     try:
@@ -4272,36 +4326,47 @@ def admin_challenge_file_upload(request: HttpRequest, challenge_id: UUID) -> Htt
     if challenge.event.created_by_id != request.user.pk:
         return HttpResponse("Forbidden", status=403)
 
-    if not request.FILES.get("file"):
-        return redirect("ctf:admin_challenge_detail", challenge_id=challenge_id)
-
-    from django.core.files.uploadedfile import UploadedFile
-
-    uploaded_file = cast(UploadedFile, request.FILES["file"])
-    display_name = request.POST.get("display_name", "")
-
-    from ctf.exceptions import CTFPermissionError
-
-    try:
-        add_challenge_file(
-            challenge_id=challenge_id,
-            file_obj=uploaded_file,
-            filename=uploaded_file.name or "unnamed",
-            display_name=display_name,
-            content_type=uploaded_file.content_type or "application/octet-stream",
-            actor_id=request.user.pk,
-        )
-    except CTFPermissionError:
-        return HttpResponse("Forbidden", status=403)
-    except (CTFNotFoundError, CTFStateError, CTFValidationError) as e:
-        logger.warning("File upload failed for challenge %s: %s", safe_log_value(challenge_id), e)
-
-    return redirect("ctf:admin_challenge_detail", challenge_id=challenge_id)
+    return _admin_upload_challenge_file(request, challenge_id)
 
 
 # -----------------------------------------------------------------------------
 # Prerequisite API Views
 # -----------------------------------------------------------------------------
+
+
+def _handle_add_prerequisite(request: HttpRequest, challenge_id: UUID, user: User) -> JsonResponse:
+    """Add a prerequisite from the POST body, returning a 201 payload or a mapped error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+    from ctf.services.challenge import add_prerequisite
+
+    try:
+        body = _parse_body_object(request)
+        required_uuid = _parse_body_uuid(body.get("required_challenge_id"), "required_challenge_id")
+    except (_BodyParseError, _BodyUUIDError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    prereq = None
+    error: tuple[str, int] | None = None
+    try:
+        prereq = add_prerequisite(challenge_id, required_uuid, actor_id=user.pk)
+    except CTFPermissionError:
+        error = ("Forbidden", 403)
+    except CTFNotFoundError as e:
+        error = (str(e), 404)
+    except (CTFStateError, CTFValidationError) as e:
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+
+    assert prereq is not None
+    return JsonResponse(
+        {
+            "id": str(prereq.id),
+            "required_challenge_id": str(prereq.required_challenge_id),
+            "required_challenge_name": prereq.required_challenge.name,
+        },
+        status=201,
+    )
 
 
 @login_required
@@ -4313,18 +4378,12 @@ def api_challenge_prerequisites(request: HttpRequest, challenge_id: UUID) -> Jso
     GET: List prerequisites for a challenge.
     POST: Add a prerequisite to a challenge.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
-    from ctf.services.challenge import add_prerequisite, get_challenge, get_prerequisites
+    from ctf.services.challenge import get_prerequisites
 
-    try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
-
+    _challenge, error = _resolve_owned_challenge_json(request, challenge_id)
+    if error is not None:
+        return error
     user = _get_user(request)
-    forbidden = _check_event_ownership(challenge.event, user)
-    if forbidden:
-        return forbidden
 
     if request.method == "GET":
         prereqs = get_prerequisites(challenge_id)
@@ -4343,35 +4402,7 @@ def api_challenge_prerequisites(request: HttpRequest, challenge_id: UUID) -> Jso
             }
         )
 
-    # POST: Add prerequisite
-    try:
-        body = _parse_body_object(request)
-    except _BodyParseError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    try:
-        required_uuid = _parse_body_uuid(body.get("required_challenge_id"), "required_challenge_id")
-    except _BodyUUIDError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    try:
-        prereq = add_prerequisite(challenge_id, required_uuid, actor_id=user.pk)
-        return JsonResponse(
-            {
-                "id": str(prereq.id),
-                "required_challenge_id": str(prereq.required_challenge_id),
-                "required_challenge_name": prereq.required_challenge.name,
-            },
-            status=201,
-        )
-    except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-    except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-    except CTFValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _handle_add_prerequisite(request, challenge_id, user)
 
 
 @login_required
@@ -4383,7 +4414,6 @@ def api_prerequisite_delete(request: HttpRequest, prerequisite_id: UUID) -> Json
     Args:
         prerequisite_id: UUID of the prerequisite to remove.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError
     from ctf.models import CTFChallengePrerequisite
     from ctf.services.challenge import remove_prerequisite
 
@@ -4397,12 +4427,4 @@ def api_prerequisite_delete(request: HttpRequest, prerequisite_id: UUID) -> Json
     if forbidden:
         return forbidden
 
-    try:
-        remove_prerequisite(prerequisite_id, actor_id=user.pk)
-        return JsonResponse({"success": True})
-    except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-    except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _delete_via_service_response(remove_prerequisite, prerequisite_id, user)

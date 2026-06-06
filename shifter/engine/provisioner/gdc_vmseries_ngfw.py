@@ -9,7 +9,7 @@ import os
 import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from jinja2 import Environment, select_autoescape
 
@@ -60,6 +60,15 @@ _INIT_CFG_FILENAME = "init-cfg.txt"
 _BOOTSTRAP_XML_FILENAME = "bootstrap.xml"
 _KEEP_FILENAME = ".keep"
 _GCS_PREFIX = "gs://"
+
+
+class _VMSeriesNames(NamedTuple):
+    """The Kubernetes resource names for one VM-Series instance."""
+
+    namespace: str
+    vm_name: str
+    boot_disk_name: str
+    bootstrap_disk_name: str
 
 
 def _namespace_name(config: GDCPaloAltoVMSeriesConfig, user_id: int) -> str:
@@ -505,114 +514,23 @@ def _extract_interface_ip(vm: dict[str, Any], interface_name: str) -> str:
     return ""
 
 
-def apply_ngfw(
+def _build_provision_result(
     *,
-    request_id: str,
-    instance_id: str,
-    app_spec: dict[str, Any],
+    config: GDCPaloAltoVMSeriesConfig,
+    names: _VMSeriesNames,
+    bootstrap_gcs_url: str,
+    ssh_secret_ref: str,
+    management_ip: str,
+    dataplane_ip: str,
 ) -> dict[str, Any]:
-    """Create or reconcile a Palo Alto VM-Series firewall on GDC VM Runtime."""
-    access = load_gdc_network_access_config()
-    if access is None:
-        raise RuntimeError("GDC VM-Series provisioning requires GDC_ACCESS_SECRET_ID")
-    config = load_gdc_palo_alto_vmseries_config()
-
-    _, client_module, _, api_exception = _import_kubernetes_modules()
-    api_client = _build_kube_api_client(access.kubeconfig)
-    core_api = client_module.CoreV1Api(api_client)
-    custom_api = client_module.CustomObjectsApi(api_client)
-
-    user_id = int(app_spec.get("user_id", 0))
-    namespace = _namespace_name(config, user_id)
-    vm_name = _vm_name(user_id, instance_id)
-    boot_disk_name = _boot_disk_name(vm_name)
-    bootstrap_disk_name = _bootstrap_disk_name(vm_name)
-    hostname = _sanitize_name(f"ngfw-user-{user_id}", max_length=31)
-    labels = _labels(user_id=user_id, request_id=request_id, instance_id=instance_id)
-
-    _ensure_namespace(core_api, namespace, labels, api_exception)
-    gcs_secret_name = _ensure_gcs_image_secret(core_api, client_module, namespace, config, api_exception)
-    ssh_secret_ref, public_key = _ensure_ssh_secret(user_id, instance_id)
-    bootstrap_gcs_url = _create_bootstrap_iso(
-        config=config,
-        request_id=request_id,
-        instance_id=instance_id,
-        hostname=hostname,
-        app_spec=app_spec,
-        public_key=public_key,
-    )
-
-    boot_disk_manifest = _build_disk_manifest(
-        namespace=namespace,
-        disk_name=boot_disk_name,
-        source_url=config.image_url,
-        gcs_secret_name=gcs_secret_name if config.image_url.startswith("gs://") else None,
-        disk_size_gib=config.disk_size_gib,
-        storage_class_name=config.storage_class_name,
-        labels=labels,
-    )
-    _apply_namespaced_custom_object(
-        custom_api,
-        group=_VM_GROUP,
-        version=_VM_VERSION,
-        plural=_VM_DISK_PLURAL,
-        namespace=namespace,
-        body=boot_disk_manifest,
-        api_exception=api_exception,
-    )
-    _wait_for_disk_ready(custom_api, namespace, boot_disk_name, api_exception)
-
-    bootstrap_disk_manifest = _build_bootstrap_disk_manifest(
-        namespace=namespace,
-        disk_name=bootstrap_disk_name,
-        source_url=bootstrap_gcs_url,
-        gcs_secret_name=gcs_secret_name,
-        disk_size_gib=config.bootstrap_disk_size_gib,
-        storage_class_name=config.storage_class_name,
-        labels=labels,
-    )
-    _apply_namespaced_custom_object(
-        custom_api,
-        group=_VM_GROUP,
-        version=_VM_VERSION,
-        plural=_VM_DISK_PLURAL,
-        namespace=namespace,
-        body=bootstrap_disk_manifest,
-        api_exception=api_exception,
-    )
-    _wait_for_disk_ready(custom_api, namespace, bootstrap_disk_name, api_exception)
-
-    vm_manifest = _build_vmseries_vm_manifest(
-        namespace=namespace,
-        vm_name=vm_name,
-        boot_disk_name=boot_disk_name,
-        bootstrap_disk_name=bootstrap_disk_name,
-        config=config,
-        labels=labels,
-    )
-    _apply_namespaced_custom_object(
-        custom_api,
-        group=_VM_GROUP,
-        version=_VM_VERSION,
-        plural=_VM_PLURAL,
-        namespace=namespace,
-        body=vm_manifest,
-        api_exception=api_exception,
-    )
-
-    vm = _wait_for_vm_ready(custom_api, namespace, vm_name, api_exception)
-    management_ip = _ip_from_cidr(config.management_ip_cidr) or _extract_interface_ip(vm, _MGMT_INTERFACE_NAME)
-    dataplane_ip = _ip_from_cidr(config.data_ip_cidr) or _extract_interface_ip(vm, _DATA_INTERFACE_NAME)
-    if not management_ip:
-        raise RuntimeError(f"GDC VM-Series {namespace}/{vm_name} reached running state without a management IP")
-
-    data_attachment_id = f"{namespace}/{vm_name}:{_DATA_INTERFACE_NAME}"
+    """Assemble the provisioner result/state dict for a created VM-Series instance."""
+    data_attachment_id = f"{names.namespace}/{names.vm_name}:{_DATA_INTERFACE_NAME}"
     gcp_metadata = {
         "product": _PRODUCT,
-        "namespace": namespace,
-        "vm_name": vm_name,
-        "boot_disk_name": boot_disk_name,
-        "bootstrap_disk_name": bootstrap_disk_name,
+        "namespace": names.namespace,
+        "vm_name": names.vm_name,
+        "boot_disk_name": names.boot_disk_name,
+        "bootstrap_disk_name": names.bootstrap_disk_name,
         "bootstrap_gcs_url": bootstrap_gcs_url,
         "management_network_name": config.management_network_name,
         "management_interface_name": _MGMT_INTERFACE_NAME,
@@ -637,15 +555,153 @@ def apply_ngfw(
         "data_eni_id": "",
         "ssh_key_secret_arn": ssh_secret_ref,
         "ssh_key_secret_ref": ssh_secret_ref,
-        "gdc_namespace": namespace,
-        "gdc_vm_name": vm_name,
-        "gdc_boot_disk_name": boot_disk_name,
-        "gdc_bootstrap_disk_name": bootstrap_disk_name,
+        "gdc_namespace": names.namespace,
+        "gdc_vm_name": names.vm_name,
+        "gdc_boot_disk_name": names.boot_disk_name,
+        "gdc_bootstrap_disk_name": names.bootstrap_disk_name,
         "gdc_bootstrap_gcs_url": bootstrap_gcs_url,
         "provider_metadata": {
             "gcp": gcp_metadata,
         },
     }
+
+
+def _apply_vm_resources(
+    custom_api: CustomObjectsApi,
+    *,
+    config: GDCPaloAltoVMSeriesConfig,
+    names: _VMSeriesNames,
+    bootstrap_gcs_url: str,
+    gcs_secret_name: str | None,
+    labels: dict[str, str],
+    api_exception: type[ApiException],
+) -> dict[str, Any]:
+    """Create the boot disk, bootstrap disk, and VirtualMachine; return the ready VM."""
+    boot_disk_manifest = _build_disk_manifest(
+        namespace=names.namespace,
+        disk_name=names.boot_disk_name,
+        source_url=config.image_url,
+        gcs_secret_name=gcs_secret_name if config.image_url.startswith("gs://") else None,
+        disk_size_gib=config.disk_size_gib,
+        storage_class_name=config.storage_class_name,
+        labels=labels,
+    )
+    _apply_namespaced_custom_object(
+        custom_api,
+        group=_VM_GROUP,
+        version=_VM_VERSION,
+        plural=_VM_DISK_PLURAL,
+        namespace=names.namespace,
+        body=boot_disk_manifest,
+        api_exception=api_exception,
+    )
+    _wait_for_disk_ready(custom_api, names.namespace, names.boot_disk_name, api_exception)
+
+    bootstrap_disk_manifest = _build_bootstrap_disk_manifest(
+        namespace=names.namespace,
+        disk_name=names.bootstrap_disk_name,
+        source_url=bootstrap_gcs_url,
+        gcs_secret_name=gcs_secret_name,
+        disk_size_gib=config.bootstrap_disk_size_gib,
+        storage_class_name=config.storage_class_name,
+        labels=labels,
+    )
+    _apply_namespaced_custom_object(
+        custom_api,
+        group=_VM_GROUP,
+        version=_VM_VERSION,
+        plural=_VM_DISK_PLURAL,
+        namespace=names.namespace,
+        body=bootstrap_disk_manifest,
+        api_exception=api_exception,
+    )
+    _wait_for_disk_ready(custom_api, names.namespace, names.bootstrap_disk_name, api_exception)
+
+    vm_manifest = _build_vmseries_vm_manifest(
+        namespace=names.namespace,
+        vm_name=names.vm_name,
+        boot_disk_name=names.boot_disk_name,
+        bootstrap_disk_name=names.bootstrap_disk_name,
+        config=config,
+        labels=labels,
+    )
+    _apply_namespaced_custom_object(
+        custom_api,
+        group=_VM_GROUP,
+        version=_VM_VERSION,
+        plural=_VM_PLURAL,
+        namespace=names.namespace,
+        body=vm_manifest,
+        api_exception=api_exception,
+    )
+    return _wait_for_vm_ready(custom_api, names.namespace, names.vm_name, api_exception)
+
+
+def apply_ngfw(
+    *,
+    request_id: str,
+    instance_id: str,
+    app_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Create or reconcile a Palo Alto VM-Series firewall on GDC VM Runtime."""
+    access = load_gdc_network_access_config()
+    if access is None:
+        raise RuntimeError("GDC VM-Series provisioning requires GDC_ACCESS_SECRET_ID")
+    config = load_gdc_palo_alto_vmseries_config()
+
+    _, client_module, _, api_exception = _import_kubernetes_modules()
+    api_client = _build_kube_api_client(access.kubeconfig)
+    core_api = client_module.CoreV1Api(api_client)
+    custom_api = client_module.CustomObjectsApi(api_client)
+
+    user_id = int(app_spec.get("user_id", 0))
+    namespace = _namespace_name(config, user_id)
+    vm_name = _vm_name(user_id, instance_id)
+    boot_disk_name = _boot_disk_name(vm_name)
+    bootstrap_disk_name = _bootstrap_disk_name(vm_name)
+    hostname = _sanitize_name(f"ngfw-user-{user_id}", max_length=31)
+    labels = _labels(user_id=user_id, request_id=request_id, instance_id=instance_id)
+    names = _VMSeriesNames(
+        namespace=namespace,
+        vm_name=vm_name,
+        boot_disk_name=boot_disk_name,
+        bootstrap_disk_name=bootstrap_disk_name,
+    )
+
+    _ensure_namespace(core_api, namespace, labels, api_exception)
+    gcs_secret_name = _ensure_gcs_image_secret(core_api, client_module, namespace, config, api_exception)
+    ssh_secret_ref, public_key = _ensure_ssh_secret(user_id, instance_id)
+    bootstrap_gcs_url = _create_bootstrap_iso(
+        config=config,
+        request_id=request_id,
+        instance_id=instance_id,
+        hostname=hostname,
+        app_spec=app_spec,
+        public_key=public_key,
+    )
+
+    vm = _apply_vm_resources(
+        custom_api,
+        config=config,
+        names=names,
+        bootstrap_gcs_url=bootstrap_gcs_url,
+        gcs_secret_name=gcs_secret_name,
+        labels=labels,
+        api_exception=api_exception,
+    )
+    management_ip = _ip_from_cidr(config.management_ip_cidr) or _extract_interface_ip(vm, _MGMT_INTERFACE_NAME)
+    dataplane_ip = _ip_from_cidr(config.data_ip_cidr) or _extract_interface_ip(vm, _DATA_INTERFACE_NAME)
+    if not management_ip:
+        raise RuntimeError(f"GDC VM-Series {namespace}/{vm_name} reached running state without a management IP")
+
+    return _build_provision_result(
+        config=config,
+        names=names,
+        bootstrap_gcs_url=bootstrap_gcs_url,
+        ssh_secret_ref=ssh_secret_ref,
+        management_ip=management_ip,
+        dataplane_ip=dataplane_ip,
+    )
 
 
 def _delete_vm_series_resource(
@@ -685,6 +741,11 @@ def _delete_image_import_secret(core_api: CoreV1Api, namespace: str, api_excepti
             raise
 
 
+def _state_field(metadata: dict[str, Any], state: dict[str, Any], meta_key: str, state_key: str) -> str:
+    """Return a VM-Series state field, preferring provider metadata over top-level state."""
+    return str(metadata.get(meta_key) or state.get(state_key, "")).strip()
+
+
 def destroy_ngfw(state: dict[str, Any]) -> None:
     """Destroy a GDC VM Runtime Palo Alto VM-Series firewall and support assets."""
     access = load_gdc_network_access_config()
@@ -692,10 +753,10 @@ def destroy_ngfw(state: dict[str, Any]) -> None:
         raise RuntimeError("GDC VM-Series destruction requires GDC_ACCESS_SECRET_ID")
 
     metadata = dict(state.get("provider_metadata", {}).get("gcp") or {})
-    namespace = str(metadata.get("namespace") or state.get("gdc_namespace", "")).strip()
-    vm_name = str(metadata.get("vm_name") or state.get("gdc_vm_name", "")).strip()
-    boot_disk_name = str(metadata.get("boot_disk_name") or state.get("gdc_boot_disk_name", "")).strip()
-    bootstrap_disk_name = str(metadata.get("bootstrap_disk_name") or state.get("gdc_bootstrap_disk_name", "")).strip()
+    namespace = _state_field(metadata, state, "namespace", "gdc_namespace")
+    vm_name = _state_field(metadata, state, "vm_name", "gdc_vm_name")
+    boot_disk_name = _state_field(metadata, state, "boot_disk_name", "gdc_boot_disk_name")
+    bootstrap_disk_name = _state_field(metadata, state, "bootstrap_disk_name", "gdc_bootstrap_disk_name")
     if not namespace or not vm_name:
         raise RuntimeError("GDC VM-Series state is missing namespace or VM name")
 
@@ -725,9 +786,8 @@ def destroy_ngfw(state: dict[str, Any]) -> None:
             api_exception=api_exception,
         )
 
-    bootstrap_gcs_url = str(metadata.get("bootstrap_gcs_url") or state.get("gdc_bootstrap_gcs_url", "")).strip()
-    _delete_bootstrap_iso(bootstrap_gcs_url)
-    _delete_ssh_secret(str(metadata.get("ssh_key_secret_id") or state.get("ssh_key_secret_arn", "")).strip())
+    _delete_bootstrap_iso(_state_field(metadata, state, "bootstrap_gcs_url", "gdc_bootstrap_gcs_url"))
+    _delete_ssh_secret(_state_field(metadata, state, "ssh_key_secret_id", "ssh_key_secret_arn"))
     _delete_image_import_secret(core_api, namespace, api_exception)
 
 

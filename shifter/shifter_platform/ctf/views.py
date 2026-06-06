@@ -2654,6 +2654,66 @@ def api_force_delete_event(request: HttpRequest, event_id: UUID) -> JsonResponse
     return _force_delete_event_response(request, event_id)
 
 
+def _challenge_list_get(event_id: UUID, user: User) -> JsonResponse:
+    """List challenges for an event as JSON, or 403 when the actor lacks access."""
+    from ctf.exceptions import CTFPermissionError
+    from ctf.services import list_challenges_for_event
+
+    try:
+        challenges = list_challenges_for_event(event_id, actor_id=user.pk).prefetch_related("tags", "topics")
+    except CTFPermissionError:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+    data = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "category": c.category,
+            "points": c.points,
+            "difficulty": c.difficulty,
+            "order": c.order,
+            "tags": list(c.tags.values_list("name", flat=True)),
+            "topics": list(c.topics.values_list("name", flat=True)),
+        }
+        for c in challenges
+    ]
+    return JsonResponse({"challenges": data})
+
+
+def _handle_challenge_create_api_post(request: HttpRequest, event_id: UUID, user: User) -> JsonResponse:
+    """Create a challenge from the POST body, returning a 201 payload or an error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+    from ctf.services import create_challenge
+
+    try:
+        body = _parse_body_object(request)
+    except _BodyParseError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    challenge = None
+    error: tuple[str, int] | None = None
+    try:
+        challenge = create_challenge(event_id, body, actor_id=user.pk)
+    except CTFPermissionError:
+        error = ("Forbidden", 403)
+    except CTFNotFoundError as e:
+        error = (str(e), 404)
+    except (CTFValidationError, CTFStateError) as e:
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+
+    assert challenge is not None
+    return JsonResponse(
+        {
+            "id": str(challenge.id),
+            "name": challenge.name,
+            "category": challenge.category,
+            "points": challenge.points,
+        },
+        status=201,
+    )
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "POST"])
@@ -2663,62 +2723,112 @@ def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
-    from ctf.services import create_challenge, get_event, list_challenges_for_event
-
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
+    _event, error = _resolve_owned_event_json(request, event_id)
+    if error is not None:
+        return error
 
     user = _get_user(request)
-    forbidden = _check_event_ownership(event, user)
-    if forbidden:
-        return forbidden
-
     if request.method == "GET":
-        try:
-            challenges = list_challenges_for_event(event_id, actor_id=user.pk).prefetch_related("tags", "topics")
-        except CTFPermissionError:
-            return JsonResponse({"error": "Forbidden"}, status=403)
-        data = [
-            {
-                "id": str(c.id),
-                "name": c.name,
-                "category": c.category,
-                "points": c.points,
-                "difficulty": c.difficulty,
-                "order": c.order,
-                "tags": list(c.tags.values_list("name", flat=True)),
-                "topics": list(c.topics.values_list("name", flat=True)),
-            }
-            for c in challenges
-        ]
-        return JsonResponse({"challenges": data})
+        return _challenge_list_get(event_id, user)
+    return _handle_challenge_create_api_post(request, event_id, user)
 
-    # POST
+
+def _resolve_owned_challenge_json(
+    request: HttpRequest, challenge_id: UUID
+) -> tuple[CTFChallenge | None, JsonResponse | None]:
+    """Resolve a challenge (404 if missing) and enforce event ownership; return (challenge, error_response)."""
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        return None, JsonResponse({"error": "Challenge not found"}, status=404)
+
+    forbidden = _check_event_ownership(challenge.event, _get_user(request))
+    if forbidden:
+        return None, forbidden
+
+    return challenge, None
+
+
+def _challenge_detail_payload(challenge: CTFChallenge) -> dict[str, Any]:
+    """Render the GET-challenge JSON payload for `api_challenge_detail`."""
+    return {
+        "id": str(challenge.id),
+        "name": challenge.name,
+        "description": challenge.description,
+        "category": challenge.category,
+        "points": challenge.points,
+        "difficulty": challenge.difficulty,
+        "flag_format": challenge.flag_format,
+        "hints": [
+            {"id": str(h.id), "text": h.text, "penalty": h.penalty, "order": h.order} for h in challenge.hints.all()
+        ],
+        "max_attempts": challenge.max_attempts,
+        "order": challenge.order,
+        "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
+        "tags": list(challenge.tags.values_list("name", flat=True)),
+        "topics": list(challenge.topics.values_list("name", flat=True)),
+        "solution": challenge.solution,
+    }
+
+
+def _handle_challenge_delete(challenge_id: UUID, user: User) -> JsonResponse:
+    """Delete a challenge, returning 204 or an error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError
+    from ctf.services import delete_challenge
+
+    try:
+        delete_challenge(challenge_id, actor_id=user.pk)
+    except CTFPermissionError:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+    except (CTFNotFoundError, CTFStateError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse({}, status=204)
+
+
+def _handle_challenge_update_put(request: HttpRequest, challenge_id: UUID, user: User) -> JsonResponse:
+    """Update a challenge from the PUT body, returning the updated payload or an error."""
+    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+    from ctf.services import update_challenge
+
     try:
         body = _parse_body_object(request)
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+    updated = None
+    error: tuple[str, int] | None = None
     try:
-        challenge = create_challenge(event_id, body, actor_id=user.pk)
-        return JsonResponse(
-            {
-                "id": str(challenge.id),
-                "name": challenge.name,
-                "category": challenge.category,
-                "points": challenge.points,
-            },
-            status=201,
-        )
+        updated = update_challenge(challenge_id, body, actor_id=user.pk)
     except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-    except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
-    except (CTFValidationError, CTFStateError) as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        error = ("Forbidden", 403)
+    except (CTFNotFoundError, CTFValidationError, CTFStateError) as e:
+        error = (str(e), 400)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+
+    assert updated is not None
+    return JsonResponse(
+        {
+            "id": str(updated.id),
+            "name": updated.name,
+            "category": updated.category,
+            "points": updated.points,
+        }
+    )
+
+
+def _dispatch_challenge_detail_method(
+    request: HttpRequest, challenge: CTFChallenge, challenge_id: UUID, user: User
+) -> JsonResponse:
+    """Dispatch GET/DELETE/PUT for an already-resolved, owned challenge."""
+    if request.method == "GET":
+        return JsonResponse(_challenge_detail_payload(challenge))
+    if request.method == "DELETE":
+        return _handle_challenge_delete(challenge_id, user)
+    return _handle_challenge_update_put(request, challenge_id, user)
 
 
 @login_required
@@ -2730,71 +2840,67 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
     Args:
         challenge_id: UUID of the challenge.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
-    from ctf.services import delete_challenge, get_challenge, update_challenge
+    challenge, error = _resolve_owned_challenge_json(request, challenge_id)
+    if error is not None:
+        return error
+    assert challenge is not None
+    return _dispatch_challenge_detail_method(request, challenge, challenge_id, _get_user(request))
 
+
+def _resolve_challenge_participant(
+    request: HttpRequest, challenge_id: UUID
+) -> tuple[CTFParticipant | None, JsonResponse | None]:
+    """Resolve a challenge (404) then the request's participant scoped to its event (403)."""
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services.challenge import get_challenge
+
+    # Resolve the participant scoped to THIS challenge's event (codex cycle 4).
     try:
         challenge = get_challenge(challenge_id)
     except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
+        return None, JsonResponse({"error": "Challenge not found"}, status=404)
+    participant = _get_participant_for_challenge(request, challenge)
+    if not participant:
+        return None, JsonResponse({"error": "Forbidden"}, status=403)
+    return participant, None
 
-    user = _get_user(request)
-    forbidden = _check_event_ownership(challenge.event, user)
-    if forbidden:
-        return forbidden
 
-    if request.method == "GET":
-        return JsonResponse(
-            {
-                "id": str(challenge.id),
-                "name": challenge.name,
-                "description": challenge.description,
-                "category": challenge.category,
-                "points": challenge.points,
-                "difficulty": challenge.difficulty,
-                "flag_format": challenge.flag_format,
-                "hints": [
-                    {"id": str(h.id), "text": h.text, "penalty": h.penalty, "order": h.order}
-                    for h in challenge.hints.all()
-                ],
-                "max_attempts": challenge.max_attempts,
-                "order": challenge.order,
-                "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
-                "tags": list(challenge.tags.values_list("name", flat=True)),
-                "topics": list(challenge.topics.values_list("name", flat=True)),
-                "solution": challenge.solution,
-            }
-        )
+def _submit_flag_response(
+    participant: CTFParticipant, challenge_id: UUID, flag: str, ip_address: str | None
+) -> JsonResponse:
+    """Submit the flag and return the scored result, or a 4xx/429 error response."""
+    from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
+    from ctf.services.scoring import calculate_score, get_participant_rank
+    from ctf.services.submission import submit_flag
 
-    if request.method == "DELETE":
-        try:
-            delete_challenge(challenge_id, actor_id=user.pk)
-            return JsonResponse({}, status=204)
-        except CTFPermissionError:
-            return JsonResponse({"error": "Forbidden"}, status=403)
-        except (CTFNotFoundError, CTFStateError) as e:
-            return JsonResponse({"error": str(e)}, status=400)
-
-    # PUT
+    submission = None
+    error_resp = None
     try:
-        body = _parse_body_object(request)
-    except _BodyParseError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        submission = submit_flag(participant.id, challenge_id, flag, ip_address=ip_address)
+    except CTFNotFoundError as e:
+        error_resp = JsonResponse({"error": str(e)}, status=404)
+    except (CTFValidationError, CTFStateError) as e:
+        error_resp = JsonResponse({"error": str(e)}, status=400)
+    except CTFRateLimitError as e:
+        error_resp = JsonResponse({"error": str(e), "details": e.details}, status=429)
+        if e.details.get("retry_after_seconds"):
+            error_resp["Retry-After"] = str(e.details["retry_after_seconds"])
+    if error_resp is not None:
+        return error_resp
 
-    try:
-        updated = update_challenge(challenge_id, body, actor_id=user.pk)
-        return JsonResponse(
-            {
-                "id": str(updated.id),
-                "name": updated.name,
-                "category": updated.category,
-                "points": updated.points,
-            }
-        )
-    except CTFPermissionError:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-    except (CTFNotFoundError, CTFValidationError, CTFStateError) as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    assert submission is not None
+    score = calculate_score(participant.id)
+    rank = get_participant_rank(participant.id)
+    return JsonResponse(
+        {
+            "correct": submission.is_correct,
+            "points_awarded": submission.points_awarded,
+            "attempt_number": submission.attempt_number,
+            "score": score,
+            "rank": rank,
+            "message": "Correct!" if submission.is_correct else "Incorrect flag.",
+        }
+    )
 
 
 @login_required
@@ -2806,57 +2912,34 @@ def api_submit_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     Args:
         challenge_id: UUID of the challenge.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
-    from ctf.services.challenge import get_challenge
-    from ctf.services.scoring import calculate_score, get_participant_rank
-    from ctf.services.submission import submit_flag
-
-    # Resolve the participant scoped to THIS challenge's event (codex cycle 4).
-    try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
-    participant = _get_participant_for_challenge(request, challenge)
-    if not participant:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    participant, error = _resolve_challenge_participant(request, challenge_id)
+    if error is not None:
+        return error
+    assert participant is not None
 
     try:
         body = _parse_body_object(request)
         flag = _get_body_str(body, "flag").strip()
+        if not flag:
+            raise _BodyParseError("Flag is required")
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    if not flag:
-        return JsonResponse({"error": "Flag is required"}, status=400)
+    return _submit_flag_response(participant, challenge_id, flag, _get_client_ip(request))
 
-    ip_address = _get_client_ip(request)
+
+def _unlock_hint_response(participant: CTFParticipant, challenge_id: UUID, hint_uuid: UUID) -> JsonResponse:
+    """Unlock the given hint, returning the result payload or a 4xx error."""
+    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+    from ctf.services.hint import use_hint
 
     try:
-        submission = submit_flag(participant.id, challenge_id, flag, ip_address=ip_address)
-        score = calculate_score(participant.id)
-        rank = get_participant_rank(participant.id)
-
-        return JsonResponse(
-            {
-                "correct": submission.is_correct,
-                "points_awarded": submission.points_awarded,
-                "attempt_number": submission.attempt_number,
-                "score": score,
-                "rank": rank,
-                "message": "Correct!" if submission.is_correct else "Incorrect flag.",
-            }
-        )
+        result = use_hint(participant.id, hint_uuid, expected_challenge_id=challenge_id)
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
-    except CTFValidationError as e:
+    except (CTFValidationError, CTFStateError) as e:
         return JsonResponse({"error": str(e)}, status=400)
-    except CTFRateLimitError as e:
-        response = JsonResponse({"error": str(e), "details": e.details}, status=429)
-        if e.details.get("retry_after_seconds"):
-            response["Retry-After"] = str(e.details["retry_after_seconds"])
-        return response
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse(result)
 
 
 @login_required
@@ -2871,18 +2954,10 @@ def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     Args:
         challenge_id: UUID of the challenge.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-    from ctf.services.challenge import get_challenge
-    from ctf.services.hint import use_hint
-
-    # Resolve the participant scoped to THIS challenge's event (codex cycle 4).
-    try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
-    participant = _get_participant_for_challenge(request, challenge)
-    if not participant:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    participant, error = _resolve_challenge_participant(request, challenge_id)
+    if error is not None:
+        return error
+    assert participant is not None
 
     # Resolve which hint to unlock from the request body. The helper
     # returns either a UUID to unlock or a JsonResponse to return as-is
@@ -2893,13 +2968,21 @@ def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     if isinstance(hint_uuid_or_response, JsonResponse):
         return hint_uuid_or_response
 
+    return _unlock_hint_response(participant, challenge_id, hint_uuid_or_response)
+
+
+def _rate_challenge_response(participant: CTFParticipant, challenge_id: UUID, value: int) -> JsonResponse:
+    """Record the rating, returning the value payload or a 4xx error."""
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.services.submission import rate_challenge
+
     try:
-        result = use_hint(participant.id, hint_uuid_or_response, expected_challenge_id=challenge_id)
-        return JsonResponse(result)
+        rating = rate_challenge(participant.id, challenge_id, value)
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
-    except (CTFValidationError, CTFStateError) as e:
+    except CTFValidationError as e:
         return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse({"value": rating.value, "challenge_id": str(challenge_id)})
 
 
 @login_required
@@ -2911,35 +2994,20 @@ def api_rate_challenge(request: HttpRequest, challenge_id: UUID) -> JsonResponse
     Args:
         challenge_id: UUID of the challenge.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFValidationError
-    from ctf.services.challenge import get_challenge
-    from ctf.services.submission import rate_challenge
-
-    # Resolve the participant scoped to THIS challenge's event (codex cycle 4).
-    try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Challenge not found"}, status=404)
-    participant = _get_participant_for_challenge(request, challenge)
-    if not participant:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    participant, error = _resolve_challenge_participant(request, challenge_id)
+    if error is not None:
+        return error
+    assert participant is not None
 
     try:
         body = _parse_body_object(request)
+        value = body.get("value")
+        if not isinstance(value, int):
+            raise _BodyParseError("value must be an integer (1-5)")
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    value = body.get("value")
-    if not isinstance(value, int):
-        return JsonResponse({"error": "value must be an integer (1-5)"}, status=400)
-
-    try:
-        rating = rate_challenge(participant.id, challenge_id, value)
-        return JsonResponse({"value": rating.value, "challenge_id": str(challenge_id)})
-    except CTFNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
-    except CTFValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _rate_challenge_response(participant, challenge_id, value)
 
 
 @login_required
@@ -2969,6 +3037,61 @@ def api_submissions(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"submissions": data, "total": len(data)})
 
 
+def _participant_list_get(request: HttpRequest, event_id: UUID) -> JsonResponse:
+    """Return the JSON participant list for an event, optionally filtered by status."""
+    from ctf.services import list_participants_for_event
+
+    participants = list_participants_for_event(event_id)
+    status_filter = request.GET.get("status")
+    if status_filter:
+        participants = participants.filter(status=status_filter)
+
+    data = [
+        {
+            "id": str(p.id),
+            "name": p.name,
+            "email": p.email,
+            "status": p.status,
+            "team_name": p.team.name if p.team else None,
+            "registered_at": p.registered_at.isoformat() if p.registered_at else None,
+            "total_score": p.total_score,
+        }
+        for p in participants
+    ]
+    return JsonResponse({"participants": data, "total": len(data)})
+
+
+def _handle_participant_invite_post(request: HttpRequest, event_id: UUID) -> JsonResponse:
+    """Invite a single participant from the POST body, returning a 201 payload or a 400 error."""
+    from ctf.exceptions import CTFValidationError
+    from ctf.services import invite_participant
+
+    try:
+        body = _parse_body_object(request)
+        name = body.get("name")
+        email = body.get("email")
+        if not name or not email:
+            raise _BodyParseError("name and email are required")
+    except _BodyParseError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    try:
+        participant = invite_participant(event_id, email, name)
+    except CTFValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse(
+        {
+            "id": str(participant.id),
+            "name": participant.name,
+            "email": participant.email,
+            "status": participant.status,
+            "invited": True,
+        },
+        status=201,
+    )
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "POST"])
@@ -2981,66 +3104,13 @@ def api_participant_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFValidationError
-    from ctf.services import get_event, invite_participant, list_participants_for_event
-
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
-
-    # Check permission
-    if event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    _event, error = _resolve_owned_event_json(request, event_id)
+    if error is not None:
+        return error
 
     if request.method == "GET":
-        participants = list_participants_for_event(event_id)
-        status_filter = request.GET.get("status")
-        if status_filter:
-            participants = participants.filter(status=status_filter)
-
-        data = [
-            {
-                "id": str(p.id),
-                "name": p.name,
-                "email": p.email,
-                "status": p.status,
-                "team_name": p.team.name if p.team else None,
-                "registered_at": p.registered_at.isoformat() if p.registered_at else None,
-                "total_score": p.total_score,
-            }
-            for p in participants
-        ]
-        return JsonResponse({"participants": data, "total": len(data)})
-
-    elif request.method == "POST":
-        try:
-            body = _parse_body_object(request)
-        except _BodyParseError as e:
-            return JsonResponse({"error": str(e)}, status=400)
-
-        name = body.get("name")
-        email = body.get("email")
-
-        if not name or not email:
-            return JsonResponse({"error": "name and email are required"}, status=400)
-
-        try:
-            participant = invite_participant(event_id, email, name)
-            return JsonResponse(
-                {
-                    "id": str(participant.id),
-                    "name": participant.name,
-                    "email": participant.email,
-                    "status": participant.status,
-                    "invited": True,
-                },
-                status=201,
-            )
-        except CTFValidationError as e:
-            return JsonResponse({"error": str(e)}, status=400)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+        return _participant_list_get(request, event_id)
+    return _handle_participant_invite_post(request, event_id)
 
 
 @login_required

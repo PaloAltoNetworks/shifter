@@ -616,8 +616,8 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
     ).select_related("required_challenge")
 
     # Map challenge_id -> list of required challenge names
-    prereqs_by_challenge: dict = defaultdict(list)
-    locked_ids: set = set()
+    prereqs_by_challenge: dict[UUID, list[Any]] = defaultdict(list)
+    locked_ids: set[UUID] = set()
     for p in all_prereqs:
         prereqs_by_challenge[p.challenge_id].append(p.required_challenge)
         if p.required_challenge_id not in solved_ids:

@@ -88,7 +88,7 @@ class ExperimentOrchestrator:
     Follows SetupOrchestrator pattern but manages the full experiment lifecycle.
     """
 
-    def __init__(self, experiment_id: int):
+    def __init__(self, experiment_id: int) -> None:
         self.experiment_id = experiment_id
         self._experiment: Experiment | None = None
 
@@ -393,7 +393,8 @@ class ExperimentOrchestrator:
 
         return plan
 
-    def _enforce_aws_only_provider(self, run: ExperimentRun) -> None:
+    @staticmethod
+    def _enforce_aws_only_provider(run: ExperimentRun) -> None:
         """Gate non-AWS providers with a clear `ExecutionPlanError` before plan construction.
 
         `cyberscript.script_context.ScriptExecutionContext` validates EC2 instance
@@ -460,8 +461,8 @@ class ExperimentOrchestrator:
                 f"Cannot build execution plan for run {run.pk}: script for instance failed validation: {summary}"
             ) from exc
 
+    @staticmethod
     def _build_python_script_command(
-        self,
         *,
         script_assignment: ExperimentScript,
         instance_name: str,
@@ -484,8 +485,8 @@ class ExperimentOrchestrator:
             script_s3_key=s3_key,
         )
 
+    @staticmethod
     def _build_claude_script_command(
-        self,
         *,
         script_assignment: ExperimentScript,
         instance_name: str,
@@ -682,6 +683,7 @@ class ExperimentOrchestrator:
             run.transition_to(RunStatus.FAILED)
             return
 
+        dispatch_error: str | None = None
         try:
             task_arn = start_experiment_task(
                 experiment_id=self.experiment_id,
@@ -691,20 +693,16 @@ class ExperimentOrchestrator:
                 payload=payload,
             )
         except Exception as exc:
-            msg = f"Failed to start execution ECS task: {exc}"
-            logger.exception(
-                "_dispatch_commands: %s (run=%d)",
-                msg,
-                run.pk,
-            )
-            run.error_message = msg
-            run.save(update_fields=["error_message"])
-            run.transition_to(RunStatus.FAILED)
-            return
+            dispatch_error = f"Failed to start execution ECS task: {exc}"
+            logger.exception("_dispatch_commands: %s (run=%d)", dispatch_error, run.pk)
+            task_arn = None
 
+        # Single failure exit covers both the exception and the not-configured
+        # (task_arn is None) cases, keeping this method under the return cap (S1142).
         if task_arn is None:
-            msg = "ECS not configured — cannot dispatch experiment commands"
-            logger.error("_dispatch_commands: %s (run=%d)", msg, run.pk)
+            msg = dispatch_error or "ECS not configured — cannot dispatch experiment commands"
+            if dispatch_error is None:
+                logger.error("_dispatch_commands: %s (run=%d)", msg, run.pk)
             run.error_message = msg
             run.save(update_fields=["error_message"])
             run.transition_to(RunStatus.FAILED)
@@ -763,6 +761,7 @@ class ExperimentOrchestrator:
             run.transition_to(RunStatus.FAILED)
             return
 
+        collect_error: str | None = None
         try:
             task_arn = start_experiment_task(
                 experiment_id=self.experiment_id,
@@ -771,20 +770,16 @@ class ExperimentOrchestrator:
                 command="collect",
             )
         except Exception as exc:
-            msg = f"Failed to start collection ECS task: {exc}"
-            logger.exception(
-                "_collect_artifacts: %s (run=%d)",
-                msg,
-                run.pk,
-            )
-            run.error_message = msg
-            run.save(update_fields=["error_message"])
-            run.transition_to(RunStatus.FAILED)
-            return
+            collect_error = f"Failed to start collection ECS task: {exc}"
+            logger.exception("_collect_artifacts: %s (run=%d)", collect_error, run.pk)
+            task_arn = None
 
+        # Single failure exit covers both the exception and the not-configured
+        # (task_arn is None) cases, keeping this method under the return cap (S1142).
         if task_arn is None:
-            msg = "ECS not configured — cannot collect experiment artifacts"
-            logger.error("_collect_artifacts: %s (run=%d)", msg, run.pk)
+            msg = collect_error or "ECS not configured — cannot collect experiment artifacts"
+            if collect_error is None:
+                logger.error("_collect_artifacts: %s (run=%d)", msg, run.pk)
             run.error_message = msg
             run.save(update_fields=["error_message"])
             run.transition_to(RunStatus.FAILED)

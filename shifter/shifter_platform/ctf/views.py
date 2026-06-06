@@ -3125,26 +3125,20 @@ def api_participant_import(request: HttpRequest, event_id: UUID) -> JsonResponse
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFValidationError
-    from ctf.services import get_event, invite_participant
+    from ctf.exceptions import CTFValidationError
+    from ctf.services import invite_participant
 
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
-
-    # Check permission
-    if event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    _event, error = _resolve_owned_event_json(request, event_id)
+    if error is not None:
+        return error
 
     try:
         body = _parse_body_object(request)
+        participants_data = body.get("participants", [])
+        if not isinstance(participants_data, list):
+            raise _BodyParseError("participants must be an array")
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
-
-    participants_data = body.get("participants", [])
-    if not isinstance(participants_data, list):
-        return JsonResponse({"error": "participants must be an array"}, status=400)
 
     imported = []
     errors = []
@@ -3178,6 +3172,40 @@ def api_participant_import(request: HttpRequest, event_id: UUID) -> JsonResponse
     )
 
 
+def _participant_detail_payload(participant: CTFParticipant) -> dict[str, Any]:
+    """Render the GET-participant JSON payload for `api_participant_detail`."""
+    from ctf.models import CTFSubmission
+
+    submissions = CTFSubmission.objects.filter(participant=participant)
+    correct_submissions = submissions.filter(is_correct=True)
+    return {
+        "id": str(participant.id),
+        "name": participant.name,
+        "email": participant.email,
+        "status": participant.status,
+        "team_name": participant.team.name if participant.team else None,
+        "registered_at": participant.registered_at.isoformat() if participant.registered_at else None,
+        "invited_at": participant.invited_at.isoformat() if participant.invited_at else None,
+        "last_active_at": participant.last_active_at.isoformat() if participant.last_active_at else None,
+        "total_score": participant.total_score,
+        "solved_count": correct_submissions.count(),
+        "attempt_count": submissions.count(),
+        "event_id": str(participant.event_id),
+    }
+
+
+def _handle_participant_delete(participant_id: UUID) -> JsonResponse:
+    """Soft-delete a participant, returning a confirmation or a 404."""
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import delete_participant
+
+    try:
+        delete_participant(participant_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+    return JsonResponse({"deleted": True, "id": str(participant_id)})
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "DELETE"])
@@ -3190,49 +3218,32 @@ def api_participant_detail(request: HttpRequest, participant_id: UUID) -> JsonRe
     Args:
         participant_id: UUID of the participant.
     """
-    from ctf.exceptions import CTFNotFoundError
-    from ctf.models import CTFSubmission
-    from ctf.services import delete_participant, get_participant
-
-    try:
-        participant = get_participant(participant_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Participant not found"}, status=404)
-
-    # Check permission
-    if participant.event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    participant, error = _resolve_owned_participant(request, participant_id)
+    if error is not None:
+        return error
+    assert participant is not None
 
     if request.method == "GET":
-        # Get submission stats
-        submissions = CTFSubmission.objects.filter(participant=participant)
-        correct_submissions = submissions.filter(is_correct=True)
+        return JsonResponse(_participant_detail_payload(participant))
+    return _handle_participant_delete(participant_id)
 
-        return JsonResponse(
-            {
-                "id": str(participant.id),
-                "name": participant.name,
-                "email": participant.email,
-                "status": participant.status,
-                "team_name": participant.team.name if participant.team else None,
-                "registered_at": participant.registered_at.isoformat() if participant.registered_at else None,
-                "invited_at": participant.invited_at.isoformat() if participant.invited_at else None,
-                "last_active_at": participant.last_active_at.isoformat() if participant.last_active_at else None,
-                "total_score": participant.total_score,
-                "solved_count": correct_submissions.count(),
-                "attempt_count": submissions.count(),
-                "event_id": str(participant.event_id),
-            }
-        )
 
-    elif request.method == "DELETE":
-        try:
-            delete_participant(participant_id)
-            return JsonResponse({"deleted": True, "id": str(participant_id)})
-        except CTFNotFoundError:
-            return JsonResponse({"error": "Participant not found"}, status=404)
+def _resend_invite_response(participant_id: UUID) -> JsonResponse:
+    """Regenerate and resend a participant invite, returning success or a 400."""
+    from ctf.exceptions import CTFStateError
+    from ctf.services import resend_invite
 
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        updated = resend_invite(participant_id)
+    except CTFStateError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse(
+        {
+            "success": True,
+            "id": str(updated.id),
+            "invited": True,
+        }
+    )
 
 
 @login_required
@@ -3247,32 +3258,14 @@ def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) ->
     Args:
         participant_id: UUID of the participant.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFStateError
-    from ctf.services import get_participant, resend_invite
-
     if not _check_invite_rate_limit(_get_user(request).pk):
         return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
 
-    try:
-        participant = get_participant(participant_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Participant not found"}, status=404)
+    _participant, error = _resolve_owned_participant(request, participant_id)
+    if error is not None:
+        return error
 
-    # Check permission
-    if participant.event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
-
-    try:
-        updated = resend_invite(participant_id)
-        return JsonResponse(
-            {
-                "success": True,
-                "id": str(updated.id),
-                "invited": True,
-            }
-        )
-    except CTFStateError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    return _resend_invite_response(participant_id)
 
 
 @login_required
@@ -3324,6 +3317,43 @@ def api_range_access(request: HttpRequest) -> JsonResponse:
     )
 
 
+def _resolve_scoreboard_access(
+    request: HttpRequest, event_id: UUID
+) -> tuple[CTFEvent | None, bool, JsonResponse | None]:
+    """Resolve the event and authorize scoreboard access; return (event, is_organizer, error_response).
+
+    Issue #768: ``@ctf_role_required`` only proves the caller has *some* CTF
+    role; it does not prove access to *this* event. Require organizer
+    ownership OR registered, non-disqualified participant membership of this
+    specific event before exposing scoreboard data. The 404-before-403
+    ordering preserves the existing "no enumeration" shape for unknown UUIDs.
+    Codex review pointed out that a bare ``registered_at__isnull=False`` filter
+    would admit DISQUALIFIED participants — ``is_active_participant`` aligns the
+    gate with the ``status__in`` filter the scoring service uses.
+    """
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+    from ctf.services.participant import is_active_participant
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return None, False, JsonResponse({"error": "Event not found"}, status=404)
+
+    user = _get_user(request)
+    role = get_user_role(user)
+    is_organizer = role.is_ctf_organizer and event.created_by_id == user.pk
+    if not is_organizer and not is_active_participant(user, event=event):
+        logger.warning(
+            "CTF scoreboard access denied for user %s on event %s",
+            user.email,
+            event.id,
+        )
+        return None, False, JsonResponse({"error": "Forbidden"}, status=403)
+
+    return event, is_organizer, None
+
+
 @login_required
 @ctf_role_required
 @require_GET
@@ -3335,35 +3365,12 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFNotFoundError
-    from ctf.services import get_event
-    from ctf.services.participant import is_active_participant
     from ctf.services.scoring import get_scoreboard, get_team_scoreboard
 
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
-
-    # Issue #768: @ctf_role_required only proves the caller has *some* CTF
-    # role; it does not prove access to *this* event. Require organizer
-    # ownership OR registered, non-disqualified participant membership of
-    # this specific event before exposing scoreboard data. The 404-before-403
-    # ordering above preserves the existing "no enumeration" shape for
-    # unknown UUIDs. Codex review pointed out that a bare
-    # `registered_at__isnull=False` filter would admit DISQUALIFIED
-    # participants — `is_active_participant` aligns the gate with the
-    # `status__in` filter the scoring service uses.
-    user = _get_user(request)
-    role = get_user_role(user)
-    is_organizer = role.is_ctf_organizer and event.created_by_id == user.pk
-    if not is_organizer and not is_active_participant(user, event=event):
-        logger.warning(
-            "CTF scoreboard access denied for user %s on event %s",
-            user.email,
-            event.id,
-        )
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    event, is_organizer, error = _resolve_scoreboard_access(request, event_id)
+    if error is not None:
+        return error
+    assert event is not None
 
     # If scoreboard is hidden from participants, return early
     if not is_organizer and not event.scoreboard_visible:
@@ -3403,6 +3410,17 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     )
 
 
+def _authorize_timeline_access(request: HttpRequest, participant: CTFParticipant) -> JsonResponse | None:
+    """Authorize score-timeline access; organizers need event ownership, participants their own row."""
+    user = _get_user(request)
+    role = get_user_role(user)
+    if role.is_ctf_organizer:
+        return _check_event_ownership(participant.event, user)
+    if participant.user_id != user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+    return None
+
+
 @login_required
 @ctf_role_required
 @require_GET
@@ -3425,17 +3443,9 @@ def api_score_timeline(request: HttpRequest, participant_id: UUID) -> JsonRespon
     except CTFNotFoundError:
         return JsonResponse({"error": "Participant not found"}, status=404)
 
-    # Authorization: organizers can view their events' participants,
-    # participants can only view their own timeline
-    user = _get_user(request)
-    role = get_user_role(user)
-
-    if role.is_ctf_organizer:
-        ownership_error = _check_event_ownership(participant.event, user)
-        if ownership_error:
-            return ownership_error
-    elif participant.user_id != user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    auth_error = _authorize_timeline_access(request, participant)
+    if auth_error is not None:
+        return auth_error
 
     timeline = get_score_timeline(participant_id)
 

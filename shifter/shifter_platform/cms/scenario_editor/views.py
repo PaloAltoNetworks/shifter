@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import messages
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -33,6 +34,9 @@ from cms.scenarios.registry import (
 from shared.auth import threat_research_required
 from shared.log_sanitize import safe_log_value
 
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
+
 logger = logging.getLogger(__name__)
 
 SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
@@ -45,7 +49,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 
 @threat_research_required
 @require_GET
-def scenario_list(request):
+def scenario_list(request: HttpRequest) -> HttpResponse:
     """List all scenarios with metadata."""
     scenarios = list_all_scenarios(user=None)  # Staff sees all
     return render(
@@ -64,7 +68,7 @@ def scenario_list(request):
 
 @threat_research_required
 @require_GET
-def scenario_detail_view(request, scenario_id):
+def scenario_detail_view(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """View scenario details."""
     try:
         try:
@@ -109,7 +113,7 @@ def scenario_detail_view(request, scenario_id):
 # =============================================================================
 
 
-def _parse_scenario_form_post(request, *, require_id: bool) -> tuple[dict, list[str]]:
+def _parse_scenario_form_post(request: HttpRequest, *, require_id: bool) -> tuple[dict[str, Any], list[str]]:
     """Extract scenario fields from a form POST; return (fields, errors).
 
     `require_id` toggles the scenario-id field validation (creation needs it;
@@ -163,7 +167,7 @@ def _parse_scenario_form_post(request, *, require_id: bool) -> tuple[dict, list[
 
 @threat_research_required
 @require_http_methods(["GET", "POST"])
-def scenario_create_form(request):
+def scenario_create_form(request: HttpRequest) -> HttpResponse:
     """Form-based scenario creation."""
     try:
         if request.method == "GET":
@@ -211,7 +215,7 @@ def scenario_create_form(request):
 
         try:
             create_scenario(
-                request.user,
+                cast("User", request.user),
                 scenario_id=scenario_id,
                 name=name,
                 description=description,
@@ -252,7 +256,7 @@ def scenario_create_form(request):
 
 @threat_research_required
 @require_http_methods(["GET", "POST"])
-def scenario_edit_form(request, scenario_id):
+def scenario_edit_form(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Form-based scenario editing (custom scenarios only)."""
     try:
         if is_default_scenario(scenario_id):
@@ -324,7 +328,7 @@ def scenario_edit_form(request, scenario_id):
 
         try:
             update_scenario(
-                request.user,
+                cast("User", request.user),
                 scenario_id,
                 name=name,
                 description=description,
@@ -376,7 +380,7 @@ def scenario_edit_form(request, scenario_id):
 
 @threat_research_required
 @require_http_methods(["GET", "POST"])
-def scenario_yaml_editor(request, scenario_id):
+def scenario_yaml_editor(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Free-form YAML editor for a scenario.
 
     GET: Renders the YAML editor with the scenario's current definition.
@@ -434,7 +438,9 @@ def scenario_yaml_editor(request, scenario_id):
                 },
             )
 
-        # Extract fields from parsed YAML
+        # Extract fields from parsed YAML. validate_yaml returns a populated
+        # mapping whenever it reports no errors; coerce None to {} for typing.
+        parsed = parsed or {}
         name = parsed.get("name", scenario["name"])
         description = parsed.get("description", scenario["description"])
         definition = {
@@ -445,7 +451,7 @@ def scenario_yaml_editor(request, scenario_id):
 
         try:
             update_scenario(
-                request.user,
+                cast("User", request.user),
                 scenario_id,
                 name=name,
                 description=description,
@@ -488,7 +494,7 @@ def scenario_yaml_editor(request, scenario_id):
 
 @threat_research_required
 @require_http_methods(["GET", "POST"])
-def scenario_yaml_create(request):
+def scenario_yaml_create(request: HttpRequest) -> HttpResponse:
     """Create a new scenario from YAML content."""
     try:
         if request.method == "GET":
@@ -537,6 +543,10 @@ def scenario_yaml_create(request):
                 },
             )
 
+        # validate_yaml returns a populated mapping whenever it reports no errors;
+        # coerce None to {} so the field reads below are well-typed (missing fields
+        # are then caught by the required-field checks).
+        parsed = parsed or {}
         scenario_id = parsed.get("id", "")
         name = parsed.get("name", "")
         description = parsed.get("description", "")
@@ -567,7 +577,7 @@ def scenario_yaml_create(request):
 
         try:
             create_scenario(
-                request.user,
+                cast("User", request.user),
                 scenario_id=scenario_id,
                 name=name,
                 description=description,
@@ -605,11 +615,11 @@ def scenario_yaml_create(request):
 
 @threat_research_required
 @require_POST
-def scenario_delete_view(request, scenario_id):
+def scenario_delete_view(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Delete a custom scenario."""
     try:
         try:
-            delete_scenario(request.user, scenario_id)
+            delete_scenario(cast("User", request.user), scenario_id)
         except ScenarioEditorError as e:
             return render(
                 request,
@@ -640,7 +650,7 @@ def scenario_delete_view(request, scenario_id):
 
 @threat_research_required
 @require_POST
-def scenario_toggle_enabled(request, scenario_id):
+def scenario_toggle_enabled(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Toggle enabled state for a scenario."""
     try:
         try:
@@ -659,7 +669,7 @@ def scenario_toggle_enabled(request, scenario_id):
         new_enabled = not current.get("enabled", True)
 
         try:
-            update_metadata(request.user, scenario_id, enabled=new_enabled)
+            update_metadata(cast("User", request.user), scenario_id, enabled=new_enabled)
         except ScenarioEditorError as e:
             return render(
                 request,
@@ -693,7 +703,7 @@ def scenario_toggle_enabled(request, scenario_id):
 
 @threat_research_required
 @require_POST
-def scenario_toggle_staff_only(request, scenario_id):
+def scenario_toggle_staff_only(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Toggle staff_only state for a scenario."""
     try:
         try:
@@ -712,7 +722,7 @@ def scenario_toggle_staff_only(request, scenario_id):
         new_staff_only = not current.get("staff_only", False)
 
         try:
-            update_metadata(request.user, scenario_id, staff_only=new_staff_only)
+            update_metadata(cast("User", request.user), scenario_id, staff_only=new_staff_only)
         except ScenarioEditorError as e:
             return render(
                 request,
@@ -746,7 +756,7 @@ def scenario_toggle_staff_only(request, scenario_id):
 
 @threat_research_required
 @require_http_methods(["GET", "POST"])
-def scenario_clone_view(request, scenario_id):
+def scenario_clone_view(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Clone a scenario."""
     try:
         try:
@@ -786,7 +796,7 @@ def scenario_clone_view(request, scenario_id):
 
         try:
             scenario = clone_scenario(
-                request.user,
+                cast("User", request.user),
                 scenario_id,
                 new_scenario_id=new_scenario_id,
                 new_name=new_name,
@@ -825,7 +835,7 @@ def scenario_clone_view(request, scenario_id):
 
 @threat_research_required
 @require_GET
-def scenario_export_view(request, scenario_id):
+def scenario_export_view(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Download scenario as YAML file."""
     try:
         try:
@@ -865,7 +875,7 @@ def scenario_export_view(request, scenario_id):
 
 @threat_research_required
 @require_POST
-def validate_yaml_view(request):
+def validate_yaml_view(request: HttpRequest) -> HttpResponse:
     """Validate YAML scenario content without saving.
 
     Called by the client-side Validate button in yaml_editor.html and yaml_create.html.

@@ -26,8 +26,8 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-log_pass() { echo -e "${GREEN}✓${NC} $1"; ((PASSED++)); }
-log_fail() { echo -e "${RED}✗${NC} $1"; ((FAILED++)); }
+log_pass() { local msg="$1"; echo -e "${GREEN}✓${NC} ${msg}"; ((PASSED++)); return 0; }
+log_fail() { local msg="$1"; echo -e "${RED}✗${NC} ${msg}"; ((FAILED++)); return 0; }
 
 echo "=== entrypoint-lib.sh fail-closed tests ==="
 

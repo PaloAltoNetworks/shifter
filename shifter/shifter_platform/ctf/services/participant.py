@@ -558,15 +558,18 @@ def _auto_register_participant(participant: CTFParticipant) -> None:
     )
 
 
-def _set_ctf_participant_profile(user: User, event: CTFEvent):
+def _set_ctf_participant_profile(user: User, event: CTFEvent) -> None:
     """Set CTF Participant group and active_ctf_event for a user.
 
     Adds the user to the CTF Participant group (additive — never removes
-    other groups) and sets active_ctf_event on the profile.
+    other groups) and sets active_ctf_event on the profile. ``set_active_ctf_event``
+    already ensures the profile row exists, so nothing is returned (the single
+    caller ignores the value, and ctf must not surface a ``management`` model type
+    across the layer boundary — ADR-001).
     """
     from django.contrib.auth.models import Group
 
-    from management.services import get_user_profile, set_active_ctf_event
+    from management.services import set_active_ctf_event
     from shared.auth import CTF_PARTICIPANT_GROUP
 
     participant_group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
@@ -578,7 +581,6 @@ def _set_ctf_participant_profile(user: User, event: CTFEvent):
         user.email,
         event.pk,
     )
-    return get_user_profile(user)
 
 
 def _clear_ctf_participant_profile(user: User, event: CTFEvent) -> None:

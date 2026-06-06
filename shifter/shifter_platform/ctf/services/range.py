@@ -16,7 +16,7 @@ from ctf.models import CTFEvent, CTFParticipant
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
-    pass
+    from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +346,8 @@ def stop_participant_range(participant_id: UUID) -> dict[str, Any]:
 
     from ctf.bridges import cms_stop_range
 
-    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
+    # guaranteed by _get_participant_with_range
+    assert participant.range_instance_id is not None
     cms_stop_range(participant.user, participant.range_instance_id)
     participant.range_status = "stopping"
     participant.save(update_fields=["range_status", "updated_at"])
@@ -360,7 +361,8 @@ def start_participant_range(participant_id: UUID) -> dict[str, Any]:
 
     from ctf.bridges import cms_start_range
 
-    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
+    # guaranteed by _get_participant_with_range
+    assert participant.range_instance_id is not None
     cms_start_range(participant.user, participant.range_instance_id)
     participant.range_status = "resuming"
     participant.save(update_fields=["range_status", "updated_at"])
@@ -545,7 +547,7 @@ def update_participant_range_status(participant_id: UUID) -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
-def _destroy_single_range(participant: CTFParticipant, user) -> None:
+def _destroy_single_range(participant: CTFParticipant, user: User | None) -> None:
     """Destroy a single participant's range and clear fields."""
     from ctf.bridges import cms_destroy_range
 

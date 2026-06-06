@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from django.db import IntegrityError, transaction
@@ -44,7 +44,7 @@ def _validate_user(user: User, func_name: str) -> None:
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 
 
-def validate_definition(definition: dict) -> list[str]:
+def validate_definition(definition: dict[str, Any]) -> list[str]:
     """Validate a scenario definition against ScenarioTemplate schema.
 
     Builds a full ScenarioTemplate from the definition dict and
@@ -112,7 +112,7 @@ def create_scenario(
     scenario_id: str,
     name: str,
     description: str,
-    definition: dict,
+    definition: dict[str, Any],
 ) -> Scenario:
     """Create a new custom scenario.
 
@@ -216,7 +216,8 @@ def create_scenario(
     audit_log(
         AuditEvent(
             entity_type=AuditLog.EntityType.SCENARIO,
-            entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
+            # Scenario PK is UUID; use 0 and store scenario_id in state
+            entity_id=0,
             action=AuditLog.Action.CREATE,
             actor_type=AuditLog.ActorType.USER,
             actor_id=user.id,
@@ -330,7 +331,8 @@ def update_scenario(
     audit_log(
         AuditEvent(
             entity_type=AuditLog.EntityType.SCENARIO,
-            entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
+            # Scenario PK is UUID; use 0 and store scenario_id in state
+            entity_id=0,
             action=AuditLog.Action.UPDATE,
             actor_type=AuditLog.ActorType.USER,
             actor_id=user.id,
@@ -406,7 +408,8 @@ def delete_scenario(user: User, scenario_id: str) -> None:
     audit_log(
         AuditEvent(
             entity_type=AuditLog.EntityType.SCENARIO,
-            entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
+            # Scenario PK is UUID; use 0 and store scenario_id in state
+            entity_id=0,
             action=AuditLog.Action.DELETE,
             actor_type=AuditLog.ActorType.USER,
             actor_id=user.id,
@@ -499,7 +502,8 @@ def update_metadata(
     audit_log(
         AuditEvent(
             entity_type=AuditLog.EntityType.SCENARIO,
-            entity_id=0,  # ScenarioMetadata PK is auto-int but use 0 for consistency
+            # ScenarioMetadata PK is auto-int but use 0 for consistency
+            entity_id=0,
             action=AuditLog.Action.UPDATE,
             actor_type=AuditLog.ActorType.USER,
             actor_id=user.id,

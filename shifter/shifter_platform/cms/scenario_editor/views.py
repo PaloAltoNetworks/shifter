@@ -220,111 +220,78 @@ def scenario_create_form(request: HttpRequest) -> HttpResponse:
         )
 
 
+def _resolve_editable_scenario(
+    request: HttpRequest, scenario_id: str
+) -> tuple[dict[str, Any] | None, HttpResponse | None]:
+    """Return (scenario, None) for an editable custom scenario, else (None, error_response).
+
+    Default scenarios are read-only (403) and missing scenarios are 404.
+    """
+    if is_default_scenario(scenario_id):
+        return None, render(
+            request,
+            "scenario_editor/error.html",
+            {"message": "Default scenarios cannot be edited. Clone it to create an editable copy."},
+            status=403,
+        )
+    try:
+        return get_scenario_detail(scenario_id), None
+    except ValueError:
+        logger.warning("scenario_edit_form: scenario not found scenario_id=%s", safe_log_value(scenario_id))
+        return None, render(request, "scenario_editor/not_found.html", {"scenario_id": scenario_id}, status=404)
+
+
+def _handle_scenario_edit_post(request: HttpRequest, scenario_id: str, scenario: dict[str, Any]) -> HttpResponse:
+    """Validate the edit form and update the scenario, re-rendering the form on error."""
+    fields, errors = _parse_scenario_form_post(request, require_id=False)
+    form_fields = {
+        "name": fields["name"],
+        "description": fields["description"],
+        "ngfw": fields["ngfw"],
+        "instances": fields["instances"],
+        "subnets": fields["subnets"],
+    }
+    if errors:
+        scenario.update(form_fields)
+        return render(request, "scenario_editor/form.html", {"mode": "edit", "scenario": scenario, "errors": errors})
+
+    definition = {"instances": fields["instances"], "subnets": fields["subnets"], "ngfw": fields["ngfw"]}
+    try:
+        update_scenario(
+            cast("User", request.user),
+            scenario_id,
+            name=fields["name"],
+            description=fields["description"],
+            definition=definition,
+        )
+    except ScenarioEditorError as e:
+        scenario.update(form_fields)
+        return render(request, "scenario_editor/form.html", {"mode": "edit", "scenario": scenario, "errors": [str(e)]})
+
+    logger.info(
+        "scenario_edit_form: updated scenario_id=%s by user_id=%s", safe_log_value(scenario_id), request.user.id
+    )
+    messages.success(request, "Scenario updated successfully.")
+    return redirect("scenario_editor:detail", scenario_id=scenario_id)
+
+
+def _scenario_edit_form_impl(request: HttpRequest, scenario_id: str) -> HttpResponse:
+    """Apply the editable-scenario guard, then dispatch GET render or POST update."""
+    scenario, error = _resolve_editable_scenario(request, scenario_id)
+    if error is not None:
+        return error
+    assert scenario is not None  # error is None implies the scenario was resolved
+    if request.method == "GET":
+        return render(request, "scenario_editor/form.html", {"mode": "edit", "scenario": scenario, "errors": []})
+    return _handle_scenario_edit_post(request, scenario_id, scenario)
+
+
 @threat_research_required
 @require_http_methods(["GET", "POST"])
 def scenario_edit_form(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Form-based scenario editing (custom scenarios only)."""
     try:
-        if is_default_scenario(scenario_id):
-            return render(
-                request,
-                "scenario_editor/error.html",
-                {
-                    "message": "Default scenarios cannot be edited. Clone it to create an editable copy.",
-                },
-                status=403,
-            )
-
-        try:
-            scenario = get_scenario_detail(scenario_id)
-        except ValueError:
-            logger.warning("scenario_edit_form: scenario not found scenario_id=%s", safe_log_value(scenario_id))
-            return render(
-                request,
-                "scenario_editor/not_found.html",
-                {
-                    "scenario_id": scenario_id,
-                },
-                status=404,
-            )
-
-        if request.method == "GET":
-            return render(
-                request,
-                "scenario_editor/form.html",
-                {
-                    "mode": "edit",
-                    "scenario": scenario,
-                    "errors": [],
-                },
-            )
-
-        fields, errors = _parse_scenario_form_post(request, require_id=False)
-        name = fields["name"]
-        description = fields["description"]
-        ngfw = fields["ngfw"]
-        instances = fields["instances"]
-        subnets = fields["subnets"]
-
-        if errors:
-            scenario.update(
-                {
-                    "name": name,
-                    "description": description,
-                    "ngfw": ngfw,
-                    "instances": instances,
-                    "subnets": subnets,
-                }
-            )
-            return render(
-                request,
-                "scenario_editor/form.html",
-                {
-                    "mode": "edit",
-                    "scenario": scenario,
-                    "errors": errors,
-                },
-            )
-
-        definition = {
-            "instances": instances,
-            "subnets": subnets,
-            "ngfw": ngfw,
-        }
-
-        try:
-            update_scenario(
-                cast("User", request.user),
-                scenario_id,
-                name=name,
-                description=description,
-                definition=definition,
-            )
-        except ScenarioEditorError as e:
-            scenario.update(
-                {
-                    "name": name,
-                    "description": description,
-                    "ngfw": ngfw,
-                    "instances": instances,
-                    "subnets": subnets,
-                }
-            )
-            return render(
-                request,
-                "scenario_editor/form.html",
-                {
-                    "mode": "edit",
-                    "scenario": scenario,
-                    "errors": [str(e)],
-                },
-            )
-
-        logger.info(
-            "scenario_edit_form: updated scenario_id=%s by user_id=%s", safe_log_value(scenario_id), request.user.id
-        )
-        messages.success(request, "Scenario updated successfully.")
-        return redirect("scenario_editor:detail", scenario_id=scenario_id)
+        return _scenario_edit_form_impl(request, scenario_id)
     except Exception:
         logger.exception(
             "scenario_edit_form: unexpected error for user_id=%s, scenario_id=%s",

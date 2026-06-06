@@ -72,7 +72,7 @@ from _gdc_vm_secrets import (
 from _gdc_vm_templates import _render_user_data
 from config import load_gdc_network_access_config, load_gdc_vmruntime_config
 from executors.factory import get_ssh_username
-from log_redact import safe_log_value
+from log_redact import safe_log_fingerprint, safe_log_value
 
 if TYPE_CHECKING:
     from kubernetes.client import CoreV1Api, CustomObjectsApi
@@ -131,7 +131,7 @@ def _delete_vm_runtime_resource(
             "Timed out waiting for GDC %s %s/%s to delete",
             safe_log_value(label),
             safe_log_value(namespace),
-            safe_log_value(name),
+            safe_log_fingerprint(name),
         )
 
 

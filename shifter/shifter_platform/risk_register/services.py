@@ -11,6 +11,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from risk_register.models import AuditLog
+from shared.log_sanitize import safe_log_fingerprint, safe_log_value
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -66,24 +67,21 @@ def audit_log(
             user_agent=user_agent,
             request_id=request_id,
         )
-        # CodeQL's ``py/clear-text-logging-sensitive-data`` flags this log on
-        # dataflow grounds because some call sites pass ``previous_state`` /
-        # ``new_state`` dicts that contain credential fields. The values
-        # actually logged here (``action``, ``entity_type``, ``entity_id``,
-        # ``actor_type``, ``actor_id``) are enum strings / integers — never
-        # credentials. Re-bind to neutral names so the dataflow taint is
-        # explicitly cleared at this boundary.
-        op_name = str(action)
-        op_target_kind = str(entity_type)
-        op_target_id = str(entity_id)
-        op_actor_kind = str(actor_type)
+        # The values logged here (action / entity_type / entity_id /
+        # actor_type) are enum strings and integers, never credentials, so they
+        # go through ``safe_log_value``. CodeQL still taints ``actor_id`` on
+        # dataflow grounds (some call sites derive it from authenticated-
+        # principal state), so it goes through ``safe_log_fingerprint`` — a true
+        # ``py/clear-text-logging-sensitive-data`` taint-break. The authoritative
+        # actor id is retained on the durable ``AuditLog`` row, so a debug-log
+        # correlation token is sufficient here.
         logger.debug(
             "Audit logged: %s %s %s by %s:%s",
-            op_name.replace("\r", " ").replace("\n", " ")[:100],
-            op_target_kind.replace("\r", " ").replace("\n", " ")[:100],
-            op_target_id.replace("\r", " ").replace("\n", " ")[:100],
-            op_actor_kind.replace("\r", " ").replace("\n", " ")[:100],
-            actor_id,
+            safe_log_value(action),
+            safe_log_value(entity_type),
+            safe_log_value(entity_id),
+            safe_log_value(actor_type),
+            safe_log_fingerprint(actor_id),
         )
         return entry
     except Exception:

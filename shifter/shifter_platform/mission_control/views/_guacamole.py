@@ -14,7 +14,7 @@ from django.views.decorators.http import require_POST
 
 from mission_control.models import GuacamoleBootstrapRequest
 from shared.errors import classify_user_message
-from shared.log_sanitize import safe_log_value
+from shared.log_sanitize import safe_log_fingerprint, safe_log_value
 
 from ._common import (
     GUAC_AUTH_NOT_CONFIGURED,
@@ -202,20 +202,18 @@ def guacamole_rdp_url(request: HttpRequest) -> JsonResponse:
         instance_uuid = _require_instance_uuid(data)
         conn_info = _resolve_rdp_conn(user, instance_uuid)
         guacamole_signing_secret, guacamole_base_url, guacamole_api_url = _get_guac_settings("RDP")
-        # ``conn_info`` carries RDP credentials; only metadata fields (os_type,
-        # whether an ssh_key is present) are extracted into neutrally-named
-        # locals so CodeQL's ``py/clear-text-logging`` heuristic does not
-        # treat the log line as leaking secrets.
+        # ``conn_info`` carries RDP credentials, so only non-secret metadata is
+        # logged. ``os_type`` is read from the credential-bearing dict, so CodeQL
+        # taints it regardless of naming; it goes through ``safe_log_fingerprint``
+        # (a true ``py/clear-text-logging-sensitive-data`` taint-break). The
+        # user/instance correlation IDs go through ``safe_log_value``.
         rdp_os = str(conn_info.get("os_type") or "unknown")
         file_transfer_available = "yes" if conn_info.get("ssh_key") else "no"
-        rdp_os = rdp_os.replace("\r", " ").replace("\n", " ")[:64]
-        safe_email = user.email.replace("\r", " ").replace("\n", " ")[:200]
-        safe_uuid = str(instance_uuid).replace("\r", " ").replace("\n", " ")[:200]
         logger.info(
             "Guac RDP request: user=%s instance_uuid=%s os=%s file_transfer_available=%s",
-            safe_email,
-            safe_uuid,
-            rdp_os,
+            safe_log_value(user.email),
+            safe_log_value(instance_uuid),
+            safe_log_fingerprint(rdp_os),
             file_transfer_available,
         )
     except _ViewError as err:
@@ -462,20 +460,18 @@ def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
     except _ViewError as err:
         return err.response
 
-    # ``ssh_info`` carries the SSH private key; only non-secret metadata
-    # (host IP, cloud provider name) is pulled into neutrally-named locals
-    # so CodeQL's ``py/clear-text-logging`` heuristic does not treat this
-    # log line as leaking credentials.
-    instance_ip = str(ssh_info["host"]).replace("\r", " ").replace("\n", " ")[:64]
-    cloud_provider_name = str(ssh_info.get("cloud_provider") or "unknown").replace("\r", " ").replace("\n", " ")[:32]
-    safe_email = user.email.replace("\r", " ").replace("\n", " ")[:200]
-    safe_uuid = str(instance_uuid).replace("\r", " ").replace("\n", " ")[:200]
+    # ``ssh_info`` carries the SSH private key. Only non-secret metadata is
+    # logged: the host IP and cloud provider name. Both are read from the
+    # credential-bearing dict, so CodeQL taints them regardless of naming; they
+    # go through ``safe_log_fingerprint`` (a true taint-break) and stay
+    # correlatable across log lines within the process. The user/instance
+    # correlation IDs go through ``safe_log_value``.
     logger.info(
         "Guacamole SSH bootstrap queued for range instance: user=%s instance_uuid=%s host=%s provider=%s",
-        safe_email,
-        safe_uuid,
-        instance_ip,
-        cloud_provider_name,
+        safe_log_value(user.email),
+        safe_log_value(instance_uuid),
+        safe_log_fingerprint(ssh_info["host"]),
+        safe_log_fingerprint(ssh_info.get("cloud_provider") or "unknown"),
     )
     return guacamole_bootstrap_response(
         user=user,

@@ -18,7 +18,7 @@ from events import (
     publish_ngfw_event,
 )
 from executors.ngfw_executor import NGFWExecutor
-from log_redact import safe_log_value
+from log_redact import safe_log_fingerprint, safe_log_value
 from ngfw_terraform_cleanup import (
     _cleanup_ngfw_bootstrap_objects,
     _run_deprovision,
@@ -364,7 +364,11 @@ def _run_pan_os_post_provision(
     except Exception as e:
         logger.exception("NGFW bootstrap object cleanup failed: request_id=%s", request_id)
         bootstrap_cleanup_error = e
-    logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
+    logger.info(
+        "NGFW provisioning complete, serial=%s: request_id=%s",
+        safe_log_fingerprint(serial_number),
+        safe_log_value(request_id),
+    )
 
     _auto_stop_ngfw(request_id)
 

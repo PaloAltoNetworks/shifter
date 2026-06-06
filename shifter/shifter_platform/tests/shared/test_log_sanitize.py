@@ -11,7 +11,8 @@ import logging
 
 import pytest
 
-from shared.log_sanitize import safe_log, safe_log_value
+from shared import log_sanitize
+from shared.log_sanitize import safe_log, safe_log_fingerprint, safe_log_id, safe_log_value
 
 
 class TestSafeLogValue:
@@ -105,3 +106,72 @@ class TestSafeLog:
     def test_passes_through_non_string(self) -> None:
         assert safe_log(42) == 42
         assert safe_log(None) is None
+
+
+class TestSafeLogId:
+    def test_none_returns_none_marker(self) -> None:
+        assert safe_log_id(None) == "<none>"
+
+    def test_short_string_fully_masked(self) -> None:
+        assert safe_log_id("abc") == "***"
+
+    def test_exactly_eight_chars_fully_masked(self) -> None:
+        assert safe_log_id("12345678") == "***"
+
+    def test_long_string_shows_last_four(self) -> None:
+        assert safe_log_id("arn:aws:secretsmanager:us-east-2:123456789012:secret:foo-AbCdEf") == "***CdEf"
+
+
+class TestSafeLogFingerprint:
+    def setup_method(self) -> None:
+        # Each test starts from a clean cache so cross-test nonce assignments
+        # don't leak in.
+        log_sanitize._fingerprint_cache.clear()
+
+    def test_none_returns_none_marker(self) -> None:
+        assert safe_log_fingerprint(None) == "<none>"
+
+    def test_returns_twelve_hex_chars(self) -> None:
+        result = safe_log_fingerprint("any-value")
+        assert len(result) == 12
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_stable_within_process(self) -> None:
+        assert safe_log_fingerprint("abc") == safe_log_fingerprint("abc")
+
+    def test_distinct_inputs_distinct_outputs(self) -> None:
+        assert safe_log_fingerprint("abc") != safe_log_fingerprint("def")
+
+    def test_integer_input_uses_string_form(self) -> None:
+        assert safe_log_fingerprint(42) == safe_log_fingerprint("42")
+
+    def test_does_not_leak_input_substring(self) -> None:
+        secret = "supersecretpasswordvalue"
+        result = safe_log_fingerprint(secret)
+        assert secret not in result
+        assert "password" not in result
+
+    def test_not_derived_from_input(self) -> None:
+        # New process state -> same input maps to a different random token.
+        log_sanitize._fingerprint_cache.clear()
+        first_run = safe_log_fingerprint("arn:aws:secret:foo")
+        log_sanitize._fingerprint_cache.clear()
+        second_run = safe_log_fingerprint("arn:aws:secret:foo")
+        assert first_run != second_run
+
+    def test_cache_evicts_oldest_at_capacity(self) -> None:
+        log_sanitize._fingerprint_cache.clear()
+        original_limit = log_sanitize._FINGERPRINT_CACHE_MAX_ENTRIES
+        log_sanitize._FINGERPRINT_CACHE_MAX_ENTRIES = 3
+        try:
+            a = safe_log_fingerprint("a")
+            safe_log_fingerprint("b")
+            safe_log_fingerprint("c")
+            safe_log_fingerprint("d")  # evicts "a"
+            new_a = safe_log_fingerprint("a")  # evicts "b"
+            assert new_a != a
+            assert "b" not in log_sanitize._fingerprint_cache
+            assert {"c", "d", "a"} == set(log_sanitize._fingerprint_cache.keys())
+        finally:
+            log_sanitize._FINGERPRINT_CACHE_MAX_ENTRIES = original_limit
+            log_sanitize._fingerprint_cache.clear()

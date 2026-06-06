@@ -32,13 +32,21 @@ COPY shifter_platform/pyproject.toml shifter_platform/uv.lock shifter_platform/r
 # py-ubjson (a vestigial autobahn->daphne transitive) ships sdist-only with no wheel on
 # any platform, so it is the single --no-binary source exception; everything else is
 # wheel-only. It is version-pinned and hash-verified, and has a pure-Python fallback so
-# it needs no compiler.
+# it needs no compiler. The first-party wheels are installed by explicit versioned
+# filename (not a *.whl glob, which reads as an unlocked resolution); bump these paths
+# when cyberscript/installation change version in their pyproject.toml.
 RUN uv export --no-emit-project --frozen > requirements.txt && \
-    uv pip install --system --no-cache --no-config --require-hashes --only-binary :all: --no-binary py-ubjson -r requirements.txt && \
-    uv pip install --system --no-cache --no-config --require-hashes --only-binary :all: -r requirements-gcp.lock && \
+    uv pip install --system --no-cache --no-config \
+        --require-hashes --only-binary :all: --no-binary py-ubjson \
+        -r requirements.txt && \
+    uv pip install --system --no-cache --no-config \
+        --require-hashes --only-binary :all: \
+        -r requirements-gcp.lock && \
     uv build --wheel /cyberscript --out-dir /wheels && \
     uv build --wheel /installation --out-dir /wheels && \
-    uv pip install --system --no-cache --no-config --no-deps --only-binary :all: /wheels/*.whl
+    uv pip install --system --no-cache --no-config --no-deps --only-binary :all: \
+        /wheels/cyberscript-0.1.0-py3-none-any.whl \
+        /wheels/installation-0.2.0-py3-none-any.whl
 
 # Production stage
 FROM python:3.12-slim-trixie AS production

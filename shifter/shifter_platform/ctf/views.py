@@ -1184,47 +1184,18 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
     return render(request, "ctf/admin/event_detail.html", context)
 
 
-@login_required
-@ctf_organizer_required
-@require_http_methods(["GET", "POST"])
-def admin_event_force_delete(request: HttpRequest, event_id: UUID) -> HttpResponse:
-    """Force-delete confirmation page and handler.
-
-    GET renders a confirmation page where the organizer must type the event
-    name to confirm. POST performs the force delete and redirects to the
-    event list.
-
-    Args:
-        event_id: UUID of the event.
-    """
+def _handle_event_force_delete_post(request: HttpRequest, event: CTFEvent, event_id: UUID) -> HttpResponse:
+    """Perform the force delete after name confirmation, re-rendering on mismatch."""
     from django.contrib import messages
-    from django.http import Http404
     from django.shortcuts import redirect
 
     from ctf.exceptions import CTFValidationError
-    from ctf.models import CTFEvent
     from ctf.services import force_delete_event, get_event_stats
 
-    try:
-        event = CTFEvent.all_objects.get(pk=event_id)
-    except CTFEvent.DoesNotExist:
-        raise Http404("Event not found") from None
-
-    if event.created_by_id != request.user.pk:
-        return HttpResponse("Forbidden: You do not have access to this event", status=403)
-
-    if request.method == "GET":
-        stats = get_event_stats(event)
-        return render(
-            request,
-            "ctf/admin/event_force_delete.html",
-            {"event": event, "stats": stats},
-        )
-
-    # POST — perform force delete
+    user = _get_user(request)
     confirmation_name = request.POST.get("confirmation_name", "")
     try:
-        result = force_delete_event(event_id, request.user, confirmation_name)
+        result = force_delete_event(event_id, user, confirmation_name)
     except CTFValidationError:
         stats = get_event_stats(event)
         return render(
@@ -1242,6 +1213,43 @@ def admin_event_force_delete(request: HttpRequest, event_id: UUID) -> HttpRespon
         f"Event '{result['event_name']}' has been permanently deleted. Ranges destroyed: {result['ranges_destroyed']}.",
     )
     return redirect("ctf:admin_event_list")
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "POST"])
+def admin_event_force_delete(request: HttpRequest, event_id: UUID) -> HttpResponse:
+    """Force-delete confirmation page and handler.
+
+    GET renders a confirmation page where the organizer must type the event
+    name to confirm. POST performs the force delete and redirects to the
+    event list.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    from django.http import Http404
+
+    from ctf.models import CTFEvent
+    from ctf.services import get_event_stats
+
+    try:
+        event = CTFEvent.all_objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    if request.method == "GET":
+        stats = get_event_stats(event)
+        return render(
+            request,
+            "ctf/admin/event_force_delete.html",
+            {"event": event, "stats": stats},
+        )
+
+    return _handle_event_force_delete_post(request, event, event_id)
 
 
 @login_required
@@ -1340,6 +1348,69 @@ def admin_challenge_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     return render(request, "ctf/admin/challenge_list.html", context)
 
 
+def _resolve_modifiable_event_for_challenge(
+    request: HttpRequest, event_id: UUID
+) -> tuple[CTFEvent | None, HttpResponse | None]:
+    """Resolve the event and enforce ownership + content-modifiable; return (event, error_response)."""
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return None, HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    if not event.is_content_modifiable:
+        logger.warning(
+            "User %s attempted to add challenge to non-modifiable event %s",
+            request.user.email,
+            event.pk,
+        )
+        return None, redirect("ctf:admin_challenge_list", event_id=event.pk)
+
+    return event, None
+
+
+def _handle_challenge_create_post(request: HttpRequest, event: CTFEvent) -> HttpResponse:
+    """Validate the create form and create the challenge, re-rendering the form on error."""
+    from ctf.forms import CTFChallengeForm
+
+    user = _get_user(request)
+    form = CTFChallengeForm(request.POST, event=event)
+    if form.is_valid():
+        from ctf.exceptions import CTFPermissionError, CTFStateError, CTFValidationError
+        from ctf.services.challenge import create_challenge
+
+        try:
+            challenge = create_challenge(
+                event_id=event.pk,
+                challenge_data=form.to_service_data(),
+                actor_id=user.pk,
+            )
+        except CTFPermissionError:
+            return HttpResponse("Forbidden: You do not have access to this event", status=403)
+        except (CTFStateError, CTFValidationError) as e:
+            form.add_error(None, str(e))
+        else:
+            logger.info(
+                "User %s created challenge %s: %s for event %s",
+                user.email,
+                challenge.pk,
+                challenge.name,
+                event.pk,
+            )
+            return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
+
+    context = {"form": form, "event": event, "is_edit": False}
+    return render(request, "ctf/admin/challenge_form.html", context)
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "POST"])
@@ -1352,65 +1423,19 @@ def admin_challenge_create(request: HttpRequest, event_id: UUID) -> HttpResponse
     Args:
         event_id: UUID of the event.
     """
-    from django.http import Http404
-    from django.shortcuts import redirect
-
-    from ctf.exceptions import CTFNotFoundError
     from ctf.forms import CTFChallengeForm
-    from ctf.services import get_event
 
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        raise Http404("Event not found") from None
-
-    # Check permission
-    if event.created_by_id != request.user.pk:
-        return HttpResponse("Forbidden: You do not have access to this event", status=403)
-
-    # Check if event content is modifiable (challenges can't be changed in active/terminal events)
-    if not event.is_content_modifiable:
-        logger.warning(
-            "User %s attempted to add challenge to non-modifiable event %s",
-            request.user.email,
-            event.pk,
-        )
-        return redirect("ctf:admin_challenge_list", event_id=event.pk)
+    event, error = _resolve_modifiable_event_for_challenge(request, event_id)
+    if error is not None:
+        return error
+    # error is None implies the event resolved and is modifiable.
+    assert event is not None
 
     if request.method == "POST":
-        form = CTFChallengeForm(request.POST, event=event)
-        if form.is_valid():
-            from ctf.exceptions import CTFPermissionError, CTFStateError, CTFValidationError
-            from ctf.services.challenge import create_challenge
+        return _handle_challenge_create_post(request, event)
 
-            try:
-                challenge = create_challenge(
-                    event_id=event.pk,
-                    challenge_data=form.to_service_data(),
-                    actor_id=request.user.pk,
-                )
-            except CTFPermissionError:
-                return HttpResponse("Forbidden: You do not have access to this event", status=403)
-            except (CTFStateError, CTFValidationError) as e:
-                form.add_error(None, str(e))
-            else:
-                logger.info(
-                    "User %s created challenge %s: %s for event %s",
-                    request.user.email,
-                    challenge.pk,
-                    challenge.name,
-                    event.pk,
-                )
-                return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
-    else:
-        form = CTFChallengeForm(event=event)
-
-    context = {
-        "form": form,
-        "event": event,
-        "is_edit": False,
-    }
-
+    form = CTFChallengeForm(event=event)
+    context = {"form": form, "event": event, "is_edit": False}
     return render(request, "ctf/admin/challenge_form.html", context)
 
 
@@ -1493,6 +1518,70 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
     return render(request, "ctf/admin/challenge_detail.html", context)
 
 
+def _resolve_editable_challenge(
+    request: HttpRequest, challenge_id: UUID
+) -> tuple[CTFChallenge | None, HttpResponse | None]:
+    """Resolve the challenge and enforce ownership + content-modifiable; return (challenge, error_response)."""
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        raise Http404("Challenge not found") from None
+
+    event = challenge.event
+    if event.created_by_id != request.user.pk:
+        return None, HttpResponse(_FORBIDDEN_CHALLENGE_ACCESS_MSG, status=403)
+
+    if not event.is_content_modifiable:
+        logger.warning(
+            "User %s attempted to edit challenge %s in non-modifiable event %s",
+            request.user.email,
+            challenge.pk,
+            event.pk,
+        )
+        return None, redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
+
+    return challenge, None
+
+
+def _handle_challenge_edit_post(request: HttpRequest, challenge: CTFChallenge, event: CTFEvent) -> HttpResponse:
+    """Validate the edit form and update the challenge, re-rendering the form on error."""
+    from ctf.forms import CTFChallengeForm
+
+    user = _get_user(request)
+    form = CTFChallengeForm(request.POST, instance=challenge, event=event)
+    if form.is_valid():
+        from ctf.exceptions import CTFPermissionError, CTFStateError, CTFValidationError
+        from ctf.services.challenge import update_challenge
+
+        try:
+            update_challenge(
+                challenge_id=challenge.pk,
+                challenge_data=form.to_service_data(),
+                actor_id=user.pk,
+            )
+        except CTFPermissionError:
+            return HttpResponse(_FORBIDDEN_CHALLENGE_ACCESS_MSG, status=403)
+        except (CTFStateError, CTFValidationError) as e:
+            form.add_error(None, str(e))
+        else:
+            logger.info(
+                "User %s updated challenge %s: %s",
+                user.email,
+                challenge.pk,
+                challenge.name,
+            )
+            return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
+
+    context = {"form": form, "event": event, "challenge": challenge, "is_edit": True}
+    return render(request, "ctf/admin/challenge_form.html", context)
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "POST"])
@@ -1505,68 +1594,20 @@ def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpRespon
     Args:
         challenge_id: UUID of the challenge.
     """
-    from django.http import Http404
-    from django.shortcuts import redirect
-
-    from ctf.exceptions import CTFNotFoundError
     from ctf.forms import CTFChallengeForm
-    from ctf.services import get_challenge
 
-    try:
-        challenge = get_challenge(challenge_id)
-    except CTFNotFoundError:
-        raise Http404("Challenge not found") from None
-
+    challenge, error = _resolve_editable_challenge(request, challenge_id)
+    if error is not None:
+        return error
+    # error is None implies the challenge resolved and its event is modifiable.
+    assert challenge is not None
     event = challenge.event
 
-    # Check permission
-    if event.created_by_id != request.user.pk:
-        return HttpResponse(_FORBIDDEN_CHALLENGE_ACCESS_MSG, status=403)
-
-    # Check if event content is modifiable
-    if not event.is_content_modifiable:
-        logger.warning(
-            "User %s attempted to edit challenge %s in non-modifiable event %s",
-            request.user.email,
-            challenge.pk,
-            event.pk,
-        )
-        return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
-
     if request.method == "POST":
-        form = CTFChallengeForm(request.POST, instance=challenge, event=event)
-        if form.is_valid():
-            from ctf.exceptions import CTFPermissionError, CTFStateError, CTFValidationError
-            from ctf.services.challenge import update_challenge
+        return _handle_challenge_edit_post(request, challenge, event)
 
-            try:
-                update_challenge(
-                    challenge_id=challenge.pk,
-                    challenge_data=form.to_service_data(),
-                    actor_id=request.user.pk,
-                )
-            except CTFPermissionError:
-                return HttpResponse(_FORBIDDEN_CHALLENGE_ACCESS_MSG, status=403)
-            except (CTFStateError, CTFValidationError) as e:
-                form.add_error(None, str(e))
-            else:
-                logger.info(
-                    "User %s updated challenge %s: %s",
-                    request.user.email,
-                    challenge.pk,
-                    challenge.name,
-                )
-                return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
-    else:
-        form = CTFChallengeForm(instance=challenge, event=event)
-
-    context = {
-        "form": form,
-        "event": event,
-        "challenge": challenge,
-        "is_edit": True,
-    }
-
+    form = CTFChallengeForm(instance=challenge, event=event)
+    context = {"form": form, "event": event, "challenge": challenge, "is_edit": True}
     return render(request, "ctf/admin/challenge_form.html", context)
 
 

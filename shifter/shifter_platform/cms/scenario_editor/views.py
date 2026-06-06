@@ -51,7 +51,8 @@ SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 @require_GET
 def scenario_list(request: HttpRequest) -> HttpResponse:
     """List all scenarios with metadata."""
-    scenarios = list_all_scenarios(user=None)  # Staff sees all
+    # Staff sees all
+    scenarios = list_all_scenarios(user=None)
     return render(
         request,
         "scenario_editor/list.html",
@@ -221,19 +222,15 @@ def scenario_create_form(request: HttpRequest) -> HttpResponse:
 
 
 def _resolve_editable_scenario(
-    request: HttpRequest, scenario_id: str
+    request: HttpRequest, scenario_id: str, *, default_message: str
 ) -> tuple[dict[str, Any] | None, HttpResponse | None]:
     """Return (scenario, None) for an editable custom scenario, else (None, error_response).
 
-    Default scenarios are read-only (403) and missing scenarios are 404.
+    Default scenarios are read-only (403, with the caller's ``default_message``) and
+    missing scenarios are 404.
     """
     if is_default_scenario(scenario_id):
-        return None, render(
-            request,
-            "scenario_editor/error.html",
-            {"message": "Default scenarios cannot be edited. Clone it to create an editable copy."},
-            status=403,
-        )
+        return None, render(request, "scenario_editor/error.html", {"message": default_message}, status=403)
     try:
         return get_scenario_detail(scenario_id), None
     except ValueError:
@@ -277,10 +274,13 @@ def _handle_scenario_edit_post(request: HttpRequest, scenario_id: str, scenario:
 
 def _scenario_edit_form_impl(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Apply the editable-scenario guard, then dispatch GET render or POST update."""
-    scenario, error = _resolve_editable_scenario(request, scenario_id)
+    scenario, error = _resolve_editable_scenario(
+        request, scenario_id, default_message="Default scenarios cannot be edited. Clone it to create an editable copy."
+    )
     if error is not None:
         return error
-    assert scenario is not None  # error is None implies the scenario was resolved
+    # error is None implies the scenario was resolved.
+    assert scenario is not None
     if request.method == "GET":
         return render(request, "scenario_editor/form.html", {"mode": "edit", "scenario": scenario, "errors": []})
     return _handle_scenario_edit_post(request, scenario_id, scenario)
@@ -311,6 +311,64 @@ def scenario_edit_form(request: HttpRequest, scenario_id: str) -> HttpResponse:
 # =============================================================================
 
 
+def _handle_scenario_yaml_post(request: HttpRequest, scenario_id: str, scenario: dict[str, Any]) -> HttpResponse:
+    """Validate submitted YAML and update the scenario, re-rendering the editor on error."""
+    submitted_yaml = request.POST.get("yaml_content", "")
+    parsed, errors = validate_yaml(submitted_yaml)
+    if errors:
+        return render(
+            request,
+            "scenario_editor/yaml_editor.html",
+            {"scenario": scenario, "yaml_content": submitted_yaml, "errors": errors},
+        )
+
+    # validate_yaml returns a populated mapping whenever it reports no errors.
+    parsed = parsed or {}
+    definition = {
+        "instances": parsed.get("instances", []),
+        "subnets": parsed.get("subnets", []),
+        "ngfw": parsed.get("ngfw", False),
+    }
+    try:
+        update_scenario(
+            cast("User", request.user),
+            scenario_id,
+            name=parsed.get("name", scenario["name"]),
+            description=parsed.get("description", scenario["description"]),
+            definition=definition,
+        )
+    except ScenarioEditorError as e:
+        return render(
+            request,
+            "scenario_editor/yaml_editor.html",
+            {"scenario": scenario, "yaml_content": submitted_yaml, "errors": [str(e)]},
+        )
+
+    logger.info(
+        "scenario_yaml_editor: updated scenario_id=%s by user_id=%s", safe_log_value(scenario_id), request.user.id
+    )
+    messages.success(request, "Scenario updated from YAML successfully.")
+    return redirect("scenario_editor:detail", scenario_id=scenario_id)
+
+
+def _scenario_yaml_editor_impl(request: HttpRequest, scenario_id: str) -> HttpResponse:
+    """Apply the editable-scenario guard, then dispatch GET render or POST update."""
+    scenario, error = _resolve_editable_scenario(
+        request, scenario_id, default_message="Default scenarios cannot be edited via YAML. Clone it first."
+    )
+    if error is not None:
+        return error
+    # error is None implies the scenario was resolved.
+    assert scenario is not None
+    if request.method == "GET":
+        return render(
+            request,
+            "scenario_editor/yaml_editor.html",
+            {"scenario": scenario, "yaml_content": export_scenario_yaml(scenario_id), "errors": []},
+        )
+    return _handle_scenario_yaml_post(request, scenario_id, scenario)
+
+
 @threat_research_required
 @require_http_methods(["GET", "POST"])
 def scenario_yaml_editor(request: HttpRequest, scenario_id: str) -> HttpResponse:
@@ -320,92 +378,7 @@ def scenario_yaml_editor(request: HttpRequest, scenario_id: str) -> HttpResponse
     POST: Validates and saves the YAML content.
     """
     try:
-        if is_default_scenario(scenario_id):
-            return render(
-                request,
-                "scenario_editor/error.html",
-                {
-                    "message": "Default scenarios cannot be edited via YAML. Clone it first.",
-                },
-                status=403,
-            )
-
-        try:
-            scenario = get_scenario_detail(scenario_id)
-        except ValueError:
-            logger.warning("scenario_yaml_editor: scenario not found scenario_id=%s", safe_log_value(scenario_id))
-            return render(
-                request,
-                "scenario_editor/not_found.html",
-                {
-                    "scenario_id": scenario_id,
-                },
-                status=404,
-            )
-
-        yaml_content = export_scenario_yaml(scenario_id)
-
-        if request.method == "GET":
-            return render(
-                request,
-                "scenario_editor/yaml_editor.html",
-                {
-                    "scenario": scenario,
-                    "yaml_content": yaml_content,
-                    "errors": [],
-                },
-            )
-
-        # POST - validate and save
-        submitted_yaml = request.POST.get("yaml_content", "")
-        parsed, errors = validate_yaml(submitted_yaml)
-
-        if errors:
-            return render(
-                request,
-                "scenario_editor/yaml_editor.html",
-                {
-                    "scenario": scenario,
-                    "yaml_content": submitted_yaml,
-                    "errors": errors,
-                },
-            )
-
-        # Extract fields from parsed YAML. validate_yaml returns a populated
-        # mapping whenever it reports no errors; coerce None to {} for typing.
-        parsed = parsed or {}
-        name = parsed.get("name", scenario["name"])
-        description = parsed.get("description", scenario["description"])
-        definition = {
-            "instances": parsed.get("instances", []),
-            "subnets": parsed.get("subnets", []),
-            "ngfw": parsed.get("ngfw", False),
-        }
-
-        try:
-            update_scenario(
-                cast("User", request.user),
-                scenario_id,
-                name=name,
-                description=description,
-                definition=definition,
-            )
-        except ScenarioEditorError as e:
-            return render(
-                request,
-                "scenario_editor/yaml_editor.html",
-                {
-                    "scenario": scenario,
-                    "yaml_content": submitted_yaml,
-                    "errors": [str(e)],
-                },
-            )
-
-        logger.info(
-            "scenario_yaml_editor: updated scenario_id=%s by user_id=%s", safe_log_value(scenario_id), request.user.id
-        )
-        messages.success(request, "Scenario updated from YAML successfully.")
-        return redirect("scenario_editor:detail", scenario_id=scenario_id)
+        return _scenario_yaml_editor_impl(request, scenario_id)
     except Exception:
         logger.exception(
             "scenario_yaml_editor: unexpected error for user_id=%s, scenario_id=%s",
@@ -423,6 +396,74 @@ def scenario_yaml_editor(request: HttpRequest, scenario_id: str) -> HttpResponse
 # =============================================================================
 # YAML Create (import new scenario from YAML)
 # =============================================================================
+
+
+def _create_scenario_from_parsed(
+    request: HttpRequest,
+    *,
+    scenario_id: str,
+    name: str,
+    description: str,
+    parsed: dict[str, Any],
+    submitted_yaml: str,
+) -> HttpResponse:
+    """Create a scenario from validated YAML fields, re-rendering the form on error."""
+    definition = {
+        "instances": parsed.get("instances", []),
+        "subnets": parsed.get("subnets", []),
+        "ngfw": parsed.get("ngfw", False),
+    }
+    try:
+        create_scenario(
+            cast("User", request.user),
+            scenario_id=scenario_id,
+            name=name,
+            description=description,
+            definition=definition,
+        )
+    except ScenarioEditorError as e:
+        return render(request, "scenario_editor/yaml_create.html", {"yaml_content": submitted_yaml, "errors": [str(e)]})
+
+    logger.info(
+        "scenario_yaml_create: created scenario_id=%s by user_id=%s", safe_log_value(scenario_id), request.user.id
+    )
+    messages.success(request, f"Scenario '{name}' created from YAML successfully.")
+    return redirect("scenario_editor:detail", scenario_id=scenario_id)
+
+
+def _handle_scenario_yaml_create_post(request: HttpRequest) -> HttpResponse:
+    """Validate submitted YAML (shape then required fields) and create a new scenario."""
+    submitted_yaml = request.POST.get("yaml_content", "")
+    parsed, errors = validate_yaml(submitted_yaml)
+    if errors:
+        return render(request, "scenario_editor/yaml_create.html", {"yaml_content": submitted_yaml, "errors": errors})
+
+    # validate_yaml returns a populated mapping whenever it reports no errors.
+    parsed = parsed or {}
+    scenario_id = parsed.get("id", "")
+    name = parsed.get("name", "")
+    description = parsed.get("description", "")
+
+    yaml_errors = []
+    if not scenario_id:
+        yaml_errors.append("YAML must include an 'id' field")
+    if not name:
+        yaml_errors.append("YAML must include a 'name' field")
+    if not description:
+        yaml_errors.append("YAML must include a 'description' field")
+    if yaml_errors:
+        return render(
+            request, "scenario_editor/yaml_create.html", {"yaml_content": submitted_yaml, "errors": yaml_errors}
+        )
+
+    return _create_scenario_from_parsed(
+        request,
+        scenario_id=scenario_id,
+        name=name,
+        description=description,
+        parsed=parsed,
+        submitted_yaml=submitted_yaml,
+    )
 
 
 @threat_research_required
@@ -462,75 +503,7 @@ def scenario_yaml_create(request: HttpRequest) -> HttpResponse:
                 },
             )
 
-        # POST
-        submitted_yaml = request.POST.get("yaml_content", "")
-        parsed, errors = validate_yaml(submitted_yaml)
-
-        if errors:
-            return render(
-                request,
-                "scenario_editor/yaml_create.html",
-                {
-                    "yaml_content": submitted_yaml,
-                    "errors": errors,
-                },
-            )
-
-        # validate_yaml returns a populated mapping whenever it reports no errors;
-        # coerce None to {} so the field reads below are well-typed (missing fields
-        # are then caught by the required-field checks).
-        parsed = parsed or {}
-        scenario_id = parsed.get("id", "")
-        name = parsed.get("name", "")
-        description = parsed.get("description", "")
-
-        # Validate required fields from YAML
-        yaml_errors = []
-        if not scenario_id:
-            yaml_errors.append("YAML must include an 'id' field")
-        if not name:
-            yaml_errors.append("YAML must include a 'name' field")
-        if not description:
-            yaml_errors.append("YAML must include a 'description' field")
-        if yaml_errors:
-            return render(
-                request,
-                "scenario_editor/yaml_create.html",
-                {
-                    "yaml_content": submitted_yaml,
-                    "errors": yaml_errors,
-                },
-            )
-
-        definition = {
-            "instances": parsed.get("instances", []),
-            "subnets": parsed.get("subnets", []),
-            "ngfw": parsed.get("ngfw", False),
-        }
-
-        try:
-            create_scenario(
-                cast("User", request.user),
-                scenario_id=scenario_id,
-                name=name,
-                description=description,
-                definition=definition,
-            )
-        except ScenarioEditorError as e:
-            return render(
-                request,
-                "scenario_editor/yaml_create.html",
-                {
-                    "yaml_content": submitted_yaml,
-                    "errors": [str(e)],
-                },
-            )
-
-        logger.info(
-            "scenario_yaml_create: created scenario_id=%s by user_id=%s", safe_log_value(scenario_id), request.user.id
-        )
-        messages.success(request, f"Scenario '{name}' created from YAML successfully.")
-        return redirect("scenario_editor:detail", scenario_id=scenario_id)
+        return _handle_scenario_yaml_create_post(request)
     except Exception:
         logger.exception("scenario_yaml_create: unexpected error for user_id=%s", request.user.id)
         return render(
@@ -662,71 +635,49 @@ def scenario_toggle_staff_only(request: HttpRequest, scenario_id: str) -> HttpRe
     )
 
 
+def _handle_scenario_clone_post(request: HttpRequest, scenario_id: str, source: dict[str, Any]) -> HttpResponse:
+    """Validate the clone form and clone the scenario, re-rendering the form on error."""
+    new_scenario_id = request.POST.get("new_scenario_id", "").strip()
+    new_name = request.POST.get("new_name", "").strip() or None
+    if not new_scenario_id:
+        return render(
+            request, "scenario_editor/clone.html", {"source": source, "errors": ["New scenario ID is required"]}
+        )
+    try:
+        scenario = clone_scenario(
+            cast("User", request.user), scenario_id, new_scenario_id=new_scenario_id, new_name=new_name
+        )
+    except ScenarioEditorError as e:
+        return render(request, "scenario_editor/clone.html", {"source": source, "errors": [str(e)]})
+
+    logger.info(
+        "scenario_clone_view: cloned scenario_id=%s to new_scenario_id=%s by user_id=%s",
+        safe_log_value(scenario_id),
+        safe_log_value(new_scenario_id),
+        request.user.id,
+    )
+    messages.success(request, f"Scenario cloned as '{new_name or new_scenario_id}' successfully.")
+    return redirect("scenario_editor:detail", scenario_id=scenario.scenario_id)
+
+
+def _scenario_clone_view_impl(request: HttpRequest, scenario_id: str) -> HttpResponse:
+    """Resolve the source scenario, then dispatch GET render or POST clone."""
+    try:
+        source = get_scenario_detail(scenario_id)
+    except ValueError:
+        logger.warning("scenario_clone_view: scenario not found scenario_id=%s", safe_log_value(scenario_id))
+        return render(request, "scenario_editor/not_found.html", {"scenario_id": scenario_id}, status=404)
+    if request.method == "GET":
+        return render(request, "scenario_editor/clone.html", {"source": source})
+    return _handle_scenario_clone_post(request, scenario_id, source)
+
+
 @threat_research_required
 @require_http_methods(["GET", "POST"])
 def scenario_clone_view(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Clone a scenario."""
     try:
-        try:
-            source = get_scenario_detail(scenario_id)
-        except ValueError:
-            logger.warning("scenario_clone_view: scenario not found scenario_id=%s", safe_log_value(scenario_id))
-            return render(
-                request,
-                "scenario_editor/not_found.html",
-                {
-                    "scenario_id": scenario_id,
-                },
-                status=404,
-            )
-
-        if request.method == "GET":
-            return render(
-                request,
-                "scenario_editor/clone.html",
-                {
-                    "source": source,
-                },
-            )
-
-        new_scenario_id = request.POST.get("new_scenario_id", "").strip()
-        new_name = request.POST.get("new_name", "").strip() or None
-
-        if not new_scenario_id:
-            return render(
-                request,
-                "scenario_editor/clone.html",
-                {
-                    "source": source,
-                    "errors": ["New scenario ID is required"],
-                },
-            )
-
-        try:
-            scenario = clone_scenario(
-                cast("User", request.user),
-                scenario_id,
-                new_scenario_id=new_scenario_id,
-                new_name=new_name,
-            )
-        except ScenarioEditorError as e:
-            return render(
-                request,
-                "scenario_editor/clone.html",
-                {
-                    "source": source,
-                    "errors": [str(e)],
-                },
-            )
-
-        logger.info(
-            "scenario_clone_view: cloned scenario_id=%s to new_scenario_id=%s by user_id=%s",
-            safe_log_value(scenario_id),
-            safe_log_value(new_scenario_id),
-            request.user.id,
-        )
-        messages.success(request, f"Scenario cloned as '{new_name or new_scenario_id}' successfully.")
-        return redirect("scenario_editor:detail", scenario_id=scenario.scenario_id)
+        return _scenario_clone_view_impl(request, scenario_id)
     except Exception:
         logger.exception(
             "scenario_clone_view: unexpected error for user_id=%s, scenario_id=%s",

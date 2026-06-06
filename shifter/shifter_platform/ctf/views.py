@@ -14,7 +14,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
@@ -29,7 +29,19 @@ from ctf.bridges import get_user_role
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from django.db.models import QuerySet
     from django.http import HttpRequest
+
+    from ctf.models import (
+        CTFBracket,
+        CTFChallenge,
+        CTFEvent,
+        CTFHint,
+        CTFParticipant,
+        CTFSubmission,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +78,7 @@ def _get_user(request: HttpRequest) -> User:
 # -----------------------------------------------------------------------------
 
 
-def ctf_organizer_required(view_func):
+def ctf_organizer_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
     """Decorator that requires the user to be a CTF organizer.
 
     Returns 403 Forbidden if user is not an organizer.
@@ -74,7 +86,8 @@ def ctf_organizer_required(view_func):
     """
 
     @functools.wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs):
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        """Enforce CTF-organizer access before delegating to the wrapped view."""
         user = _get_user(request)
         role = get_user_role(user)
         if not role.is_ctf_organizer:
@@ -88,7 +101,7 @@ def ctf_organizer_required(view_func):
     return wrapper
 
 
-def ctf_participant_required(view_func):
+def ctf_participant_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
     """Decorator that requires the user to be a registered CTF participant.
 
     Checks the CTFParticipant table directly — works regardless of
@@ -97,7 +110,8 @@ def ctf_participant_required(view_func):
     """
 
     @functools.wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs):
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        """Enforce active-CTF-participant access before delegating to the wrapped view."""
         from ctf.services.participant import is_active_participant
 
         user = _get_user(request)
@@ -117,7 +131,7 @@ def ctf_participant_required(view_func):
     return wrapper
 
 
-def ctf_role_required(view_func):
+def ctf_role_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
     """Decorator that requires the user to be a CTF organizer or participant.
 
     Returns 403 Forbidden if user has no CTF role.
@@ -125,7 +139,8 @@ def ctf_role_required(view_func):
     """
 
     @functools.wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs):
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        """Enforce any-CTF-role access before delegating to the wrapped view."""
         user = _get_user(request)
         role = get_user_role(user)
         if not role.is_ctf_organizer and not role.is_ctf_participant:
@@ -144,7 +159,7 @@ def ctf_role_required(view_func):
 # -----------------------------------------------------------------------------
 
 
-def _get_client_ip(request):
+def _get_client_ip(request: HttpRequest) -> str | None:
     """Extract client IP from request headers."""
     forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if forwarded_for:
@@ -155,14 +170,14 @@ def _get_client_ip(request):
 _FORBIDDEN_CHALLENGE_ACCESS_MSG = "Forbidden: You do not have access to this challenge"
 
 
-def _check_event_ownership(event, user) -> JsonResponse | None:
+def _check_event_ownership(event: CTFEvent, user: User) -> JsonResponse | None:
     """Return a 403 JsonResponse if the user does not own the event, else None."""
     if event.created_by_id != user.pk:
         return JsonResponse({"error": "Forbidden"}, status=403)
     return None
 
 
-def _get_active_participant(request: HttpRequest):
+def _get_active_participant(request: HttpRequest) -> CTFParticipant | None:
     """Resolve the participant for the user's active CTF event.
 
     Codex review (issue #765/#768/#769) cycle 4: profile-scoped participant
@@ -183,7 +198,7 @@ def _get_active_participant(request: HttpRequest):
     return get_participant_by_user(user, event_id=role.active_ctf_event.id)
 
 
-def _get_participant_for_challenge(request: HttpRequest, challenge):
+def _get_participant_for_challenge(request: HttpRequest, challenge: CTFChallenge) -> CTFParticipant | None:
     """Resolve the participant for a challenge-scoped request.
 
     Codex review (issue #765/#768/#769) cycle 4: challenge-scoped views
@@ -198,7 +213,12 @@ def _get_participant_for_challenge(request: HttpRequest, challenge):
     return get_participant_by_user(_get_user(request), event_id=challenge.event_id)
 
 
-def _compute_hint_purchase_info(challenge, all_hints, unlocked_hint_ids, total_hint_penalty) -> dict:
+def _compute_hint_purchase_info(
+    challenge: CTFChallenge,
+    all_hints: Iterable[CTFHint],
+    unlocked_hint_ids: set[UUID],
+    total_hint_penalty: int,
+) -> dict[str, Any]:
     """Compute next-hint, cost, and warning state for the challenge detail page.
 
     Extracted to keep `challenge_detail`'s cognitive complexity below the
@@ -222,19 +242,9 @@ def _compute_hint_purchase_info(challenge, all_hints, unlocked_hint_ids, total_h
     }
 
 
-def _resolve_target_connection_info(challenge, participant):
-    """Return connection-info dict for the challenge's target instance, or None.
-
-    Extracted from `challenge_detail` (SonarCloud python:S3776).
-    """
-    if not challenge.target_instance_name or participant.range_status != "ready":
-        return None
-    participant_user = participant.user
-    if participant_user is None:
-        return None
-    import cms.services as cms_services
-
-    for inst in cms_services.get_range_target_instances(participant_user.pk):
+def _match_target_instance(challenge: CTFChallenge, instances: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return connection info for the instance matching the challenge target, or None."""
+    for inst in instances:
         if inst.get("name") != challenge.target_instance_name:
             continue
         host = inst.get("private_ip")
@@ -249,7 +259,41 @@ def _resolve_target_connection_info(challenge, participant):
     return None
 
 
-def _resolve_hint_to_unlock(request: HttpRequest, participant, challenge_id):
+def _resolve_target_connection_info(challenge: CTFChallenge, participant: CTFParticipant) -> dict[str, Any] | None:
+    """Return connection-info dict for the challenge's target instance, or None.
+
+    Extracted from `challenge_detail` (SonarCloud python:S3776).
+    """
+    participant_user = participant.user
+    if not challenge.target_instance_name or participant.range_status != "ready" or participant_user is None:
+        return None
+    import cms.services as cms_services
+
+    return _match_target_instance(challenge, cms_services.get_range_target_instances(participant_user.pk))
+
+
+def _parse_explicit_hint_id(body: dict[str, Any]) -> UUID | JsonResponse:
+    """Parse an explicit `hint_id` body field, returning the UUID or a 400 JsonResponse."""
+    try:
+        return _parse_body_uuid(body.get("hint_id"), "hint_id")
+    except _BodyUUIDError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+def _resolve_next_unlockable_hint(participant: CTFParticipant, challenge_id: UUID) -> UUID | JsonResponse:
+    """Return the UUID of the first not-yet-unlocked hint, or a 400 JsonResponse when none remain."""
+    from ctf.services.hint import get_hints, get_unlocked_hints
+
+    unlocked_ids = {h.id for h in get_unlocked_hints(participant.id, challenge_id)}
+    next_hint = next((h for h in get_hints(challenge_id) if h.id not in unlocked_ids), None)
+    if not next_hint:
+        return JsonResponse({"error": "No more hints available"}, status=400)
+    return next_hint.id
+
+
+def _resolve_hint_to_unlock(
+    request: HttpRequest, participant: CTFParticipant, challenge_id: UUID
+) -> UUID | JsonResponse:
     """Resolve which hint UUID to unlock for `api_use_hint`.
 
     Returns either a `UUID` (the hint to unlock) or a `JsonResponse` that
@@ -265,26 +309,21 @@ def _resolve_hint_to_unlock(request: HttpRequest, participant, challenge_id):
         of silently falling back to the next-hint path.
       - JSON parse failure / non-object body → 400.
     """
-    from ctf.services.hint import get_hints, get_unlocked_hints
-
     try:
         body = _parse_body_object(request, allow_empty=True)
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
     if "hint_id" in body:
-        try:
-            return _parse_body_uuid(body.get("hint_id"), "hint_id")
-        except _BodyUUIDError as e:
-            return JsonResponse({"error": str(e)}, status=400)
-    # Default path: pick the first hint not yet unlocked.
-    unlocked_ids = {h.id for h in get_unlocked_hints(participant.id, challenge_id)}
-    next_hint = next((h for h in get_hints(challenge_id) if h.id not in unlocked_ids), None)
-    if not next_hint:
-        return JsonResponse({"error": "No more hints available"}, status=400)
-    return next_hint.id
+        return _parse_explicit_hint_id(body)
+    return _resolve_next_unlockable_hint(participant, challenge_id)
 
 
-def _compute_attempt_state(challenge, participant, submissions, attempt_count: int):
+def _compute_attempt_state(
+    challenge: CTFChallenge,
+    participant: CTFParticipant,
+    submissions: QuerySet[CTFSubmission],
+    attempt_count: int,
+) -> tuple[int, int | None, int | None]:
     """Return `(attempt_count, timeout_retry_after, attempts_remaining)`.
 
     Extracted from `challenge_detail` (SonarCloud python:S3776). Recomputes
@@ -345,7 +384,7 @@ class _BodyParseError(ValueError):
     """
 
 
-def _parse_body_object(request: HttpRequest, *, allow_empty: bool = False) -> dict:
+def _parse_body_object(request: HttpRequest, *, allow_empty: bool = False) -> dict[str, Any]:
     """Parse `request.body` as a JSON object, raising `_BodyParseError`.
 
     Single source of truth for the "decode a JSON object from a request
@@ -384,7 +423,7 @@ def _parse_body_object(request: HttpRequest, *, allow_empty: bool = False) -> di
     return decoded
 
 
-def _get_body_str(body: dict, field_name: str, *, default: str = "", required: bool = False) -> str:
+def _get_body_str(body: dict[str, Any], field_name: str, *, default: str = "", required: bool = False) -> str:
     """Pull a string-typed field from a parsed body, raising _BodyParseError on type mismatch.
 
     Codex review (cycle 6): JSON callers passing `null`, an integer, an
@@ -406,7 +445,9 @@ def _get_body_str(body: dict, field_name: str, *, default: str = "", required: b
     return value
 
 
-def _resolve_bracket_filter(event_id: UUID, bracket_param: str | None) -> tuple[list, object | None, UUID | None]:
+def _resolve_bracket_filter(
+    event_id: UUID, bracket_param: str | None
+) -> tuple[list[CTFBracket], CTFBracket | None, UUID | None]:
     """Resolve bracket filter from query parameter.
 
     Args:
@@ -452,20 +493,24 @@ def ctf_register(request: HttpRequest) -> HttpResponse:
     from ctf.models import CTFParticipant
 
     token = request.GET.get("token")
+    participant = CTFParticipant.objects.filter(invite_token=token).select_related("user").first() if token else None
+
+    error_message = None
     if not token:
-        return HttpResponse("Missing invite token.", status=400)
+        error_message = "Missing invite token."
+    elif not participant or not participant.user:
+        error_message = "Invalid invite token."
+    elif not participant.is_invite_valid:
+        error_message = "Invite token has expired."
+    if error_message:
+        return HttpResponse(error_message, status=400)
 
-    participant = CTFParticipant.objects.filter(invite_token=token).select_related("user").first()
-    if not participant or not participant.user:
-        return HttpResponse("Invalid invite token.", status=400)
-
-    if not participant.is_invite_valid:
-        return HttpResponse("Invite token has expired.", status=400)
-
+    # error_message is None implies a valid participant with a linked user.
+    assert participant is not None and participant.user is not None
     login(request, participant.user, backend="django.contrib.auth.backends.ModelBackend")
 
     if getattr(settings, "MAGIC_LINK_SINGLE_USE", False):
-        participant.invite_token = ""  # nosec B105 — clearing token, not a password
+        participant.invite_token = ""  # nosec B105 — clearing token, not a password  # NOSONAR
         participant.save(update_fields=["invite_token", "updated_at"])
 
     return redirect("mission_control:dashboard")
@@ -3338,10 +3383,7 @@ def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpRe
     )
 
 
-@login_required
-@ctf_organizer_required
-@require_http_methods(["GET", "PUT", "DELETE"])
-def _handle_get_email_template(event, notification_type: str) -> JsonResponse:
+def _handle_get_email_template(event: CTFEvent, notification_type: str) -> JsonResponse:
     """Return the per-event custom template or 404."""
     from ctf.models import CTFEmailTemplate
 
@@ -3359,7 +3401,7 @@ def _handle_get_email_template(event, notification_type: str) -> JsonResponse:
     )
 
 
-def _handle_delete_email_template(event, notification_type: str) -> JsonResponse:
+def _handle_delete_email_template(event: CTFEvent, notification_type: str) -> JsonResponse:
     """Soft-delete the per-event template; revert to default."""
     from ctf.models import CTFEmailTemplate
 
@@ -3384,6 +3426,9 @@ def _validate_template_bodies(html_body: str, text_body: str) -> JsonResponse | 
     return None
 
 
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "PUT", "DELETE"])
 def api_event_email_template(request: HttpRequest, event_id: UUID, notification_type: str) -> JsonResponse:
     """API: Get, update, or delete a per-event email template override.
 

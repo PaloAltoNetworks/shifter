@@ -7,20 +7,8 @@ from uuid import uuid4
 from shared.enums import ResourceStatus
 
 
-class TestResumeRange:
-    """Tests for resume_range() in engine/services.py.
-
-    Tests the service contract:
-    - Inputs: request_id (UUID)
-    - Outputs: bool (True if resume initiated or already ready, False otherwise)
-    - Side effects: sets status to RESUMING, triggers ECS operation
-    - Errors: none raised (returns False for not found/invalid state)
-    - Logging: DEBUG on entry, INFO on status change, WARNING for not found/invalid state
-    """
-
-    # -------------------------------------------------------------------------
-    # Outputs - returns bool indicating success
-    # -------------------------------------------------------------------------
+class TestResumeRangeOutcomes:
+    """Outcome tests for resume_range()."""
 
     def test_returns_true_when_ecs_task_started(self):
         """Service returns True when range exists, can be resumed, and ECS task starts."""
@@ -157,9 +145,9 @@ class TestResumeRange:
             result = resume_range(request_id)
             assert result is False
 
-    # -------------------------------------------------------------------------
-    # Side effects - status update and ECS operation
-    # -------------------------------------------------------------------------
+
+class TestResumeRangeStateMutation:
+    """State mutation tests for resume_range()."""
 
     def test_sets_status_to_resuming(self):
         """Service sets range status to RESUMING."""
@@ -248,9 +236,9 @@ class TestResumeRange:
 
             mock_operation.assert_not_called()
 
-    # -------------------------------------------------------------------------
-    # ECS failure recovery (Fix 3)
-    # -------------------------------------------------------------------------
+
+class TestResumeRangeErrorReversion:
+    """Error reversion tests for resume_range()."""
 
     def test_reverts_status_when_ecs_returns_none(self):
         """Service reverts status to PAUSED when ECS returns None."""
@@ -320,9 +308,9 @@ class TestResumeRange:
             result = resume_range(request_id)
             assert result is False
 
-    # -------------------------------------------------------------------------
-    # Logging
-    # -------------------------------------------------------------------------
+
+class TestResumeRangeLogging:
+    """Logging tests for resume_range()."""
 
     def test_logs_debug_on_entry(self, caplog):
         """Service logs debug on entry with request_id."""

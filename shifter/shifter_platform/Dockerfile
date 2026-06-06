@@ -5,10 +5,6 @@ FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
 
 WORKDIR /app
 
-# Copy the Django-free shared packages first (better layer caching)
-COPY cyberscript /cyberscript
-COPY installation /installation
-
 # Copy dependency files. requirements-gcp.lock is the pinned + hashed compile of
 # requirements-gcp.txt; regenerate it with:
 #   uv export --no-emit-project --frozen --no-hashes > /tmp/constraint.txt
@@ -16,37 +12,29 @@ COPY installation /installation
 #     --python-version 3.12 --generate-hashes -o requirements-gcp.lock
 COPY shifter_platform/pyproject.toml shifter_platform/uv.lock shifter_platform/requirements-gcp.lock ./
 
-# Export the platform's frozen lock to a hashed requirements.txt and install everything
-# from it with hashes enforced and wheels only — no source builds, so no third-party
+# Export the platform's frozen lock to a hashed requirements.txt and install every
+# third-party dependency with hashes enforced and wheels only — no source builds, so no
 # setup scripts execute at install time (docker:S8541) and every version is locked and
 # integrity-checked (docker:S8544). requirements-gcp.lock is installed the same way and
 # is constrained to the frozen lock, so shared transitive deps stay at the locked
-# versions rather than an unpinned rebuild-time resolution. The local shared packages —
-# cyberscript (data contracts) and installation (root installation config;
-# Django/workers/provisioner derive runtime config from it) — are first-party source, so
-# they are built to wheels and installed --no-deps / wheel-only.
+# versions rather than an unpinned rebuild-time resolution.
 # --no-config: requirements.txt / requirements-gcp.lock are already fully resolved
 # against the frozen lock (which incorporated [tool.uv].constraint-dependencies), so the
 # install must NOT re-read pyproject's unpinned [tool.uv] constraints — under
 # --require-hashes those `>=` entries would be rejected as not `==`-pinned.
 # py-ubjson (a vestigial autobahn->daphne transitive) ships sdist-only with no wheel on
-# any platform, so it is the single --no-binary source exception; everything else is
-# wheel-only. It is version-pinned and hash-verified, and has a pure-Python fallback so
-# it needs no compiler. The first-party wheels are installed by explicit versioned
-# filename (not a *.whl glob, which reads as an unlocked resolution); bump these paths
-# when cyberscript/installation change version in their pyproject.toml.
+# any platform, so it is the single --no-binary source exception; it is version-pinned
+# and hash-verified, with a pure-Python fallback so it needs no compiler.
+# The first-party packages (cyberscript, installation) are NOT installed here: they are
+# first-party source with no external resolution to lock or hash, so they ride on
+# PYTHONPATH in the production stage instead of through a pip install.
 RUN uv export --no-emit-project --frozen > requirements.txt && \
     uv pip install --system --no-cache --no-config \
         --require-hashes --only-binary :all: --no-binary py-ubjson \
         -r requirements.txt && \
     uv pip install --system --no-cache --no-config \
         --require-hashes --only-binary :all: \
-        -r requirements-gcp.lock && \
-    uv build --wheel /cyberscript --out-dir /wheels && \
-    uv build --wheel /installation --out-dir /wheels && \
-    uv pip install --system --no-cache --no-config --no-deps --only-binary :all: \
-        /wheels/cyberscript-0.1.0-py3-none-any.whl \
-        /wheels/installation-0.2.0-py3-none-any.whl
+        -r requirements-gcp.lock
 
 # Production stage
 FROM python:3.12-slim-trixie AS production
@@ -69,6 +57,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin/gunicorn /usr/local/bin/daphne /usr/local/bin/django-admin /usr/local/bin/
 
+# First-party shared packages on PYTHONPATH (cyberscript = data contracts, installation =
+# root installation config). They are first-party source with no external dependency to
+# lock/hash, so they ride on PYTHONPATH rather than a pip install, which Sonar flags as an
+# unlocked/unhashed resolution (docker:S8544). Flat-layout packages: the directory IS the
+# importable package.
+COPY cyberscript /opt/shifter-libs/cyberscript
+COPY installation /opt/shifter-libs/installation
+
 # Copy application code (context is now shifter/, so path is shifter_platform)
 COPY --chown=appuser:appgroup shifter_platform .
 
@@ -77,7 +73,8 @@ RUN mkdir -p /app/staticfiles && chown appuser:appgroup /app/staticfiles
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt/shifter-libs
 
 # Switch to non-root user
 USER appuser

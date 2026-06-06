@@ -648,110 +648,85 @@ def scenario_delete_view(request: HttpRequest, scenario_id: str) -> HttpResponse
         )
 
 
+def _toggle_scenario_metadata_flag(
+    request: HttpRequest,
+    scenario_id: str,
+    *,
+    field: str,
+    default: bool,
+    log_name: str,
+    on_message: str,
+    off_message: str,
+) -> HttpResponse:
+    """Flip a boolean scenario metadata flag (enabled / staff_only) and redirect to the list.
+
+    Shared by the enabled and staff-only toggles. ``get_scenario_detail`` raises
+    ``ValueError`` for a missing scenario (404); ``update_metadata`` raises
+    ``ScenarioEditorError`` (rendered at 200) and anything else is a 500.
+    """
+    try:
+        current = get_scenario_detail(scenario_id)
+        new_value = not current.get(field, default)
+        update_metadata(cast("User", request.user), scenario_id, **{field: new_value})
+    except ValueError:
+        logger.warning("%s: scenario not found scenario_id=%s", log_name, safe_log_value(scenario_id))
+        return render(request, "scenario_editor/not_found.html", {"scenario_id": scenario_id}, status=404)
+    except Exception as e:
+        known = isinstance(e, ScenarioEditorError)
+        if not known:
+            logger.exception(
+                "%s: unexpected error for user_id=%s, scenario_id=%s",
+                log_name,
+                request.user.id,
+                safe_log_value(scenario_id),
+            )
+        return render(
+            request,
+            "scenario_editor/error.html",
+            {"message": str(e) if known else "An unexpected error occurred. Please try again."},
+            status=200 if known else 500,
+        )
+
+    logger.info(
+        "%s: toggled %s=%s for scenario_id=%s by user_id=%s",
+        log_name,
+        field,
+        new_value,
+        safe_log_value(scenario_id),
+        request.user.id,
+    )
+    messages.success(request, on_message if new_value else off_message)
+    return redirect("scenario_editor:list")
+
+
 @threat_research_required
 @require_POST
 def scenario_toggle_enabled(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Toggle enabled state for a scenario."""
-    try:
-        try:
-            current = get_scenario_detail(scenario_id)
-        except ValueError:
-            logger.warning("scenario_toggle_enabled: scenario not found scenario_id=%s", safe_log_value(scenario_id))
-            return render(
-                request,
-                "scenario_editor/not_found.html",
-                {
-                    "scenario_id": scenario_id,
-                },
-                status=404,
-            )
-
-        new_enabled = not current.get("enabled", True)
-
-        try:
-            update_metadata(cast("User", request.user), scenario_id, enabled=new_enabled)
-        except ScenarioEditorError as e:
-            return render(
-                request,
-                "scenario_editor/error.html",
-                {
-                    "message": str(e),
-                },
-            )
-
-        logger.info(
-            "scenario_toggle_enabled: toggled enabled=%s for scenario_id=%s by user_id=%s",
-            new_enabled,
-            safe_log_value(scenario_id),
-            request.user.id,
-        )
-        messages.success(request, f"Scenario {'enabled' if new_enabled else 'disabled'} successfully.")
-        return redirect("scenario_editor:list")
-    except Exception:
-        logger.exception(
-            "scenario_toggle_enabled: unexpected error for user_id=%s, scenario_id=%s",
-            request.user.id,
-            safe_log_value(scenario_id),
-        )
-        return render(
-            request,
-            "scenario_editor/error.html",
-            {"message": "An unexpected error occurred. Please try again."},
-            status=500,
-        )
+    return _toggle_scenario_metadata_flag(
+        request,
+        scenario_id,
+        field="enabled",
+        default=True,
+        log_name="scenario_toggle_enabled",
+        on_message="Scenario enabled successfully.",
+        off_message="Scenario disabled successfully.",
+    )
 
 
 @threat_research_required
 @require_POST
 def scenario_toggle_staff_only(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Toggle staff_only state for a scenario."""
-    try:
-        try:
-            current = get_scenario_detail(scenario_id)
-        except ValueError:
-            logger.warning("scenario_toggle_staff_only: scenario not found scenario_id=%s", safe_log_value(scenario_id))
-            return render(
-                request,
-                "scenario_editor/not_found.html",
-                {
-                    "scenario_id": scenario_id,
-                },
-                status=404,
-            )
-
-        new_staff_only = not current.get("staff_only", False)
-
-        try:
-            update_metadata(cast("User", request.user), scenario_id, staff_only=new_staff_only)
-        except ScenarioEditorError as e:
-            return render(
-                request,
-                "scenario_editor/error.html",
-                {
-                    "message": str(e),
-                },
-            )
-
-        logger.info(
-            "scenario_toggle_staff_only: toggled staff_only=%s for scenario_id=%s by user_id=%s",
-            new_staff_only,
-            safe_log_value(scenario_id),
-            request.user.id,
-        )
-        messages.success(request, f"Access set to {'staff only' if new_staff_only else 'all users'} successfully.")
-        return redirect("scenario_editor:list")
-    except Exception:
-        logger.exception(
-            "scenario_toggle_staff_only: unexpected error for user_id=%s, scenario_id=%s",
-            request.user.id,
-            safe_log_value(scenario_id),
-        )
-        return render(
-            request,
-            "scenario_editor/error.html",
-            {"message": "An unexpected error occurred. Please try again."},
-            status=500,
-        )
+    return _toggle_scenario_metadata_flag(
+        request,
+        scenario_id,
+        field="staff_only",
+        default=False,
+        log_name="scenario_toggle_staff_only",
+        on_message="Access set to staff only successfully.",
+        off_message="Access set to all users successfully.",
+    )
 
 
 @threat_research_required

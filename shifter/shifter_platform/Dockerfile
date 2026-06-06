@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Build stage - use uv's official image for faster builds
-FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
+# Build stage - use uv's official image for faster builds.
+# Pinned by digest for reproducible, integrity-checked builds; the
+# `docker` dependabot ecosystem bumps the digest when the tag is rebuilt
+# with security patches.
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim@sha256:1189a633dc687f42a22343bcea73d9c7d1bceca4ba21e366ae6ca4179a15bb9f AS builder
 
 WORKDIR /app
 
@@ -36,8 +39,17 @@ RUN uv export --no-emit-project --frozen > requirements.txt && \
         --require-hashes --only-binary :all: \
         -r requirements-gcp.lock
 
-# Production stage
-FROM python:3.12-slim-trixie AS production
+# Production stage. Base image pinned by digest (reproducible + integrity-
+# checked); the `docker` dependabot ecosystem bumps it on upstream rebuilds.
+FROM python:3.12-slim-trixie@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 AS production
+
+# OCI image metadata (org.opencontainers.image.* is the modern replacement for
+# the deprecated MAINTAINER instruction / `maintainer` label).
+LABEL org.opencontainers.image.title="shifter-portal" \
+      org.opencontainers.image.description="Shifter platform portal (Django: Mission Control, CMS, CTF, Management)" \
+      org.opencontainers.image.source="https://github.com/Brad-Edwards/shifter" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.authors="Shifter maintainers"
 
 WORKDIR /app
 

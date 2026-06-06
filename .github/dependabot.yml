@@ -234,3 +234,13 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # Auto-bump the digest-pinned base images in the portal Dockerfile so the
+  # pins stay current with upstream security rebuilds (the FROM lines are
+  # pinned by @sha256 for reproducible, integrity-checked builds).
+  - package-ecosystem: "docker"
+    directory: "/shifter/shifter_platform"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

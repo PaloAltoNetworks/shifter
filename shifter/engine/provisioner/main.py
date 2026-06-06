@@ -219,17 +219,19 @@ NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500
 # suppressions) so ``main`` exposes the same surface as the pre-split module.
 from provisioner_db import (  # noqa: E402
     _append_kwarg_assignment,
-    _build_ngfw_range_attachment_record,
-    _record_ngfw_range_attachment,
-    _remove_ngfw_range_attachment,
     _update_range_config,
     get_db_connection,
-    get_ngfw_data_by_request_id,
     get_range_data_by_request_id,
-    get_user_ngfw_data,
     mark_range_instances_destroyed,
     update_range_status,
     write_provisioned_state,
+)
+from provisioner_db_ngfw import (  # noqa: E402
+    _build_ngfw_range_attachment_record,
+    _record_ngfw_range_attachment,
+    _remove_ngfw_range_attachment,
+    get_ngfw_data_by_request_id,
+    get_user_ngfw_data,
 )
 
 _DB_REEXPORTS_USED = (

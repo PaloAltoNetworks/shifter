@@ -2077,6 +2077,63 @@ def admin_bracket_delete(request: HttpRequest, bracket_id: UUID) -> HttpResponse
     return redirect("ctf:admin_bracket_list", event_id=event.id)
 
 
+def _resolve_owned_participant(
+    request: HttpRequest, participant_id: UUID
+) -> tuple[CTFParticipant | None, JsonResponse | None]:
+    """Resolve a participant and enforce event ownership; return (participant, error_response)."""
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_participant
+
+    try:
+        participant = get_participant(participant_id)
+    except CTFNotFoundError:
+        return None, JsonResponse({"error": "Participant not found"}, status=404)
+
+    if participant.event.created_by_id != request.user.pk:
+        return None, JsonResponse({"error": "Forbidden"}, status=403)
+
+    return participant, None
+
+
+def _set_participant_bracket(participant_id: UUID, bracket_id: object) -> JsonResponse:
+    """Assign (bracket_id given) or remove (bracket_id None) a participant's bracket."""
+    if bracket_id is None:
+        from ctf.services.bracket import remove_participant_bracket
+
+        remove_participant_bracket(participant_id)
+        return JsonResponse({"status": "ok", "bracket": None})
+
+    from uuid import UUID as _UUID
+
+    from django.core.exceptions import ValidationError
+
+    from ctf.models import CTFBracket
+    from ctf.services.bracket import assign_participant_bracket
+
+    participant = None
+    error: tuple[str, int] | None = None
+    try:
+        bracket_uuid = _UUID(str(bracket_id))
+        participant = assign_participant_bracket(participant_id, bracket_uuid)
+    except ValueError:
+        error = ("Invalid bracket ID format", 400)
+    except ValidationError:
+        error = ("Bracket and participant must belong to the same event", 400)
+    except CTFBracket.DoesNotExist:
+        error = ("Bracket not found", 404)
+    if error is not None:
+        return JsonResponse({"error": error[0]}, status=error[1])
+
+    assert participant is not None
+    bracket = participant.bracket
+    return JsonResponse(
+        {
+            "status": "ok",
+            "bracket": {"id": str(bracket.id), "name": bracket.name} if bracket else None,
+        }
+    )
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["POST"])
@@ -2088,54 +2145,16 @@ def api_assign_bracket(request: HttpRequest, participant_id: UUID) -> JsonRespon
     Args:
         participant_id: UUID of the participant.
     """
-    from ctf.exceptions import CTFNotFoundError
-    from ctf.services import get_participant
-
-    try:
-        participant = get_participant(participant_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Participant not found"}, status=404)
-
-    if participant.event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+    _participant, error = _resolve_owned_participant(request, participant_id)
+    if error is not None:
+        return error
 
     try:
         body = _parse_body_object(request)
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    bracket_id = body.get("bracket_id")
-
-    if bracket_id is None:
-        from ctf.services.bracket import remove_participant_bracket
-
-        remove_participant_bracket(participant_id)
-        return JsonResponse({"status": "ok", "bracket": None})
-    else:
-        from uuid import UUID as _UUID
-
-        from django.core.exceptions import ValidationError
-
-        from ctf.models import CTFBracket
-        from ctf.services.bracket import assign_participant_bracket
-
-        try:
-            bracket_uuid = _UUID(str(bracket_id))
-            participant = assign_participant_bracket(participant_id, bracket_uuid)
-        except ValueError:
-            return JsonResponse({"error": "Invalid bracket ID format"}, status=400)
-        except ValidationError:
-            return JsonResponse({"error": "Bracket and participant must belong to the same event"}, status=400)
-        except CTFBracket.DoesNotExist:
-            return JsonResponse({"error": "Bracket not found"}, status=404)
-
-        bracket = participant.bracket
-        return JsonResponse(
-            {
-                "status": "ok",
-                "bracket": {"id": str(bracket.id), "name": bracket.name} if bracket else None,
-            }
-        )
+    return _set_participant_bracket(participant_id, body.get("bracket_id"))
 
 
 @login_required
@@ -2200,15 +2219,8 @@ def admin_notification_list(request: HttpRequest, event_id: UUID) -> HttpRespons
     )
 
 
-@login_required
-@ctf_organizer_required
-@require_http_methods(["GET", "POST"])
-def admin_notification_create(request: HttpRequest, event_id: UUID) -> HttpResponse:
-    """Create new notification.
-
-    Args:
-        event_id: UUID of the event.
-    """
+def _resolve_owned_event_or_404(request: HttpRequest, event_id: UUID) -> tuple[CTFEvent | None, HttpResponse | None]:
+    """Resolve an event (Http404 if missing) and enforce ownership; return (event, error_response)."""
     from django.http import Http404
 
     from ctf.exceptions import CTFNotFoundError
@@ -2220,66 +2232,88 @@ def admin_notification_create(request: HttpRequest, event_id: UUID) -> HttpRespo
         raise Http404("Event not found") from None
 
     if event.created_by_id != request.user.pk:
-        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+        return None, HttpResponse("Forbidden: You do not have access to this event", status=403)
 
-    if request.method == "POST":
-        from ctf.enums import NotificationStatus, NotificationType
-        from ctf.models import CTFNotification
-        from ctf.services import notification
+    return event, None
 
-        subject = request.POST.get("subject", "").strip()
-        body = request.POST.get("body", "").strip()
-        action = request.POST.get("action", "draft")
 
-        if not subject or not body:
+def _handle_notification_create_post(request: HttpRequest, event: CTFEvent) -> HttpResponse:
+    """Create, schedule, or send an announcement notification; re-render the form on error."""
+    from ctf.enums import NotificationStatus, NotificationType
+    from ctf.models import CTFNotification
+    from ctf.services import notification
+
+    subject = request.POST.get("subject", "").strip()
+    body = request.POST.get("body", "").strip()
+    action = request.POST.get("action", "draft")
+
+    if not subject or not body:
+        return render(
+            request,
+            "ctf/admin/notification_form.html",
+            {"event": event, "error": "Subject and body are required."},
+        )
+
+    if action == "send_now":
+        notification.send_announcement(
+            event_id=event.id,
+            subject=subject,
+            body=body,
+            created_by=_get_user(request),
+        )
+    elif action == "schedule":
+        from django.utils.dateparse import parse_datetime
+
+        scheduled_at = parse_datetime(request.POST.get("scheduled_at", ""))
+        if not scheduled_at:
             return render(
                 request,
                 "ctf/admin/notification_form.html",
-                {"event": event, "error": "Subject and body are required."},
+                {"event": event, "error": "Valid schedule time is required."},
             )
+        notif = CTFNotification.objects.create(
+            event=event,
+            notification_type=NotificationType.ANNOUNCEMENT.value,
+            subject=subject,
+            body=body,
+            status=NotificationStatus.DRAFT.value,
+            recipient_filter="participants",
+            created_by=_get_user(request),
+        )
+        notification.schedule_notification(notif.id, scheduled_at)
+    else:
+        # Save as draft
+        CTFNotification.objects.create(
+            event=event,
+            notification_type=NotificationType.ANNOUNCEMENT.value,
+            subject=subject,
+            body=body,
+            status=NotificationStatus.DRAFT.value,
+            recipient_filter="participants",
+            created_by=_get_user(request),
+        )
 
-        if action == "send_now":
-            notif = notification.send_announcement(
-                event_id=event.id,
-                subject=subject,
-                body=body,
-                created_by=_get_user(request),
-            )
-        elif action == "schedule":
-            from django.utils.dateparse import parse_datetime
+    from django.shortcuts import redirect
 
-            scheduled_at = parse_datetime(request.POST.get("scheduled_at", ""))
-            if not scheduled_at:
-                return render(
-                    request,
-                    "ctf/admin/notification_form.html",
-                    {"event": event, "error": "Valid schedule time is required."},
-                )
-            notif = CTFNotification.objects.create(
-                event=event,
-                notification_type=NotificationType.ANNOUNCEMENT.value,
-                subject=subject,
-                body=body,
-                status=NotificationStatus.DRAFT.value,
-                recipient_filter="participants",
-                created_by=_get_user(request),
-            )
-            notification.schedule_notification(notif.id, scheduled_at)
-        else:
-            # Save as draft
-            CTFNotification.objects.create(
-                event=event,
-                notification_type=NotificationType.ANNOUNCEMENT.value,
-                subject=subject,
-                body=body,
-                status=NotificationStatus.DRAFT.value,
-                recipient_filter="participants",
-                created_by=_get_user(request),
-            )
+    return redirect("ctf:admin_notification_list", event_id=event.id)
 
-        from django.shortcuts import redirect
 
-        return redirect("ctf:admin_notification_list", event_id=event.id)
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "POST"])
+def admin_notification_create(request: HttpRequest, event_id: UUID) -> HttpResponse:
+    """Create new notification.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    event, error = _resolve_owned_event_or_404(request, event_id)
+    if error is not None:
+        return error
+    assert event is not None
+
+    if request.method == "POST":
+        return _handle_notification_create_post(request, event)
 
     return render(
         request,
@@ -2385,6 +2419,48 @@ def admin_analytics(request: HttpRequest, event_id: UUID) -> HttpResponse:
 # -----------------------------------------------------------------------------
 
 
+def _handle_event_create_post(request: HttpRequest, user: User) -> JsonResponse:
+    """Create an event from the POST body, returning a 201 payload or a 400 error."""
+    from ctf.exceptions import CTFValidationError
+    from ctf.services import create_event
+
+    try:
+        body = _parse_body_object(request)
+    except _BodyParseError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    # Parse datetime strings to datetime objects for the service layer
+    from django.utils.dateparse import parse_datetime
+
+    for field in ("event_start", "event_end", "registration_deadline"):
+        if field in body and isinstance(body[field], str):
+            parsed = parse_datetime(body[field])
+            if parsed:
+                body[field] = parsed
+
+    event = None
+    error_message = None
+    try:
+        event = create_event(user, body)
+    except CTFValidationError as e:
+        error_message = str(e)
+    except ValidationError as e:
+        # Django model validation (from full_clean in save)
+        error_message = "; ".join(e.messages)
+    if error_message is not None:
+        return JsonResponse({"error": error_message}, status=400)
+
+    assert event is not None
+    return JsonResponse(
+        {
+            "id": str(event.id),
+            "name": event.name,
+            "status": event.status,
+        },
+        status=201,
+    )
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "POST"])
@@ -2394,8 +2470,7 @@ def api_event_list(request: HttpRequest) -> JsonResponse:
     GET: List events for organizer.
     POST: Create new event.
     """
-    from ctf.exceptions import CTFValidationError
-    from ctf.services import create_event, get_organizer_events
+    from ctf.services import get_organizer_events
 
     user = _get_user(request)
 
@@ -2414,39 +2489,10 @@ def api_event_list(request: HttpRequest) -> JsonResponse:
         ]
         return JsonResponse({"events": data})
 
-    # POST
-    try:
-        body = _parse_body_object(request)
-    except _BodyParseError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    # Parse datetime strings to datetime objects for the service layer
-    from django.utils.dateparse import parse_datetime
-
-    for field in ("event_start", "event_end", "registration_deadline"):
-        if field in body and isinstance(body[field], str):
-            parsed = parse_datetime(body[field])
-            if parsed:
-                body[field] = parsed
-
-    try:
-        event = create_event(user, body)
-        return JsonResponse(
-            {
-                "id": str(event.id),
-                "name": event.name,
-                "status": event.status,
-            },
-            status=201,
-        )
-    except CTFValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-    except ValidationError as e:
-        # Django model validation (from full_clean in save)
-        return JsonResponse({"error": "; ".join(e.messages)}, status=400)
+    return _handle_event_create_post(request, user)
 
 
-def _event_detail_payload(event) -> dict:
+def _event_detail_payload(event: CTFEvent) -> dict[str, Any]:
     """Render the GET-event JSON payload for `api_event_detail`."""
     return {
         "id": str(event.id),
@@ -2473,7 +2519,7 @@ def _event_detail_payload(event) -> dict:
     }
 
 
-def _coerce_event_datetime_fields(body: dict) -> None:
+def _coerce_event_datetime_fields(body: dict[str, Any]) -> None:
     """In-place: parse ISO datetime strings on the four scheduling fields."""
     from django.utils.dateparse import parse_datetime
 
@@ -2482,6 +2528,68 @@ def _coerce_event_datetime_fields(body: dict) -> None:
             parsed = parse_datetime(body[field])
             if parsed:
                 body[field] = parsed
+
+
+def _resolve_owned_event_json(request: HttpRequest, event_id: UUID) -> tuple[CTFEvent | None, JsonResponse | None]:
+    """Resolve an event (404 if missing) and enforce ownership; return (event, error_response)."""
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return None, JsonResponse({"error": "Event not found"}, status=404)
+
+    if event.created_by_id != request.user.pk:
+        return None, JsonResponse({"error": "Forbidden"}, status=403)
+
+    return event, None
+
+
+def _handle_event_update_put(request: HttpRequest, event_id: UUID) -> JsonResponse:
+    """Update an event from the PUT body, returning the updated payload or a 400 error."""
+    from ctf.exceptions import CTFStateError, CTFValidationError
+    from ctf.services import update_event
+
+    try:
+        body = _parse_body_object(request)
+    except _BodyParseError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    _coerce_event_datetime_fields(body)
+
+    updated = None
+    error_message = None
+    try:
+        updated = update_event(event_id, body)
+    except (CTFValidationError, CTFStateError) as e:
+        error_message = str(e)
+    except ValidationError as e:
+        error_message = "; ".join(e.messages)
+    if error_message is not None:
+        return JsonResponse({"error": error_message}, status=400)
+
+    assert updated is not None
+    return JsonResponse(
+        {
+            "id": str(updated.id),
+            "name": updated.name,
+            "status": updated.status,
+        }
+    )
+
+
+def _dispatch_event_detail_method(request: HttpRequest, event: CTFEvent, event_id: UUID) -> JsonResponse:
+    """Dispatch GET/DELETE/PUT for an already-resolved, owned event."""
+    if request.method == "GET":
+        return JsonResponse(_event_detail_payload(event))
+
+    if request.method == "DELETE":
+        from ctf.services import delete_event
+
+        delete_event(event_id)
+        return JsonResponse({}, status=204)
+
+    return _handle_event_update_put(request, event_id)
 
 
 @login_required
@@ -2493,46 +2601,33 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFNotFoundError
-    from ctf.services import get_event
+    event, error = _resolve_owned_event_json(request, event_id)
+    if error is not None:
+        return error
+    assert event is not None
+    return _dispatch_event_detail_method(request, event, event_id)
 
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Event not found"}, status=404)
 
-    if event.created_by_id != request.user.pk:
-        return JsonResponse({"error": "Forbidden"}, status=403)
+def _force_delete_event_response(request: HttpRequest, event_id: UUID) -> JsonResponse:
+    """Validate the confirmation name and force-delete the event, returning the result or a 400 error."""
+    from ctf.exceptions import CTFValidationError
+    from ctf.services import force_delete_event
 
-    from ctf.exceptions import CTFStateError, CTFValidationError
-    from ctf.services import delete_event, update_event
-
-    if request.method == "GET":
-        return JsonResponse(_event_detail_payload(event))
-
-    if request.method == "DELETE":
-        delete_event(event_id)
-        return JsonResponse({}, status=204)
-
-    # PUT
     try:
         body = _parse_body_object(request)
+        confirmation_name = body.get("confirmation_name")
+        if not confirmation_name:
+            raise _BodyParseError("confirmation_name is required")
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
-    _coerce_event_datetime_fields(body)
+
+    user = _get_user(request)
     try:
-        updated = update_event(event_id, body)
-        return JsonResponse(
-            {
-                "id": str(updated.id),
-                "name": updated.name,
-                "status": updated.status,
-            }
-        )
-    except (CTFValidationError, CTFStateError) as e:
+        result = force_delete_event(event_id, user, confirmation_name)
+    except CTFValidationError as e:
         return JsonResponse({"error": str(e)}, status=400)
-    except ValidationError as e:
-        return JsonResponse({"error": "; ".join(e.messages)}, status=400)
+
+    return JsonResponse(result)
 
 
 @login_required
@@ -2546,9 +2641,7 @@ def api_force_delete_event(request: HttpRequest, event_id: UUID) -> JsonResponse
     Args:
         event_id: UUID of the event.
     """
-    from ctf.exceptions import CTFValidationError
     from ctf.models import CTFEvent
-    from ctf.services import force_delete_event
 
     try:
         event = CTFEvent.all_objects.get(pk=event_id)
@@ -2558,21 +2651,7 @@ def api_force_delete_event(request: HttpRequest, event_id: UUID) -> JsonResponse
     if event.created_by_id != request.user.pk:
         return JsonResponse({"error": "Forbidden"}, status=403)
 
-    try:
-        body = _parse_body_object(request)
-    except _BodyParseError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    confirmation_name = body.get("confirmation_name")
-    if not confirmation_name:
-        return JsonResponse({"error": "confirmation_name is required"}, status=400)
-
-    try:
-        result = force_delete_event(event_id, request.user, confirmation_name)
-    except CTFValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    return JsonResponse(result)
+    return _force_delete_event_response(request, event_id)
 
 
 @login_required

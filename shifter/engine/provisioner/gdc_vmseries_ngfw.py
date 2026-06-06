@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess  # nosec B404 - used for kubectl virt runtime operations
+
+# subprocess drives kubectl virt start/stop runtime operations (see run_power_operation).
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, select_autoescape
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+    from types import ModuleType
+
+    from kubernetes.client import CoreV1Api, CustomObjectsApi
+    from kubernetes.client.exceptions import ApiException
 
 from cloud.gcp.base import get_project_id, import_google_module
 from config import (
@@ -54,33 +63,40 @@ _GCS_PREFIX = "gs://"
 
 
 def _namespace_name(config: GDCPaloAltoVMSeriesConfig, user_id: int) -> str:
+    """Return the per-user GDC namespace for the VM-Series range plane."""
     return _sanitize_name(f"{config.namespace_prefix}-user-{user_id}")
 
 
 def _resource_prefix(user_id: int, instance_id: str) -> str:
+    """Return the shared name prefix for a user's VM-Series Kubernetes resources."""
     instance_token = _sanitize_name(str(instance_id).split("-")[0], max_length=12)
     return _sanitize_name(f"ngfw-user-{user_id}-{instance_token}")
 
 
 def _vm_name(user_id: int, instance_id: str) -> str:
+    """Return the VirtualMachine resource name for the given user/instance."""
     return _resource_prefix(user_id, instance_id)
 
 
 def _boot_disk_name(vm_name: str) -> str:
+    """Return the boot-disk resource name derived from a VM name."""
     return _sanitize_name(f"{vm_name}-boot")
 
 
 def _bootstrap_disk_name(vm_name: str) -> str:
+    """Return the bootstrap-disk resource name derived from a VM name."""
     return _sanitize_name(f"{vm_name}-bootstrap")
 
 
 def _ssh_secret_id(user_id: int, instance_id: str) -> str:
+    """Return the Secret Manager secret id holding the VM-Series SSH key."""
     environment = _sanitize_name(os.environ.get("ENVIRONMENT", "gcp-dev"), max_length=32)
     instance_token = str(instance_id).split("-")[0]
     return _sanitize_name(f"shifter-{environment}-ngfw-user-{user_id}-{instance_token}-ssh", max_length=255)
 
 
 def _labels(*, user_id: int, request_id: str, instance_id: str) -> dict[str, str]:
+    """Return the standard Kubernetes labels applied to VM-Series resources."""
     return {
         "app.kubernetes.io/managed-by": _MANAGED_BY_LABEL,
         "shifter.dev/component": "ngfw",
@@ -92,7 +108,10 @@ def _labels(*, user_id: int, request_id: str, instance_id: str) -> dict[str, str
     }
 
 
-def _ensure_namespace(core_api, namespace: str, labels: dict[str, str], api_exception) -> None:
+def _ensure_namespace(
+    core_api: CoreV1Api, namespace: str, labels: dict[str, str], api_exception: type[ApiException]
+) -> None:
+    """Create the VM-Series namespace, or patch its labels if it already exists."""
     body = {"metadata": {"name": namespace, "labels": labels}}
     try:
         core_api.create_namespace(body=body)
@@ -104,6 +123,10 @@ def _ensure_namespace(core_api, namespace: str, labels: dict[str, str], api_exce
 
 
 def _ensure_ssh_secret(user_id: int, instance_id: str) -> tuple[str, str]:
+    """Fetch or create the VM-Series SSH keypair in Secret Manager.
+
+    Returns the full secret resource name and the derived public key.
+    """
     project_id = get_project_id()
     if not project_id:
         raise RuntimeError("GCP project ID is required to manage GDC VM-Series SSH secrets")
@@ -138,12 +161,16 @@ def _ensure_ssh_secret(user_id: int, instance_id: str) -> tuple[str, str]:
 
 
 def _ensure_gcs_image_secret(
-    core_api,
-    client_module,
+    core_api: CoreV1Api,
+    client_module: ModuleType,
     namespace: str,
     config: GDCPaloAltoVMSeriesConfig,
-    api_exception,
+    api_exception: type[ApiException],
 ) -> str | None:
+    """Create or update the namespaced secret that grants GCS image-pull access.
+
+    Returns the secret name, or ``None`` when no image GCS secret is configured.
+    """
     if not config.image_gcs_secret_id:
         return None
 
@@ -173,6 +200,7 @@ def _ensure_gcs_image_secret(
 
 
 def _delete_ssh_secret(secret_ref: str) -> None:
+    """Delete the VM-Series SSH secret, ignoring an already-absent secret."""
     if not secret_ref:
         return
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
@@ -186,6 +214,7 @@ def _delete_ssh_secret(secret_ref: str) -> None:
 
 
 def _build_init_cfg(*, hostname: str, app_spec: dict[str, Any]) -> str:
+    """Render the PAN-OS ``init-cfg.txt`` bootstrap content for the firewall."""
     lines = [
         "type=dhcp-client",
         f"hostname={hostname}",
@@ -212,6 +241,10 @@ def _render_bootstrap_xml(
     hostname: str,
     app_spec: dict[str, Any],
 ) -> str:
+    """Render the optional ``bootstrap.xml`` from its Jinja template secret.
+
+    Returns an empty string when no bootstrap-XML template is configured.
+    """
     if not config.bootstrap_xml_template_secret_id:
         return ""
 
@@ -241,6 +274,10 @@ def _write_bootstrap_iso(
     authcode: str,
     bootstrap_xml: str,
 ) -> None:
+    """Write the PAN-OS bootstrap ISO9660 image to ``iso_path``.
+
+    Requires the optional ``pycdlib`` GCP provisioner extra.
+    """
     try:
         import pycdlib
     except ImportError as exc:
@@ -296,6 +333,7 @@ def _upload_bootstrap_iso(
     instance_id: str,
     iso_path: Path,
 ) -> str:
+    """Upload the bootstrap ISO to the configured GCS bucket and return its URL."""
     storage = import_google_module("google.cloud.storage")
     client = storage.Client()
     key = f"bootstrap/ngfw/{instance_id}/bootstrap.iso"
@@ -307,6 +345,7 @@ def _upload_bootstrap_iso(
 
 
 def _delete_bootstrap_iso(bootstrap_gcs_url: str) -> None:
+    """Delete the bootstrap ISO from GCS, ignoring an already-absent object."""
     if not bootstrap_gcs_url.startswith(_GCS_PREFIX):
         return
     storage = import_google_module("google.cloud.storage")
@@ -329,6 +368,7 @@ def _create_bootstrap_iso(
     app_spec: dict[str, Any],
     public_key: str,
 ) -> str:
+    """Build the bootstrap ISO and upload it to GCS, returning its URL."""
     init_cfg = _build_init_cfg(hostname=hostname, app_spec=app_spec)
     bootstrap_xml = _render_bootstrap_xml(
         config=config,
@@ -362,6 +402,7 @@ def _build_bootstrap_disk_manifest(
     storage_class_name: str,
     labels: dict[str, str],
 ) -> dict[str, Any]:
+    """Build the VirtualMachineDisk manifest for the bootstrap (cdrom) disk."""
     manifest = {
         "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
         "kind": "VirtualMachineDisk",
@@ -381,6 +422,7 @@ def _build_bootstrap_disk_manifest(
 
 
 def _interface_manifest(*, name: str, network_name: str, ip_cidr: str, default: bool) -> dict[str, Any]:
+    """Build one VirtualMachine network-interface manifest entry."""
     interface = {
         "name": name,
         "networkName": network_name,
@@ -400,6 +442,7 @@ def _build_vmseries_vm_manifest(
     config: GDCPaloAltoVMSeriesConfig,
     labels: dict[str, str],
 ) -> dict[str, Any]:
+    """Build the VirtualMachine manifest with mgmt/data interfaces and disks."""
     return {
         "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
         "kind": "VirtualMachine",
@@ -445,10 +488,12 @@ def _build_vmseries_vm_manifest(
 
 
 def _ip_from_cidr(ip_cidr: str) -> str:
+    """Return the bare IP address from a ``ip/prefix`` CIDR string."""
     return ip_cidr.split("/", 1)[0].strip() if ip_cidr else ""
 
 
 def _extract_interface_ip(vm: dict[str, Any], interface_name: str) -> str:
+    """Return the first IP reported for ``interface_name`` in the VM status."""
     status = vm.get("status", {})
     for interface in status.get("interfaces", []) or []:
         if str(interface.get("name", "")).strip() != interface_name:
@@ -604,14 +649,18 @@ def apply_ngfw(
 
 
 def _delete_vm_series_resource(
-    custom_api,
+    custom_api: CustomObjectsApi,
     *,
     namespace: str,
     name: str,
     plural: str,
     label: str,
-    api_exception,
+    api_exception: type[ApiException],
 ) -> None:
+    """Delete a namespaced VM-Series custom object and wait for it to disappear.
+
+    A deletion timeout is logged as a warning rather than raised.
+    """
     _delete_namespaced_custom_object(
         custom_api,
         group=_VM_GROUP,
@@ -627,7 +676,8 @@ def _delete_vm_series_resource(
         logger.warning("Timed out waiting for GDC VM-Series %s %s/%s to delete", label, namespace, name)
 
 
-def _delete_image_import_secret(core_api, namespace: str, api_exception) -> None:
+def _delete_image_import_secret(core_api: CoreV1Api, namespace: str, api_exception: type[ApiException]) -> None:
+    """Delete the image-import secret, ignoring an already-absent secret (404)."""
     try:
         core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace)
     except api_exception as exc:
@@ -711,7 +761,7 @@ def run_power_operation(operation: str, state: dict[str, Any]) -> None:
         Path(kubeconfig_path).unlink(missing_ok=True)
 
 
-def contextlib_suppress(*exceptions):
+def contextlib_suppress(*exceptions: type[BaseException]) -> AbstractContextManager[None]:
     """Small wrapper to keep suppress local without shadowing test patches."""
     import contextlib
 

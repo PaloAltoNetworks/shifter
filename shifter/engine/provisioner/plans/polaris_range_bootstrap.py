@@ -539,7 +539,8 @@ class PolarisRangeBootstrapPlan:
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance: object) -> dict[str, Any]:
         """Return template variables for the polaris range bootstrap script.
 
         Args:

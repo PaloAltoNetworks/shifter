@@ -197,12 +197,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
           "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
           "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
           "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:route-table/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:internet-gateway/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:elastic-ip/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:natgateway/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint-service/*",
           "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
         ]
         Condition = {
@@ -626,10 +620,12 @@ resource "aws_iam_role_policy" "vpc_endpoints" {
 }
 
 # ------------------------------------------------------------------------------
-# Task Role Policy - S3 Bootstrap Write
+# Task Role Policy - Runtime Writes
 # ------------------------------------------------------------------------------
 # Provisioner needs write access to bootstrap/* prefix for NGFW init-cfg.txt,
-# authcodes, and other bootstrap configuration files.
+# authcodes, and other bootstrap configuration files. It also publishes range
+# lifecycle events to SNS. Keep these together so SCP-constrained accounts that
+# require inline policies stay under IAM's aggregate inline-role policy limit.
 
 resource "aws_iam_role_policy" "s3_bootstrap" {
   name = "s3-bootstrap-write"
@@ -637,15 +633,22 @@ resource "aws_iam_role_policy" "s3_bootstrap" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:GetObjectTagging"
-      ]
-      Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:GetObjectTagging"
+        ]
+        Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "sns:Publish"
+        Resource = var.sns_topic_arn
+      }
+    ]
   })
 }
 
@@ -810,27 +813,5 @@ resource "aws_iam_role_policy" "kms" {
         }
       }
     ]
-  })
-}
-
-# ------------------------------------------------------------------------------
-# Task Role Policy - SNS (for range event publishing)
-# ------------------------------------------------------------------------------
-# Provisioner publishes range lifecycle events to SNS for fan-out to
-# Django services (CMS, Engine, Mission Control).
-
-resource "aws_iam_role_policy" "sns_publish" {
-  name = "sns-publish"
-  role = aws_iam_role.ecs_task.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "sns:Publish"
-      ]
-      Resource = var.sns_topic_arn
-    }]
   })
 }

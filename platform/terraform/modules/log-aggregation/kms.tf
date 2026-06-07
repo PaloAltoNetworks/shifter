@@ -18,7 +18,7 @@ resource "aws_kms_key" "log_aggregation" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Sid       = "EnableRootAccountAdmin"
         Effect    = "Allow"
@@ -72,7 +72,21 @@ resource "aws_kms_key" "log_aggregation" {
         ]
         Resource = "*"
       },
-    ]
+      ],
+      length(var.source_log_group_names) > 0 ? [
+        {
+          Sid       = "AllowCloudWatchToFirehoseRole"
+          Effect    = "Allow"
+          Principal = { AWS = aws_iam_role.cloudwatch_to_firehose[0].arn }
+          Action = [
+            "kms:Decrypt",
+            "kms:DescribeKey",
+            "kms:GenerateDataKey",
+          ]
+          Resource = "*"
+        }
+      ] : []
+    )
   })
 
   tags = merge(local.common_tags, {

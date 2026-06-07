@@ -178,6 +178,42 @@ data "aws_iam_policy_document" "logs" {
     }
   }
 
+  # ALB access logs - modern ALB log delivery service principal.
+  dynamic "statement" {
+    for_each = var.enable_alb_access_logs ? [1] : []
+    content {
+      sid    = "AllowALBLogDeliveryWrite"
+      effect = "Allow"
+
+      principals {
+        type        = "Service"
+        identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
+      }
+
+      actions = ["s3:PutObject"]
+      resources = [
+        "${aws_s3_bucket.logs[0].arn}/alb/${var.name_prefix}/AWSLogs/${data.aws_caller_identity.current.account_id}/*",
+        "${aws_s3_bucket.logs[0].arn}/alb/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_alb_access_logs ? [1] : []
+    content {
+      sid    = "AllowALBLogDeliveryAclCheck"
+      effect = "Allow"
+
+      principals {
+        type        = "Service"
+        identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
+      }
+
+      actions   = ["s3:GetBucketAcl"]
+      resources = [aws_s3_bucket.logs[0].arn]
+    }
+  }
+
   # ALB access logs - delivery.logs.amazonaws.com for new format (conditional)
   dynamic "statement" {
     for_each = var.enable_alb_access_logs ? [1] : []

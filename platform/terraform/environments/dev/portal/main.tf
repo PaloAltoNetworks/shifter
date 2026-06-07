@@ -291,6 +291,7 @@ module "alb" {
   # Phase 5: ALB Access Logs and WAF Logging
   enable_access_logs      = var.enable_alb_access_logs
   logs_bucket_name        = var.enable_alb_access_logs ? local.log_aggregation_bucket_name : ""
+  logs_bucket_policy_id   = var.enable_alb_access_logs ? module.log_aggregation.logs_bucket_policy_id : ""
   enable_waf_logging      = var.enable_waf_logging
   waf_log_destination_arn = var.enable_waf_logging ? module.log_aggregation.waf_firehose_arn : ""
 

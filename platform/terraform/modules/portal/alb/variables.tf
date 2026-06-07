@@ -65,6 +65,12 @@ variable "logs_bucket_name" {
   default     = ""
 }
 
+variable "logs_bucket_policy_id" {
+  description = "Optional readiness handle for the S3 bucket policy that permits ALB access-log delivery"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # WAF Logging
 # ------------------------------------------------------------------------------

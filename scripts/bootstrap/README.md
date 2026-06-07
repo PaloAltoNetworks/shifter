@@ -17,7 +17,9 @@ The `deploy.py` CLI provides an interactive walkthrough for bootstrapping a bare
 **AWS Bootstrap Creates:**
 - S3 bucket for Terraform state (with `use_lockfile = true` S3 native locking — no DynamoDB)
 - GitHub OIDC provider for keyless CI/CD
-- IAM role with all required permissions
+- IAM role with all required permissions. The role uses an inline
+  AdministratorAccess-equivalent policy so bootstrap works in AWS
+  organizations that deny `iam:AttachRolePolicy` via SCP.
 - Optionally deploys Terraform infrastructure
 
 **GDC Bootstrap Creates:**
@@ -43,6 +45,26 @@ When automated options are available, you'll see:
 **Note:** All steps are mandatory for a functioning deployment. Choosing 'n' will abort the script with an explanation of why that step is required.
 
 ## Commands
+
+## Fresh AWS Account Order
+
+For a new AWS account, run bootstrap-only first. Do not start with `full`.
+The self-hosted runner Terraform root uses the same S3 backend that
+bootstrap creates, and the AWS deploy workflows cannot run until the
+runners are provisioned and registered.
+
+1. Run `bootstrap --env dev --profile <profile>` to create the shared dev
+   state bucket, GitHub OIDC provider, and deploy role. Let it update
+   `AWS_ROLE_ARN_DEV` and the dev `.s3.tfbackend` files.
+2. Update `platform/terraform/global/github-runner/dev.tfvars` with the
+   target account's VPC and subnet IDs.
+3. Apply `platform/terraform/global/github-runner` and register each EC2
+   runner with GitHub.
+4. Seed or build the `/shifter/ami/{kali,ubuntu,windows,dc}` SSM
+   parameters required by portal Terraform.
+5. Run `./scripts/bootstrap/deploy.py terraform --env dev --profile <profile>`
+   locally, or push the updated dev backend files to the deploy branch after
+   runners are online.
 
 ### Bootstrap Only
 ```bash

@@ -1,4 +1,4 @@
-bucket         = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
+bucket         = "shifter-dev-infra-1697b88e-01b3-424f-be63-8ab29df0ce39"
 key            = "global/github-runner/terraform.tfstate"
 region         = "us-east-2"
 use_lockfile   = true

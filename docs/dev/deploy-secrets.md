@@ -78,6 +78,26 @@ For AWS local deploys, write the same HCL to a gitignored
 `terraform apply` from a workstation that has the target role (see
 **Local development** below).
 
+### Fresh AWS account bootstrap order
+
+For a new AWS account, bootstrap the backend and CI identity before trying
+to use the `aws-dev` deploy branch:
+
+1. Run `./scripts/bootstrap/deploy.py bootstrap --env dev --profile <profile>`.
+   This creates the shared S3 state bucket, creates the GitHub OIDC role,
+   updates `AWS_ROLE_ARN_DEV`, and rewrites the dev `.s3.tfbackend` files.
+2. Update `platform/terraform/global/github-runner/dev.tfvars` with the
+   target account's VPC/subnet IDs, apply the runner root, and register each
+   runner with GitHub. AWS deploy workflows use `runs-on: self-hosted`.
+3. Ensure `/shifter/ami/{kali,ubuntu,windows,dc}` exists in SSM Parameter
+   Store before portal Terraform plans/applies. The Packer workflow updates
+   these parameters after AMI builds; in a moved account, verify the Packer
+   `dev.pkrvars.hcl` VPC/subnet values first.
+4. Review `TF_VARS_DEV_PORTAL` for account-specific values such as domain
+   names, alarm email, SSH allowlists, and bucket names.
+5. Run the local Terraform deploy or refresh/push `aws-dev` only after the
+   backend files and runners are in place.
+
 ## AWS range (`dev` / `prod`)
 
 Range Terraform (under `platform/terraform/environments/<env>/range/`) is

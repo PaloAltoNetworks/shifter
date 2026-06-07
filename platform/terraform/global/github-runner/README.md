@@ -8,14 +8,19 @@ let it deploy to both dev and prod.
 
 - `aws_instance.runner[count]` — Amazon Linux 2023, t3.large, no inbound
   rules (egress to GitHub/ECR/SSM). Access via SSM Session Manager.
-- IAM instance profile with `AmazonSSMManagedInstanceCore` + an inline
-  policy granting ECR push/pull on `shifter-*` repos.
-- `user_data` installs Docker, the build chain, the .NET runtime libs
+- IAM instance profile with inline SSM Session Manager and ECR push/pull
+  policies. Inline policies avoid `iam:AttachRolePolicy`, which may be
+  denied by AWS Organizations SCPs in fresh managed accounts.
+- Launch user data installs Docker, the build chain, the .NET runtime libs
   the Actions binary needs, and downloads the latest runner tarball.
-  **Registration is manual** — see below.
+  **Registration is manual** -- see below.
 
 State backend: `<env>.s3.tfbackend` (partial; bucket/key supplied at
 `terraform init` time).
+
+For a fresh AWS account, run `scripts/bootstrap/deploy.py bootstrap` before
+this runner root. Bootstrap creates the shared S3 state bucket and rewrites
+`dev.s3.tfbackend`; the runner root intentionally reuses that backend.
 
 ## Scheduling policy
 
@@ -45,6 +50,26 @@ From repo root:
 The script reads `PANW_SHIFTER_DEV_PROFILE` from `.env`. AWS pager
 should be disabled (`export AWS_PAGER=""`) or `aws` calls will block on
 `less`.
+
+Before applying in a new account, update `dev.tfvars` with the account-local
+VPC and subnet. The runner instances need outbound internet access for GitHub,
+ECR, and SSM; the default VPC public subnet is acceptable for dev bootstrap.
+
+```bash
+aws ec2 describe-vpcs \
+  --profile "$PANW_SHIFTER_DEV_PROFILE" \
+  --region us-east-2 \
+  --filters Name=is-default,Values=true \
+  --query 'Vpcs[0].VpcId' \
+  --output text
+
+aws ec2 describe-subnets \
+  --profile "$PANW_SHIFTER_DEV_PROFILE" \
+  --region us-east-2 \
+  --filters Name=default-for-az,Values=true \
+  --query 'Subnets[?AvailabilityZone==`us-east-2a`].SubnetId | [0]' \
+  --output text
+```
 
 ## Registering a runner (one-time per instance)
 

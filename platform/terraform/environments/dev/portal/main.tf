@@ -803,6 +803,30 @@ module "guacamole" {
   depends_on = [module.vpc]
 }
 
+# ALB health checks and user traffic are routed through the portal inspection
+# boundary before they reach private targets. Source security group references
+# do not survive that middlebox path reliably, so keep those existing SG rules
+# and add CIDR-scoped ingress from only the ALB public subnet CIDRs.
+resource "aws_security_group_rule" "portal_app_from_alb_subnets" {
+  type              = "ingress"
+  from_port         = var.app_port
+  to_port           = var.app_port
+  protocol          = "tcp"
+  cidr_blocks       = module.vpc.public_subnet_cidrs
+  security_group_id = module.ec2.security_group_id
+  description       = "HTTP from ALB public subnets through inspection"
+}
+
+resource "aws_security_group_rule" "guacamole_client_from_alb_subnets" {
+  type              = "ingress"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  cidr_blocks       = module.vpc.public_subnet_cidrs
+  security_group_id = module.guacamole.guacamole_client_security_group_id
+  description       = "HTTP from ALB public subnets through inspection"
+}
+
 # ------------------------------------------------------------------------------
 # SES (Transactional Email)
 # ------------------------------------------------------------------------------

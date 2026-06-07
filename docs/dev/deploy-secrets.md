@@ -153,6 +153,12 @@ during first deploy. The portal EC2 user_data also retries the AL2023 package
 metadata/install step so a transient repository timeout does not permanently
 strand cloud-init.
 
+When portal inspection is enabled, ALB health checks and user traffic route
+through the inspection boundary before reaching the private portal and
+Guacamole targets. The targets therefore allow ingress both from the ALB
+security group and from the portal public subnet CIDRs; the CIDR rule is still
+VPC-local and is required for the routed middlebox path.
+
 ## AWS range (`dev` / `prod`)
 
 Range Terraform (under `platform/terraform/environments/<env>/range/`) is

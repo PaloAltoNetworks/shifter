@@ -78,6 +78,10 @@ After a successful build:
 **Services (installed, not running):**
 - Samba
 
+**Desktop/RDP:**
+- Minimal XFCE session components
+- xrdp/xorgxrdp for Guacamole RDP access
+
 **Development:**
 - build-essential (gcc, g++, make)
 - Python 3, pip, venv
@@ -168,6 +172,13 @@ Ensure:
 ### Build fails partway through
 
 Check the EC2 console - Packer may leave a running instance. Terminate it manually if needed.
+
+### Ubuntu desktop package failures
+
+The Ubuntu image intentionally installs minimal XFCE components with
+`--no-install-recommends`. Avoid replacing this with `xfce4-goodies` unless
+the added packages are tested in an EC2 bake; that dependency chain can pull
+hardware/peripheral package postinst scripts that fail under Packer.
 
 ### Windows WinRM connection timeout
 

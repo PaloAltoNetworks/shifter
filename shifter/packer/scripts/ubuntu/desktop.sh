@@ -6,13 +6,23 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 echo "=== Installing XFCE desktop and xrdp for RDP access ==="
-# Some XFCE recommends pull in sane-utils, whose update-inetd postinst
-# exits 123 if the base image does not already have /etc/inetd.conf.
+# Some XFCE-related packages still assume a classic inetd config exists.
 touch /etc/inetd.conf
 
-# Install lightweight XFCE desktop (ubuntu-desktop is too heavy)
-# dbus-x11 is required for xrdp session communication
-apt-get install -y xfce4 xfce4-goodies xrdp xorgxrdp dbus-x11
+# Install only the XFCE components xrdp needs. The full xfce4-goodies
+# dependency chain pulls hardware/peripheral packages that are brittle in
+# an EC2 bake environment and are not needed for challenge victims.
+apt-get install -y --no-install-recommends \
+    dbus-x11 \
+    thunar \
+    xfce4-panel \
+    xfce4-session \
+    xfce4-settings \
+    xfconf \
+    xfdesktop4 \
+    xfwm4 \
+    xorgxrdp \
+    xrdp
 
 # Enable xrdp service
 systemctl enable xrdp

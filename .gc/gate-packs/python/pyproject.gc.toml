@@ -1,0 +1,9 @@
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C901", "S"]

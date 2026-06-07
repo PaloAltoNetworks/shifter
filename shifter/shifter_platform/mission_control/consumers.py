@@ -7,7 +7,7 @@ import contextlib
 import json
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -15,8 +15,11 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 
 from mission_control.terminal_sessions import session_registry as _session_registry
-from risk_register.services import audit_session_event
+from risk_register.services import SessionInfo, audit_session_event
 from shared.enums import WebSocketCloseCode
+
+if TYPE_CHECKING:
+    from engine.services import SSHConnection
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +36,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.instance_uuid: str | None = None
-        self.ssh_conn: Any = None
+        self.ssh_conn: SSHConnection | None = None
         self._read_task: asyncio.Task[None] | None = None
         self.session_id: str = str(uuid.uuid4())[:8]
         self._user_id: int | None = None
@@ -97,9 +100,11 @@ class SSHConsumer(AsyncWebsocketConsumer):
             await sync_to_async(audit_session_event)(
                 action="access_denied",
                 user_id=user.id,
-                session_id=self.session_id,
-                range_id=None,
-                session_type="terminal",
+                session=SessionInfo(
+                    session_id=self.session_id,
+                    range_id=None,
+                    session_type="terminal",
+                ),
                 source_ip=client_ip,
                 context=f"Permission denied for instance {instance_uuid}",
             )
@@ -159,10 +164,12 @@ class SSHConsumer(AsyncWebsocketConsumer):
         await sync_to_async(audit_session_event)(
             action="connect",
             user_id=user.id,
-            session_id=self.session_id,
-            range_id=None,
-            session_type="terminal",
-            target_ip=instance_uuid,
+            session=SessionInfo(
+                session_id=self.session_id,
+                range_id=None,
+                session_type="terminal",
+                target_ip=instance_uuid,
+            ),
             source_ip=client_ip,
         )
 
@@ -195,6 +202,9 @@ class SSHConsumer(AsyncWebsocketConsumer):
         timeout only bounds how often the loop wakes to enforce the idle and
         max-duration limits and to notice a closed shell. See issue #847.
         """
+        conn = self.ssh_conn
+        if conn is None:
+            return
         loop = asyncio.get_running_loop()
         if not self._session_start:
             self._session_start = loop.time()
@@ -205,14 +215,14 @@ class SSHConsumer(AsyncWebsocketConsumer):
         idle_timeout = settings.TERMINAL_IDLE_TIMEOUT_SECONDS
         max_duration = settings.TERMINAL_MAX_SESSION_SECONDS
         try:
-            while self.ssh_conn.is_connected:
-                data = await self.ssh_conn.receive(timeout=poll)
+            while conn.is_connected:
+                data = await conn.receive(timeout=poll)
                 if data:
                     # receive() returns bytes, decode to string for JSON
                     output = data.decode("utf-8", errors="replace")
                     await self.send(text_data=json.dumps({"type": "output", "data": output}))
                     self._last_activity = loop.time()
-                elif self.ssh_conn.at_eof():
+                elif conn.at_eof():
                     logger.info("Terminal shell closed (EOF): uuid=%s", self.instance_uuid)
                     break
 
@@ -267,8 +277,10 @@ class SSHConsumer(AsyncWebsocketConsumer):
             await sync_to_async(audit_session_event)(
                 action="disconnect",
                 user_id=self._user_id,
-                session_id=self.session_id,
-                session_type="terminal",
+                session=SessionInfo(
+                    session_id=self.session_id,
+                    session_type="terminal",
+                ),
                 context=f"close_code={close_code}",
             )
 

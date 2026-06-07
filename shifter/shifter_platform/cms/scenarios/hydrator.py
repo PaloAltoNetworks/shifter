@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import uuid as uuid_module
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from cms.exceptions import CMSError
@@ -22,6 +23,22 @@ from .registry import load_scenario_template as load_scenario
 
 if TYPE_CHECKING:
     from cms.models import AgentConfig, App, Credential, Instance, Request
+
+
+@dataclass(frozen=True)
+class NGFWRegistration:
+    """Deployment-profile and registration/credential inputs for an NGFW create.
+
+    Groups the registration-method-specific credential inputs so ``hydrate_ngfw``
+    takes a single cohesive object instead of a long positional parameter list.
+    """
+
+    deployment_profile: Credential
+    registration_method: Literal["pin", "otp"]
+    scm_credential: Credential | None = None
+    otp_value: str | None = None
+    otp_folder: str | None = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -117,11 +134,7 @@ def hydrate_ngfw(
     instance: Instance,
     app: App,
     request: Request,
-    deployment_profile: Credential,
-    registration_method: Literal["pin", "otp"],
-    scm_credential: Credential | None = None,
-    otp_value: str | None = None,
-    otp_folder: str | None = None,
+    registration: NGFWRegistration,
 ) -> InstanceSpec:
     """Hydrate NGFW with credential data for Engine provisioning.
 
@@ -132,11 +145,8 @@ def hydrate_ngfw(
         instance: CMS Instance model (provides UUID for event correlation).
         app: CMS App model (provides UUID for event correlation).
         request: CMS Request model (provides user context).
-        deployment_profile: Deployment profile credential with authcode.
-        registration_method: Either "pin" or "otp".
-        scm_credential: SCM credential (required if registration_method="pin").
-        otp_value: OTP value (required if registration_method="otp").
-        otp_folder: OTP folder (required if registration_method="otp").
+        registration: Deployment-profile and registration-method credential
+            inputs (see :class:`NGFWRegistration`).
 
     Returns:
         InstanceSpec with hydrated NGFWAppSpec for Engine consumption.
@@ -144,6 +154,12 @@ def hydrate_ngfw(
     Raises:
         CMSError: If required credentials are missing or invalid.
     """
+    deployment_profile = registration.deployment_profile
+    registration_method = registration.registration_method
+    scm_credential = registration.scm_credential
+    otp_value = registration.otp_value
+    otp_folder = registration.otp_folder
+
     # Validate deployment profile has authcode
     authcode = deployment_profile.data.get("authcode")
     if not authcode:

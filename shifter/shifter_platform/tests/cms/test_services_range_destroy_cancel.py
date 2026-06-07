@@ -541,10 +541,10 @@ class TestCancelRange:
             services.cancel_range(mock_user, 42)
 
         mock_audit.assert_called_once()
-        kwargs = mock_audit.call_args.kwargs
-        assert kwargs["entity_type"] == AuditLogModel.EntityType.RANGE
-        assert kwargs["entity_id"] == 42
-        assert kwargs["action"] == AuditLogModel.Action.CANCEL
-        assert kwargs["actor_id"] == mock_user.id
-        assert kwargs["previous_state"]["scenario"] == "basic"
-        assert kwargs["previous_state"]["status"] == ResourceStatus.DESTROYED.value
+        event = mock_audit.call_args.args[0]
+        assert event.entity_type == AuditLogModel.EntityType.RANGE
+        assert event.entity_id == 42
+        assert event.action == AuditLogModel.Action.CANCEL
+        assert event.actor_id == mock_user.id
+        assert event.previous_state["scenario"] == "basic"
+        assert event.previous_state["status"] == ResourceStatus.DESTROYED.value

@@ -25,6 +25,7 @@ from __future__ import annotations
 # Rebound here so the patch target resolves at the package level, which means
 # submodules that look these up at call time through ``cms.services`` honour
 # the mock for free.
+from cms.assets.services import AgentUploadSpec
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.exceptions import CMSError
@@ -41,7 +42,7 @@ from engine.services import destroy_range_by_request as engine_destroy_range_by_
 from engine.services import get_instance_ips_by_uuid as engine_get_instance_ips_by_uuid
 from engine.services import pause_range as engine_pause_range
 from engine.services import resume_range as engine_resume_range
-from risk_register.services import audit_log
+from risk_register.services import AuditEvent, audit_log
 
 # --- Public service functions ------------------------------------------------
 from ._agents import (
@@ -102,6 +103,8 @@ from ._uploads import (
 # cms.experiments / cms.signals directly.
 __all__ = (
     "AgentConfig",
+    "AgentUploadSpec",
+    "AuditEvent",
     "CMSError",
     "RangeInstance",
     "ScriptUploadError",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import firebase_admin
 import requests
@@ -17,8 +17,13 @@ from firebase_admin import auth as firebase_auth
 from config.bootstrap_admin import apply_bootstrap_admin_flags
 from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
-from risk_register.services import audit_auth_event
+from risk_register.services import AuthPrincipal, audit_auth_event
 from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
+
+if TYPE_CHECKING:
+    # Aliased to avoid clashing with the ``User = get_user_model()`` runtime
+    # binding below while still annotating with the concrete user model type.
+    from django.contrib.auth.models import User as DjangoUser
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +83,7 @@ def _ensure_firebase_app() -> firebase_admin.App:
 
 
 def _identity_api_key() -> str:
+    """Return the configured Identity Platform API key, raising if it is unset."""
     api_key = getattr(settings, "IDENTITY_PLATFORM_API_KEY", "")
     if not api_key:
         raise IdentityPlatformAuthError("Identity Platform API key is not configured")
@@ -85,10 +91,12 @@ def _identity_api_key() -> str:
 
 
 def _identity_endpoint(path: str) -> str:
+    """Build the Identity Platform REST endpoint URL for ``path`` with the API key."""
     return f"{IDENTITY_PLATFORM_BASE_URL}{path}?key={_identity_api_key()}"
 
 
 def _post_identity_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """POST ``payload`` to an Identity Platform endpoint and return the parsed JSON body."""
     response = requests.post(
         _identity_endpoint(path),
         json=payload,
@@ -107,6 +115,7 @@ def _post_identity_request(path: str, payload: dict[str, Any]) -> dict[str, Any]
 
 
 def _lookup_identity_account(*, id_token: str) -> dict[str, Any]:
+    """Return the Identity Platform account record for ``id_token`` (raises if none)."""
     payload = _post_identity_request(IDENTITY_PLATFORM_ACCOUNT_LOOKUP_PATH, {"idToken": id_token})
     users = payload.get("users", [])
     if not users:
@@ -115,10 +124,12 @@ def _lookup_identity_account(*, id_token: str) -> dict[str, Any]:
 
 
 def _allowed_email_domain() -> str:
+    """Return the configured corporate email domain, lowercased."""
     return getattr(settings, "IDENTITY_ALLOWED_EMAIL_DOMAIN", "paloaltonetworks.com").strip().lower()
 
 
 def _allowed_emails() -> set[str]:
+    """Return the configured per-address email allow-list, lowercased."""
     return {email.strip().lower() for email in getattr(settings, "IDENTITY_ALLOWED_EMAILS", []) if email.strip()}
 
 
@@ -155,11 +166,14 @@ def verify_identity_token(id_token: str) -> dict[str, Any]:
     _ensure_firebase_app()
     try:
         return firebase_auth.verify_id_token(id_token, check_revoked=True)
-    except Exception as exc:  # pragma: no cover - firebase_admin exception tree is broad
+    except Exception as exc:
+        # firebase_admin's exception tree is broad; normalize any verification
+        # failure to our single auth error type so callers handle one thing.
         raise IdentityPlatformAuthError("Unable to verify Identity Platform token") from exc
 
 
 def _assert_account_can_create_app_session(*, id_token: str, claims: IdentityUserClaims) -> None:
+    """Raise unless the account may start an app session (verified email + enrolled MFA)."""
     if not claims.email_verified:
         raise IdentityPlatformEmailVerificationRequired("Corporate login requires a verified email address.")
 
@@ -170,7 +184,7 @@ def _assert_account_can_create_app_session(*, id_token: str, claims: IdentityUse
         raise IdentityPlatformMFAEnrollmentRequired("Corporate login requires an enrolled multi-factor authenticator.")
 
 
-def _sync_user_type_from_claims(user: Any, claims: dict[str, Any]) -> None:
+def _sync_user_type_from_claims(user: DjangoUser, claims: dict[str, Any]) -> None:
     """Keep the profile user_type aligned with custom claims when present."""
     claim_user_type = claims.get("user_type") or claims.get("custom:user_type")
     if claim_user_type not in {"standard", "ctf_organizer", "ctf_participant", None}:
@@ -185,10 +199,20 @@ def _sync_user_type_from_claims(user: Any, claims: dict[str, Any]) -> None:
         user.groups.remove(*user.groups.filter(name__in=[CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP]))
 
 
+def _request_audit_context(request: HttpRequest | None) -> tuple[str | None, str]:
+    """Return ``(source_ip, user_agent)`` for audit logging, tolerating a missing request."""
+    if request is None:
+        return None, ""
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    source_ip = xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR")
+    user_agent = request.META.get("HTTP_USER_AGENT", "")[:500]
+    return source_ip, user_agent
+
+
 class IdentityPlatformBackend(BaseBackend):
     """Authenticate Django users from verified Identity Platform claims."""
 
-    def authenticate(self, request: HttpRequest | None, **kwargs: Any):
+    def authenticate(self, request: HttpRequest | None, **kwargs: Any) -> DjangoUser | None:
         identity_claims = kwargs.get("identity_claims")
         if identity_claims is None:
             return None
@@ -213,27 +237,25 @@ class IdentityPlatformBackend(BaseBackend):
         update_cognito_sub(user, claims.sub)
         _sync_user_type_from_claims(user, identity_claims)
 
+        source_ip, user_agent = _request_audit_context(request)
         audit_auth_event(
             action=AuditLog.Action.CREATE if created else AuditLog.Action.LOGIN,
-            user_id=user.id,
-            email=user.email,
-            cognito_sub=claims.sub,
-            source_ip=(request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() if request else None)
-            or (request.META.get("REMOTE_ADDR") if request else None),
-            user_agent=(request.META.get("HTTP_USER_AGENT", "")[:500] if request else ""),
+            principal=AuthPrincipal(user_id=user.id, email=user.email, cognito_sub=claims.sub),
+            source_ip=source_ip,
+            user_agent=user_agent,
             context="Identity Platform login" if not created else "User created via Identity Platform first login",
         )
 
         return user
 
-    def get_user(self, user_id):
+    def get_user(self, user_id: int) -> DjangoUser | None:
         try:
             return User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return None
 
 
-def login_with_identity_token(request: HttpRequest | None, id_token: str):
+def login_with_identity_token(request: HttpRequest | None, id_token: str) -> DjangoUser:
     """Verify the Identity Platform token, enforce session gates, and authenticate the Django user."""
     claims_payload = verify_identity_token(id_token)
     claims = IdentityUserClaims.from_mapping(claims_payload)

@@ -1,6 +1,14 @@
 """Custom middleware for Shifter platform."""
 
+from __future__ import annotations
+
 import uuid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from django.http import HttpRequest, HttpResponse
 
 # Paths that bypass ``ALLOWED_HOSTS`` enforcement so AWS ALB / GCP ingress
 # health probes (which arrive with the load balancer's internal IP as the
@@ -23,17 +31,19 @@ class RequestIDMiddleware:
     included in the response header.
     """
 
-    def __init__(self, get_response):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         # Get existing request ID or generate new one
         request_id = request.META.get("HTTP_X_REQUEST_ID")
         if not request_id:
             request_id = str(uuid.uuid4())[:8]
 
-        # Store on request object for access by views and audit logging
-        request.request_id = request_id
+        # Store on request object for access by views and audit logging. The
+        # ignore is needed because HttpRequest has no typed slot for this
+        # middleware-added dynamic attribute (read back by views / audit logger).
+        request.request_id = request_id  # type: ignore[attr-defined]
 
         response = self.get_response(request)
 
@@ -66,10 +76,10 @@ class HealthCheckMiddleware:
     unaffected.
     """
 
-    def __init__(self, get_response):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         if request.path in _HEALTH_PATHS:
             request.META["HTTP_HOST"] = _HEALTH_ADMISSION_HOST
         return self.get_response(request)

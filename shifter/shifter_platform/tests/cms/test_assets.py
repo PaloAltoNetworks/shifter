@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from cms.assets.services import (
+    AgentUploadSpec,
     AssetError,
     create_agent,
     delete_agent,
@@ -178,12 +179,14 @@ class TestCreateAgent:
 
         agent = create_agent(
             user=mock_user,
-            name="New Agent",
-            s3_key="agents/1/new.msi",
-            filename="new.msi",
-            os_slug="windows",
-            file_size=2048,
-            sha256="newhash123",
+            spec=AgentUploadSpec(
+                name="New Agent",
+                s3_key="agents/1/new.msi",
+                filename="new.msi",
+                os_slug="windows",
+                file_size=2048,
+                sha256="newhash123",
+            ),
         )
 
         assert agent.id is not None
@@ -214,12 +217,14 @@ class TestCreateAgent:
 
         agent = create_agent(
             user=mock_user,
-            name="Linux Agent",
-            s3_key="agents/1/linux.sh",
-            filename="linux.sh",
-            os_slug="linux-debian",
-            file_size=1024,
-            sha256="linuxhash",
+            spec=AgentUploadSpec(
+                name="Linux Agent",
+                s3_key="agents/1/linux.sh",
+                filename="linux.sh",
+                os_slug="linux-debian",
+                file_size=1024,
+                sha256="linuxhash",
+            ),
         )
 
         assert agent.os == mock_linux_os
@@ -237,20 +242,22 @@ class TestCreateAgent:
 
         create_agent(
             user=mock_user,
-            name="Logged Agent",
-            s3_key="agents/1/logged.msi",
-            filename="logged.msi",
-            os_slug="windows",
-            file_size=1024,
-            sha256="loggedhash",
+            spec=AgentUploadSpec(
+                name="Logged Agent",
+                s3_key="agents/1/logged.msi",
+                filename="logged.msi",
+                os_slug="windows",
+                file_size=1024,
+                sha256="loggedhash",
+            ),
         )
 
         mock_audit_log.assert_called_once()
-        call_kwargs = mock_audit_log.call_args
-        assert call_kwargs.kwargs["entity_id"] == 44
-        assert call_kwargs.kwargs["new_state"]["name"] == "Logged Agent"
-        assert call_kwargs.kwargs["new_state"]["filename"] == "logged.msi"
-        assert call_kwargs.kwargs["actor_id"] == mock_user.id
+        event = mock_audit_log.call_args.args[0]
+        assert event.entity_id == 44
+        assert event.new_state["name"] == "Logged Agent"
+        assert event.new_state["filename"] == "logged.msi"
+        assert event.actor_id == mock_user.id
 
     @patch("cms.assets.services.audit_log")
     @patch("cms.assets.services.AgentConfig")
@@ -266,17 +273,19 @@ class TestCreateAgent:
 
         create_agent(
             user=mock_user,
-            name="Presigned Agent",
-            s3_key="agents/1/presigned.msi",
-            filename="presigned.msi",
-            os_slug="windows",
-            file_size=1024,
-            sha256="presignedhash",
-            upload_method="presigned",
+            spec=AgentUploadSpec(
+                name="Presigned Agent",
+                s3_key="agents/1/presigned.msi",
+                filename="presigned.msi",
+                os_slug="windows",
+                file_size=1024,
+                sha256="presignedhash",
+                upload_method="presigned",
+            ),
         )
 
-        call_kwargs = mock_audit_log.call_args
-        assert call_kwargs.kwargs["new_state"]["upload_method"] == "presigned"
+        event = mock_audit_log.call_args.args[0]
+        assert event.new_state["upload_method"] == "presigned"
 
     @patch("cms.assets.services.OperatingSystem")
     def test_raises_for_invalid_os_slug(self, mock_os_model, mock_user):
@@ -286,12 +295,14 @@ class TestCreateAgent:
         with pytest.raises(AssetError) as exc_info:
             create_agent(
                 user=mock_user,
-                name="Invalid OS Agent",
-                s3_key="agents/1/invalid.msi",
-                filename="invalid.msi",
-                os_slug="nonexistent-os",
-                file_size=1024,
-                sha256="invalidhash",
+                spec=AgentUploadSpec(
+                    name="Invalid OS Agent",
+                    s3_key="agents/1/invalid.msi",
+                    filename="invalid.msi",
+                    os_slug="nonexistent-os",
+                    file_size=1024,
+                    sha256="invalidhash",
+                ),
             )
 
         assert "not found" in str(exc_info.value).lower()
@@ -311,12 +322,14 @@ class TestCreateAgent:
 
         result = create_agent(
             user=mock_user,
-            name="Return Test",
-            s3_key="agents/1/return.msi",
-            filename="return.msi",
-            os_slug="windows",
-            file_size=1024,
-            sha256="returnhash",
+            spec=AgentUploadSpec(
+                name="Return Test",
+                s3_key="agents/1/return.msi",
+                filename="return.msi",
+                os_slug="windows",
+                file_size=1024,
+                sha256="returnhash",
+            ),
         )
 
         assert isinstance(result, RealAgentConfig)
@@ -374,10 +387,10 @@ class TestDeleteAgent:
         delete_agent(mock_windows_agent)
 
         mock_audit_log.assert_called_once()
-        call_kwargs = mock_audit_log.call_args
-        assert call_kwargs.kwargs["entity_id"] == mock_windows_agent.id
-        assert call_kwargs.kwargs["previous_state"]["name"] == mock_windows_agent.name
-        assert call_kwargs.kwargs["actor_id"] == mock_windows_agent.user.id
+        event = mock_audit_log.call_args.args[0]
+        assert event.entity_id == mock_windows_agent.id
+        assert event.previous_state["name"] == mock_windows_agent.name
+        assert event.actor_id == mock_windows_agent.user.id
 
     @patch("cms.assets.services.s3_delete")
     def test_raises_if_s3_delete_fails(self, mock_s3_delete, mock_windows_agent):

@@ -220,7 +220,9 @@ def load_root_config(path: str | Path) -> RootConfig:
     # The root schema validated the *shape*; the selected backend bundle owns the
     # contents of ``settings`` and the per-provider secret reference grammar.
     bundle = registry.get_backend_bundle(config.backend)
-    if bundle is None:  # pragma: no cover - an unknown backend already failed the root schema
+    # A validated backend always resolves to a bundle in practice; this guards
+    # against the registry unexpectedly yielding None (covered by tests).
+    if bundle is None:
         return config
     try:
         normalized_settings = bundle.validate_settings(config.settings)

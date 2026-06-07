@@ -54,4 +54,7 @@ else:
     response = client.get_secret_value(SecretId=secret_id)
     print(response["SecretString"])
 PY
+    # Explicitly propagate the python subshell's exit code (fail-closed for #52):
+    # return $? preserves the implicit-last-command status this function relies on.
+    return $?
 }

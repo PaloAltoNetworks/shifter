@@ -15,6 +15,7 @@ from __future__ import annotations
 from django.db import transaction
 
 from engine.secrets import SecretsError, get_rdp_password, get_ssh_key
+from engine.ssh import SSHConnection
 
 from ._common import EngineError
 from ._lifecycle import pause_range, resume_range
@@ -38,6 +39,7 @@ from ._terminal import (
 
 __all__ = (
     "EngineError",
+    "SSHConnection",
     "SecretsError",
     "cancel_range",
     "cancel_range_by_request",

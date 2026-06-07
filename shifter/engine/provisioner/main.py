@@ -79,6 +79,7 @@ __all__ = [
     "_should_run_dc_bootstrap_plan",
     "build_guest_execution_context",
     "generate_presigned_url",
+    "get_ami_id",
     "get_range_availability_zone",
     "has_ngfw_attachment_state",
     "load_range_network_config",
@@ -125,78 +126,34 @@ def get_agent_presigned_url(inst_config: dict[str, Any]) -> str | None:
     return presigned_url
 
 
-class DynamicPlan:
+class DynamicPlan(SetupPlan):
     """Simple wrapper for dynamically-built setup plans.
 
-    Structurally satisfies the SetupPlan protocol (``steps``,
-    ``verify_step``, ``get_context``) via duck typing — does NOT
-    inherit from the Protocol class because SetupPlan declares
-    ``steps`` as a read-only ``@property``, which conflicts with
-    storing the value as an instance attribute. The orchestrator
-    accepts SetupPlan-shaped objects at runtime regardless.
+    Implements the SetupPlan protocol nominally: ``steps`` and ``verify_step``
+    are exposed as read-only ``@property`` accessors (matching the protocol's
+    declarations) backed by values bundled at construction time. Inheriting the
+    Protocol explicitly makes the contract visible to nominal type checkers.
     """
 
     def __init__(self, name: str, steps: list[SetupStep]) -> None:
         """Bundle a name and pre-built steps for SetupOrchestrator."""
         self.name = name
-        self.steps = steps
-        self.verify_step: SetupStep | None = None
+        self._steps = steps
+        self._verify_step: SetupStep | None = None
 
-    @staticmethod
-    def get_context(instance: object) -> dict[str, Any]:
+    @property
+    def steps(self) -> list[SetupStep]:
+        """Pre-built steps to execute in order."""
+        return self._steps
+
+    @property
+    def verify_step(self) -> SetupStep | None:
+        """Dynamically-built plans carry no dedicated verification step."""
+        return self._verify_step
+
+    def get_context(self, instance: object) -> dict[str, Any]:
         """No template variables needed - steps are pre-built."""
         return {}
-
-
-# SSM parameter paths for AMI IDs (fetched at runtime for latest values)
-_AMI_SSM_PARAMS = {
-    "kali": "/shifter/ami/kali",
-    "victim": "/shifter/ami/ubuntu",
-    "windows": "/shifter/ami/windows",
-    "dc": "/shifter/ami/dc",
-}
-
-# Cache for SSM AMI lookups (cleared per invocation, avoids repeated API calls)
-_ami_cache: dict[str, str] = {}
-
-
-def get_ami_id(ami_type: str) -> str:
-    """Get AMI ID from SSM Parameter Store at runtime.
-
-    This ensures the provisioner always uses the latest AMI IDs without
-    requiring a Terraform apply or ECS task definition update.
-
-    Known types ('kali', 'victim', 'windows', 'dc') use legacy SSM paths.
-    Custom ami_key values resolve to /shifter/ami/<ami_key>.
-
-    Args:
-        ami_type: Known type or custom ami_key (e.g. 'kali', 'windows').
-
-    Returns:
-        AMI ID string
-
-    Raises:
-        ValueError: If SSM parameter not found.
-    """
-    if ami_type in _ami_cache:
-        return _ami_cache[ami_type]
-
-    # Known types use legacy SSM paths; custom keys construct path directly
-    param_path = _AMI_SSM_PARAMS.get(ami_type)
-    if not param_path:
-        param_path = f"/shifter/ami/{ami_type}"
-
-    try:
-        from cloud import get_config_store
-
-        store = get_config_store()
-        ami_id = store.get_parameter(param_path)
-        logger.info("Fetched %s AMI from SSM %s: %s", ami_type, param_path, ami_id)
-        _ami_cache[ami_type] = ami_id
-        return ami_id
-    except Exception as e:
-        # No fallback - fail fast to surface IAM/config issues immediately
-        raise ValueError(f"Failed to get {ami_type} AMI ID from SSM parameter {param_path}: {e}") from e
 
 
 # Default timeout for waiting for NGFW SSH to become available (seconds)
@@ -210,19 +167,22 @@ NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500
 # reach in through ``main`` instead of the new sibling module path. They
 # must follow the top-level constants above (hence the per-line E402
 # suppressions) so ``main`` exposes the same surface as the pre-split module.
+from provisioner_ami import get_ami_id  # noqa: E402
 from provisioner_db import (  # noqa: E402
     _append_kwarg_assignment,
-    _build_ngfw_range_attachment_record,
-    _record_ngfw_range_attachment,
-    _remove_ngfw_range_attachment,
     _update_range_config,
     get_db_connection,
-    get_ngfw_data_by_request_id,
     get_range_data_by_request_id,
-    get_user_ngfw_data,
     mark_range_instances_destroyed,
     update_range_status,
     write_provisioned_state,
+)
+from provisioner_db_ngfw import (  # noqa: E402
+    _build_ngfw_range_attachment_record,
+    _record_ngfw_range_attachment,
+    _remove_ngfw_range_attachment,
+    get_ngfw_data_by_request_id,
+    get_user_ngfw_data,
 )
 
 _DB_REEXPORTS_USED = (

@@ -303,7 +303,9 @@ def send_announcement(
     Raises:
         CTFNotFoundError: If event doesn't exist.
     """
-    logger.info("Sending announcement for event %s: %s", event_id, subject)
+    # Do not log the user-controlled announcement subject (SonarCloud S5145 /
+    # log-injection): the event id is sufficient to trace the operation.
+    logger.info("Sending announcement for event %s", event_id)
 
     try:
         event = CTFEvent.objects.get(pk=event_id)

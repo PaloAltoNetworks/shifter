@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from cms.experiments.models import Experiment, ExperimentRun
 from cms.experiments.orchestrator import ExperimentOrchestrator
@@ -217,7 +218,7 @@ def process_event(message: str | dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _validate_event_ids(event: dict, handler_name: str, *fields: str) -> dict | None:
+def _validate_event_ids(event: dict[str, Any], handler_name: str, *fields: str) -> dict[str, Any] | None:
     """Extract and validate required integer fields from event dict.
 
     Returns dict of field->value if valid, or None if validation fails.
@@ -240,7 +241,7 @@ def _validate_event_ids(event: dict, handler_name: str, *fields: str) -> dict | 
 # ---------------------------------------------------------------------------
 
 
-def _handle_experiment_start(event: dict) -> None:
+def _handle_experiment_start(event: dict[str, Any]) -> None:
     """Handle experiment.start — begin scheduling runs."""
     ids = _validate_event_ids(event, "experiment.start", "experiment_id")
     if ids is None:
@@ -253,7 +254,7 @@ def _handle_experiment_start(event: dict) -> None:
     _broadcast_experiment_status(ids["experiment_id"], "running")
 
 
-def _handle_range_provisioned(event: dict) -> None:
+def _handle_range_provisioned(event: dict[str, Any]) -> None:
     """Handle experiment.run.range_provisioned — range is ready, start scripts."""
     ids = _validate_event_ids(event, "range_provisioned", "experiment_id", "run_id")
     if ids is None:
@@ -267,7 +268,7 @@ def _handle_range_provisioned(event: dict) -> None:
     _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
-def _handle_victim_scripts_completed(event: dict) -> None:
+def _handle_victim_scripts_completed(event: dict[str, Any]) -> None:
     """Handle experiment.run.victims_completed — victims done, start attacker."""
     ids = _validate_event_ids(event, "victims_completed", "experiment_id", "run_id")
     if ids is None:
@@ -279,7 +280,7 @@ def _handle_victim_scripts_completed(event: dict) -> None:
     _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
-def _handle_attacker_scripts_completed(event: dict) -> None:
+def _handle_attacker_scripts_completed(event: dict[str, Any]) -> None:
     """Handle experiment.run.attacker_completed — attacker done, collect artifacts."""
     ids = _validate_event_ids(event, "attacker_completed", "experiment_id", "run_id")
     if ids is None:
@@ -291,7 +292,7 @@ def _handle_attacker_scripts_completed(event: dict) -> None:
     _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
-def _handle_artifacts_collected(event: dict) -> None:
+def _handle_artifacts_collected(event: dict[str, Any]) -> None:
     """Handle experiment.run.artifacts_collected — mark run complete."""
     ids = _validate_event_ids(event, "artifacts_collected", "experiment_id", "run_id")
     if ids is None:
@@ -304,7 +305,7 @@ def _handle_artifacts_collected(event: dict) -> None:
     _broadcast_experiment_status_if_terminal(ids["experiment_id"])
 
 
-def _handle_run_failed(event: dict) -> None:
+def _handle_run_failed(event: dict[str, Any]) -> None:
     """Handle experiment.run.failed — record failure, schedule next."""
     ids = _validate_event_ids(event, "run_failed", "experiment_id", "run_id")
     if ids is None:

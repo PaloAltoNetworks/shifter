@@ -31,6 +31,7 @@ from ctf.s3 import (
     generate_download_url,
     upload_challenge_file,
 )
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     pass
@@ -256,7 +257,9 @@ def remove_challenge_file(file_id: UUID, *, actor_id: int) -> None:
     try:
         delete_challenge_file(challenge_file.s3_key)
     except CTFFileError:
-        logger.warning("Failed to delete S3 object %s, proceeding with soft delete", challenge_file.s3_key)
+        logger.warning(
+            "Failed to delete S3 object %s, proceeding with soft delete", safe_log_value(challenge_file.s3_key)
+        )
 
     challenge_file.delete(soft=True)
     logger.info("Removed file %s", file_id)

@@ -42,7 +42,7 @@ def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
     """Late-bound call to ``cms.services.audit_log`` so test patches apply."""
     from cms import services as _cs
 
-    _cs.audit_log(**kwargs)
+    _cs.audit_log(_cs.AuditEvent(**kwargs))
 
 
 def _get_range_call(user: User, range_id: int) -> RangeInstance:

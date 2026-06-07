@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from django.db import IntegrityError, transaction
@@ -19,9 +19,10 @@ from cms.models import Scenario, ScenarioMetadata
 from cms.scenarios.registry import is_default_scenario
 from cms.scenarios.schema import ScenarioTemplate
 from risk_register.models import AuditLog
-from risk_register.services import audit_log
+from risk_register.services import AuditEvent, audit_log
 from shared.auth import validate_cms_authoring_user
 from shared.exceptions import CMSError
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -43,7 +44,7 @@ def _validate_user(user: User, func_name: str) -> None:
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 
 
-def validate_definition(definition: dict) -> list[str]:
+def validate_definition(definition: dict[str, Any]) -> list[str]:
     """Validate a scenario definition against ScenarioTemplate schema.
 
     Builds a full ScenarioTemplate from the definition dict and
@@ -111,7 +112,7 @@ def create_scenario(
     scenario_id: str,
     name: str,
     description: str,
-    definition: dict,
+    definition: dict[str, Any],
 ) -> Scenario:
     """Create a new custom scenario.
 
@@ -134,14 +135,14 @@ def create_scenario(
     logger.debug(
         "create_scenario called for user_id=%s, scenario_id=%s",
         user.id,
-        scenario_id,
+        safe_log_value(scenario_id),
     )
 
     # Validate scenario_id format
     if not _SCENARIO_ID_RE.match(scenario_id):
         logger.error(
             "create_scenario: invalid scenario_id format: %s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(
@@ -152,7 +153,7 @@ def create_scenario(
     if is_default_scenario(scenario_id):
         logger.error(
             "create_scenario: conflicts with default scenario, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"Scenario ID '{scenario_id}' conflicts with a built-in default scenario")
@@ -168,7 +169,7 @@ def create_scenario(
     if errors:
         logger.error(
             "create_scenario: invalid definition, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"Invalid scenario definition: {'; '.join(errors)}")
@@ -178,7 +179,7 @@ def create_scenario(
             if Scenario.objects.filter(scenario_id=scenario_id).exists():
                 logger.error(
                     "create_scenario: duplicate scenario_id=%s, user_id=%s",
-                    scenario_id,
+                    safe_log_value(scenario_id),
                     user.id,
                 )
                 raise ScenarioEditorError(f"A scenario with ID '{scenario_id}' already exists")
@@ -198,7 +199,7 @@ def create_scenario(
     except IntegrityError:
         logger.error(
             "create_scenario: integrity error (race), scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"A scenario with ID '{scenario_id}' already exists") from None
@@ -208,21 +209,24 @@ def create_scenario(
         logger.exception(
             "Error in create_scenario for user_id=%s, scenario_id=%s",
             user.id,
-            scenario_id,
+            safe_log_value(scenario_id),
         )
         raise
 
     audit_log(
-        entity_type=AuditLog.EntityType.SCENARIO,
-        entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
-        action=AuditLog.Action.CREATE,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=user.id,
-        new_state={"scenario_id": scenario_id, "name": name},
+        AuditEvent(
+            entity_type=AuditLog.EntityType.SCENARIO,
+            # Scenario PK is UUID; use 0 and store scenario_id in state
+            entity_id=0,
+            action=AuditLog.Action.CREATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"scenario_id": scenario_id, "name": name},
+        )
     )
     logger.info(
         "Scenario created: scenario_id=%s by user_id=%s",
-        scenario_id,
+        safe_log_value(scenario_id),
         user.id,
     )
     return scenario
@@ -259,13 +263,13 @@ def update_scenario(
     logger.debug(
         "update_scenario called for user_id=%s, scenario_id=%s",
         user.id,
-        scenario_id,
+        safe_log_value(scenario_id),
     )
 
     if is_default_scenario(scenario_id):
         logger.error(
             "update_scenario: cannot edit default scenario, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(
@@ -277,7 +281,7 @@ def update_scenario(
     except Scenario.DoesNotExist as e:
         logger.error(
             "update_scenario: scenario not found, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
@@ -304,7 +308,7 @@ def update_scenario(
     if errors:
         logger.error(
             "update_scenario: invalid definition, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"Invalid scenario definition: {'; '.join(errors)}")
@@ -320,21 +324,24 @@ def update_scenario(
         logger.exception(
             "Error in update_scenario for user_id=%s, scenario_id=%s",
             user.id,
-            scenario_id,
+            safe_log_value(scenario_id),
         )
         raise
 
     audit_log(
-        entity_type=AuditLog.EntityType.SCENARIO,
-        entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
-        action=AuditLog.Action.UPDATE,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=user.id,
-        new_state={"scenario_id": scenario_id, "name": scenario.name},
+        AuditEvent(
+            entity_type=AuditLog.EntityType.SCENARIO,
+            # Scenario PK is UUID; use 0 and store scenario_id in state
+            entity_id=0,
+            action=AuditLog.Action.UPDATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"scenario_id": scenario_id, "name": scenario.name},
+        )
     )
     logger.info(
         "Scenario updated: scenario_id=%s by user_id=%s",
-        scenario_id,
+        safe_log_value(scenario_id),
         user.id,
     )
     return scenario
@@ -358,13 +365,13 @@ def delete_scenario(user: User, scenario_id: str) -> None:
     logger.debug(
         "delete_scenario called for user_id=%s, scenario_id=%s",
         user.id,
-        scenario_id,
+        safe_log_value(scenario_id),
     )
 
     if is_default_scenario(scenario_id):
         logger.error(
             "delete_scenario: cannot delete default scenario, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(
@@ -376,7 +383,7 @@ def delete_scenario(user: User, scenario_id: str) -> None:
     except Scenario.DoesNotExist as e:
         logger.error(
             "delete_scenario: scenario not found, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
@@ -394,21 +401,24 @@ def delete_scenario(user: User, scenario_id: str) -> None:
         logger.exception(
             "Error in delete_scenario for user_id=%s, scenario_id=%s",
             user.id,
-            scenario_id,
+            safe_log_value(scenario_id),
         )
         raise
 
     audit_log(
-        entity_type=AuditLog.EntityType.SCENARIO,
-        entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
-        action=AuditLog.Action.DELETE,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=user.id,
-        previous_state={"scenario_id": scenario_id, "name": scenario.name},
+        AuditEvent(
+            entity_type=AuditLog.EntityType.SCENARIO,
+            # Scenario PK is UUID; use 0 and store scenario_id in state
+            entity_id=0,
+            action=AuditLog.Action.DELETE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={"scenario_id": scenario_id, "name": scenario.name},
+        )
     )
     logger.info(
         "Scenario deleted: scenario_id=%s by user_id=%s",
-        scenario_id,
+        safe_log_value(scenario_id),
         user.id,
     )
 
@@ -443,7 +453,7 @@ def update_metadata(
     logger.debug(
         "update_metadata called for user_id=%s, scenario_id=%s",
         user.id,
-        scenario_id,
+        safe_log_value(scenario_id),
     )
 
     # Verify the scenario exists
@@ -454,7 +464,7 @@ def update_metadata(
     except ValueError as e:
         logger.error(
             "update_metadata: scenario not found, scenario_id=%s, user_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
@@ -485,21 +495,24 @@ def update_metadata(
         logger.exception(
             "Error in update_metadata for user_id=%s, scenario_id=%s",
             user.id,
-            scenario_id,
+            safe_log_value(scenario_id),
         )
         raise
 
     audit_log(
-        entity_type=AuditLog.EntityType.SCENARIO,
-        entity_id=0,  # ScenarioMetadata PK is auto-int but use 0 for consistency
-        action=AuditLog.Action.UPDATE,
-        actor_type=AuditLog.ActorType.USER,
-        actor_id=user.id,
-        new_state={"scenario_id": scenario_id, "enabled": metadata.enabled, "staff_only": metadata.staff_only},
+        AuditEvent(
+            entity_type=AuditLog.EntityType.SCENARIO,
+            # ScenarioMetadata PK is auto-int but use 0 for consistency
+            entity_id=0,
+            action=AuditLog.Action.UPDATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"scenario_id": scenario_id, "enabled": metadata.enabled, "staff_only": metadata.staff_only},
+        )
     )
     logger.info(
         "Scenario metadata updated: scenario_id=%s, enabled=%s, staff_only=%s by user_id=%s",
-        scenario_id,
+        safe_log_value(scenario_id),
         metadata.enabled,
         metadata.staff_only,
         user.id,
@@ -534,8 +547,8 @@ def clone_scenario(
     logger.debug(
         "clone_scenario called for user_id=%s, source=%s, new_id=%s",
         user.id,
-        source_scenario_id,
-        new_scenario_id,
+        safe_log_value(source_scenario_id),
+        safe_log_value(new_scenario_id),
     )
 
     from cms.scenarios.registry import get_scenario_detail
@@ -545,7 +558,7 @@ def clone_scenario(
     except ValueError as e:
         logger.error(
             "clone_scenario: source not found, source_scenario_id=%s, user_id=%s",
-            source_scenario_id,
+            safe_log_value(source_scenario_id),
             user.id,
         )
         raise ScenarioEditorError(f"Source scenario '{source_scenario_id}' not found") from e
@@ -580,7 +593,7 @@ def export_scenario_yaml(scenario_id: str) -> str:
     Raises:
         ScenarioEditorError: If scenario not found.
     """
-    logger.debug("export_scenario_yaml called for scenario_id=%s", scenario_id)
+    logger.debug("export_scenario_yaml called for scenario_id=%s", safe_log_value(scenario_id))
 
     from cms.scenarios.registry import get_scenario_detail
 
@@ -589,7 +602,7 @@ def export_scenario_yaml(scenario_id: str) -> str:
     except ValueError as e:
         logger.error(
             "export_scenario_yaml: scenario not found, scenario_id=%s",
-            scenario_id,
+            safe_log_value(scenario_id),
         )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 

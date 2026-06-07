@@ -124,13 +124,15 @@ class TestCompleteUploadDependencies:
             services.complete_upload(mock_user, "token123")
             mock_create.assert_called_once_with(
                 user=mock_user,
-                name="My Agent",
-                s3_key="agents/1/abc_agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=5000,
-                upload_method="presigned",
-                agent_type="xdr",
+                spec=services.AgentUploadSpec(
+                    name="My Agent",
+                    s3_key="agents/1/abc_agent.msi",
+                    filename="agent.msi",
+                    os_slug="windows",
+                    file_size=5000,
+                    upload_method="presigned",
+                    agent_type="xdr",
+                ),
             )
 
 

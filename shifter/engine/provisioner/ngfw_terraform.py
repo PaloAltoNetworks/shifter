@@ -18,7 +18,7 @@ from events import (
     publish_ngfw_event,
 )
 from executors.ngfw_executor import NGFWExecutor
-from log_redact import safe_log_value
+from log_redact import safe_log_fingerprint, safe_log_value
 from ngfw_terraform_cleanup import (
     _cleanup_ngfw_bootstrap_objects,
     _run_deprovision,
@@ -209,7 +209,10 @@ def _wait_for_ngfw_management_plane(output_data: dict[str, Any]) -> tuple[str, N
 
     management_ip, ssh_executor = _build_ngfw_ssh_executor_from_output(output_data)
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    # management_ip is read from the same terraform output dict that carries the
+    # SSH key secret ARN, so CodeQL taints it as sensitive; fingerprint it for
+    # correlation without clear-text logging (py/clear-text-logging-sensitive-data).
+    logger.info("Waiting for SSH on NGFW at %s...", safe_log_fingerprint(management_ip))
     ssh_executor.wait_for_agent(management_ip, timeout_seconds=ssh_timeout)
 
     logger.info("Polling for NGFW serial number (management plane readiness check)...")
@@ -364,7 +367,11 @@ def _run_pan_os_post_provision(
     except Exception as e:
         logger.exception("NGFW bootstrap object cleanup failed: request_id=%s", request_id)
         bootstrap_cleanup_error = e
-    logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
+    logger.info(
+        "NGFW provisioning complete, serial=%s: request_id=%s",
+        safe_log_fingerprint(serial_number),
+        safe_log_value(request_id),
+    )
 
     _auto_stop_ngfw(request_id)
 

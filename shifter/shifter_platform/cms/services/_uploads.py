@@ -261,7 +261,7 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
             mismatch, or header inspection rejects the upload.
     """
     from cms.assets.s3 import tag_s3_object
-    from cms.assets.services import create_agent
+    from cms.assets.services import AgentUploadSpec, create_agent
 
     _validate_caller_user(user, "complete_upload")
     upload_token = _validate_nonempty_str(upload_token, "upload_token", "complete_upload", user.id)
@@ -277,13 +277,15 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
         tag_s3_object(s3_key, {"status": "completed"})
         agent = create_agent(
             user=user,
-            name=payload["name"],
-            s3_key=s3_key,
-            filename=payload["filename"],
-            os_slug=payload["os_slug"],
-            file_size=expected_size,
-            upload_method="presigned",
-            agent_type=payload.get("agent_type", "xdr"),
+            spec=AgentUploadSpec(
+                name=payload["name"],
+                s3_key=s3_key,
+                filename=payload["filename"],
+                os_slug=payload["os_slug"],
+                file_size=expected_size,
+                upload_method="presigned",
+                agent_type=payload.get("agent_type", "xdr"),
+            ),
         )
         logger.debug("complete_upload completed for user_id=%s, agent_id=%s", user.id, agent.id)
         return agent

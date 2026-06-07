@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# Build stage - use uv's official image for faster builds
+# Build stage - use uv's official image for faster builds. Tracked by the
+# `docker` dependabot ecosystem; the floating minor tag receives upstream
+# security rebuilds (SonarCloud docker:S8431 forbids tag + digest together).
 FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
 
 WORKDIR /app
@@ -36,8 +38,19 @@ RUN uv export --no-emit-project --frozen > requirements.txt && \
         --require-hashes --only-binary :all: \
         -r requirements-gcp.lock
 
-# Production stage
+# Production stage. Tracked by the `docker` dependabot ecosystem; the floating
+# minor tag receives upstream security rebuilds (docker:S8431 forbids tag +
+# digest together).
 FROM python:3.12-slim-trixie AS production
+
+# Image metadata. `maintainer` is the label SonarCloud docker:S7028 requires;
+# the org.opencontainers.image.* labels are the modern OCI equivalents.
+LABEL maintainer="Shifter maintainers" \
+      org.opencontainers.image.title="shifter-portal" \
+      org.opencontainers.image.description="Shifter platform portal (Django: Mission Control, CMS, CTF, Management)" \
+      org.opencontainers.image.source="https://github.com/Brad-Edwards/shifter" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.authors="Shifter maintainers"
 
 WORKDIR /app
 

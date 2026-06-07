@@ -43,6 +43,25 @@ class TestLoadScenario:
         with pytest.raises(ValueError, match="not found"):
             load_scenario("nonexistent_scenario")
 
+    @pytest.mark.parametrize(
+        "malicious_id",
+        [
+            "../../../etc/passwd",
+            "../secrets",
+            "a/b",
+            "..",
+            "foo.bar",
+            "with space",
+            "",
+        ],
+    )
+    def test_load_rejects_path_traversal(self, malicious_id):
+        """load_scenario rejects ids that aren't a safe slug (path-traversal guard)."""
+        from cms.scenarios.loader import load_scenario
+
+        with pytest.raises(ValueError, match="Invalid scenario id"):
+            load_scenario(malicious_id)
+
     def test_basic_scenario_has_attacker_instance(self):
         """Basic scenario has an attacker instance."""
         from cms.scenarios.loader import load_scenario

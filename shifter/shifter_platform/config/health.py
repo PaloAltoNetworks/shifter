@@ -28,7 +28,9 @@ standard logger and ``config.logging.ECSFormatter``.
 
 from __future__ import annotations
 
-from django.http import JsonResponse
+from typing import Any
+
+from django.http import HttpRequest, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from django.views.generic import View
@@ -47,7 +49,7 @@ class CoarseHealthCheckView(CheckMixin, View):
     _FAIL_LABEL = "unavailable"
 
     @method_decorator(never_cache)
-    def get(self, request, *args, **kwargs):
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
         has_error = bool(self.check())
         status_code = 500 if has_error else 200
         body = {label: (self._FAIL_LABEL if p.errors else self._OK_LABEL) for label, p in self.plugins.items()}

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 from cms.exceptions import CMSError
@@ -17,6 +16,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
     from cms.models import App, Credential, Instance, Request
+    from cms.scenarios.hydrator import NGFWRegistration
     from shared.schemas.app import NGFWAppContext, NGFWAppRef
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
     """Late-bound call to ``cms.services.audit_log`` so test patches apply."""
     from cms import services as _cs
 
-    _cs.audit_log(**kwargs)
+    _cs.audit_log(_cs.AuditEvent(**kwargs))
 
 
 def _app_to_ngfw_context(app: App) -> NGFWAppContext:
@@ -263,17 +263,6 @@ def _provision_ngfw_request_records(user: User, name: str) -> tuple[UUID, Reques
     return request_id, request, instance, app
 
 
-@dataclass(frozen=True)
-class _NGFWRegistration:
-    """Deployment-profile and registration/credential inputs for an NGFW create."""
-
-    deployment_profile: Credential
-    registration_method: str
-    scm_credential: Credential | None
-    otp_value: str | None
-    otp_folder: str | None
-
-
 def _hydrate_and_dispatch_ngfw(
     request_id: UUID,
     user: User,
@@ -281,7 +270,7 @@ def _hydrate_and_dispatch_ngfw(
     instance: Instance,
     app: App,
     name: str,
-    registration: _NGFWRegistration,
+    registration: NGFWRegistration,
 ) -> None:
     """Hydrate the NGFW spec, persist for audit, dispatch the engine, and write the audit-log row."""
     from cms.scenarios.hydrator import hydrate_ngfw
@@ -292,11 +281,7 @@ def _hydrate_and_dispatch_ngfw(
         instance=instance,
         app=app,
         request=request,
-        deployment_profile=registration.deployment_profile,
-        registration_method=registration.registration_method,  # type: ignore[arg-type]
-        scm_credential=registration.scm_credential,
-        otp_value=registration.otp_value,
-        otp_folder=registration.otp_folder,
+        registration=registration,
     )
     request_spec = RequestSpec(
         request_id=request_id,
@@ -369,6 +354,8 @@ def create_ngfw(
         safe_log_value(registration_method),
     )
 
+    from cms.scenarios.hydrator import NGFWRegistration
+
     request_id, request, instance, app = _provision_ngfw_request_records(user, name)
     _hydrate_and_dispatch_ngfw(
         request_id,
@@ -377,9 +364,11 @@ def create_ngfw(
         instance,
         app,
         name,
-        _NGFWRegistration(
+        NGFWRegistration(
+            # registration_method is validated to "pin"/"otp" upstream by
+            # _resolve_ngfw_registration; cast narrows str -> the Literal type.
             deployment_profile=deployment_profile,
-            registration_method=registration_method,
+            registration_method=cast(Literal["pin", "otp"], registration_method),
             scm_credential=scm_credential,
             otp_value=otp_value,
             otp_folder=otp_folder,

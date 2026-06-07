@@ -71,6 +71,12 @@ runners are provisioned and registered.
    publishing when the pushed commit only touched bootstrap/backend files.
    After the first full run succeeds, normal filtered `aws-dev` pushes are
    appropriate.
+6. During that first platform apply, publish DNS records for ACM and SES
+   validation in the authoritative DNS zone. ACM records come from the root
+   Terraform output `acm_validation_records`. SES records come from
+   `aws ses get-identity-verification-attributes` for the `_amazonses` TXT
+   value and `aws ses get-identity-dkim-attributes` for the three DKIM CNAME
+   tokens. In Cloudflare, keep ACM and DKIM CNAMEs DNS-only.
 
 ### Bootstrap Only
 ```bash

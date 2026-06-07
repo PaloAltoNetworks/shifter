@@ -21,7 +21,8 @@ provider "aws" {
 }
 
 locals {
-  name_prefix = "${var.environment}-portal"
+  name_prefix                 = "${var.environment}-portal"
+  log_aggregation_bucket_name = "${local.name_prefix}-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
   # Add padding to field_encryption_key (b64_url doesn't include padding, but Fernet requires it)
   field_encryption_key_padded = "${random_id.field_encryption_key.b64_url}="
 }
@@ -289,7 +290,7 @@ module "alb" {
 
   # Phase 5: ALB Access Logs and WAF Logging
   enable_access_logs      = var.enable_alb_access_logs
-  logs_bucket_name        = var.enable_alb_access_logs ? module.log_aggregation.logs_bucket_name : ""
+  logs_bucket_name        = var.enable_alb_access_logs ? local.log_aggregation_bucket_name : ""
   enable_waf_logging      = var.enable_waf_logging
   waf_log_destination_arn = var.enable_waf_logging ? module.log_aggregation.waf_firehose_arn : ""
 

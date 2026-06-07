@@ -103,6 +103,30 @@ resource "aws_iam_role_policy" "firehose_logs" {
   })
 }
 
+resource "aws_iam_role_policy" "firehose_kms" {
+  count = var.enable_log_aggregation ? 1 : 0
+
+  name = "kms-log-delivery"
+  role = aws_iam_role.firehose[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+          "kms:ReEncrypt*"
+        ]
+        Resource = aws_kms_key.log_aggregation[0].arn
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # Kinesis Firehose Delivery Stream
 # ------------------------------------------------------------------------------
@@ -142,6 +166,8 @@ resource "aws_kinesis_firehose_delivery_stream" "logs" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-logs-${var.environment}"
   })
+
+  depends_on = [aws_iam_role_policy.firehose_kms]
 }
 
 # ------------------------------------------------------------------------------
@@ -192,4 +218,6 @@ resource "aws_kinesis_firehose_delivery_stream" "waf" {
   tags = merge(local.common_tags, {
     Name = "aws-waf-logs-${var.name_prefix}-${var.environment}"
   })
+
+  depends_on = [aws_iam_role_policy.firehose_kms]
 }

@@ -105,6 +105,25 @@ to use the `aws-dev` deploy branch:
    After the first full run has created the shared state and images, normal
    `aws-dev` pushes can use the filtered path.
 
+### First-run DNS validation
+
+The first platform apply in a fresh account creates DNS-validated ACM
+certificates for the portal domains and SES identities for the configured
+mail domain. Publish these records in the authoritative DNS zone while the
+apply is running; Terraform will continue once AWS observes the ACM records.
+
+- ACM portal and Guacamole URL validation records are exposed by the root
+  Terraform output `acm_validation_records`. They are CNAME records.
+- SES domain verification uses a TXT record named `_amazonses.<ses_domain>`.
+  Fetch the value with:
+  `aws ses get-identity-verification-attributes --identities <ses_domain> --region <region>`.
+- SES DKIM uses three CNAME records. Fetch the tokens with:
+  `aws ses get-identity-dkim-attributes --identities <ses_domain> --region <region>`.
+  Each token maps `<token>._domainkey.<ses_domain>` to
+  `<token>.dkim.amazonses.com`.
+- In Cloudflare, create ACM and DKIM CNAMEs as DNS-only records. Do not proxy
+  validation CNAMEs.
+
 ## AWS range (`dev` / `prod`)
 
 Range Terraform (under `platform/terraform/environments/<env>/range/`) is

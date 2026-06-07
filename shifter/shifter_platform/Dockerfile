@@ -54,9 +54,10 @@ LABEL maintainer="Shifter maintainers" \
 
 WORKDIR /app
 
-# Create non-root user
+# Create non-root user and its writable home. Gunicorn and provisioner helpers
+# resolve HOME to /home/appuser in production containers.
 RUN groupadd --gid 1000 appgroup && \
-    useradd --uid 1000 --gid appgroup --shell /bin/bash appuser
+    useradd --uid 1000 --gid appgroup --create-home --home-dir /home/appuser --shell /bin/bash appuser
 
 # Install runtime dependencies
 # gettext provides msgfmt, required by `manage.py compilemessages` in
@@ -81,14 +82,17 @@ COPY installation /opt/shifter-libs/installation
 # Copy application code (context is now shifter/, so path is shifter_platform)
 COPY --chown=appuser:appgroup shifter_platform .
 
-# Create writable runtime directories for collectstatic and django-health-check's
-# default-storage probe. The application source tree stays immutable.
-RUN mkdir -p /app/staticfiles /app/media && chown appuser:appgroup /app/staticfiles /app/media
+# Create writable runtime directories for collectstatic, django-health-check's
+# default-storage probe, and tools that use HOME. The application source tree
+# stays immutable.
+RUN mkdir -p /app/staticfiles /app/media /home/appuser/.terraform.d/plugin-cache /home/appuser/.pulumi && \
+    chown -R appuser:appgroup /app/staticfiles /app/media /home/appuser
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/opt/shifter-libs
+    PYTHONPATH=/opt/shifter-libs \
+    HOME=/home/appuser
 
 # Switch to non-root user
 USER appuser

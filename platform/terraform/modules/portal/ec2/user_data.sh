@@ -262,10 +262,15 @@ echo "Starting portal..."
 eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"
 
 echo "Starting workers..."
-eval docker run -d --name worker-cms --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue cms
-eval docker run -d --name worker-engine --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue engine
-eval docker run -d --name worker-mc --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue mc
-eval docker run -d --name ctf-scheduler --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_ctf_scheduler
+WORKER_HEALTH_BASE="--health-interval 30s --health-timeout 5s --health-start-period 90s --health-retries 2"
+WORKER_CMS_HEALTH="--health-cmd='find /tmp/worker-cms-heartbeat -mmin -2 | grep -q .'"
+WORKER_ENGINE_HEALTH="--health-cmd='find /tmp/worker-engine-heartbeat -mmin -2 | grep -q .'"
+WORKER_MC_HEALTH="--health-cmd='find /tmp/worker-mc-heartbeat -mmin -2 | grep -q .'"
+CTF_SCHEDULER_HEALTH="--health-cmd='find /tmp/ctf-scheduler-heartbeat -mmin -2 | grep -q .'"
+eval docker run -d --name worker-cms --restart unless-stopped $WORKER_HEALTH_BASE "$WORKER_CMS_HEALTH" $COMMON_ENV "$IMAGE" python manage.py run_worker --queue cms
+eval docker run -d --name worker-engine --restart unless-stopped $WORKER_HEALTH_BASE "$WORKER_ENGINE_HEALTH" $COMMON_ENV "$IMAGE" python manage.py run_worker --queue engine
+eval docker run -d --name worker-mc --restart unless-stopped $WORKER_HEALTH_BASE "$WORKER_MC_HEALTH" $COMMON_ENV "$IMAGE" python manage.py run_worker --queue mc
+eval docker run -d --name ctf-scheduler --restart unless-stopped $WORKER_HEALTH_BASE "$CTF_SCHEDULER_HEALTH" $COMMON_ENV "$IMAGE" python manage.py run_ctf_scheduler
 
 echo "All containers started:"
 docker ps

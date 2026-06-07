@@ -30,12 +30,10 @@ Current mechanisms:
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
     Shifter-owned, Terraform-managed instances.
-- `.github/workflows/deploy.yml` and `.github/workflows/_quality.yml`:
-  CI quality gate. `deploy.yml` owns path detection and passes subsystem
-  booleans into `_quality.yml`; `_quality.yml` gates lint, SAST, type,
-  architecture, and test jobs by the relevant subsystem so unrelated
-  package checks do not fan out on every PR. Guardrail and quality-workflow
-  edits still run the enforcement jobs needed to validate the guardrails.
+- `.github/workflows/_quality.yml`: CI architecture gate. Its SonarCloud
+  job restores coverage artifacts, sets up Temurin Java 21, and disables
+  SonarScanner JRE auto-provisioning so the quality gate does not depend
+  on downloading a runtime during analysis.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
   runs on push to `dev`, on pull requests against `dev`, and on a
@@ -49,6 +47,10 @@ Current mechanisms:
   `deprecated`, `removed`, `fixed`, `feat`, `fix`, `chore`, `docs`,
   `refactor`, `test`, `ci`, `build`, `perf`, `revert`. Subject must
   start with a lowercase letter.
+- `.github/workflows/_shifter-engine.yml`: engine image validation and
+  deployment. The validate job runs on GitHub-hosted runners because it
+  only performs a local Docker build; self-hosted runners are reserved
+  for the credentialed build and deploy jobs.
 - `.github/dependabot.yml`: weekly dependency PRs across every uv,
   npm, github-actions, and pre-commit package root in the repo; every
   block targets the `dev` integration branch.
@@ -67,6 +69,12 @@ Current mechanisms:
   header.
 - `.kube-linter.yaml`: Kubernetes security and best-practice linting
   configuration (enforces ADR-006 checks)
+- `Checkov`: Terraform and Kubernetes IaC security scanning. ADR-004-R11
+  makes the Terraform path a blocking gate (pre-commit and CI share
+  `platform/terraform/.checkov.yaml`); the Kubernetes path remains
+  soft-fail while manifest hardening proceeds as a separate workstream.
+  Accepted-risk waivers MUST have an entry in `docs/adr/exceptions.yaml`
+  with owner, reason, expiry, affected paths, and the Checkov policy ID.
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
   flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
   `child_process` (any shape — named, default, namespace, CommonJS

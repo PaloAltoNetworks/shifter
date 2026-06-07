@@ -56,3 +56,13 @@ dns_record_ttl          = 300
 # so the placeholder below is loud-and-broken until you replace it.
 identity_allowed_email_domain = "REPLACE_WITH_YOUR_TENANCY_DOMAIN.example"
 identity_allowed_emails       = []
+
+# Range egress policy (PLAT-220). The committed baseline is status-quo (no
+# enforcement, range Cloud NAT egress unrestricted) so the example deploys
+# without prescribing a security posture. Deployments that want active
+# enforcement set `range_egress_mode = "allowlist"` (or "deny-all") via a
+# sibling `local.auto.tfvars` rendered from CI secrets (see
+# docs/dev/deploy-secrets.md). CIDRs are operator config, not secrets, but
+# the actual list belongs to your deployment, not this committed file.
+range_egress_mode          = "status-quo"
+range_egress_allowed_cidrs = []

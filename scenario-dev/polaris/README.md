@@ -46,10 +46,12 @@ scenario-dev/polaris/
 ├── tests/                          everything test-related
 │   ├── setup.sh                    build + up + wait ready
 │   ├── reset.sh                    force-recreate sticky-state services (a5/a10/a11/a12/a13)
-│   ├── run-all-smoketests.sh       full sweep: reset + 15 asset smoketests + isolation
+│   ├── run-all-smoketests.sh       infra sweep: reset + per-asset smoketests + isolation
 │   ├── isolation-smoketest.sh      cross-cutting network boundary validation (70 checks)
 │   ├── smoketests/                 one per asset, pointed at the live range from its pivot container
 │   │   ├── A0-smoketest.sh ... A14-smoketest.(sh|py)
+│   ├── scenario_smoketest/         pre-event challenge-hint → flag verifier (Python package; see its README)
+│   ├── test_scenario_smoketest.py  unit tests for scenario_smoketest
 │   └── walkthroughs/               step-by-step happy-path participant guides, grouped by flag range
 │       ├── README.md
 │       ├── 00-range-access-docker.md
@@ -94,8 +96,19 @@ first instead of assuming the older design prose is correct.
    ssh ctf-range-builder 'bash /home/atomik/range/tests/run-all-smoketests.sh'
    ```
    Expected: `16 / 16 asset sweeps PASS`, `NORTHSTORM full range: PASS`.
+   Infrastructure-level: per-asset connectivity + cross-cutting network
+   isolation. Does not verify CTFd challenge content.
 
-3. **Reset** — before each test or between participant sessions:
+3. **Verify scenario content** — pre-event content check that every CTFd
+   challenge's hint path produces the configured flag:
+   ```
+   ssh ctf-range-builder 'cd /home/atomik/range/tests && python3 -m scenario_smoketest'
+   ```
+   Content-level (vs. step 2's infra sweep). Full usage, flags, and the
+   CTFd-token security model live in
+   [`tests/scenario_smoketest/README.md`](tests/scenario_smoketest/README.md).
+
+4. **Reset** — before each test or between participant sessions:
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/reset.sh'
    ```

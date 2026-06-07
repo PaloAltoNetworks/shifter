@@ -19,7 +19,9 @@ from ctf.enums import (
     ParticipantStatus,
 )
 from ctf.exceptions import CTFRateLimitError, CTFStateError
-from ctf.models import CTFChallenge, CTFEvent, CTFParticipant, CTFSubmission
+from ctf.models import CTFChallenge, CTFEvent, CTFHint, CTFParticipant, CTFSubmission
+from ctf.services.hint import use_hint
+from ctf.services.scoring import calculate_score
 from ctf.services.submission import submit_flag
 
 
@@ -500,3 +502,109 @@ class TestTimeBoundaryEnforcement:
         """Flag submission succeeds when within the event time window."""
         submission = submit_flag(participant.id, challenge.id, "FLAG{on_time}")
         assert submission is not None
+
+
+# ── Fixtures for hint-penalty scoring tests (CTF-002 / CTF-203 / CTF-206) ─
+
+
+@pytest.fixture
+def hint_event(db, organizer_user):
+    """Active event with no cooldown — clean ground for scoring assertions."""
+    return CTFEvent.objects.create(
+        name="Hint Penalty Scoring Event",
+        created_by=organizer_user,
+        status=EventStatus.ACTIVE.value,
+        event_start=timezone.now() - timedelta(hours=1),
+        event_end=timezone.now() + timedelta(hours=7),
+        scenario_id="basic",
+        submission_cooldown_seconds=0,
+    )
+
+
+@pytest.fixture
+def hint_challenge(db, hint_event):
+    return CTFChallenge.objects.create(
+        event=hint_event,
+        name="Hint Penalty Challenge",
+        description="Test",
+        category=ChallengeCategory.WEB.value,
+        points=100,
+        difficulty=ChallengeDifficulty.EASY.value,
+        flag_hash="$2b$12$placeholder_hint_scoring",
+    )
+
+
+@pytest.fixture
+def hint_participant(db, hint_event, participant_user):
+    return CTFParticipant.objects.create(
+        event=hint_event,
+        user=participant_user,
+        email=participant_user.email,
+        name="Hint Penalty Participant",
+        status=ParticipantStatus.ACTIVE.value,
+        registered_at=timezone.now(),
+    )
+
+
+@pytest.mark.django_db
+class TestSubmitFlagHintPenalty:
+    """Hint penalty is read from the durable CTFHintUsage ledger and baked
+    into CTFSubmission.points_awarded at solve time (CTF-002 / CTF-203 /
+    CTF-206). Cumulative penalty at 100% (or above) awards 0, not the
+    historical 1-point floor.
+    """
+
+    @patch("ctf.services.submission.verify_flag", return_value=True)
+    def test_first_solve_after_hint_applies_penalty(self, mock_verify, hint_participant, hint_challenge):
+        """Unlock a 30% hint, then solve — points_awarded reflects the penalty
+        and calculate_score returns that net value."""
+        hint = CTFHint.objects.create(challenge=hint_challenge, text="Try X", penalty=30, order=0)
+        use_hint(hint_participant.id, hint.id)
+
+        submission = submit_flag(hint_participant.id, hint_challenge.id, "FLAG{ok}")
+
+        assert submission.is_correct
+        assert submission.points_awarded == 70  # 100 - 30%
+        assert calculate_score(hint_participant.id) == 70
+
+    @patch("ctf.services.submission.verify_flag", return_value=False)
+    def test_unsolved_hint_does_not_change_total_score(self, mock_verify, hint_participant, hint_challenge):
+        """Unlocking a hint without a correct solve leaves total score at 0:
+        no penalty is debited from anything because penalties only attach to
+        the points awarded for a correct submission."""
+        hint = CTFHint.objects.create(challenge=hint_challenge, text="Try X", penalty=50, order=0)
+        use_hint(hint_participant.id, hint.id)
+
+        # Wrong-flag submission persists a row with points_awarded=0.
+        submit_flag(hint_participant.id, hint_challenge.id, "FLAG{wrong}")
+
+        assert calculate_score(hint_participant.id) == 0
+        assert not CTFSubmission.objects.filter(participant=hint_participant, points_awarded__gt=0).exists()
+
+    @patch("ctf.services.submission.verify_flag", return_value=True)
+    def test_100_percent_hint_penalty_awards_zero(self, mock_verify, hint_participant, hint_challenge):
+        """A 100% cumulative hint penalty floors net solve points at 0
+        (CTF-203 — net score for a challenge solve shall never go below zero,
+        and the historical floor-at-1 is the bug this issue fixes)."""
+        hint = CTFHint.objects.create(challenge=hint_challenge, text="Full give-away", penalty=100, order=0)
+        use_hint(hint_participant.id, hint.id)
+
+        submission = submit_flag(hint_participant.id, hint_challenge.id, "FLAG{ok}")
+
+        assert submission.is_correct
+        assert submission.points_awarded == 0
+        assert calculate_score(hint_participant.id) == 0
+
+    @patch("ctf.services.submission.verify_flag", return_value=True)
+    def test_cumulative_penalty_over_100_still_zero(self, mock_verify, hint_participant, hint_challenge):
+        """Two hints summing above 100% are capped at 100% and the solve still
+        floors at 0 (no negative awards)."""
+        h1 = CTFHint.objects.create(challenge=hint_challenge, text="H1", penalty=60, order=0)
+        h2 = CTFHint.objects.create(challenge=hint_challenge, text="H2", penalty=60, order=1)
+        use_hint(hint_participant.id, h1.id)
+        use_hint(hint_participant.id, h2.id)
+
+        submission = submit_flag(hint_participant.id, hint_challenge.id, "FLAG{ok}")
+
+        assert submission.points_awarded == 0
+        assert calculate_score(hint_participant.id) == 0

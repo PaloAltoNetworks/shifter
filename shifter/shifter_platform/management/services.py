@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from django.utils import timezone
 
 from risk_register.models import AuditLog
-from risk_register.services import audit_log
+from risk_register.services import AuditEvent, audit_log
 from shared.constants import USER_CANNOT_BE_NONE
 
 from .models import ActivityLog, UserProfile
@@ -110,12 +110,14 @@ def mark_user_deleted(user: User, admin_user: User | None = None) -> None:
 
         # Audit log user deletion
         audit_log(
-            entity_type=AuditLog.EntityType.USER,
-            entity_id=user.id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER if admin_user else AuditLog.ActorType.SYSTEM,
-            actor_id=admin_user.id if admin_user else None,
-            previous_state={"email": user.email},
+            AuditEvent(
+                entity_type=AuditLog.EntityType.USER,
+                entity_id=user.id,
+                action=AuditLog.Action.DELETE,
+                actor_type=AuditLog.ActorType.USER if admin_user else AuditLog.ActorType.SYSTEM,
+                actor_id=admin_user.id if admin_user else None,
+                previous_state={"email": user.email},
+            )
         )
 
         logger.debug("Marked user %s as deleted", user.email)

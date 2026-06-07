@@ -101,30 +101,30 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.43.2"
+version = "1.43.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/cd/bba36079f5d4bd63db7385e6b9dc1845db32407c3f18f56aaddafb75097f/boto3-1.43.2.tar.gz", hash = "sha256:be951cc22769fbcda73fac523b031ee38db45c3ae2b0d828c76b8f6e8e683073", size = 113108, upload-time = "2026-05-01T19:43:13.632Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/2f/c4159fa45079b41f11ad17d8c5df8e1d10169b94d1e4240df5be116d3f0a/boto3-1.43.12.tar.gz", hash = "sha256:4a60cdf02c52cb0a60f8dbc986142ce2c31e87e3df1438ffe6755b83008f3e4e", size = 113142, upload-time = "2026-05-20T19:38:13.163Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cb/e5/c9cee72ef678dabcc27acaf8228a2d4157ad26b00e1cc5d48886f8a94c2c/boto3-1.43.2-py3-none-any.whl", hash = "sha256:796e859cfb5e93c55276ce746f8020f691eda6b68a0ec4ce4f6fd07a1cca6859", size = 140501, upload-time = "2026-05-01T19:43:10.5Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/35/b7ab4b6977811f9887405e24460640033c22f4515cf1e904480710bd6296/boto3-1.43.12-py3-none-any.whl", hash = "sha256:685c3e6093455623bfc22dac55b4946ea243095252f7f9c11a99d84b38033bcf", size = 140537, upload-time = "2026-05-20T19:38:09.995Z" },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.43.2"
+version = "1.43.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/b0/65d4c85f16367fb6147d391652d0c386f24b029536f7026e7b98740166cd/botocore-1.43.2.tar.gz", hash = "sha256:7b2ec87b6d0720bff920451ce930e71c2a99cdea48d0eaa66ccf0b21ea747e03", size = 15301186, upload-time = "2026-05-01T19:42:59.748Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6d/a1/95ec376c2300e605225998619c46f7093c515710b9d6d65f891f126f32b6/botocore-1.43.12.tar.gz", hash = "sha256:7608ecd51687132e22aa8b82acb89a5917b1b68ec0563c25d82c3e16adab9bc0", size = 15366431, upload-time = "2026-05-20T19:37:58.734Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/52/f57ded73f1527a18e0712281eb49c4ae240038bb4dc7083fd288b4adc811/botocore-1.43.2-py3-none-any.whl", hash = "sha256:b823454d751a1c24bb403b5b07ab65007689654abb21787df923684e0743976c", size = 14982693, upload-time = "2026-05-01T19:42:54.602Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/20/b2ef618de8dc634361e32344bdc5139f1ad92968ab6c18cddd6c8c431f67/botocore-1.43.12-py3-none-any.whl", hash = "sha256:75dfb84c6edbb5aaa0314d93776d840d74e26e8d97e0431270a3274d70abeba3", size = 15046449, upload-time = "2026-05-20T19:37:53.723Z" },
 ]
 
 [[package]]
@@ -506,11 +506,11 @@ wheels = [
 
 [[package]]
 name = "idna"
-version = "3.13"
+version = "3.18"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ce/cc/762dfb036166873f0059f3b7de4565e1b5bc3d6f28a414c13da27e442f99/idna-3.13.tar.gz", hash = "sha256:585ea8fe5d69b9181ec1afba340451fba6ba764af97026f92a91d4eef164a242", size = 194210, upload-time = "2026-04-22T16:42:42.314Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cd/63/9496c57188a2ee585e0f1db071d75089a11e98aa86eb99d9d7618fc1edce/idna-3.18.tar.gz", hash = "sha256:ffb385a7e039654cef1ab9ef32c6fafe283c0c0467bba1d9029738ce4a14a848", size = 196711, upload-time = "2026-06-02T14:34:07.794Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/13/ad7d7ca3808a898b4612b6fe93cde56b53f3034dcde235acb1f0e1df24c6/idna-3.13-py3-none-any.whl", hash = "sha256:892ea0cde124a99ce773decba204c5552b69c3c67ffd5f232eb7696135bc8bb3", size = 68629, upload-time = "2026-04-22T16:42:40.909Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/5e/d4e9f1a599fb8e573b7b87160658329fbf28d19eac2718f51fc3def3aa5a/idna-3.18-py3-none-any.whl", hash = "sha256:7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2", size = 65455, upload-time = "2026-06-02T14:34:06.319Z" },
 ]
 
 [[package]]
@@ -874,29 +874,29 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arpeggio", specifier = ">=2.0.3" },
-    { name = "asgiref", specifier = ">=3.8.1" },
+    { name = "asgiref", specifier = ">=3.11.1" },
     { name = "attrs", specifier = ">=25.4.0" },
-    { name = "boto3", specifier = ">=1.42.14" },
-    { name = "botocore", specifier = ">=1.42.14" },
+    { name = "boto3", specifier = ">=1.43.8" },
+    { name = "botocore", specifier = ">=1.43.8" },
     { name = "cffi", specifier = ">=2.0.0" },
     { name = "cryptography", specifier = ">=46.0.7" },
-    { name = "debugpy", specifier = ">=1.8.19" },
-    { name = "dill", specifier = ">=0.4.0" },
-    { name = "grpcio", specifier = ">=1.76.0" },
+    { name = "debugpy", specifier = ">=1.8.20" },
+    { name = "dill", specifier = ">=0.4.1" },
+    { name = "grpcio", specifier = ">=1.80.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "jmespath", specifier = ">=1.0.1" },
+    { name = "jmespath", specifier = ">=1.1.0" },
     { name = "kubernetes", specifier = ">=32.0.0" },
     { name = "markupsafe", specifier = ">=3.0.3" },
     { name = "paramiko", specifier = ">=4.0.0" },
     { name = "parver", specifier = ">=0.5" },
-    { name = "protobuf", specifier = ">=5.29.6" },
-    { name = "psycopg", specifier = ">=3.3.2" },
-    { name = "psycopg-binary", specifier = ">=3.3.2" },
-    { name = "pycparser", specifier = ">=2.23" },
+    { name = "protobuf", specifier = ">=7.34.1" },
+    { name = "psycopg", specifier = ">=3.3.4" },
+    { name = "psycopg-binary", specifier = ">=3.3.4" },
+    { name = "pycparser", specifier = ">=3.0" },
     { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "redis", specifier = ">=5.2.1" },
-    { name = "s3transfer", specifier = ">=0.16.0" },
+    { name = "s3transfer", specifier = ">=0.17.0" },
     { name = "semver", specifier = ">=3.0.4" },
     { name = "six", specifier = ">=1.17.0" },
     { name = "typing-extensions", specifier = ">=4.15.0" },

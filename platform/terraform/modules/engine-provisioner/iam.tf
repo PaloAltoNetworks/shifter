@@ -65,6 +65,37 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
   })
 }
 
+# Allow the ECS execution role to decrypt secrets encrypted with the portal
+# Secrets Manager CMK. ECS resolves task-definition `secrets = [...]` before
+# container start using the execution role, so a missing kms:Decrypt grant on
+# the CMK aborts the task with `ResourceInitializationError: Access to KMS is
+# not allowed` and the container never runs. Mirrors `SecretsManagerKMSAccess`
+# on the task role below, but pinned to the concrete CMK ARN (preflight
+# guidance: prefer the concrete CMK ARN when the role only needs the portal
+# CMK). See issue #52.
+resource "aws_iam_role_policy" "ecs_execution_kms" {
+  name = "kms-secrets-decrypt"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SecretsManagerKMSAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey"
+      ]
+      Resource = var.secrets_manager_kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "secretsmanager.${local.region}.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role
 # ------------------------------------------------------------------------------
@@ -465,32 +496,103 @@ resource "aws_iam_role_policy" "gwlb" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "GWLBOperations"
+        # ELBv2 Describe APIs require Resource = "*" per the AWS service
+        # authorization reference. Actions are enumerated so the wildcard
+        # statement cannot grow silently to additional read APIs.
+        Sid    = "GWLBDescribe"
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetHealth",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeTags"
+        ]
+        Resource = "*"
+      },
+      {
+        # GWLB resource creation. Scoped to Gateway Load Balancer
+        # resource types and gated on Shifter ownership request tags so
+        # this statement cannot create ALB/NLB resources or untagged
+        # resources.
+        Sid    = "GWLBCreate"
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:DeleteLoadBalancer",
           "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:CreateListener"
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # Existing-resource mutations. Restricted to Shifter-owned GWLB
+        # resources via ELBv2 resource tags so the runtime cannot delete
+        # or reconfigure load balancers it does not own.
+        Sid    = "GWLBMutateOwned"
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DeleteLoadBalancer",
           "elasticloadbalancing:DeleteTargetGroup",
-          "elasticloadbalancing:CreateListener",
           "elasticloadbalancing:DeleteListener",
           "elasticloadbalancing:RegisterTargets",
           "elasticloadbalancing:DeregisterTargets",
           "elasticloadbalancing:ModifyLoadBalancerAttributes",
           "elasticloadbalancing:ModifyTargetGroup",
           "elasticloadbalancing:ModifyTargetGroupAttributes",
-          "elasticloadbalancing:AddTags",
           "elasticloadbalancing:RemoveTags"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:ResourceTag/shifter:system"      = "shifter"
+            "elasticloadbalancing:ResourceTag/shifter:environment" = var.environment
+            "elasticloadbalancing:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
       },
       {
-        Sid    = "GWLBDescribe"
+        # Tagging at create time. Bound to the GWLB create APIs and the
+        # Shifter ownership request tags so this statement cannot tag
+        # arbitrary ELBv2 resources or strip ownership tags later.
+        Sid    = "GWLBTagOnCreate"
         Effect = "Allow"
         Action = [
-          "elasticloadbalancing:Describe*"
+          "elasticloadbalancing:AddTags"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:CreateAction" = [
+              "CreateLoadBalancer",
+              "CreateTargetGroup",
+              "CreateListener"
+            ]
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
       }
     ]
   })

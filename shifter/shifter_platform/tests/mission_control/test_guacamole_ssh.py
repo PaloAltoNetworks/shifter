@@ -5,6 +5,21 @@ from unittest.mock import patch
 import pytest
 
 
+def _ssh_req(**overrides):
+    """Build a ``GuacSSHUrlRequest`` with sensible test defaults."""
+    from mission_control.guacamole import GuacSSHUrlRequest
+
+    defaults = {
+        "base_url": "https://guac.example.com",
+        "secret_key": "0123456789abcdef0123456789abcdef",
+        "username": "test@example.com",
+        "connection_name": "ngfw-123",
+        "hostname": "10.1.5.10",
+    }
+    defaults.update(overrides)
+    return GuacSSHUrlRequest(**defaults)
+
+
 @pytest.fixture
 def fake_private_key():
     """Generate a fake private key for testing that won't trigger security scanners."""
@@ -136,13 +151,7 @@ class TestCreateGuacamoleSSHURL:
         ):
             mock_payload.return_value = {"username": "test@example.com"}
 
-            create_guacamole_ssh_url(
-                base_url="https://guac.example.com",
-                secret_key="0123456789abcdef0123456789abcdef",
-                username="test@example.com",
-                connection_name="ngfw-123",
-                hostname="10.1.5.10",
-            )
+            create_guacamole_ssh_url(_ssh_req())
 
             mock_payload.assert_called_once()
             call_args = mock_payload.call_args
@@ -159,13 +168,7 @@ class TestCreateGuacamoleSSHURL:
         ):
             mock_payload.return_value = {"username": "test@example.com"}
 
-            create_guacamole_ssh_url(
-                base_url="https://guac.example.com",
-                secret_key="0123456789abcdef0123456789abcdef",
-                username="test@example.com",
-                connection_name="ngfw-123",
-                hostname="10.1.5.10",
-            )
+            create_guacamole_ssh_url(_ssh_req())
 
             # Verify connections dict structure
             call_args = mock_payload.call_args
@@ -182,13 +185,7 @@ class TestCreateGuacamoleSSHURL:
             patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
             patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123"),
         ):
-            result = create_guacamole_ssh_url(
-                base_url="https://guac.example.com",
-                secret_key="0123456789abcdef0123456789abcdef",
-                username="test@example.com",
-                connection_name="ngfw-123",
-                hostname="10.1.5.10",
-            )
+            result = create_guacamole_ssh_url(_ssh_req())
 
             assert result.startswith("https://guac.example.com/#/client/")
             assert "token=token123" in result
@@ -203,12 +200,10 @@ class TestCreateGuacamoleSSHURL:
             patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123") as mock_token,
         ):
             create_guacamole_ssh_url(
-                base_url="https://public.example.com",
-                secret_key="0123456789abcdef0123456789abcdef",
-                username="test@example.com",
-                connection_name="ngfw-123",
-                hostname="10.1.5.10",
-                api_base_url="https://internal.example.com",
+                _ssh_req(
+                    base_url="https://public.example.com",
+                    api_base_url="https://internal.example.com",
+                )
             )
 
             # Should use internal URL for token exchange
@@ -228,13 +223,7 @@ class TestCreateGuacamoleSSHURL:
             ),
             pytest.raises(ValueError, match="Token exchange failed"),
         ):
-            create_guacamole_ssh_url(
-                base_url="https://guac.example.com",
-                secret_key="0123456789abcdef0123456789abcdef",
-                username="test@example.com",
-                connection_name="ngfw-123",
-                hostname="10.1.5.10",
-            )
+            create_guacamole_ssh_url(_ssh_req())
 
     def test_passes_ssh_private_key_to_connection_params(self, fake_private_key):
         """Function includes SSH private key in connection parameters."""
@@ -247,14 +236,7 @@ class TestCreateGuacamoleSSHURL:
         ):
             mock_payload.return_value = {"username": "test@example.com"}
 
-            create_guacamole_ssh_url(
-                base_url="https://guac.example.com",
-                secret_key="0123456789abcdef0123456789abcdef",
-                username="test@example.com",
-                connection_name="ngfw-123",
-                hostname="10.1.5.10",
-                ssh_private_key=fake_private_key,
-            )
+            create_guacamole_ssh_url(_ssh_req(ssh_private_key=fake_private_key))
 
             # Verify private key is in connection params
             call_args = mock_payload.call_args
@@ -274,14 +256,7 @@ class TestCreateGuacamoleSSHURL:
         ):
             mock_payload.return_value = {"username": "test@example.com"}
 
-            create_guacamole_ssh_url(
-                base_url="https://guac.example.com",
-                secret_key="0123456789abcdef0123456789abcdef",
-                username="test@example.com",
-                connection_name="ngfw-123",
-                hostname="10.1.5.10",
-                ssh_username="custom-user",
-            )
+            create_guacamole_ssh_url(_ssh_req(ssh_username="custom-user"))
 
             # Verify username in connection params
             call_args = mock_payload.call_args

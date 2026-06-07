@@ -26,6 +26,7 @@ graph TB
             ALB["ALB"]
             PortalNAT["NAT Gateway"]
         end
+        FirewallSubnetPortal["Portal Firewall Subnets (×N AZs)"]
         subgraph PrivateSubnets["Private Subnets (×3 AZs)"]
             EC2["EC2/ASG"]
             RDS["RDS"]
@@ -40,10 +41,10 @@ graph TB
     end
 
     Internet --> WAF --> ALB
-    ALB --> EC2
+    ALB --> FirewallSubnetPortal --> EC2
     EC2 --> RDS
     EC2 --> Redis
-    PrivateSubnets --> PortalNAT --> Internet
+    PrivateSubnets --> FirewallSubnetPortal --> PortalNAT --> Internet
     EC2 <-->|VPC peering| UserSubnets
 
     UserSubnets --> FirewallSubnet --> NATSubnet --> Internet
@@ -54,16 +55,78 @@ graph TB
 | Subnet Type | Components |
 |-------------|------------|
 | Public (×3 AZs) | ALB, NAT Gateway |
+| Firewall (×N AZs) | AWS Network Firewall endpoint per AZ; east-west inspection between public and private tiers |
 | Private (×3 AZs) | EC2 (single instance or ASG, configurable), RDS subnet group, Redis subnet group |
 
 Components:
 - **WAF** - Rate limiting, IP reputation, OWASP rules. Attached to ALB.
 - **ALB** - Public-facing. HTTPS only (HTTP redirects).
 - **NAT Gateway** - Single, in one public subnet.
-- **RDS** - Subnet group spans all private subnets (Multi-AZ capable).
-- **Redis** - Subnet group spans all private subnets.
+- **Portal Network Firewall** - East-west inspection between the public (ALB) tier and the private services tier. Stateful pass-through with baseline ALERT rules on protocols that have no legitimate east-west use (SSH/RDP/ICMP). FLOW + ALERT logs feed the existing `log-aggregation` pipeline. Gated by `enable_portal_inspection`; requires `enable_log_aggregation = true` so logs do not silently dead-end.
+- **RDS** - Subnet group spans all private subnets (Multi-AZ capable). Ingress restricted to the portal EC2 / Django security group (SG-to-SG, not VPC CIDR).
+- **Redis** - Subnet group spans all private subnets. Ingress restricted to the portal EC2 / Django security group (SG-to-SG, not VPC CIDR).
 
-Defined in `platform/terraform/modules/portal/vpc/` and `platform/terraform/modules/portal/alb/`.
+Defined in `platform/terraform/modules/portal/vpc/` (including `inspection.tf`) and `platform/terraform/modules/portal/alb/`.
+
+#### Portal east-west inspection (#122)
+
+Defense-in-depth boundary between the portal public tier and the
+private services tier:
+
+- **Mechanism**: AWS Network Firewall, the same managed primitive the
+  range VPC uses for egress filtering.
+- **Path**: ALB → firewall endpoint → Django EC2 (and the return path).
+  The VPC has per-AZ public, private, and firewall route tables, plus
+  one Network Firewall endpoint per AZ via the firewall's
+  `subnet_mapping`. Each AZ's public RT keeps its IGW default and adds
+  a more-specific route to every private subnet CIDR via that AZ's
+  firewall endpoint; each AZ's private RT routes every public subnet
+  CIDR via that AZ's firewall endpoint and redirects its 0/0 default
+  through that endpoint; each AZ's firewall RT default sends onward
+  Internet-bound traffic to the shared NAT gateway. The full route
+  matrix ensures cross-AZ flows (created by ALB cross-zone load
+  balancing and by the single shared NAT) cannot fall back to the
+  implicit local VPC route and bypass inspection.
+- **Stateful trade-off**: ALB always has cross-zone load balancing on
+  (the platform cannot turn it off), and the portal runs a single
+  shared NAT. With per-AZ firewall endpoints, cross-AZ flows are
+  inspected by different endpoints on the forward and return legs
+  (asymmetric stateful). This is compatible with the visibility-first
+  v1 policy because rules fire per packet on whichever endpoint
+  observes them and FLOW logs from both endpoints reconstruct the
+  flow. A stateful drop-by-default posture would require a centralized
+  inspection topology (Transit Gateway with single endpoint, GWLB
+  with consistent hashing, or single-AZ appliance mode); all of those
+  are deferred beyond this issue.
+- **Policy**: stateful default pass with a baseline rule group that
+  ALERTs on protocols that should not appear east-west (SSH, RDP,
+  ICMP). FLOW logs capture every inspected flow. Visibility-first;
+  nothing is dropped by default.
+- **Logging**: FLOW + ALERT to a CMK-encrypted CloudWatch log group,
+  subscribed through `module.log_aggregation` so the existing
+  CloudWatch → Firehose → S3 / SQS pipeline carries portal-firewall
+  records.
+- **Fail-closed**: `enable_portal_inspection = true` requires
+  `enable_log_aggregation = true`; a precondition on
+  `aws_networkfirewall_firewall.portal` fails the plan otherwise.
+- **Microsegmentation**: portal RDS and Redis ingress are
+  SG-to-SG references from the portal EC2 / Django security group,
+  not a broad `vpc_cidr` allowlist.
+
+##### v1 deferrals
+
+- **Stateful symmetric inspection for cross-AZ flows**: see the
+  stateful trade-off above. Requires a centralized inspection topology
+  (Transit Gateway with single endpoint, GWLB with consistent hashing,
+  or single-AZ appliance mode).
+- **Intra-private-tier inspection** (Django ↔ RDS, Django ↔ Redis):
+  these services share the private subnets, so route-table-based
+  inspection cannot apply (same-subnet traffic bypasses route
+  lookup). v1 enforces SG-to-SG microsegmentation as the boundary for
+  this traffic. A follow-up can split RDS / Redis into a dedicated
+  data subnet tier so the firewall covers Django ↔ data as well.
+- **Portal ↔ range peering traffic**: not in scope; the range-side
+  Network Firewall already owns the range egress boundary.
 
 ### Range VPC
 

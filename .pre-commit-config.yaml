@@ -7,7 +7,7 @@ repos:
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -41,7 +41,7 @@ repos:
   # Python - Ruff (linting + formatting)
   # Note: Ruff handles import sorting via "I" rules - no separate isort needed
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+    rev: v0.15.13
     hooks:
       - id: ruff
         name: ruff (shifter_platform)
@@ -179,6 +179,72 @@ repos:
         language: system
         files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
 
+      - id: check-tf-iam-elb-scope
+        name: AWS ELBv2 (GWLB) IAM scoping (engine provisioner)
+        entry: python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py
+        language: system
+        files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
+
+      # Custom: Secrets Manager kms:Decrypt grant check (issue #52).
+      # Ensures every aws_iam_role defined in scoped files that reads
+      # the portal Secrets Manager CMK has an attached
+      # aws_iam_role_policy granting kms:Decrypt conditioned on
+      # kms:ViaService = secretsmanager.<region>.amazonaws.com. Without
+      # the grant, ECS task secrets injection (execution role) and the
+      # runtime secret fetch (EC2 / task role) both fail with
+      # "Access to KMS is not allowed" when the secret is on the
+      # portal Secrets Manager CMK. Scoped to every module that defines
+      # an IAM role whose attached policies grant
+      # secretsmanager:GetSecretValue on a portal-CMK-encrypted secret;
+      # add new files here when a new module starts reading portal
+      # Secrets Manager values.
+      - id: check-tf-kms-secrets-grant
+        name: Secrets Manager kms:Decrypt grant (portal CMK readers)
+        # Pass the full scoped file list (pass_filenames=false) instead
+        # of just the changed files, so cross-file aggregation works:
+        # the checker can detect a policy in `policies.tf` attached to a
+        # role defined in `roles.tf` even when only one of the two
+        # changed. The `files:` regex still gates whether the hook
+        # runs (on any change to the scoped files); the explicit list
+        # is what gets handed to the checker.
+        entry: >-
+          bash -c '
+          python3 scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py
+          platform/terraform/modules/engine-provisioner/iam.tf
+          platform/terraform/modules/portal/ec2/main.tf
+          platform/terraform/modules/guacamole/iam.tf
+          '
+        language: system
+        files: ^(platform/terraform/modules/engine-provisioner/iam\.tf|platform/terraform/modules/portal/ec2/main\.tf|platform/terraform/modules/guacamole/iam\.tf)$
+        pass_filenames: false
+
+      # Pin the behavior of the three custom check_tf_* IAM/security
+      # checkers themselves. Their test suites (synthetic HCL fixtures
+      # covering wildcards, list resources, scoped conditions, missing
+      # grants, etc.) only exercise edge cases that the live-file
+      # invocations never see, so without this hook a parser regression
+      # could pass CI as long as the current production .tf files
+      # remain in the happy-path shape. Run on any change under
+      # scripts/check_tf_*/ so a tweak to either the checker or the
+      # tests is verified before push.
+      - id: check-tf-checker-tests
+        name: Tests for check_tf_* IAM/security checkers
+        # Each test module uses `from .check_tf_X import check_file`
+        # (relative import), so it MUST be invoked as a fully-qualified
+        # module from the repo root rather than via `unittest discover`
+        # (which loses the package path and trips
+        # `attempted relative import with no known parent package`).
+        entry: >-
+          bash -c '
+          python3 -m unittest scripts.check_tf_iam_ec2_scope.test_check_tf_iam_ec2_scope &&
+          python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope &&
+          python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs &&
+          python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
+          '
+        language: system
+        files: ^scripts/check_tf_(iam_ec2_scope|iam_elb_scope|sg_cidrs|kms_secrets_grant)/
+        pass_filenames: false
+
   # Kubernetes schema validation
   - repo: local
     hooks:
@@ -211,7 +277,7 @@ repos:
 
   # Python - Security (bandit)
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.9.2
+    rev: 1.9.4
     hooks:
       - id: bandit
         name: bandit (shifter_platform)
@@ -254,15 +320,22 @@ repos:
         files: ^shifter/installation/
         exclude: ^shifter/installation/(tests|\.venv)/
 
-  # IaC Security (Terraform, Dockerfile)
+  # IaC Security (Terraform). Blocking gate per ADR-004-R11.
+  # Config (skip-check / framework / soft-fail) lives in
+  # platform/terraform/.checkov.yaml so CI consumes the same policy.
+  # Override `entry:` to drop the upstream `-d .` default; without that
+  # Checkov scans the repo root in addition to platform/terraform/ and
+  # follows module sources into shifter/engine/provisioner/terraform/.
   - repo: https://github.com/bridgecrewio/checkov
-    rev: 3.2.346
+    rev: 3.2.529
     hooks:
       - id: checkov
         name: checkov (terraform)
+        entry: checkov
         files: ^platform/terraform/
+        pass_filenames: false
         args:
-          [--quiet, --compact, --framework, terraform, --directory, platform/terraform/, --soft-fail]
+          [--config-file, platform/terraform/.checkov.yaml, --directory, platform/terraform/]
 
   # Kubernetes security and best practices
   - repo: local

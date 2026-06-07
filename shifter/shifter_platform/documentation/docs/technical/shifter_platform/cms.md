@@ -67,7 +67,7 @@ subnets:
 | `basic` | Basic Range | attacker, victim | No |
 | `basic_ngfw` | Basic Range with NGFW | attacker, victim | Yes |
 | `ad_attack_lab` | AD Attack Lab | attacker, dc, victim | No |
-| `cortex_byot` | Cortex BYOT | attacker, dc, 2x victim, server | Yes |
+| `ad_attack_lab_ngfw` | AD Attack Lab with NGFW | attacker, dc, victim | Yes |
 
 ## Hydrated Range Config
 

@@ -193,6 +193,19 @@ variable "enable_autoscaling" {
   type        = bool
 }
 
+variable "enable_redis" {
+  description = <<-EOT
+    Wire Redis as the Django Channels backend for the portal runtime
+    (ADR-018, #849). Environment-owned and INDEPENDENT of enable_autoscaling:
+    a single-instance dev portal may use Redis, and an environment may disable
+    Redis to save cost without changing ASG posture. When true, the Redis
+    endpoint is published to SSM and the container runs with
+    CHANNEL_LAYER_BACKEND=redis (fail-closed if the endpoint is missing); when
+    false, the portal runs CHANNEL_LAYER_BACKEND=in_memory.
+  EOT
+  type        = bool
+}
+
 variable "asg_min_size" {
   description = "Minimum number of instances in the ASG"
   type        = number
@@ -278,6 +291,20 @@ variable "enable_rds_log_exports" {
 variable "enable_waf_logging" {
   description = "Enable WAF logging to Firehose"
   type        = bool
+}
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+variable "enable_portal_inspection" {
+  description = "Insert an AWS Network Firewall east-west inspection boundary between the portal public (ALB) tier and the private services tier. Requires enable_log_aggregation = true."
+  type        = bool
+}
+
+variable "firewall_log_retention_days" {
+  description = "CloudWatch retention in days for portal Network Firewall FLOW / ALERT logs."
+  type        = number
 }
 
 # ------------------------------------------------------------------------------

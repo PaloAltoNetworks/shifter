@@ -78,6 +78,59 @@ For AWS local deploys, write the same HCL to a gitignored
 `terraform apply` from a workstation that has the target role (see
 **Local development** below).
 
+## AWS range (`dev` / `prod`)
+
+Range Terraform (under `platform/terraform/environments/<env>/range/`) is
+applied locally by operators today, not by GitHub Actions, so there is no
+CI secret to render — the operator writes the deployment-specific values
+into a gitignored `local.auto.tfvars` alongside `terraform.tfvars`. The
+committed `terraform.tfvars` ships an empty `victim_allowed_cidrs` baseline
+so the repo never carries a deployment's allowlist (PLAT-220 / #775).
+
+For the PLAT-220 range egress allowlist:
+
+| File                                                                                  | Status                                                |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| `platform/terraform/environments/{dev,prod}/range/terraform.tfvars`                  | committed; empty `victim_allowed_cidrs` baseline      |
+| `platform/terraform/environments/{dev,prod}/range/local.auto.tfvars.example`         | committed; shape reference                            |
+| `platform/terraform/environments/{dev,prod}/range/local.auto.tfvars`                 | gitignored; operator writes `victim_allowed_cidrs`    |
+
+Source for the PANW Cortex XSIAM/XDR allowlist:
+<https://docs-cortex.paloaltonetworks.com/r/Cortex-XSIAM/Cortex-XSIAM-Administrator-Guide/Resources-Required-to-Enable-Access>.
+
+See `docs/architecture/range-egress-ip-allowlist.md` for the full mapping
+between `shifter.yaml.settings.range_egress` and the Terraform inputs.
+
+## GCP range (`gcp-dev`)
+
+The GCP range network egress allowlist piggy-backs on the existing
+`gcp-dev` `local.auto.tfvars` (rendered from secrets/variables by
+`.github/workflows/_gcp-dev.yml` for CI deploys, or operator-authored for
+local apply). Two new Terraform variables expose the platform contract:
+
+| Variable                       | Type           | Meaning                                                                          |
+| ------------------------------ | -------------- | -------------------------------------------------------------------------------- |
+| `range_egress_mode`            | `string`       | One of `status-quo` (default), `deny-all`, `allowlist`                           |
+| `range_egress_allowed_cidrs`   | `list(string)` | CIDR allowlist when `range_egress_mode = "allowlist"`                            |
+
+The committed `terraform.tfvars` baseline sets `range_egress_mode =
+"status-quo"`. Deployments that want enforcement add the matching block to
+`local.auto.tfvars`:
+
+```hcl
+range_egress_mode          = "allowlist"
+range_egress_allowed_cidrs = [
+  "203.0.113.0/24",
+]
+```
+
+No additional GitHub secret is required for PLAT-220 today — the existing
+`_gcp-dev.yml` "Render local.auto.tfvars from secrets/variables" step can
+emit these two keys when a future repository variable adds them. CIDRs are
+operator configuration, not secrets, so they may live in repository
+variables; declare a GitHub secret only if your deployment classifies the
+allowlist as sensitive.
+
 ## Local development
 
 For local `terraform plan` / `terraform apply` against your own cloud

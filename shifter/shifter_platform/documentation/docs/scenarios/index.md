@@ -9,7 +9,7 @@ A scenario defines what your range contains. Choose based on your demo needs.
 | [Basic Range](basic-range) | Kali, Workstation | No | Quick demos, simple attacks |
 | [AD Attack Lab](ad-attack-lab) | Kali, DC, Workstation | No | Active Directory attacks |
 | [Basic Range with NGFW](ngfw-range) | Kali, Workstation | Yes | Traffic logging demos |
-| [Cortex BYOT](cortex-byot) | Kali, DC, 2 Workstations, Server | Yes | Full enterprise scenarios |
+| AD Attack Lab with NGFW | Kali, DC, Workstation | Yes | AD attacks with network visibility + Cortex XDR |
 
 ## Quick Comparison
 
@@ -19,7 +19,7 @@ A scenario defines what your range contains. Choose based on your demo needs.
 
 **NGFW required:**
 - [Basic Range with NGFW](ngfw-range) - Simple + network visibility
-- [Cortex BYOT](cortex-byot) - Full enterprise demo
+- AD Attack Lab with NGFW - AD topology + NGFW segmentation + Cortex XDR
 
 ## Provisioning Time
 
@@ -28,6 +28,6 @@ A scenario defines what your range contains. Choose based on your demo needs.
 | Basic Range | 2-5 minutes |
 | AD Attack Lab | 5-10 minutes |
 | Basic Range with NGFW | 3-7 minutes |
-| Cortex BYOT | 10-15 minutes |
+| AD Attack Lab with NGFW | 6-12 minutes |
 
 Times vary based on infrastructure load.

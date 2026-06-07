@@ -93,6 +93,13 @@ class TestSSHConnectionConnect:
                 encoding=None,
             )
 
+            # Connection state is actually established, not just the calls made:
+            # a connect() that called asyncssh correctly but failed to assign
+            # these would leave every later send()/receive() raising "Not connected".
+            assert conn._conn is mock_asyncssh_connection
+            assert conn._process is mock_asyncssh_process
+            assert conn.is_connected is True
+
     @pytest.mark.asyncio
     async def test_connect_with_custom_port(
         self,
@@ -111,6 +118,10 @@ class TestSSHConnectionConnect:
             await conn.connect()
 
             assert mock_asyncssh.connect.call_args[1]["port"] == 2222
+            # Connection actually established (not just the call made).
+            assert conn._conn is mock_asyncssh_connection
+            assert conn._process is mock_asyncssh_process
+            assert conn.is_connected is True
 
     @pytest.mark.asyncio
     async def test_connect_with_session_id_uses_tmux(
@@ -136,6 +147,11 @@ class TestSSHConnectionConnect:
                 term_size=(80, 24),
                 encoding=None,
             )
+
+            # Connection actually established (not just the call made).
+            assert conn._conn is mock_asyncssh_connection
+            assert conn._process is mock_asyncssh_process
+            assert conn.is_connected is True
 
     @pytest.mark.asyncio
     async def test_connect_sanitizes_session_id(
@@ -332,6 +348,26 @@ class TestSSHConnectionIsConnected:
         # True when connection is active
         mock_asyncssh_connection.is_closed.return_value = False
         assert conn.is_connected is True
+
+
+class TestSSHConnectionAtEof:
+    """Tests for at_eof() (issue #847)."""
+
+    def test_false_when_no_process(self, valid_connection_params):
+        """No process yet means the output stream is not at EOF."""
+        conn = SSHConnection(**valid_connection_params)
+        assert conn.at_eof() is False
+
+    def test_reflects_stdout_eof(self, valid_connection_params, mock_asyncssh_process):
+        """at_eof() proxies the process stdout EOF state."""
+        conn = SSHConnection(**valid_connection_params)
+        conn._process = mock_asyncssh_process
+
+        mock_asyncssh_process.stdout.at_eof = MagicMock(return_value=False)
+        assert conn.at_eof() is False
+
+        mock_asyncssh_process.stdout.at_eof = MagicMock(return_value=True)
+        assert conn.at_eof() is True
 
 
 class TestSSHConnectionContextManager:

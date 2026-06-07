@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from cms.experiments.models import Experiment, ExperimentRun
 from cms.experiments.orchestrator import ExperimentOrchestrator
@@ -17,6 +18,68 @@ from shared.messages.envelope import parse_sns_message
 _TERMINAL_EXPERIMENT_STATUSES = ("completed", "failed")
 
 logger = logging.getLogger(__name__)
+
+
+def _experiment_recipient_id(experiment_id: int) -> int | None:
+    """Return the owning user id for experiment notifications."""
+    try:
+        return Experiment.objects.only("user_id").get(pk=experiment_id).user_id
+    except Experiment.DoesNotExist:
+        return None
+
+
+def _publish_run_status_notification(
+    experiment_id: int,
+    run_id: int,
+    run_number: int,
+    status: str,
+    error_message: str,
+) -> None:
+    """Queue a shared notification for run-status changes."""
+    recipient_id = _experiment_recipient_id(experiment_id)
+    if recipient_id is None:
+        return
+    try:
+        from cms.experiments.notifications import publish_experiment_run_status_notification
+
+        publish_experiment_run_status_notification(
+            experiment_id=experiment_id,
+            recipient_id=recipient_id,
+            run_id=run_id,
+            run_number=run_number,
+            status=status,
+            error_message=error_message,
+        )
+    except Exception:
+        logger.warning(
+            "failed to queue experiment run notification: experiment=%s run=%s status=%s",
+            experiment_id,
+            run_id,
+            status,
+            exc_info=True,
+        )
+
+
+def _publish_experiment_status_notification(experiment_id: int, status: str) -> None:
+    """Queue a shared notification for experiment status changes."""
+    recipient_id = _experiment_recipient_id(experiment_id)
+    if recipient_id is None:
+        return
+    try:
+        from cms.experiments.notifications import publish_experiment_status_notification
+
+        publish_experiment_status_notification(
+            experiment_id=experiment_id,
+            recipient_id=recipient_id,
+            status=status,
+        )
+    except Exception:
+        logger.warning(
+            "failed to queue experiment notification: experiment=%s status=%s",
+            experiment_id,
+            status,
+            exc_info=True,
+        )
 
 
 def _broadcast_run_status(
@@ -34,28 +97,33 @@ def _broadcast_run_status(
         from cms.experiments.consumers import experiment_event_group
 
         channel_layer = get_channel_layer()
-        if channel_layer is None:
-            return
-
-        group = experiment_event_group(experiment_id)
-        async_to_sync(channel_layer.group_send)(
-            group,
-            {
-                "type": "experiment.run_status",
-                "run_id": run_id,
-                "run_number": run_number,
-                "status": status,
-                "error_message": error_message,
-            },
-        )
-        logger.debug(
-            "broadcast run_status: experiment=%s run=%s status=%s",
-            experiment_id,
-            run_id,
-            status,
-        )
+        if channel_layer is not None:
+            group = experiment_event_group(experiment_id)
+            async_to_sync(channel_layer.group_send)(
+                group,
+                {
+                    "type": "experiment.run_status",
+                    "run_id": run_id,
+                    "run_number": run_number,
+                    "status": status,
+                    "error_message": error_message,
+                },
+            )
+            logger.debug(
+                "broadcast run_status: experiment=%s run=%s status=%s",
+                experiment_id,
+                run_id,
+                status,
+            )
     except Exception:
         logger.warning("_broadcast_run_status: channel layer unavailable", exc_info=True)
+    _publish_run_status_notification(
+        experiment_id,
+        run_id,
+        run_number,
+        status,
+        error_message,
+    )
 
 
 def _broadcast_run_status_for(
@@ -97,25 +165,24 @@ def _broadcast_experiment_status(experiment_id: int, status: str) -> None:
         from cms.experiments.consumers import experiment_event_group
 
         channel_layer = get_channel_layer()
-        if channel_layer is None:
-            return
-
-        group = experiment_event_group(experiment_id)
-        async_to_sync(channel_layer.group_send)(
-            group,
-            {
-                "type": "experiment.status",
-                "experiment_id": experiment_id,
-                "status": status,
-            },
-        )
-        logger.debug(
-            "broadcast experiment_status: experiment=%s status=%s",
-            experiment_id,
-            status,
-        )
+        if channel_layer is not None:
+            group = experiment_event_group(experiment_id)
+            async_to_sync(channel_layer.group_send)(
+                group,
+                {
+                    "type": "experiment.status",
+                    "experiment_id": experiment_id,
+                    "status": status,
+                },
+            )
+            logger.debug(
+                "broadcast experiment_status: experiment=%s status=%s",
+                experiment_id,
+                status,
+            )
     except Exception:
         logger.warning("_broadcast_experiment_status: channel layer unavailable", exc_info=True)
+    _publish_experiment_status_notification(experiment_id, status)
 
 
 def process_event(message: str | dict) -> None:
@@ -151,7 +218,7 @@ def process_event(message: str | dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _validate_event_ids(event: dict, handler_name: str, *fields: str) -> dict | None:
+def _validate_event_ids(event: dict[str, Any], handler_name: str, *fields: str) -> dict[str, Any] | None:
     """Extract and validate required integer fields from event dict.
 
     Returns dict of field->value if valid, or None if validation fails.
@@ -174,7 +241,7 @@ def _validate_event_ids(event: dict, handler_name: str, *fields: str) -> dict | 
 # ---------------------------------------------------------------------------
 
 
-def _handle_experiment_start(event: dict) -> None:
+def _handle_experiment_start(event: dict[str, Any]) -> None:
     """Handle experiment.start — begin scheduling runs."""
     ids = _validate_event_ids(event, "experiment.start", "experiment_id")
     if ids is None:
@@ -187,7 +254,7 @@ def _handle_experiment_start(event: dict) -> None:
     _broadcast_experiment_status(ids["experiment_id"], "running")
 
 
-def _handle_range_provisioned(event: dict) -> None:
+def _handle_range_provisioned(event: dict[str, Any]) -> None:
     """Handle experiment.run.range_provisioned — range is ready, start scripts."""
     ids = _validate_event_ids(event, "range_provisioned", "experiment_id", "run_id")
     if ids is None:
@@ -201,7 +268,7 @@ def _handle_range_provisioned(event: dict) -> None:
     _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
-def _handle_victim_scripts_completed(event: dict) -> None:
+def _handle_victim_scripts_completed(event: dict[str, Any]) -> None:
     """Handle experiment.run.victims_completed — victims done, start attacker."""
     ids = _validate_event_ids(event, "victims_completed", "experiment_id", "run_id")
     if ids is None:
@@ -213,7 +280,7 @@ def _handle_victim_scripts_completed(event: dict) -> None:
     _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
-def _handle_attacker_scripts_completed(event: dict) -> None:
+def _handle_attacker_scripts_completed(event: dict[str, Any]) -> None:
     """Handle experiment.run.attacker_completed — attacker done, collect artifacts."""
     ids = _validate_event_ids(event, "attacker_completed", "experiment_id", "run_id")
     if ids is None:
@@ -225,7 +292,7 @@ def _handle_attacker_scripts_completed(event: dict) -> None:
     _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
-def _handle_artifacts_collected(event: dict) -> None:
+def _handle_artifacts_collected(event: dict[str, Any]) -> None:
     """Handle experiment.run.artifacts_collected — mark run complete."""
     ids = _validate_event_ids(event, "artifacts_collected", "experiment_id", "run_id")
     if ids is None:
@@ -238,7 +305,7 @@ def _handle_artifacts_collected(event: dict) -> None:
     _broadcast_experiment_status_if_terminal(ids["experiment_id"])
 
 
-def _handle_run_failed(event: dict) -> None:
+def _handle_run_failed(event: dict[str, Any]) -> None:
     """Handle experiment.run.failed — record failure, schedule next."""
     ids = _validate_event_ids(event, "run_failed", "experiment_id", "run_id")
     if ids is None:

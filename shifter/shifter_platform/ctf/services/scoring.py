@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import statistics
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from django.db.models.functions import Coalesce
 
 from ctf.models import CTFAward, CTFParticipant, CTFSubmission, CTFTeam
 from ctf.services.participant import eligible_participant_q
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -41,6 +43,65 @@ def calculate_score(participant_id: UUID) -> int:
     ).aggregate(total=Coalesce(Sum("points"), 0))["total"]
 
     return submission_total + award_total
+
+
+def _build_scoreboard_rows(participants: Iterable[Any]) -> list[dict[str, Any]]:
+    """Rank an ordered participant queryset, sharing a rank on (score, last-solve) ties.
+
+    Rows are the annotate()-augmented CTFParticipant instances from get_scoreboard;
+    typed as Any because the score/solve aggregates are dynamic query annotations.
+    """
+    scoreboard: list[dict[str, Any]] = []
+    current_rank = 0
+    last_score = None
+    last_time = None
+    for i, p in enumerate(participants):
+        if p.computed_score != last_score or p.last_solve_time != last_time:
+            current_rank = i + 1
+        scoreboard.append(
+            {
+                "rank": current_rank,
+                "participant_id": str(p.id),
+                "name": p.name,
+                "team_name": p.team.name if p.team else None,
+                "bracket_name": p.bracket.name if p.bracket else None,
+                "score": p.computed_score,
+                "solve_count": p.solve_count,
+                "last_solve": p.last_solve_time.isoformat() if p.last_solve_time else None,
+            }
+        )
+        last_score = p.computed_score
+        last_time = p.last_solve_time
+    return scoreboard
+
+
+def _build_team_scoreboard_rows(teams: Iterable[Any]) -> list[dict[str, Any]]:
+    """Rank an ordered team queryset, sharing a rank on (score, last-solve) ties.
+
+    Rows are the annotate()-augmented CTFTeam instances from get_team_scoreboard;
+    typed as Any because the score/solve aggregates are dynamic query annotations.
+    """
+    scoreboard: list[dict[str, Any]] = []
+    current_rank = 0
+    last_score = None
+    last_time = None
+    for i, t in enumerate(teams):
+        if t.computed_score != last_score or t.last_solve_time != last_time:
+            current_rank = i + 1
+        scoreboard.append(
+            {
+                "rank": current_rank,
+                "team_id": str(t.id),
+                "name": t.name,
+                "score": t.computed_score,
+                "solve_count": t.solve_count,
+                "member_count": t.computed_member_count,
+                "last_solve": t.last_solve_time.isoformat() if t.last_solve_time else None,
+            }
+        )
+        last_score = t.computed_score
+        last_time = t.last_solve_time
+    return scoreboard
 
 
 def get_scoreboard(
@@ -134,33 +195,7 @@ def get_scoreboard(
     if limit:
         participants = participants[:limit]
 
-    scoreboard: list[dict[str, Any]] = []
-    current_rank = 0
-    last_score = None
-    last_time = None
-
-    for i, p in enumerate(participants):
-        # Calculate rank (handle ties)
-        if p.computed_score != last_score or p.last_solve_time != last_time:
-            current_rank = i + 1
-
-        scoreboard.append(
-            {
-                "rank": current_rank,
-                "participant_id": str(p.id),
-                "name": p.name,
-                "team_name": p.team.name if p.team else None,
-                "bracket_name": p.bracket.name if p.bracket else None,
-                "score": p.computed_score,
-                "solve_count": p.solve_count,
-                "last_solve": p.last_solve_time.isoformat() if p.last_solve_time else None,
-            }
-        )
-
-        last_score = p.computed_score
-        last_time = p.last_solve_time
-
-    return scoreboard
+    return _build_scoreboard_rows(participants)
 
 
 def get_team_scoreboard(
@@ -277,32 +312,7 @@ def get_team_scoreboard(
     if limit:
         teams = teams[:limit]
 
-    scoreboard: list[dict[str, Any]] = []
-    current_rank = 0
-    last_score = None
-    last_time = None
-
-    for i, t in enumerate(teams):
-        # Calculate rank (handle ties)
-        if t.computed_score != last_score or t.last_solve_time != last_time:
-            current_rank = i + 1
-
-        scoreboard.append(
-            {
-                "rank": current_rank,
-                "team_id": str(t.id),
-                "name": t.name,
-                "score": t.computed_score,
-                "solve_count": t.solve_count,
-                "member_count": t.computed_member_count,
-                "last_solve": t.last_solve_time.isoformat() if t.last_solve_time else None,
-            }
-        )
-
-        last_score = t.computed_score
-        last_time = t.last_solve_time
-
-    return scoreboard
+    return _build_team_scoreboard_rows(teams)
 
 
 def get_participant_rank(participant_id: UUID) -> int | None:
@@ -381,7 +391,7 @@ def get_score_timeline(participant_id: UUID) -> list[dict[str, Any]]:
         List of dicts with timestamp, points, cumulative score, label, and type.
         The first entry is always the event start with cumulative 0.
     """
-    logger.debug("Getting score timeline for participant %s", participant_id)
+    logger.debug("Getting score timeline for participant %s", safe_log_value(participant_id))
 
     participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
     event_start = participant.event.event_start

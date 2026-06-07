@@ -79,7 +79,33 @@ variable "enable_ngfw_infrastructure" {
 # ------------------------------------------------------------------------------
 
 variable "victim_allowed_cidrs" {
-  description = "IP CIDR allowlist for Victim egress (GCP/PANW ranges for XDR)"
+  # Implementation detail for the platform-level PLAT-220 range egress allowlist.
+  # The public surface is `settings.range_egress.allowed_cidrs` in shifter.yaml.
+  # Operator writes the per-deployment list into a gitignored `local.auto.tfvars`
+  # alongside this directory; the committed baseline ships empty so the repo
+  # never holds an operator-specific list. See
+  # docs/architecture/range-egress-ip-allowlist.md.
+  description = "IP CIDR allowlist for Victim egress (bridge for shifter.yaml settings.range_egress.allowed_cidrs)."
   type        = list(string)
   default     = []
+
+  # Mirrors the public RangeEgressPolicy contract; see the same validation in
+  # the underlying module (`platform/terraform/modules/range/vpc/variables.tf`)
+  # and the public surface (`shifter/installation/range_egress.py`). The prefix
+  # length is parsed numerically so alternate /0 spellings (e.g. 0.0.0.0/00)
+  # cannot slip past a literal-string check.
+  validation {
+    condition = (
+      length(distinct(var.victim_allowed_cidrs)) == length(var.victim_allowed_cidrs)
+      && alltrue([
+        for c in var.victim_allowed_cidrs : (
+          can(cidrhost(c, 0))
+          && can(tonumber(split("/", c)[1]))
+          && tonumber(split("/", c)[1]) > 0
+          && cidrhost(c, 0) == split("/", c)[0]
+        )
+      ])
+    )
+    error_message = "victim_allowed_cidrs must be a list of canonical CIDR network addresses (IPv4 or IPv6) with no duplicates; default-route prefixes (parsed prefix length 0) and host-bits-set inputs are rejected."
+  }
 }

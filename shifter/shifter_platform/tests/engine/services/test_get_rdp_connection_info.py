@@ -51,7 +51,7 @@ class TestGetRdpConnectionInfo:
         with (
             patch.object(Range, "get_active_for_user", return_value=mock_range),
             patch("engine.services.get_rdp_password", return_value="UniquePerInstanceP4ss!"),
-            patch("engine.services.get_ssh_key", return_value="fake-ssh-key"),
+            patch("engine.secrets.get_ssh_key", return_value="fake-ssh-key"),
         ):
             result = get_rdp_connection_info(mock_user, instance_data["uuid"])
 
@@ -84,7 +84,7 @@ class TestGetRdpConnectionInfo:
         with (
             patch.object(Range, "get_active_for_user", return_value=mock_range),
             patch("engine.services.get_rdp_password", return_value="GdcUniqueP4ss!") as get_pw,
-            patch("engine.services.get_ssh_key", return_value="fake"),
+            patch("engine.secrets.get_ssh_key", return_value="fake"),
         ):
             result = get_rdp_connection_info(mock_user, instance_data["uuid"])
 

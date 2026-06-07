@@ -108,11 +108,22 @@ resource "aws_vpc_security_group_ingress_rule" "webserver_admin" {
 
 resource "aws_vpc_security_group_egress_rule" "webserver_all" {
   security_group_id = aws_security_group.webserver.id
+  description       = "Webserver egress (all protocols)"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
 
 resource "aws_instance" "webserver" {
+  monitoring    = true
+  ebs_optimized = true
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    http_endpoint               = "enabled"
+  }
+  root_block_device {
+    encrypted = true
+  }
   ami                    = var.webserver_ami_id
   instance_type          = var.webserver_instance_type
   key_name               = var.key_name

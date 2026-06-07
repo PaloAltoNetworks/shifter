@@ -8,12 +8,31 @@ from django.db import DatabaseError
 from shared.enums import ResourceStatus
 
 
-class TestActiveRangeContextProcessor:
-    """Tests for active_range context processor."""
+class _TestActiveRangeContextProcessorHelpers:
+    """Shared helpers for split TestActiveRangeContextProcessor scenarios."""
 
-    # ---------------------------------------------------------------------
-    # Happy path - authenticated user with active range
-    # ---------------------------------------------------------------------
+    @staticmethod
+    def _make_range_with_instances(os_types):
+        """Create a RangeContext with instances of the given os_types."""
+        from shared.schemas import InstanceContext, RangeContext
+
+        instances = [
+            InstanceContext(uuid=str(uuid4()), name=os, os_type=os, role="attacker" if os == "kali" else "victim")
+            for os in os_types
+        ]
+        return RangeContext(
+            request_id=uuid4(),
+            range_id=1,
+            user_id=42,
+            scenario_id="basic",
+            status=ResourceStatus.READY,
+            instances=instances,
+            agent_name="Test Agent",
+        )
+
+
+class TestActiveRangeContextLookup(_TestActiveRangeContextProcessorHelpers):
+    """Active range lookup tests."""
 
     def test_returns_active_range_context(self):
         """Returns RangeContext when user has an active range."""
@@ -90,10 +109,6 @@ class TestActiveRangeContextProcessor:
         assert result["has_active_range"] is False
         assert result["active_range"] is None
 
-    # ---------------------------------------------------------------------
-    # Unauthenticated user
-    # ---------------------------------------------------------------------
-
     def test_returns_none_for_unauthenticated_user(self):
         """Returns None when user is not authenticated."""
         from mission_control.context_processors import active_range
@@ -118,9 +133,9 @@ class TestActiveRangeContextProcessor:
 
         mock_get_active_range.assert_not_called()
 
-    # ---------------------------------------------------------------------
-    # Error handling
-    # ---------------------------------------------------------------------
+
+class TestActiveRangeContextErrors(_TestActiveRangeContextProcessorHelpers):
+    """Error handling tests for active range context."""
 
     def test_handles_service_exception_gracefully(self):
         """Returns None when service raises exception."""
@@ -196,9 +211,9 @@ class TestActiveRangeContextProcessor:
         assert "invalid type" in call_args[0]
         assert "str" in call_args  # type name in args
 
-    # ---------------------------------------------------------------------
-    # Logging - verify logger methods are called
-    # ---------------------------------------------------------------------
+
+class TestActiveRangeContextLogging(_TestActiveRangeContextProcessorHelpers):
+    """Logging tests for active range context."""
 
     def test_logs_info_when_range_found(self):
         """Logs INFO when active range is found."""
@@ -278,10 +293,6 @@ class TestActiveRangeContextProcessor:
         assert "Error" in call_args[0]
         assert 42 in call_args
 
-    # ---------------------------------------------------------------------
-    # RangeContext status checks
-    # ---------------------------------------------------------------------
-
     def test_uses_is_ready_property(self):
         """Uses RangeContext.is_ready property for determining ready state."""
         from mission_control.context_processors import active_range
@@ -343,28 +354,9 @@ class TestActiveRangeContextProcessor:
             assert result["active_range"].status == status
             assert result["active_range"].is_ready is False
 
-    # ---------------------------------------------------------------------
-    # CTF participant instance filtering
-    # ---------------------------------------------------------------------
 
-    @staticmethod
-    def _make_range_with_instances(os_types):
-        """Create a RangeContext with instances of the given os_types."""
-        from shared.schemas import InstanceContext, RangeContext
-
-        instances = [
-            InstanceContext(uuid=str(uuid4()), name=os, os_type=os, role="attacker" if os == "kali" else "victim")
-            for os in os_types
-        ]
-        return RangeContext(
-            request_id=uuid4(),
-            range_id=1,
-            user_id=42,
-            scenario_id="basic",
-            status=ResourceStatus.READY,
-            instances=instances,
-            agent_name="Test Agent",
-        )
+class TestActiveRangeContextInstanceFiltering(_TestActiveRangeContextProcessorHelpers):
+    """Participant instance filtering tests."""
 
     def test_ctf_participant_only_sees_kali_instances(self):
         """CTF participant sees only the Kali instance, not victims or NGFW."""
@@ -443,3 +435,106 @@ class TestActiveRangeContextProcessor:
         assert len(result["active_range"].instances) == 2
         assert all(inst.os_type == "kali" for inst in result["active_range"].instances)
         assert len(result["connection_urls"]) == 2
+
+
+class TestTerminalInstancesPayload:
+    """Tests for the json_script-safe terminal_instances payload."""
+
+    @staticmethod
+    def _range_with(instances):
+        from shared.schemas import RangeContext
+
+        return RangeContext(
+            request_id=uuid4(),
+            range_id=42,
+            user_id=42,
+            scenario_id="basic",
+            status=ResourceStatus.READY,
+            instances=instances,
+            agent_name="Test Agent",
+        )
+
+    def test_payload_contains_private_ip_camelcase(self):
+        from mission_control.context_processors import active_range
+        from shared.schemas import InstanceContext
+
+        request = MagicMock()
+        request.user.is_authenticated = True
+        request.user.id = 42
+
+        range_ctx = self._range_with(
+            [
+                InstanceContext(
+                    uuid="att-1",
+                    name="AttackerKali",
+                    role="attacker",
+                    os_type="kali",
+                    private_ip="10.0.1.5",
+                ),
+                InstanceContext(
+                    uuid="vic-1",
+                    name="VictimWin",
+                    role="victim",
+                    os_type="windows",
+                ),
+            ]
+        )
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=False),
+        ):
+            result = active_range(request)
+
+        payload = result["terminal_instances"]
+        assert payload == [
+            {
+                "uuid": "att-1",
+                "role": "attacker",
+                "osType": "kali",
+                "name": "AttackerKali",
+                "privateIp": "10.0.1.5",
+            },
+            {
+                "uuid": "vic-1",
+                "role": "victim",
+                "osType": "windows",
+                "name": "VictimWin",
+                "privateIp": None,
+            },
+        ]
+
+    def test_payload_respects_ctf_filtering(self):
+        from mission_control.context_processors import active_range
+        from shared.schemas import InstanceContext
+
+        request = MagicMock()
+        request.user.is_authenticated = True
+        request.user.id = 42
+
+        range_ctx = self._range_with(
+            [
+                InstanceContext(uuid="k", name="K", role="attacker", os_type="kali", private_ip="10.0.0.1"),
+                InstanceContext(uuid="w", name="W", role="victim", os_type="windows", private_ip="10.0.0.2"),
+            ]
+        )
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=True),
+        ):
+            result = active_range(request)
+
+        assert [row["uuid"] for row in result["terminal_instances"]] == ["k"]
+
+    def test_payload_empty_when_no_active_range(self):
+        from mission_control.context_processors import active_range
+
+        request = MagicMock()
+        request.user.is_authenticated = True
+        request.user.id = 42
+
+        with patch("mission_control.context_processors.get_active_range", return_value=None):
+            result = active_range(request)
+
+        assert result["terminal_instances"] == []

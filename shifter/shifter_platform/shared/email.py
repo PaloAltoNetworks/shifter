@@ -20,6 +20,8 @@ import atexit
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+from shared.log_sanitize import safe_log_value
+
 logger = logging.getLogger(__name__)
 
 # Lazy-initialised thread pool for async delivery.  The small pool size
@@ -100,7 +102,7 @@ def send_email(
         msg.send()
         return True
     except Exception:
-        logger.exception("Failed to send email to %s", recipient)
+        logger.exception("Failed to send email to %s", safe_log_value(recipient))
         return False
 
 

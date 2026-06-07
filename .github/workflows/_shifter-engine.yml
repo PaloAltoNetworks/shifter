@@ -24,9 +24,12 @@ env:
 jobs:
   validate:
     name: Validate (${{ inputs.environment }})
-    runs-on: self-hosted
+    # PR validation only needs a local Docker build and no cloud credentials.
+    # Keep it on GitHub-hosted runners so PRs do not queue behind the
+    # deployment runner pool; build/deploy remain self-hosted below.
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build provisioner image locally
         run: docker build --no-cache -t shifter-engine-validate ./shifter/engine/provisioner
 
@@ -43,7 +46,7 @@ jobs:
     env:
       ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

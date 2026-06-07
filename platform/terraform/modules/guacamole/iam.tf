@@ -73,6 +73,36 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
   })
 }
 
+# Allow execution role to decrypt the portal Secrets Manager CMK. Without
+# this, ECS resolves task-definition `secrets = [...]` using this role
+# before container start; any guacamole secret encrypted with the new CMK
+# (db_credentials, json_auth — see rds.tf:36, rds.tf:73 which set
+# kms_key_id = var.secrets_kms_key_arn) aborts with
+# `AccessDeniedException: Access to KMS is not allowed`. Same class of
+# bug as issue #52; this grant closes the gap for guacamole.
+resource "aws_iam_role_policy" "ecs_execution_kms" {
+  name = "kms-secrets-decrypt"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SecretsManagerKMSAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey"
+      ]
+      Resource = var.secrets_kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role - Guacamole Client
 # ------------------------------------------------------------------------------
@@ -110,6 +140,31 @@ resource "aws_iam_role_policy" "guacamole_client_secrets" {
       Resource = [
         aws_secretsmanager_secret.db_credentials.arn
       ]
+    }]
+  })
+}
+
+# Same kms:Decrypt grant on the client task role for runtime secret
+# fetches via boto3. See ecs_execution_kms above for the rationale.
+resource "aws_iam_role_policy" "guacamole_client_kms" {
+  name = "kms-secrets-decrypt"
+  role = aws_iam_role.guacamole_client_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SecretsManagerKMSAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey"
+      ]
+      Resource = var.secrets_kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+        }
+      }
     }]
   })
 }

@@ -13,11 +13,6 @@ on:
           - windows
           - dc
           - brokenbk
-          - ctf-webshell
-          - ctf-mailroom
-          - ctf-helpdesk
-          - ctf-devbox
-          - ctf-vault
 
 jobs:
   # DC AMIs are prebaked - just update SSM from config file
@@ -31,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials (prod)
         uses: aws-actions/configure-aws-credentials@v4

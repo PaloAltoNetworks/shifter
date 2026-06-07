@@ -16,6 +16,7 @@ CHART_DIR = REPO_ROOT / "platform" / "charts" / "shifter"
 DEFAULT_NAMESPACE = "default"
 
 JOB_LAUNCHER_DEPLOYMENTS = {
+    "ctf-scheduler": "ctf-scheduler",
     "portal-web": "portal",
     "worker-engine": "workers",
 }

@@ -13,7 +13,6 @@ from unittest.mock import Mock, patch
 import pytest
 
 from cms import services
-from cms.models import AgentConfig
 from shared.constants import USER_CANNOT_BE_NONE
 
 # MSI magic prefix used to make every happy-path complete_upload test pass the
@@ -30,19 +29,8 @@ def mock_user():
     return user
 
 
-class TestInitiateUpload:
-    """Tests for initiate_upload() service function.
-
-    Tests SERVICE behavior with mocked dependencies:
-    - Validates inputs (user, name, filename, file_size)
-    - Checks storage quota
-    - Validates file extension
-    - Generates presigned URL via S3 service
-    - Generates upload token
-    - Returns dict with presigned_url, s3_key, upload_token, expected_os
-    """
-
-    # --- Service calls dependencies correctly ---
+class TestInitiateUploadDependencies:
+    """Dependency call tests for initiate_upload()."""
 
     def test_calls_get_storage_used_with_user(self, mock_user):
         """Service calls get_storage_used to check quota."""
@@ -109,7 +97,9 @@ class TestInitiateUpload:
                 agent_type="xdr",
             )
 
-    # --- Service returns correct dict ---
+
+class TestInitiateUploadReturns:
+    """Return payload tests for initiate_upload()."""
 
     def test_returns_dict_with_presigned_url(self, mock_user):
         """Service returns dict containing presigned_url."""
@@ -172,7 +162,9 @@ class TestInitiateUpload:
             result = services.initiate_upload(mock_user, "Agent", "agent.deb", 1000)
             assert result["expected_os"] == "linux-debian"
 
-    # --- Input validation - user ---
+
+class TestInitiateUploadUserValidation:
+    """User validation tests for initiate_upload()."""
 
     def test_raises_typeerror_when_user_is_none(self):
         """Service raises TypeError when user is None."""
@@ -192,7 +184,9 @@ class TestInitiateUpload:
         with pytest.raises(ValueError, match="user must be saved"):
             services.initiate_upload(unsaved_user, "Agent", "agent.msi", 1000)
 
-    # --- Input validation - name ---
+
+class TestInitiateUploadInputValidation:
+    """Name, filename, and size validation tests for initiate_upload()."""
 
     def test_raises_valueerror_when_name_is_none(self, mock_user):
         """Service raises ValueError when name is None."""
@@ -209,8 +203,6 @@ class TestInitiateUpload:
         with pytest.raises(ValueError, match="name cannot be empty"):
             services.initiate_upload(mock_user, "   ", "agent.msi", 1000)
 
-    # --- Input validation - filename ---
-
     def test_raises_valueerror_when_filename_is_none(self, mock_user):
         """Service raises ValueError when filename is None."""
         with pytest.raises(ValueError, match="filename cannot be None"):
@@ -225,8 +217,6 @@ class TestInitiateUpload:
         """Service raises ValueError when filename is only whitespace."""
         with pytest.raises(ValueError, match="filename cannot be empty"):
             services.initiate_upload(mock_user, "Agent", "   ", 1000)
-
-    # --- Input validation - file_size ---
 
     def test_raises_typeerror_when_file_size_is_none(self, mock_user):
         """Service raises TypeError when file_size is None."""
@@ -248,7 +238,9 @@ class TestInitiateUpload:
         with pytest.raises(ValueError, match="file_size must be positive"):
             services.initiate_upload(mock_user, "Agent", "agent.msi", -100)
 
-    # --- Quota validation ---
+
+class TestInitiateUploadFailures:
+    """Downstream failure tests for initiate_upload()."""
 
     def test_raises_cmserror_when_quota_exceeded(self, mock_user, settings):
         """Service raises CMSError when storage quota would be exceeded."""
@@ -302,8 +294,6 @@ class TestInitiateUpload:
             result = services.initiate_upload(mock_user, "Agent", "agent.msi", new_file_size)
             assert "presigned_url" in result
 
-    # --- File extension validation ---
-
     def test_raises_cmserror_on_invalid_extension(self, mock_user):
         """Service raises CMSError when file extension is not allowed."""
         from cms.assets.validation import ValidationError
@@ -316,8 +306,6 @@ class TestInitiateUpload:
             pytest.raises(CMSError, match="Extension not allowed"),
         ):
             services.initiate_upload(mock_user, "Agent", "agent.exe", 1000)
-
-    # --- S3 error handling ---
 
     def test_raises_cmserror_on_s3_error(self, mock_user):
         """Service raises CMSError when S3 presigned URL generation fails."""
@@ -336,8 +324,6 @@ class TestInitiateUpload:
             mock_validate.return_value = Mock(os_slug="windows")
             services.initiate_upload(mock_user, "Agent", "agent.msi", 1000)
 
-    # --- Error propagation ---
-
     def test_propagates_unexpected_exception(self, mock_user):
         """Service propagates unexpected exceptions from dependencies."""
         with (
@@ -348,574 +334,3 @@ class TestInitiateUpload:
             pytest.raises(RuntimeError, match="Unexpected"),
         ):
             services.initiate_upload(mock_user, "Agent", "agent.msi", 1000)
-
-
-class TestCompleteUpload:
-    """Tests for complete_upload() service function.
-
-    Tests SERVICE behavior with mocked dependencies:
-    - Validates inputs (user, upload_token)
-    - Verifies upload token
-    - Verifies S3 object exists
-    - Tags S3 object as completed
-    - Creates agent record
-    - Returns created agent
-    """
-
-    # --- Service calls dependencies correctly ---
-
-    def test_calls_verify_upload_token_with_token_and_user_id(self, mock_user):
-        """Service calls verify_upload_token with the token and user_id."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        verify_token_path = "cms.assets.upload_token.verify_upload_token"
-        with (
-            patch(verify_token_path, return_value=token_payload) as mock_verify,
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent") as mock_create,
-        ):
-            mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(mock_user, "token123")
-            mock_verify.assert_called_once_with("token123", mock_user.id)
-
-    def test_calls_verify_s3_object_exists_with_s3_key(self, mock_user):
-        """Service calls verify_s3_object_exists with s3_key from token."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")) as mock_verify_s3,
-            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent") as mock_create,
-        ):
-            mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(mock_user, "token123")
-            mock_verify_s3.assert_called_once_with("agents/1/abc_agent.msi")
-
-    def test_calls_tag_s3_object_with_completed_tags(self, mock_user):
-        """Service calls tag_s3_object with completion tags."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
-            patch("cms.assets.s3.tag_s3_object") as mock_tag,
-            patch("cms.assets.services.create_agent") as mock_create,
-        ):
-            mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(mock_user, "token123")
-            mock_tag.assert_called_once_with("agents/1/abc_agent.msi", {"status": "completed"})
-
-    def test_calls_create_agent_with_all_params(self, mock_user):
-        """Service calls create_agent with all required params."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "My Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 5000,
-            "agent_type": "xdr",
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(5000, "etag")),
-            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent") as mock_create,
-        ):
-            mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(mock_user, "token123")
-            mock_create.assert_called_once_with(
-                user=mock_user,
-                name="My Agent",
-                s3_key="agents/1/abc_agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=5000,
-                upload_method="presigned",
-                agent_type="xdr",
-            )
-
-    # --- Service returns agent ---
-
-    def test_returns_created_agent(self, mock_user):
-        """Service returns the agent created by create_agent."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        mock_agent = Mock(spec=AgentConfig, id=42, name="Agent")
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent", return_value=mock_agent),
-        ):
-            result = services.complete_upload(mock_user, "token123")
-            assert result == mock_agent
-            assert result.id == 42
-
-    # --- Input validation - user ---
-
-    def test_raises_typeerror_when_user_is_none(self):
-        """Service raises TypeError when user is None."""
-        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
-            services.complete_upload(None, "token123")
-
-    def test_raises_typeerror_when_user_has_no_id_attribute(self):
-        """Service raises TypeError when user has no id attribute."""
-        with pytest.raises(TypeError, match="user must be a User instance"):
-            services.complete_upload("not a user", "token123")
-
-    def test_raises_valueerror_when_user_id_is_none(self):
-        """Service raises ValueError when user is unsaved."""
-        unsaved_user = Mock()
-        unsaved_user.id = None
-        with pytest.raises(ValueError, match="user must be saved"):
-            services.complete_upload(unsaved_user, "token123")
-
-    # --- Input validation - upload_token ---
-
-    def test_raises_valueerror_when_upload_token_is_none(self, mock_user):
-        """Service raises ValueError when upload_token is None."""
-        with pytest.raises(ValueError, match="upload_token cannot be None"):
-            services.complete_upload(mock_user, None)
-
-    def test_raises_valueerror_when_upload_token_is_empty(self, mock_user):
-        """Service raises ValueError when upload_token is empty."""
-        with pytest.raises(ValueError, match="upload_token cannot be empty"):
-            services.complete_upload(mock_user, "")
-
-    def test_raises_valueerror_when_upload_token_is_whitespace(self, mock_user):
-        """Service raises ValueError when upload_token is only whitespace."""
-        with pytest.raises(ValueError, match="upload_token cannot be empty"):
-            services.complete_upload(mock_user, "   ")
-
-    # --- Token verification errors ---
-
-    def test_raises_cmserror_on_invalid_token(self, mock_user):
-        """Service raises CMSError when token is invalid."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                side_effect=ValueError("Invalid token"),
-            ),
-            pytest.raises(CMSError, match="Invalid upload token"),
-        ):
-            services.complete_upload(mock_user, "bad_token")
-
-    def test_raises_cmserror_on_expired_token(self, mock_user):
-        """Service raises CMSError when token is expired."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                side_effect=ValueError("Token expired"),
-            ),
-            pytest.raises(CMSError, match="Invalid upload token"),
-        ):
-            services.complete_upload(mock_user, "expired_token")
-
-    # --- S3 verification errors ---
-
-    def test_raises_cmserror_when_s3_object_not_found(self, mock_user):
-        """Service raises CMSError when S3 object doesn't exist."""
-        from cms.assets.s3 import S3Error
-        from cms.exceptions import CMSError
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch(
-                "cms.assets.s3.verify_s3_object_exists",
-                side_effect=S3Error("Object not found"),
-            ),
-            pytest.raises(CMSError, match="Upload not found"),
-        ):
-            services.complete_upload(mock_user, "token123")
-
-    def test_raises_cmserror_when_file_size_mismatch(self, mock_user):
-        """Service raises CMSError when S3 object size doesn't match token."""
-        from cms.exceptions import CMSError
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch(
-                "cms.assets.s3.verify_s3_object_exists",
-                return_value=(5000, "etag"),  # Wrong size
-            ),
-            pytest.raises(CMSError, match="size mismatch"),
-        ):
-            services.complete_upload(mock_user, "token123")
-
-    # --- Error propagation ---
-
-    def test_propagates_unexpected_exception(self, mock_user):
-        """Service propagates unexpected exceptions from dependencies."""
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                side_effect=RuntimeError("Unexpected"),
-            ),
-            pytest.raises(RuntimeError, match="Unexpected"),
-        ):
-            services.complete_upload(mock_user, "token123")
-
-    # --- Server-side header inspection (issue #696) ---
-
-    def test_reads_object_header_after_size_verify(self, mock_user):
-        """Service reads the object header via the cloud seam before tagging."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        msi_magic = bytes([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.read_agent_header", return_value=msi_magic + b"\x00" * 16) as mock_read,
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent") as mock_create,
-        ):
-            mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(mock_user, "token123")
-            mock_read.assert_called_once()
-            args, _ = mock_read.call_args
-            assert args[0] == "agents/1/abc_agent.msi"
-
-    def test_magic_byte_mismatch_raises_and_deletes_object(self, mock_user):
-        """Magic-byte mismatch must delete the object and skip tag + create_agent + audit."""
-        from cms.exceptions import CMSError
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",  # .msi expects D0 CF 11 E0 ...
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        # Header is ZIP magic, not MSI — mismatch.
-        bogus_header = b"\x50\x4b\x03\x04" + b"\x00" * 16
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.read_agent_header", return_value=bogus_header),
-            patch("cms.assets.s3.tag_s3_object") as mock_tag,
-            patch("cms.assets.s3.delete_agent") as mock_delete,
-            patch("cms.assets.services.create_agent") as mock_create,
-            pytest.raises(CMSError, match="content"),
-        ):
-            services.complete_upload(mock_user, "token123")
-        mock_delete.assert_called_once_with("agents/1/abc_agent.msi")
-        mock_tag.assert_not_called()
-        mock_create.assert_not_called()
-
-    def test_rejection_log_does_not_leak_header_bytes_or_token(self, mock_user, caplog):
-        from cms.exceptions import CMSError
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        leak = b"\x50\x4b\x03\x04S3CR3T-DO-NOT-LEAK"
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.read_agent_header", return_value=leak),
-            patch("cms.assets.s3.delete_agent"),
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent"),
-            caplog.at_level("WARNING", logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.complete_upload(mock_user, "token-S3CR3T-DO-NOT-LEAK")
-
-        combined = " ".join(record.getMessage() for record in caplog.records)
-        assert "S3CR3T-DO-NOT-LEAK" not in combined
-
-    def test_header_read_failure_raises_cmserror(self, mock_user):
-        """If reading the header fails, the service raises CMSError and does not finalize."""
-        from cms.assets.s3 import S3Error
-        from cms.exceptions import CMSError
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch(
-                "cms.assets.s3.read_agent_header",
-                side_effect=S3Error("range read failed"),
-            ),
-            patch("cms.assets.s3.tag_s3_object") as mock_tag,
-            patch("cms.assets.services.create_agent") as mock_create,
-            pytest.raises(CMSError),
-        ):
-            services.complete_upload(mock_user, "token123")
-        mock_tag.assert_not_called()
-        mock_create.assert_not_called()
-
-
-class TestCancelUpload:
-    """Tests for cancel_upload() service function.
-
-    Tests SERVICE behavior with mocked dependencies:
-    - Validates inputs (user, upload_token)
-    - Verifies upload token
-    - Deletes S3 object
-    - Returns None on success
-    """
-
-    # --- Service calls dependencies correctly ---
-
-    def test_calls_verify_upload_token_with_token_and_user_id(self, mock_user):
-        """Service calls verify_upload_token with the token and user_id."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        verify_token_path = "cms.assets.upload_token.verify_upload_token"
-        with (
-            patch(verify_token_path, return_value=token_payload) as mock_verify,
-            patch("cms.assets.s3.delete_agent"),
-        ):
-            services.cancel_upload(mock_user, "token123")
-            mock_verify.assert_called_once_with("token123", mock_user.id)
-
-    def test_calls_delete_agent_with_s3_key(self, mock_user):
-        """Service calls delete_agent with s3_key from token."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        verify_token_path = "cms.assets.upload_token.verify_upload_token"
-        with (
-            patch(verify_token_path, return_value=token_payload),
-            patch("cms.assets.s3.delete_agent") as mock_delete,
-        ):
-            services.cancel_upload(mock_user, "token123")
-            mock_delete.assert_called_once_with("agents/1/abc_agent.msi")
-
-    # --- Service returns None ---
-
-    def test_returns_none_on_success(self, mock_user):
-        """Service returns None on successful cancellation."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch("cms.assets.s3.delete_agent"),
-        ):
-            result = services.cancel_upload(mock_user, "token123")
-            assert result is None
-
-    # --- Input validation - user ---
-
-    def test_raises_typeerror_when_user_is_none(self):
-        """Service raises TypeError when user is None."""
-        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
-            services.cancel_upload(None, "token123")
-
-    def test_raises_typeerror_when_user_has_no_id_attribute(self):
-        """Service raises TypeError when user has no id attribute."""
-        with pytest.raises(TypeError, match="user must be a User instance"):
-            services.cancel_upload("not a user", "token123")
-
-    def test_raises_valueerror_when_user_id_is_none(self):
-        """Service raises ValueError when user is unsaved."""
-        unsaved_user = Mock()
-        unsaved_user.id = None
-        with pytest.raises(ValueError, match="user must be saved"):
-            services.cancel_upload(unsaved_user, "token123")
-
-    # --- Input validation - upload_token ---
-
-    def test_raises_valueerror_when_upload_token_is_none(self, mock_user):
-        """Service raises ValueError when upload_token is None."""
-        with pytest.raises(ValueError, match="upload_token cannot be None"):
-            services.cancel_upload(mock_user, None)
-
-    def test_raises_valueerror_when_upload_token_is_empty(self, mock_user):
-        """Service raises ValueError when upload_token is empty."""
-        with pytest.raises(ValueError, match="upload_token cannot be empty"):
-            services.cancel_upload(mock_user, "")
-
-    def test_raises_valueerror_when_upload_token_is_whitespace(self, mock_user):
-        """Service raises ValueError when upload_token is only whitespace."""
-        with pytest.raises(ValueError, match="upload_token cannot be empty"):
-            services.cancel_upload(mock_user, "   ")
-
-    # --- Token verification errors ---
-
-    def test_raises_cmserror_on_invalid_token(self, mock_user):
-        """Service raises CMSError when token is invalid."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                side_effect=ValueError("Invalid token"),
-            ),
-            pytest.raises(CMSError, match="Invalid upload token"),
-        ):
-            services.cancel_upload(mock_user, "bad_token")
-
-    def test_raises_cmserror_on_expired_token(self, mock_user):
-        """Service raises CMSError when token is expired."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                side_effect=ValueError("Token expired"),
-            ),
-            pytest.raises(CMSError, match="Invalid upload token"),
-        ):
-            services.cancel_upload(mock_user, "expired_token")
-
-    # --- S3 delete errors (should be ignored) ---
-
-    def test_succeeds_when_s3_delete_fails(self, mock_user):
-        """Service succeeds even when S3 delete fails (best effort cleanup)."""
-        from cms.assets.s3 import S3Error
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch(
-                "cms.assets.s3.delete_agent",
-                side_effect=S3Error("Delete failed"),
-            ),
-        ):
-            # Should not raise - S3 delete is best effort
-            result = services.cancel_upload(mock_user, "token123")
-            assert result is None
-
-    def test_succeeds_when_s3_object_not_found(self, mock_user):
-        """Service succeeds when S3 object doesn't exist (already deleted)."""
-        from cms.assets.s3 import S3Error
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                return_value=token_payload,
-            ),
-            patch(
-                "cms.assets.s3.delete_agent",
-                side_effect=S3Error("Object not found"),
-            ),
-        ):
-            # Should not raise - object may have never been uploaded
-            result = services.cancel_upload(mock_user, "token123")
-            assert result is None
-
-    # --- Error propagation ---
-
-    def test_propagates_unexpected_exception(self, mock_user):
-        """Service propagates unexpected exceptions from dependencies."""
-        with (
-            patch(
-                "cms.assets.upload_token.verify_upload_token",
-                side_effect=RuntimeError("Unexpected"),
-            ),
-            pytest.raises(RuntimeError, match="Unexpected"),
-        ):
-            services.cancel_upload(mock_user, "token123")

@@ -7,10 +7,12 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import GDCNetworkAccessConfig, GDCPaloAltoVMSeriesConfig
-from gdc_vmseries_ngfw import (
+from gdc_vmseries_assets import (
     _build_bootstrap_disk_manifest,
     _build_init_cfg,
     _build_vmseries_vm_manifest,
+)
+from gdc_vmseries_ngfw import (
     apply_ngfw,
     run_power_operation,
 )

@@ -23,20 +23,8 @@ def make_range_ctx(range_id: int = 42, user_id: int = 7) -> RangeContext:
     )
 
 
-class TestDestroyRange:
-    """Tests for destroy_range() in engine/services.py.
-
-    Tests the service contract:
-    - Inputs: RangeContext (required, with range_id and user_id)
-    - Outputs: bool (True if range exists and destruction initiated/in progress, False otherwise)
-    - Side effects: sets status to DESTROYING, triggers ECS teardown, stores task ARN
-    - Errors: none raised (returns False for not found/already destroyed)
-    - Logging: DEBUG on entry, INFO on status change, WARNING for not found/already destroyed
-    """
-
-    # -------------------------------------------------------------------------
-    # Outputs - returns bool indicating success
-    # -------------------------------------------------------------------------
+class TestDestroyRangeOutcomes:
+    """Outcome tests for destroy_range()."""
 
     def test_returns_true_for_destroyable_range(self):
         """Service returns True when range exists and can be destroyed."""
@@ -88,9 +76,9 @@ class TestDestroyRange:
             result = destroy_range(range_ctx)
             assert result is False
 
-    # -------------------------------------------------------------------------
-    # Side effects - status update and ECS teardown
-    # -------------------------------------------------------------------------
+
+class TestDestroyRangeStateMutation:
+    """State mutation tests for destroy_range()."""
 
     def test_sets_status_to_destroying(self):
         """Service sets range status to DESTROYING."""
@@ -192,10 +180,6 @@ class TestDestroyRange:
 
             mock_teardown.assert_not_called()
 
-    # -------------------------------------------------------------------------
-    # All destroyable statuses work
-    # -------------------------------------------------------------------------
-
     @pytest.mark.parametrize(
         "status",
         [
@@ -224,9 +208,9 @@ class TestDestroyRange:
             assert result is True
             assert mock_range.status == ResourceStatus.DESTROYING.value
 
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG on entry
-    # -------------------------------------------------------------------------
+
+class TestDestroyRangeLogging:
+    """Logging tests for destroy_range()."""
 
     def test_logs_debug_on_entry(self, caplog):
         """Service logs debug on entry with range_id."""
@@ -244,10 +228,6 @@ class TestDestroyRange:
             destroy_range(range_ctx)
 
         assert "42" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - INFO on status change
-    # -------------------------------------------------------------------------
 
     def test_logs_info_when_status_changed(self, caplog):
         """Service logs info when status is set to DESTROYING."""
@@ -299,10 +279,6 @@ class TestDestroyRange:
             destroy_range(range_ctx)
 
         assert "already destroying" in caplog.text.lower() or "42" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - WARNING on not found / already destroyed
-    # -------------------------------------------------------------------------
 
     def test_logs_warning_when_range_not_found(self, caplog):
         """Service logs warning when range not found."""

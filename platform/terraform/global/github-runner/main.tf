@@ -143,6 +143,13 @@ resource "aws_iam_role_policy" "ecr" {
 # ------------------------------------------------------------------------------
 
 resource "aws_instance" "runner" {
+  monitoring    = true
+  ebs_optimized = true
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    http_endpoint               = "enabled"
+  }
   count         = var.runner_count
   ami           = data.aws_ami.al2023.id
   instance_type = var.instance_type

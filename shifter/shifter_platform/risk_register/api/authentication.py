@@ -1,11 +1,17 @@
 """API Key authentication backend for Django REST Framework."""
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING, Any
 
 from rest_framework import authentication, exceptions
 
 from risk_register.models import APIKey, AuditLog
-from risk_register.services import audit_log, get_client_ip
+from risk_register.services import AuditEvent, audit_log, get_client_ip
+
+if TYPE_CHECKING:
+    from rest_framework.request import Request
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +26,7 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
     keyword = "X-API-Key"
 
-    def authenticate(self, request):
+    def authenticate(self, request: Request) -> tuple[None, APIKey] | None:
         """
         Authenticate the request and return a tuple of (user, auth) or None.
 
@@ -30,7 +36,8 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
         api_key = request.META.get(f"HTTP_{self.keyword.upper().replace('-', '_')}")
 
         if not api_key:
-            return None  # Let other authenticators try
+            # Let other authenticators try.
+            return None
 
         authenticated_key = APIKey.authenticate(api_key)
 
@@ -44,15 +51,17 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             # Extract prefix if possible for debugging
             key_prefix = api_key[:8] if api_key and len(api_key) >= 8 else "invalid"
             audit_log(
-                entity_type=AuditLog.EntityType.APIKEY,
-                entity_id=0,
-                action=AuditLog.Action.LOGIN_FAILED,
-                actor_type=AuditLog.ActorType.APIKEY,
-                actor_id=None,
-                new_state={"key_prefix": key_prefix, "endpoint": endpoint},
-                context="Invalid or expired API key",
-                source_ip=source_ip,
-                user_agent=user_agent,
+                AuditEvent(
+                    entity_type=AuditLog.EntityType.APIKEY,
+                    entity_id=0,
+                    action=AuditLog.Action.LOGIN_FAILED,
+                    actor_type=AuditLog.ActorType.APIKEY,
+                    actor_id=None,
+                    new_state={"key_prefix": key_prefix, "endpoint": endpoint},
+                    context="Invalid or expired API key",
+                    source_ip=source_ip,
+                    user_agent=user_agent,
+                )
             )
             raise exceptions.AuthenticationFailed("Invalid or expired API key")
 
@@ -61,21 +70,23 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
         # Log successful authentication
         audit_log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=authenticated_key.id,
-            action=AuditLog.Action.LOGIN,
-            actor_type=AuditLog.ActorType.APIKEY,
-            actor_id=authenticated_key.id,
-            new_state={"key_prefix": authenticated_key.prefix, "endpoint": endpoint},
-            source_ip=source_ip,
-            user_agent=user_agent,
+            AuditEvent(
+                entity_type=AuditLog.EntityType.APIKEY,
+                entity_id=authenticated_key.id,
+                action=AuditLog.Action.LOGIN,
+                actor_type=AuditLog.ActorType.APIKEY,
+                actor_id=authenticated_key.id,
+                new_state={"key_prefix": authenticated_key.prefix, "endpoint": endpoint},
+                source_ip=source_ip,
+                user_agent=user_agent,
+            )
         )
 
         # Return (user, auth) - user is None for API key auth
         # The api_key is accessible via request.auth
         return (None, authenticated_key)
 
-    def authenticate_header(self, request):
+    def authenticate_header(self, request: Request) -> str:
         """Return a string to be used as the WWW-Authenticate header."""
         return self.keyword
 
@@ -87,7 +98,7 @@ class APIKeyOrSessionAuthentication(authentication.BaseAuthentication):
     This is useful for views that should work for both UI and API access.
     """
 
-    def authenticate(self, request):
+    def authenticate(self, request: Request) -> tuple[Any, Any] | None:
         """Try API key first, then fall back to session."""
         # Try API key
         api_key_auth = APIKeyAuthentication()

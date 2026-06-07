@@ -6,20 +6,8 @@ from unittest.mock import MagicMock, patch
 from shared.cloud.exceptions import CloudTaskError
 
 
-class TestGetTaskStatus:
-    """Tests for get_task_status() public function.
-
-    Contract:
-    - Inputs: task_arn (str)
-    - Outputs: Dict with status info, or None if not configured/error
-    - Side effects: Calls TaskRunner.get_task_status via get_task_runner()
-    - Errors: Returns None on CloudTaskError (does not raise)
-    - Logging: ERROR on failures
-    """
-
-    # -------------------------------------------------------------------------
-    # Happy path - function succeeds
-    # -------------------------------------------------------------------------
+class TestGetTaskStatusSuccess:
+    """Successful task status tests."""
 
     def test_returns_status_dict_on_success(self, settings):
         """Function returns status dict when task is found."""
@@ -153,9 +141,9 @@ class TestGetTaskStatus:
                 task_id=task_arn,
             )
 
-    # -------------------------------------------------------------------------
-    # Configuration - not configured returns None
-    # -------------------------------------------------------------------------
+
+class TestGetTaskStatusMissingInputs:
+    """Missing configuration and task ARN tests."""
 
     def test_returns_none_when_cluster_not_configured(self, settings):
         """Function returns None when ENGINE_ECS_CLUSTER_ARN is not set."""
@@ -191,10 +179,6 @@ class TestGetTaskStatus:
 
         assert result is None
 
-    # -------------------------------------------------------------------------
-    # Input validation - empty/None task_arn
-    # -------------------------------------------------------------------------
-
     def test_returns_none_when_task_arn_is_none(self, settings):
         """Function returns None when task_arn is None."""
         from engine.ecs import get_task_status
@@ -223,9 +207,9 @@ class TestGetTaskStatus:
         # The test documents current behavior
         assert result is None or isinstance(result, dict)
 
-    # -------------------------------------------------------------------------
-    # Task not found
-    # -------------------------------------------------------------------------
+
+class TestGetTaskStatusCloudErrors:
+    """Cloud error tests for task status lookup."""
 
     def test_returns_unknown_when_task_not_found(self, settings):
         """Function returns UNKNOWN status when task not found."""
@@ -261,10 +245,6 @@ class TestGetTaskStatus:
 
             assert result is not None
             assert result["status"] == "UNKNOWN"
-
-    # -------------------------------------------------------------------------
-    # Error handling - returns None on errors
-    # -------------------------------------------------------------------------
 
     def test_returns_none_on_cloud_task_error(self, settings):
         """Function returns None when CloudTaskError occurs."""
@@ -314,10 +294,6 @@ class TestGetTaskStatus:
             result = get_task_status("arn:aws:ecs:task/abc123")
             assert result is None
 
-    # -------------------------------------------------------------------------
-    # Logging
-    # -------------------------------------------------------------------------
-
     def test_logs_error_on_cloud_task_error(self, settings, caplog):
         """Function logs ERROR when CloudTaskError occurs."""
         from engine.ecs import get_task_status
@@ -337,9 +313,9 @@ class TestGetTaskStatus:
 
         assert "failed" in caplog.text.lower() or "error" in caplog.text.lower()
 
-    # -------------------------------------------------------------------------
-    # Output format
-    # -------------------------------------------------------------------------
+
+class TestGetTaskStatusOutputShape:
+    """Output shape and idempotence tests for task status lookup."""
 
     def test_output_status_is_string(self, settings):
         """Status field is a string."""
@@ -417,10 +393,6 @@ class TestGetTaskStatus:
 
             assert result["status"] == "UNKNOWN"
 
-    # -------------------------------------------------------------------------
-    # Boundary conditions
-    # -------------------------------------------------------------------------
-
     def test_handles_valid_task_arn_format(self, settings):
         """Function handles valid ECS task ARN format."""
         from engine.ecs import get_task_status
@@ -455,10 +427,6 @@ class TestGetTaskStatus:
             result = get_task_status("abc123")
 
             assert result is not None
-
-    # -------------------------------------------------------------------------
-    # Multiple calls
-    # -------------------------------------------------------------------------
 
     def test_multiple_calls_are_independent(self, settings):
         """Multiple calls don't affect each other."""

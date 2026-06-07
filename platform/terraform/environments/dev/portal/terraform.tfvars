@@ -11,7 +11,7 @@
 
 environment        = "dev"
 aws_region         = "us-east-2"
-log_retention_days = 30
+log_retention_days = 365
 
 tags = {
   Project     = "shifter"
@@ -115,12 +115,18 @@ kali_instance_type   = "t3.large"
 # Autoscaling
 # ------------------------------------------------------------------------------
 
-enable_autoscaling   = true
-asg_min_size         = 6
-asg_max_size         = 8
-asg_desired_capacity = 6
+enable_autoscaling   = false
+asg_min_size         = 1
+asg_max_size         = 1
+asg_desired_capacity = 1
 scale_up_threshold   = 70
 scale_down_threshold = 30
+
+# Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
+# Dev keeps the in-memory channel layer (Redis provisioned but unused). Flip to
+# true to run the portal on Redis for event-representative websocket behavior;
+# no change to enable_autoscaling is required.
+enable_redis = false
 
 # ------------------------------------------------------------------------------
 # Redis
@@ -140,8 +146,9 @@ log_level = "DEBUG"
 # Log Aggregation
 # ------------------------------------------------------------------------------
 
-# Disabled for initial deployment - enable when ready for XDR integration
-enable_log_aggregation = false
+# Enabled so portal Network Firewall FLOW / ALERT logs reach the existing
+# CloudWatch -> Firehose -> S3 / SQS pipeline (#122 fail-closed contract).
+enable_log_aggregation = true
 
 # ------------------------------------------------------------------------------
 # Phase 5: Additional Log Sources
@@ -151,6 +158,13 @@ enable_alb_access_logs = true
 enable_vpc_flow_logs   = true
 enable_rds_log_exports = true
 enable_waf_logging     = true
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+enable_portal_inspection    = true
+firewall_log_retention_days = 365
 
 # ------------------------------------------------------------------------------
 # Engine Provisioner

@@ -31,23 +31,23 @@ jobs:
   # ============================================================================
   changes:
     name: Detect Changes
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
+    # `dorny/paths-filter` calls the GitHub API to list files changed in
+    # the PR. The default GITHUB_TOKEN scopes under this repo's
+    # permissions policy don't include `pull-requests: read`, so without
+    # this block paths-filter fails with
+    # "Resource not accessible by integration" on every PR-event run.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       shifter_app: ${{ steps.filter.outputs.shifter_app }}
-      shifter_platform_app: ${{ steps.filter.outputs.shifter_platform_app }}
       mcp: ${{ steps.filter.outputs.mcp }}
-      packer: ${{ steps.filter.outputs.packer }}
-      bootstrap: ${{ steps.filter.outputs.bootstrap }}
-      check_layer_imports: ${{ steps.filter.outputs.check_layer_imports }}
-      check_rds_pending_modifications: ${{ steps.filter.outputs.check_rds_pending_modifications }}
-      installation: ${{ steps.filter.outputs.installation }}
       gcp: ${{ steps.filter.outputs.gcp }}
-      guardrails: ${{ steps.filter.outputs.guardrails }}
-      quality_workflow: ${{ steps.filter.outputs.quality_workflow }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
       aws_is_dev: ${{ steps.env.outputs.aws_is_dev }}
       gcp_environment: ${{ steps.env.outputs.gcp_environment }}
@@ -58,7 +58,7 @@ jobs:
       fast_gcp_deploy: ${{ steps.env.outputs.fast_gcp_deploy }}
       skip_tests: ${{ steps.skip.outputs.skip_tests }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Need full history to access PR head commit
 
@@ -78,7 +78,10 @@ jobs:
               - '.github/workflows/_range.yml'
             shifter_engine:
               - 'shifter/engine/provisioner/**'
-              - 'platform/terraform/modules/pulumi-provisioner/**'
+              # NB: module is `engine-provisioner`, not the historical
+              # `pulumi-provisioner` name; the latter was a stale typo
+              # the path filter inherited from before the rename.
+              - 'platform/terraform/modules/engine-provisioner/**'
               - 'platform/terraform/modules/ecr/**'
               - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_shifter-engine.yml'
@@ -90,37 +93,29 @@ jobs:
               - '.github/workflows/_shifter-platform.yml'
             shifter_app:
               - 'shifter/**'
-            shifter_platform_app:
-              - 'shifter/shifter_platform/**'
             mcp:
               - 'mcp/**'
-            packer:
-              - 'shifter/packer/**'
-            bootstrap:
-              - 'scripts/bootstrap/**'
-            check_layer_imports:
-              - 'scripts/check_layer_imports/**'
-            check_rds_pending_modifications:
-              - 'scripts/check_rds_pending_modifications/**'
-            installation:
-              - 'shifter/installation/**'
-            guardrails:
-              - '.github/workflows/**'
-              - '.github/CODEOWNERS'
-              - '.github/pull_request_template.md'
-              - '.github/copilot-instructions.md'
-              - '.pre-commit-config.yaml'
-              - '.importlinter'
-              - '.tflint.hcl'
-              - '.gitleaks.toml'
-              - '.kube-linter.yaml'
-              - '.claude/settings.json'
-              - '.claude/hooks/**'
-              - 'scripts/adr_guard/**'
-              - 'docs/adr/**'
-            quality_workflow:
               - '.github/workflows/_quality.yml'
-              - '.github/workflows/deploy.yml'
+              # Guardrail scripts that the Quality workflow invokes
+              # directly (their CI steps live in _quality.yml's
+              # terraform-lint job). A change to these scripts or their
+              # tests must re-run Quality so the guardrail's enforcement
+              # is verified, but it shouldn't trigger any deploy — the
+              # `mcp` filter is the existing "Quality-only" route.
+              - 'scripts/check_tf_iam_ec2_scope/**'
+              - 'scripts/check_tf_iam_elb_scope/**'
+              - 'scripts/check_tf_sg_cidrs/**'
+              - 'scripts/check_tf_kms_secrets_grant/**'
+              # Guardrail / ADR-registry surfaces. A change to any of
+              # these must re-run Quality so adr_guard catches a broken
+              # registry, malformed exception entry, or pre-commit hook
+              # wiring mismatch before it lands. Without this, a PR
+              # touching only ADR metadata or hook configuration would
+              # skip every architecture gate.
+              - '.pre-commit-config.yaml'
+              - 'docs/adr/**'
+              - 'scripts/adr_guard/**'
+              - 'shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md'
             gcp:
               - 'platform/terraform/gcp/**'
               - 'platform/k8s/gcp/**'
@@ -132,9 +127,11 @@ jobs:
               - 'shifter/shifter_platform/engine/ecs.py'
               - 'shifter/shifter_platform/cms/experiments/ecs.py'
               - 'shifter/shifter_platform/entrypoint.sh'
+              - 'shifter/shifter_platform/entrypoint-lib.sh'
               - 'shifter/shifter_platform/cms/experiments/events.py'
               - 'shifter/shifter_platform/shared/management/commands/run_worker.py'
               - 'shifter/shifter_platform/requirements-gcp.txt'
+              - 'shifter/shifter_platform/requirements-gcp.lock'
               - 'shifter/engine/provisioner/requirements-gcp.txt'
               - 'shifter/shifter_platform/Dockerfile'
               - 'shifter/engine/provisioner/Dockerfile'
@@ -255,39 +252,57 @@ jobs:
        needs.changes.outputs.shifter_engine == 'true' ||
        needs.changes.outputs.shifter_platform == 'true' ||
        needs.changes.outputs.shifter_app == 'true' ||
-       needs.changes.outputs.shifter_platform_app == 'true' ||
        needs.changes.outputs.mcp == 'true' ||
-       needs.changes.outputs.packer == 'true' ||
-       needs.changes.outputs.bootstrap == 'true' ||
-       needs.changes.outputs.check_layer_imports == 'true' ||
-       needs.changes.outputs.check_rds_pending_modifications == 'true' ||
-       needs.changes.outputs.installation == 'true' ||
        needs.changes.outputs.gcp == 'true' ||
-       needs.changes.outputs.guardrails == 'true' ||
-       needs.changes.outputs.quality_workflow == 'true' ||
        github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
     with:
       skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
-      core: ${{ needs.changes.outputs.core == 'true' }}
-      range: ${{ needs.changes.outputs.range == 'true' }}
-      shifter_engine: ${{ needs.changes.outputs.shifter_engine == 'true' }}
-      shifter_platform: ${{ needs.changes.outputs.shifter_platform == 'true' }}
-      shifter_app: ${{ needs.changes.outputs.shifter_app == 'true' }}
-      shifter_platform_app: ${{ needs.changes.outputs.shifter_platform_app == 'true' }}
-      mcp: ${{ needs.changes.outputs.mcp == 'true' }}
-      packer: ${{ needs.changes.outputs.packer == 'true' }}
-      bootstrap: ${{ needs.changes.outputs.bootstrap == 'true' }}
-      check_layer_imports: ${{ needs.changes.outputs.check_layer_imports == 'true' }}
-      check_rds_pending_modifications: ${{ needs.changes.outputs.check_rds_pending_modifications == 'true' }}
-      installation: ${{ needs.changes.outputs.installation == 'true' }}
-      gcp: ${{ needs.changes.outputs.gcp == 'true' }}
-      guardrails: ${{ needs.changes.outputs.guardrails == 'true' }}
-      quality_workflow: ${{ needs.changes.outputs.quality_workflow == 'true' || github.event_name == 'workflow_dispatch' }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # PR Gate — a single always-present aggregate check for branch
+  # protection. `dev` protection requires this one context instead of the
+  # individual Quality / * checks: those are only created when the
+  # `quality` job runs (it is conditional on quality-relevant paths), so
+  # requiring them directly leaves branch protection waiting forever on
+  # PRs that touch none of those paths. Scoped to pull_request events, so
+  # it never runs on aws-dev / gcp-dev / main pushes.
+  pr-gate:
+    name: PR Gate
+    needs: [changes, quality]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert required PR jobs passed
+        run: |
+          changes_result='${{ needs.changes.result }}'
+          quality_result='${{ needs.quality.result }}'
+          echo "changes=$changes_result quality=$quality_result"
+          if [ "$changes_result" != "success" ]; then
+            echo "::error::Detect Changes did not succeed (result=$changes_result)"
+            exit 1
+          fi
+          # `quality` is legitimately skipped when no quality-relevant
+          # paths changed; only a real failure or cancellation blocks.
+          if [ "$quality_result" != "success" ] && [ "$quality_result" != "skipped" ]; then
+            echo "::error::Quality did not pass (result=$quality_result)"
+            exit 1
+          fi
+          echo "PR gate passed"
 
   gcp-dev:
     name: GCP Dev
     needs: [changes, quality]
+    # `_gcp-dev.yml::deploy` requests `id-token: write` (GCP OIDC via
+    # workload identity federation). Reusable workflows can't request
+    # higher GITHUB_TOKEN scopes than the caller grants — without this
+    # block the workflow fails at startup with
+    # `nested job 'deploy' is requesting 'id-token: write', but is only
+    # allowed 'id-token: none'`.
+    permissions:
+      contents: read
+      id-token: write
     if: |
       always() &&
       needs.changes.outputs.run_gcp == 'true' &&
@@ -316,6 +331,13 @@ jobs:
   core:
     name: Core
     needs: [changes, quality]
+    # `_core.yml::plan` + `apply` request `id-token: write` (AWS OIDC
+    # via configure-aws-credentials) and `pull-requests: write` (plan
+    # comments). Caller must grant the union.
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
@@ -333,6 +355,12 @@ jobs:
   range:
     name: Range
     needs: [changes, quality, core]
+    # Same OIDC + PR-comment scopes as `core` — `_range.yml::plan` and
+    # `apply` mirror the core workflow's permission requests.
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
@@ -351,6 +379,11 @@ jobs:
   shifter-engine:
     name: Shifter Engine
     needs: [changes, quality, core]
+    # `_shifter-engine.yml::build` + `deploy` request `id-token: write`
+    # (AWS OIDC for ECR + ECS task push).
+    permissions:
+      contents: read
+      id-token: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
@@ -369,6 +402,13 @@ jobs:
   shifter_platform:
     name: Shifter Platform
     needs: [changes, quality, core, range, shifter-engine]
+    # `_shifter-platform.yml` jobs (plan, push-guacamole-images, apply,
+    # build, deploy) all request `id-token: write` (AWS OIDC) and
+    # `pull-requests: write` (plan comments). Caller grants the union.
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&

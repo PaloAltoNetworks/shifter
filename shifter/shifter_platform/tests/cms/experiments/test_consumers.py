@@ -51,6 +51,7 @@ def _make_non_staff_user(pk=2):
     return user
 
 
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 class TestConsumerAuthentication:
     """5.3: Test consumer authentication (reject unauthenticated, reject non-owner)."""

@@ -191,6 +191,52 @@ class TestInstanceSpecValidation:
             )
             assert spec.os_type == os_type
 
+class TestInstanceContextPrivateIp:
+    """Tests for the optional InstanceContext.private_ip display field."""
+
+    def test_defaults_to_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali")
+        assert ctx.private_ip is None
+
+    def test_accepts_ipv4(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="10.0.1.5")
+        assert ctx.private_ip == "10.0.1.5"
+
+    def test_strips_whitespace(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="  10.0.1.5  ")
+        assert ctx.private_ip == "10.0.1.5"
+
+    def test_empty_string_becomes_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="   ")
+        assert ctx.private_ip is None
+
+    def test_overlong_input_becomes_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="x" * 65)
+        assert ctx.private_ip is None
+
+    def test_obviously_malformed_becomes_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="<script>")
+        assert ctx.private_ip is None
+
+    def test_accepts_ipv6(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="fe80::1")
+        assert ctx.private_ip == "fe80::1"
+
+
 class TestEventValidation:
     """Tests for event model validation."""
 

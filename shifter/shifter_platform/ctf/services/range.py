@@ -13,9 +13,10 @@ from uuid import UUID
 
 from ctf.exceptions import CTFNotFoundError, CTFRangeError
 from ctf.models import CTFEvent, CTFParticipant
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
-    pass
+    from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
         CTFNotFoundError: If participant doesn't exist.
         CTFRangeError: If range provisioning fails.
     """
-    logger.info("Provisioning range for participant %s", participant_id)
+    logger.info("Provisioning range for participant %s", safe_log_value(participant_id))
 
     try:
         participant = CTFParticipant.objects.select_related("event", "user").get(pk=participant_id)
@@ -74,7 +75,7 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
             ngfw_enabled=ngfw_enabled,
         )
     except Exception as e:
-        logger.exception("Range provisioning failed for participant %s", participant_id)
+        logger.exception("Range provisioning failed for participant %s", safe_log_value(participant_id))
         raise CTFRangeError(
             f"Range provisioning failed: {e}",
             details={"participant_id": str(participant_id)},
@@ -107,7 +108,7 @@ def provision_event_ranges(event_id: UUID) -> dict[str, Any]:
     Raises:
         CTFNotFoundError: If event doesn't exist.
     """
-    logger.info("Bulk provisioning ranges for event %s", event_id)
+    logger.info("Bulk provisioning ranges for event %s", safe_log_value(event_id))
 
     try:
         CTFEvent.objects.get(pk=event_id)
@@ -340,12 +341,13 @@ def _get_participant_with_range(participant_id: UUID) -> CTFParticipant:
 
 def stop_participant_range(participant_id: UUID) -> dict[str, Any]:
     """Stop (pause) a participant's range."""
-    logger.info("Stopping range for participant %s", participant_id)
+    logger.info("Stopping range for participant %s", safe_log_value(participant_id))
     participant = _get_participant_with_range(participant_id)
 
     from ctf.bridges import cms_stop_range
 
-    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
+    # guaranteed by _get_participant_with_range
+    assert participant.range_instance_id is not None
     cms_stop_range(participant.user, participant.range_instance_id)
     participant.range_status = "stopping"
     participant.save(update_fields=["range_status", "updated_at"])
@@ -354,12 +356,13 @@ def stop_participant_range(participant_id: UUID) -> dict[str, Any]:
 
 def start_participant_range(participant_id: UUID) -> dict[str, Any]:
     """Start (resume) a participant's stopped range."""
-    logger.info("Starting range for participant %s", participant_id)
+    logger.info("Starting range for participant %s", safe_log_value(participant_id))
     participant = _get_participant_with_range(participant_id)
 
     from ctf.bridges import cms_start_range
 
-    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
+    # guaranteed by _get_participant_with_range
+    assert participant.range_instance_id is not None
     cms_start_range(participant.user, participant.range_instance_id)
     participant.range_status = "resuming"
     participant.save(update_fields=["range_status", "updated_at"])
@@ -368,7 +371,7 @@ def start_participant_range(participant_id: UUID) -> dict[str, Any]:
 
 def restart_participant_range(participant_id: UUID) -> dict[str, Any]:
     """Restart a participant's range (stop then start)."""
-    logger.info("Restarting range for participant %s", participant_id)
+    logger.info("Restarting range for participant %s", safe_log_value(participant_id))
     stop_participant_range(participant_id)
     return start_participant_range(participant_id)
 
@@ -500,7 +503,7 @@ def destroy_participant_range(participant_id: UUID) -> dict[str, Any]:
         CTFNotFoundError: If participant doesn't exist.
         CTFRangeError: If no range assigned.
     """
-    logger.info("Destroying range for participant %s", participant_id)
+    logger.info("Destroying range for participant %s", safe_log_value(participant_id))
 
     try:
         participant = CTFParticipant.objects.select_related("user").get(pk=participant_id)
@@ -544,7 +547,7 @@ def update_participant_range_status(participant_id: UUID) -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
-def _destroy_single_range(participant: CTFParticipant, user) -> None:
+def _destroy_single_range(participant: CTFParticipant, user: User | None) -> None:
     """Destroy a single participant's range and clear fields."""
     from ctf.bridges import cms_destroy_range
 

@@ -53,6 +53,18 @@ variable "secret_arns" {
   type        = list(string)
 }
 
+variable "secrets_manager_kms_key_arn" {
+  description = <<-EOT
+    ARN of the portal Secrets Manager CMK. The EC2 role needs kms:Decrypt on
+    this key to fetch values from any portal Secrets Manager secret encrypted
+    with the CMK (e.g. the dc-domain password). Without it,
+    `entrypoint.sh::fetch_runtime_secret` fails the get_secret_value call with
+    `AccessDeniedException: Access to KMS is not allowed`. Required, no
+    default. See issue #52.
+  EOT
+  type        = string
+}
+
 variable "app_port" {
   description = "Port the Django app listens on"
   type        = number

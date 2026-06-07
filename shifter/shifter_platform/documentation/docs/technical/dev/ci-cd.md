@@ -96,10 +96,16 @@ Runs on every PR and push:
 - **K8s security and best practices**: `kube-linter` enforces security contexts,
   resource limits, privilege escalation prevention, and other best practices
   via `.kube-linter.yaml`.
-- **K8s security scanning**: Checkov with the `kubernetes` framework (soft fail
-  while manifests are being hardened).
+- **K8s security scanning**: Checkov with the `kubernetes` framework. Current
+  soft-fail is scoped to Kubernetes manifest hardening and does not justify
+  Terraform soft-fail.
 - **Tests**: `pytest` with PostgreSQL service container for `shifter_platform`
-- **IaC scanning**: Checkov for Terraform (soft fail - warnings only)
+- **IaC scanning**: Checkov for Terraform is a **blocking gate** under
+  ADR-004-R11. Pre-commit and CI share the same config at
+  `platform/terraform/.checkov.yaml`; `--soft-fail` is off. Accepted-risk
+  waivers (Checkov `skip-check` entries or inline `# checkov:skip=…`
+  comments) require a matching entry in `docs/adr/exceptions.yaml` with
+  owner, reason, expiry, affected paths, and the Checkov policy ID.
 - **Secret scanning**: gitleaks on newly introduced commits
 - **Coverage**: `shifter_platform` emits terminal and XML coverage reports
 

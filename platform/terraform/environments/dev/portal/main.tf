@@ -232,6 +232,11 @@ module "vpc" {
   # Phase 5: VPC Flow Logs
   enable_flow_logs   = var.enable_vpc_flow_logs
   log_retention_days = var.log_retention_days
+
+  # Portal east-west inspection (#122)
+  enable_portal_inspection    = var.enable_portal_inspection
+  enable_log_aggregation      = var.enable_log_aggregation
+  firewall_log_retention_days = var.firewall_log_retention_days
 }
 
 # ------------------------------------------------------------------------------
@@ -241,11 +246,11 @@ module "vpc" {
 module "rds" {
   source = "../../../modules/portal/rds"
 
-  name_prefix         = local.name_prefix
-  secrets_kms_key_arn = aws_kms_key.secrets_manager.arn
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_subnet_ids
-  allowed_cidr_blocks = [module.vpc.vpc_cidr]
+  name_prefix                = local.name_prefix
+  secrets_kms_key_arn        = aws_kms_key.secrets_manager.arn
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  allowed_security_group_ids = [module.ec2.security_group_id]
 
   db_name               = var.db_name
   db_username           = var.db_username
@@ -298,13 +303,13 @@ module "alb" {
 module "redis" {
   source = "../../../modules/portal/redis"
 
-  name_prefix         = local.name_prefix
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_subnet_ids
-  allowed_cidr_blocks = [module.vpc.vpc_cidr]
-  node_type           = var.redis_node_type
-  engine_version      = var.redis_engine_version
-  enable_replication  = var.redis_enable_replication
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  allowed_security_group_ids = [module.ec2.security_group_id]
+  node_type                  = var.redis_node_type
+  engine_version             = var.redis_engine_version
+  enable_replication         = var.redis_enable_replication
 
   # CloudWatch Alarms
   enable_alarms = var.alarm_email != ""
@@ -423,8 +428,9 @@ module "ssm" {
   sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]
   sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
-  redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
-  enable_redis   = var.enable_autoscaling
+  # Redis wiring is environment-owned and decoupled from autoscaling (ADR-018, #849).
+  redis_endpoint = var.enable_redis ? module.redis.redis_endpoint : ""
+  enable_redis   = var.enable_redis
 
   # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
   db_host_override        = module.rds.db_instance_address
@@ -461,9 +467,10 @@ module "ec2" {
     module.guacamole.json_auth_secret_arn,
     module.engine_provisioner.dc_domain_password_secret_arn,
   ]
-  s3_bucket_arn    = module.s3.bucket_arn
-  app_port         = var.app_port
-  root_volume_size = var.ec2_root_volume_size
+  secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
+  s3_bucket_arn               = module.s3.bucket_arn
+  app_port                    = var.app_port
+  root_volume_size            = var.ec2_root_volume_size
 
   # ECS permissions for engine provisioner
   ecs_cluster_arn            = module.engine_provisioner.ecs_cluster_arn
@@ -478,7 +485,7 @@ module "ec2" {
   asg_min_size         = var.asg_min_size
   asg_max_size         = var.asg_max_size
   asg_desired_capacity = var.asg_desired_capacity
-  redis_endpoint       = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+  redis_endpoint       = var.enable_redis ? module.redis.redis_endpoint : ""
   scale_up_threshold   = var.scale_up_threshold
   scale_down_threshold = var.scale_down_threshold
   log_retention_days   = var.log_retention_days
@@ -602,9 +609,11 @@ resource "aws_vpc_peering_connection" "portal_to_range" {
   })
 }
 
-# Route from Portal private subnets to Range VPC via peering
+# Route from Portal private subnets to Range VPC via peering (per-AZ).
 resource "aws_route" "portal_to_range" {
-  route_table_id            = module.vpc.private_route_table_id
+  count = length(module.vpc.private_route_table_ids)
+
+  route_table_id            = module.vpc.private_route_table_ids[count.index]
   destination_cidr_block    = data.terraform_remote_state.range.outputs.vpc_cidr
   vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
 }
@@ -822,6 +831,8 @@ module "log_aggregation" {
     module.engine_provisioner.log_group_names,
     # Guacamole logs
     module.guacamole.log_group_names,
+    # Portal east-west inspection (#122)
+    var.enable_portal_inspection ? [module.vpc.firewall_log_group_name] : [],
   ) : []
 
   tags = var.tags
@@ -837,6 +848,7 @@ resource "aws_cloudwatch_log_group" "bedrock" {
 
   name              = "/aws/bedrock/${local.name_prefix}-invocations"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = merge(var.tags, {
     Name = "${local.name_prefix}-bedrock-invocations"

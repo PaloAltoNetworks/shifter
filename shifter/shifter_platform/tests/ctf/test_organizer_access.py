@@ -651,3 +651,46 @@ class TestAPIUseHint:
             response = api_use_hint(request, challenge_id=url_challenge_id)
 
         assert response.status_code == 400, response.content
+
+
+# ===========================================================================
+# Per-event email-template API — auth decorators belong on the routed view
+# ===========================================================================
+
+
+@pytest.mark.usefixtures("_patch_get_event", "_patch_role_organizer")
+class TestAPIEmailTemplateView:
+    """Regression tests for ``api_event_email_template``.
+
+    The ``@login_required`` / ``@ctf_organizer_required`` /
+    ``@require_http_methods`` decorators must sit on the routed view, not on
+    the ``_handle_get_email_template`` helper. While they were misplaced on
+    the helper, the view's GET branch invoked the decorator wrapper with a
+    ``CTFEvent`` in place of the request (wrong status / runtime error) and
+    the public endpoint ran without organizer authentication.
+    """
+
+    NOTIFICATION_TYPE = "invite"
+
+    def test_get_returns_404_when_no_custom_template(self, rf, mock_owner_user):
+        from ctf.views import api_event_email_template
+
+        with patch("ctf.models.CTFEmailTemplate.objects") as mock_objects:
+            mock_objects.filter.return_value.first.return_value = None
+            request = _get_request(rf, mock_owner_user)
+            response = api_event_email_template(request, event_id=EVENT_ID, notification_type=self.NOTIFICATION_TYPE)
+        assert response.status_code == 404
+
+    def test_get_denies_other_organizer(self, rf, mock_non_owner_user):
+        from ctf.views import api_event_email_template
+
+        request = _get_request(rf, mock_non_owner_user)
+        response = api_event_email_template(request, event_id=EVENT_ID, notification_type=self.NOTIFICATION_TYPE)
+        assert response.status_code == 403
+
+    def test_rejects_invalid_notification_type(self, rf, mock_owner_user):
+        from ctf.views import api_event_email_template
+
+        request = _get_request(rf, mock_owner_user)
+        response = api_event_email_template(request, event_id=EVENT_ID, notification_type="bogus-type")
+        assert response.status_code == 400

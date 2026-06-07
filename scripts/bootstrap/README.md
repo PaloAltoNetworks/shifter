@@ -64,9 +64,13 @@ runners are provisioned and registered.
    parameters required by portal Terraform. The Kali build requires the target
    account to accept the free AWS Marketplace terms for product code
    `7lgvy7mt78lgoi4lant0znp5h`.
-5. Run `./scripts/bootstrap/deploy.py terraform --env dev --profile <profile>`
-   locally, or push the updated dev backend files to the deploy branch after
-   runners are online.
+5. For the first deploy in the moved account, run the `Deploy` GitHub Actions
+   workflow manually with `workflow_dispatch` on `aws-dev`. Manual dispatch
+   forces the full AWS chain (Core -> Range -> Engine -> Platform). A plain
+   branch push still obeys path filters, so it can skip Core or image
+   publishing when the pushed commit only touched bootstrap/backend files.
+   After the first full run succeeds, normal filtered `aws-dev` pushes are
+   appropriate.
 
 ### Bootstrap Only
 ```bash

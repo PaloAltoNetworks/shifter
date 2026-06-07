@@ -39,6 +39,11 @@ jobs:
       pull-requests: write
     name: Plan (${{ inputs.environment }})
     runs-on: self-hosted
+    needs: push-guacamole-images
+    if: |
+      always() &&
+      (needs.push-guacamole-images.result == 'success' ||
+       needs.push-guacamole-images.result == 'skipped')
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
@@ -105,11 +110,8 @@ jobs:
       pull-requests: write
     name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
-    needs: plan
     if: |
-      always() &&
       inputs.apply_changes &&
-      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
       github.event_name != 'pull_request'
     env:
       GUACD_REPO: ${{ inputs.is_dev && 'shifter-dev-guacd' || 'shifter-guacd' }}

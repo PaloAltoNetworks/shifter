@@ -97,8 +97,13 @@ to use the `aws-dev` deploy branch:
    code `7lgvy7mt78lgoi4lant0znp5h`.
 4. Review `TF_VARS_DEV_PORTAL` for account-specific values such as domain
    names, alarm email, SSH allowlists, and bucket names.
-5. Run the local Terraform deploy or refresh/push `aws-dev` only after the
-   backend files and runners are in place.
+5. For the first deploy in a moved or fresh account, run the `Deploy`
+   workflow manually with `workflow_dispatch` on `aws-dev`. Manual dispatch
+   forces the full AWS chain (Core -> Range -> Engine -> Platform). A plain
+   branch push still obeys path filters, so it can skip Core or image
+   publishing if the pushed commit only touched bootstrap/backend files.
+   After the first full run has created the shared state and images, normal
+   `aws-dev` pushes can use the filtered path.
 
 ## AWS range (`dev` / `prod`)
 

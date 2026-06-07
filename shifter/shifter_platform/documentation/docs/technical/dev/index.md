@@ -64,10 +64,10 @@ shifter/
 ## Git Workflow
 
 ```
-feature/* ──► dev ──► aws-dev ──► main
-              │        │          │
-              │        ▼          ▼
-              └──────► gcp-dev   prod env
+feature/* ──► dev ──► aws-dev ──► main ──workflow_dispatch──► prod env
+              │        │
+              │        ▼
+              └──────► gcp-dev
                        │
                        ▼
                     gcp dev env
@@ -77,7 +77,7 @@ feature/* ──► dev ──► aws-dev ──► main
 - **dev** - Integration, validation only
 - **aws-dev** - AWS dev deployment branch
 - **gcp-dev** - GCP dev deployment branch
-- **main** - Production, deploys to prod environment
+- **main** - Production code branch; prod deploys require manual dispatch
 
 All changes go through pull requests. Never commit directly to deploy branches.
 

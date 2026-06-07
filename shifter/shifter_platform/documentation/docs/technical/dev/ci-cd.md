@@ -17,20 +17,24 @@ which coordinates:
 
 | Event | What Runs |
 |-------|-----------|
-| PR to any branch | Quality + Plan (no apply) |
-| Push to `dev` | Quality + AWS validation + GCP validation (no apply) |
+| PR to `dev` / `main` | Quality only; no deploy or Terraform plan jobs |
+| PR to `aws-dev` | Quality + AWS plan (no apply) |
+| PR to `gcp-dev` | Quality + GCP validate (no apply) |
+| Push to `dev` | Quality only; no deploy or Terraform plan jobs |
 | Push to `aws-dev` | Quality + AWS deploy to dev |
 | Push to `gcp-dev` | Fast GCP validation + GCP deploy |
-| Push to `main` | Quality + Plan + Apply to prod |
+| Push to `main` | Code branch update only; no deploy or Terraform plan jobs |
+| Manual dispatch on `main` | AWS prod deploy |
 
-PRs get Terraform plan comments. `dev` is the integration branch for
-cross-provider validation only. Dev deployments happen only from `aws-dev` and
+Deployment-branch PRs get Terraform plan comments. `dev` is the integration
+branch for Quality only. Dev deployments happen only from `aws-dev` and
 `gcp-dev`.
 
 `gcp-dev` pushes skip the global quality fan-out. The fast path still runs the
 provider-local guardrails in `_gcp-dev.yml`: Terraform fmt/init/validate plus
 rendered-manifest schema validation before deploy. Broad lint/test/security
-coverage runs on PRs, `dev`, and `main`.
+coverage runs on PRs and `dev`; production deployment is a deliberate manual
+dispatch from `main`.
 
 ## Workflow Files
 
@@ -78,7 +82,7 @@ The orchestrator uses path filters to run only relevant jobs:
 
 ## Quality Gate
 
-Runs on every PR and push:
+Runs on every PR and direct push to `dev`:
 
 - **ADR conformance**: `python3 scripts/adr_guard/adr_guard.py --all --level ci`
   Includes `adr-registry`, `layer-imports`, `cross-layer-model-imports`, and
@@ -151,25 +155,26 @@ After Terraform apply, AWS platform deployment:
 
 ```
 Branch/Target     → Behavior
-PR to dev         → AWS plan + GCP validate
+PR to dev         → Quality only
 PR to aws-dev     → AWS dev plan
 PR to gcp-dev     → GCP validate
-PR to main        → AWS prod plan
-Push to dev       → AWS plan + GCP validate
+PR to main        → Quality only
+Push to dev       → Quality only
 Push to aws-dev   → AWS dev deploy
 Push to gcp-dev   → Fast GCP validate + GCP deploy
-Push to main      → AWS prod deploy
+Push to main      → no deploy
+Dispatch on main  → AWS prod deploy
 ```
 
 ## Provider Routing
 
 `deploy.yml` resolves branch intent explicitly:
 
-- `dev` is the shared integration branch. It must validate both provider paths when shared code changes, but it must not apply infrastructure or deploy workloads.
+- `dev` is the shared integration branch. It runs the quality gate for shared code changes, but it must not plan/apply infrastructure or deploy workloads.
 - `aws-dev` is the only branch that deploys the AWS dev environment.
 - `gcp-dev` is the only branch that deploys the GCP dev environment, and it uses the narrow GCP fast path on branch pushes.
-- `main` remains the AWS production deploy branch.
-- Shared Shifter application changes trigger both the AWS validation chain and the GCP validation chain on `dev`, so provider overlaps are caught before promotion to either deploy branch.
+- `main` is the production code branch; production deploys run only through deliberate `workflow_dispatch`.
+- Shared Shifter application changes run Quality on `dev`; provider-specific deployment validation runs on the deployment branches before apply.
 - The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults.
 - The GCP portal auth contract is FirebaseUI/browser-side Identity Platform auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
 - Multi-cloud work enters through the shared cloud adapter layers rather than provider-specific calls in domain services.
@@ -200,7 +205,7 @@ Terraform plans are also posted as PR comments.
 - Check branch protection rules
 - Verify path filters match your changes
 - Look for `paths-filter` in deploy.yml
-- Confirm you are pushing to the right branch for the intended behavior: `dev` validates only, `aws-dev` deploys AWS dev, `gcp-dev` deploys GCP dev
+- Confirm you are pushing to the right branch for the intended behavior: `dev` runs Quality only, `aws-dev` deploys AWS dev, `gcp-dev` deploys GCP dev, and prod deploys require manual dispatch on `main`
 
 ### Terraform Plan Fails
 - Check for formatting issues: `terraform fmt -recursive`

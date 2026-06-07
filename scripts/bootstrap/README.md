@@ -61,7 +61,9 @@ runners are provisioned and registered.
 3. Apply `platform/terraform/global/github-runner` and register each EC2
    runner with GitHub.
 4. Seed or build the `/shifter/ami/{kali,ubuntu,windows,dc}` SSM
-   parameters required by portal Terraform.
+   parameters required by portal Terraform. The Kali build requires the target
+   account to accept the free AWS Marketplace terms for product code
+   `7lgvy7mt78lgoi4lant0znp5h`.
 5. Run `./scripts/bootstrap/deploy.py terraform --env dev --profile <profile>`
    locally, or push the updated dev backend files to the deploy branch after
    runners are online.

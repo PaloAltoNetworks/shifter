@@ -151,10 +151,12 @@ apt-get install -y my-package
 ### Marketplace subscription error
 
 ```
-Error: You are not authorized to perform this operation
+OptInRequired: In order to use this AWS Marketplace product you need to
+accept terms and subscribe.
 ```
 
-Subscribe to Kali Linux on AWS Marketplace (free):
+Subscribe to Kali Linux on AWS Marketplace (free). Product code:
+`7lgvy7mt78lgoi4lant0znp5h`.
 https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to
 
 ### SSH connection timeout

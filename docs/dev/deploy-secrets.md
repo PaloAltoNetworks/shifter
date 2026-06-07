@@ -92,7 +92,9 @@ to use the `aws-dev` deploy branch:
 3. Ensure `/shifter/ami/{kali,ubuntu,windows,dc}` exists in SSM Parameter
    Store before portal Terraform plans/applies. The Packer workflow updates
    these parameters after AMI builds; in a moved account, verify the Packer
-   `dev.pkrvars.hcl` VPC/subnet values first.
+   `dev.pkrvars.hcl` VPC/subnet values first. The Kali build also requires
+   the target account to accept the free AWS Marketplace terms for product
+   code `7lgvy7mt78lgoi4lant0znp5h`.
 4. Review `TF_VARS_DEV_PORTAL` for account-specific values such as domain
    names, alarm email, SSH allowlists, and bucket names.
 5. Run the local Terraform deploy or refresh/push `aws-dev` only after the

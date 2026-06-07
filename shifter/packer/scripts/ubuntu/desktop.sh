@@ -6,6 +6,10 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 echo "=== Installing XFCE desktop and xrdp for RDP access ==="
+# Some XFCE recommends pull in sane-utils, whose update-inetd postinst
+# exits 123 if the base image does not already have /etc/inetd.conf.
+touch /etc/inetd.conf
+
 # Install lightweight XFCE desktop (ubuntu-desktop is too heavy)
 # dbus-x11 is required for xrdp session communication
 apt-get install -y xfce4 xfce4-goodies xrdp xorgxrdp dbus-x11

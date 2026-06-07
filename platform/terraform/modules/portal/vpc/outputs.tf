@@ -40,6 +40,16 @@ output "private_route_table_ids" {
   value       = aws_route_table.private[*].id
 }
 
+output "gateway_endpoint_ids" {
+  description = "Map of private-tier gateway VPC endpoint service key to endpoint ID."
+  value       = { for service, endpoint in aws_vpc_endpoint.gateway : service => endpoint.id }
+}
+
+output "interface_endpoint_ids" {
+  description = "Map of private-tier interface VPC endpoint service key to endpoint ID."
+  value       = { for service, endpoint in aws_vpc_endpoint.interface : service => endpoint.id }
+}
+
 output "flow_logs_log_group_name" {
   description = "Name of the CloudWatch log group for VPC flow logs"
   value       = var.enable_flow_logs ? aws_cloudwatch_log_group.flow_logs[0].name : ""

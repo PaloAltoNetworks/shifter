@@ -88,7 +88,8 @@ to use the `aws-dev` deploy branch:
    updates `AWS_ROLE_ARN_DEV`, and rewrites the dev `.s3.tfbackend` files.
 2. Update `platform/terraform/global/github-runner/dev.tfvars` with the
    target account's VPC/subnet IDs, apply the runner root, and register each
-   runner with GitHub. AWS deploy workflows use `runs-on: self-hosted`.
+   runner with GitHub. AWS deploy workflows use `runs-on: self-hosted`, and
+   bootstrap does not create the runners.
 3. Ensure `/shifter/ami/{kali,ubuntu,windows,dc}` exists in SSM Parameter
    Store before portal Terraform plans/applies. The Packer workflow updates
    these parameters after AMI builds; in a moved account, verify the Packer
@@ -139,6 +140,18 @@ ALB access logs use a dedicated S3 bucket with SSE-S3 because Elastic Load
 Balancing does not support SSE-KMS for Application Load Balancer access-log
 delivery. Central Firehose log archives continue to use the log-aggregation
 customer-managed KMS key.
+
+### First-run private AWS API reachability
+
+The portal VPC creates private AWS service endpoints for the runtime services
+that must be reachable before application containers can start: ECR, S3,
+CloudWatch Logs, Secrets Manager, SSM, STS/KMS, ECS/EC2/ELB, SNS, SQS, and
+DynamoDB. These endpoints are part of the expected fresh-account platform
+shape. They keep EC2 user_data, Docker image pulls, ECS secret resolution, and
+awslogs setup from depending on the portal inspection firewall/NAT egress path
+during first deploy. The portal EC2 user_data also retries the AL2023 package
+metadata/install step so a transient repository timeout does not permanently
+strand cloud-init.
 
 ## AWS range (`dev` / `prod`)
 

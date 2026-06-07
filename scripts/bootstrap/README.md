@@ -59,7 +59,9 @@ runners are provisioned and registered.
 2. Update `platform/terraform/global/github-runner/dev.tfvars` with the
    target account's VPC and subnet IDs.
 3. Apply `platform/terraform/global/github-runner` and register each EC2
-   runner with GitHub.
+   runner with GitHub. Bootstrap does not create or register the self-hosted
+   runners; their Terraform root is applied separately after the shared
+   backend exists.
 4. Seed or build the `/shifter/ami/{kali,ubuntu,windows,dc}` SSM
    parameters required by portal Terraform. The Kali build requires the target
    account to accept the free AWS Marketplace terms for product code
@@ -80,6 +82,14 @@ runners are provisioned and registered.
 7. After platform apply creates runtime endpoints, publish routing records:
    `domain_name` and `chat.<domain_name>` CNAME to the root Terraform output
    `alb_dns_name`; `ctfd_domain` A-records to `ctfd_elastic_ip`.
+
+The portal VPC creates private AWS service endpoints for the bootstrap-critical
+services used by EC2 user_data and Fargate task startup: ECR, S3, CloudWatch
+Logs, Secrets Manager, SSM, STS/KMS, ECS/EC2/ELB, SNS, SQS, and DynamoDB.
+These endpoints are expected in fresh accounts, especially when portal
+inspection is enabled, because the private default route traverses the
+firewall/NAT path while Docker install, image pulls, ECS secret resolution, and
+awslogs setup are all first-boot or task-initialization work.
 
 ### Bootstrap Only
 ```bash

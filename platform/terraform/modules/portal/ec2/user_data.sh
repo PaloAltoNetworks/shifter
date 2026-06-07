@@ -60,7 +60,25 @@ trap 'echo "Bootstrap failed!"; complete_lifecycle_action ABANDON; exit 1' ERR
 # Install Docker
 # ------------------------------------------------------------------------------
 echo "Installing Docker..."
-dnf install -y docker amazon-ecr-credential-helper
+install_docker() {
+  local attempt
+  local delay
+
+  for attempt in 1 2 3 4 5; do
+    if dnf makecache --refresh && dnf install -y docker amazon-ecr-credential-helper; then
+      return 0
+    fi
+
+    delay=$((attempt * 20))
+    echo "Docker install attempt $attempt failed; retrying in $delay seconds..."
+    sleep "$delay"
+  done
+
+  echo "Docker install failed after 5 attempts."
+  return 1
+}
+
+install_docker
 systemctl enable docker
 systemctl start docker
 

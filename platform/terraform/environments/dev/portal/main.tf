@@ -504,6 +504,11 @@ module "ec2" {
   enable_ses              = true
 
   tags = var.tags
+
+  # First boot installs Docker and configures ECR/SSM-backed deployment. Make
+  # the portal AWS service endpoints part of the VPC dependency boundary so a
+  # fresh account does not race private AWS API reachability.
+  depends_on = [module.vpc]
 }
 
 # ------------------------------------------------------------------------------
@@ -717,6 +722,8 @@ module "engine_provisioner" {
 
   # Messaging (SNS topic for range event publishing)
   sns_topic_arn = module.messaging.sns_topic_arn
+
+  depends_on = [module.vpc]
 }
 
 moved {
@@ -792,6 +799,8 @@ module "guacamole" {
   cognito_domain       = module.cognito.cognito_domain
   aws_region           = var.aws_region
   domain_name          = var.domain_name
+
+  depends_on = [module.vpc]
 }
 
 # ------------------------------------------------------------------------------

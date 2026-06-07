@@ -4,51 +4,5 @@
   "gate_id": "python.shifter.shifter.platform.dependency_policy",
   "scope": "shifter/shifter_platform",
   "captured_from": "uv audit",
-  "findings": [
-    {
-      "id": "PYSEC-2026-197",
-      "package": "django",
-      "fixed_in": ["5.2.15", "6.0.6"]
-    },
-    {
-      "id": "PYSEC-2026-198",
-      "package": "django",
-      "fixed_in": ["5.2.15", "6.0.6"]
-    },
-    {
-      "id": "PYSEC-2026-199",
-      "package": "django",
-      "fixed_in": ["5.2.15", "6.0.6"]
-    },
-    {
-      "id": "PYSEC-2026-200",
-      "package": "django",
-      "fixed_in": ["5.2.15", "6.0.6"]
-    },
-    {
-      "id": "PYSEC-2026-201",
-      "package": "django",
-      "fixed_in": ["5.2.15", "6.0.6"]
-    },
-    {
-      "id": "PYSEC-2026-175",
-      "package": "pyjwt",
-      "fixed_in": ["2.13.0"]
-    },
-    {
-      "id": "PYSEC-2026-177",
-      "package": "pyjwt",
-      "fixed_in": ["2.13.0"]
-    },
-    {
-      "id": "PYSEC-2026-178",
-      "package": "pyjwt",
-      "fixed_in": ["2.13.0"]
-    },
-    {
-      "id": "PYSEC-2026-179",
-      "package": "pyjwt",
-      "fixed_in": ["2.13.0"]
-    }
-  ]
+  "findings": []
 }

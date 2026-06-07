@@ -10,7 +10,7 @@ dependencies = [
     "channels",
     "channels-redis",
     "daphne",
-    "django>=6.0.4",
+    "django>=6.0.6",
     "django-encrypted-model-fields>=0.6.5",
     "django-health-check<5.0",
     "django-ses",
@@ -169,6 +169,7 @@ constraint-dependencies = [
     "virtualenv>=20.36.1",
     "pygments>=2.20.0",
     "requests>=2.33.0",
+    "pyjwt>=2.13.0",
 ]
 
 [tool.django-stubs]

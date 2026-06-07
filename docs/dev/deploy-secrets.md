@@ -124,6 +124,22 @@ apply is running; Terraform will continue once AWS observes the ACM records.
 - In Cloudflare, create ACM and DKIM CNAMEs as DNS-only records. Do not proxy
   validation CNAMEs.
 
+### First-run DNS routing
+
+After the first platform apply creates the portal ALB and CTFd instance,
+publish the runtime DNS records:
+
+- `domain_name` and `chat.<domain_name>` point to the Terraform output
+  `alb_dns_name` as CNAME records. In Cloudflare, keep them DNS-only unless
+  the deployment explicitly validates proxied Cloudflare behavior.
+- `ctfd_domain` points to the Terraform output `ctfd_elastic_ip` as an A
+  record.
+
+ALB access logs use a dedicated S3 bucket with SSE-S3 because Elastic Load
+Balancing does not support SSE-KMS for Application Load Balancer access-log
+delivery. Central Firehose log archives continue to use the log-aggregation
+customer-managed KMS key.
+
 ## AWS range (`dev` / `prod`)
 
 Range Terraform (under `platform/terraform/environments/<env>/range/`) is

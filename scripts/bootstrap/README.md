@@ -77,6 +77,9 @@ runners are provisioned and registered.
    `aws ses get-identity-verification-attributes` for the `_amazonses` TXT
    value and `aws ses get-identity-dkim-attributes` for the three DKIM CNAME
    tokens. In Cloudflare, keep ACM and DKIM CNAMEs DNS-only.
+7. After platform apply creates runtime endpoints, publish routing records:
+   `domain_name` and `chat.<domain_name>` CNAME to the root Terraform output
+   `alb_dns_name`; `ctfd_domain` A-records to `ctfd_elastic_ip`.
 
 ### Bootstrap Only
 ```bash

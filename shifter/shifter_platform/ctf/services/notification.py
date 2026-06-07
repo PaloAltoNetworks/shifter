@@ -303,7 +303,7 @@ def send_announcement(
     Raises:
         CTFNotFoundError: If event doesn't exist.
     """
-    logger.info("Sending announcement for event %s: %s", event_id, subject)
+    logger.info("Sending announcement for event %s: %s", event_id, safe_log(subject))
 
     try:
         event = CTFEvent.objects.get(pk=event_id)

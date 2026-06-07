@@ -6,6 +6,7 @@ Loads and validates YAML scenario templates from cms/scenarios/templates/.
 from __future__ import annotations
 
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -17,6 +18,19 @@ logger = logging.getLogger(__name__)
 
 # Directory containing scenario YAML templates
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# Scenario IDs map directly to template filenames, so they must be a strict
+# slug allowlist: this rejects path separators and ``..`` so a caller-supplied
+# id cannot escape TEMPLATES_DIR (defense-in-depth against path traversal even
+# though the URL ``<slug>`` converter already constrains the web entrypoint).
+_SCENARIO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$", re.IGNORECASE)
+
+
+def _validate_scenario_id(scenario_id: str) -> str:
+    """Return ``scenario_id`` if it is a safe slug, else raise ``ValueError``."""
+    if not isinstance(scenario_id, str) or not _SCENARIO_ID_RE.match(scenario_id):
+        raise ValueError("Invalid scenario id")
+    return scenario_id
 
 
 @lru_cache(maxsize=32)
@@ -32,6 +46,7 @@ def load_scenario(scenario_id: str) -> ScenarioTemplate:
     Raises:
         ValueError: If scenario not found or template is invalid
     """
+    scenario_id = _validate_scenario_id(scenario_id)
     logger.debug("load_scenario: scenario_id=%s", scenario_id)
 
     template_path = TEMPLATES_DIR / f"{scenario_id}.yaml"

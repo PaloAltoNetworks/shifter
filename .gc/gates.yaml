@@ -1,0 +1,897 @@
+schema_version: 1
+engine:
+  min_version: '>=1.0.0'
+  manifest_version: 1.0.0
+defaults:
+  timeout_seconds: 900
+  provider_missing: reviewer_fallback
+  fail_fast: false
+packs:
+  - id: python
+    version: 1.0.0
+    scope: shifter/shifter_platform
+  - id: docs-generic
+    version: 1.0.0
+    scope: .
+gates:
+  - id: python.shifter.shifter.platform.format
+    capability: format
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider: ruff-format
+    command: ../../.gc/gate-packs/python/gc-python-run ruff format --check .
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.lint
+    capability: lint
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider: ruff-check
+    command: ../../.gc/gate-packs/python/gc-python-run ruff check .
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.build
+    capability: build
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/pyproject.toml
+        - shifter/shifter_platform/setup.cfg
+        - shifter/shifter_platform/setup.py
+        - shifter/shifter_platform/**/*.py
+    provider: python-build
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+    provider_missing: reviewer_fallback
+  - id: python.shifter.shifter.platform.type_safety
+    capability: type_safety
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider: pyright-or-mypy
+    command: node ../../.gc/gate-packs/shifter/run-mypy-baseline.mjs ../../.gc/baselines/python-type-safety.json ../../.gc/gate-packs/python/gc-python-run
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.unit_tests
+    capability: unit_tests
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/tests/**
+        - shifter/shifter_platform/pyproject.toml
+    provider: pytest
+    command: TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=gate-pack-local DB_HOST=${DB_HOST:-localhost} DB_PORT=${DB_PORT:-5432} DB_NAME=${DB_NAME:-shifter} DB_USER=${DB_USER:-test} DB_PASSWORD=${DB_PASSWORD:-test} ../../.gc/gate-packs/python/gc-python-run pytest tests/ --ignore=tests/documentation
+    timeout_seconds: 1200
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.integration_tests
+    capability: integration_tests
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/tests/**
+        - shifter/shifter_platform/pyproject.toml
+    provider: pytest-integration
+    timeout_seconds: 1800
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+    provider_missing: reviewer_fallback
+  - id: python.shifter.shifter.platform.contract_boundary
+    capability: contract_boundary
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider_missing: reviewer_fallback
+    threshold:
+      metric: provider_declared
+      policy: reviewer_fallback
+    thresholds:
+      platform_minimum:
+        metric: provider_declared
+        policy: reviewer_fallback
+      recommendation:
+        metric: provider_declared
+        policy: deterministic_provider_when_adopted
+  - id: python.shifter.shifter.platform.property_verification
+    capability: property_verification
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/tests/**
+        - shifter/shifter_platform/pyproject.toml
+    provider: hypothesis
+    timeout_seconds: 1800
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+    provider_missing: reviewer_fallback
+  - id: python.shifter.shifter.platform.architecture
+    capability: architecture
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider: import-linter
+    command: ../../.gc/gate-packs/python/gc-python-run lint-imports --config ../../.importlinter
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.complexity
+    capability: complexity
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider: ruff-complexity
+    command: ../../.gc/gate-packs/python/gc-python-run ruff check --select C901 .
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.mutation
+    capability: mutation
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/tests/**
+        - shifter/shifter_platform/pyproject.toml
+    provider: mutmut
+    timeout_seconds: 3600
+    threshold:
+      metric: mutation_score
+      min: 60
+    thresholds:
+      platform_minimum:
+        metric: mutation_score
+        min: 60
+      recommendation:
+        metric: mutation_score
+        min: 80
+    provider_missing: reviewer_fallback
+  - id: python.shifter.shifter.platform.diff_coverage
+    capability: diff_coverage
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/tests/**
+    provider: coverage-diff-cover
+    threshold:
+      metric: changed_line_coverage
+      min: 80
+    thresholds:
+      platform_minimum:
+        metric: changed_line_coverage
+        min: 80
+      recommendation:
+        metric: changed_line_coverage
+        min: 90
+    provider_missing: reviewer_fallback
+  - id: python.shifter.shifter.platform.sast
+    capability: sast
+    pack: python
+    cwd: .
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider: bandit
+    command: uv tool run bandit -r shifter/shifter_platform/ --skip B101 --exclude shifter/shifter_platform/tests,shifter/shifter_platform/.venv -ll
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.secret_scan
+    capability: secret_scan
+    pack: python
+    cwd: .
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*
+    provider: gitleaks
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs --secrets-only
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.dependency_policy
+    capability: dependency_policy
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/pyproject.toml
+        - shifter/shifter_platform/requirements*.txt
+        - shifter/shifter_platform/uv.lock
+        - shifter/shifter_platform/poetry.lock
+    provider: pip-audit-or-uv-audit
+    command: node ../../.gc/gate-packs/shifter/run-uv-audit-baseline.mjs ../../.gc/baselines/python-dependency-policy.json
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.accessibility
+    capability: accessibility
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: python.shifter.shifter.platform.docs_policy
+    capability: docs_policy
+    pack: python
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/*.md
+        - shifter/shifter_platform/**/*.md
+        - shifter/shifter_platform/*.markdown
+        - shifter/shifter_platform/**/*.markdown
+        - shifter/shifter_platform/docs/**
+        - shifter/shifter_platform/architecture/adrs/**
+        - shifter/shifter_platform/.ground-control.yaml
+    provider: docs-profile
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.traceability
+    capability: traceability
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*.py
+        - shifter/shifter_platform/pyproject.toml
+    provider_missing: reviewer_fallback
+    threshold:
+      metric: provider_declared
+      policy: reviewer_fallback
+    thresholds:
+      platform_minimum:
+        metric: provider_declared
+        policy: reviewer_fallback
+      recommendation:
+        metric: provider_declared
+        policy: deterministic_provider_when_adopted
+  - id: python.shifter.shifter.platform.policy
+    capability: policy
+    pack: python
+    cwd: .
+    blocking: true
+    scope: repo
+    applies_when:
+      paths:
+        - shifter/shifter_platform/**/*
+    provider: repo-policy
+    command: python3 scripts/adr_guard/adr_guard.py --all --level ci
+    timeout_seconds: 1800
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: python.shifter.shifter.platform.remote_status
+    capability: remote_status
+    pack: python
+    cwd: shifter/shifter_platform
+    blocking: true
+    scope: repo
+    applies_when:
+      paths: []
+    provider: required-statuses
+    required_statuses:
+      - ci
+    threshold:
+      metric: required_statuses
+      policy: all_success
+    thresholds:
+      platform_minimum:
+        metric: required_statuses
+        policy: all_success
+      recommendation:
+        metric: required_statuses
+        policy: all_success
+  - id: docs-generic.root.format
+    capability: format
+    pack: docs-generic
+    cwd: .
+    blocking: true
+    scope: repo
+    applies_when:
+      paths:
+        - '*.md'
+        - '**/*.md'
+        - '*.markdown'
+        - '**/*.markdown'
+        - docs/**
+        - architecture/adrs/**
+        - .ground-control.yaml
+    provider: pre-commit-docs-format
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: docs-generic.root.lint
+    capability: lint
+    pack: docs-generic
+    cwd: .
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - '*.md'
+        - '**/*.md'
+        - '*.markdown'
+        - '**/*.markdown'
+        - docs/**
+        - architecture/adrs/**
+        - .ground-control.yaml
+    provider: markdown-policy
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: docs-generic.root.build
+    capability: build
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.type_safety
+    capability: type_safety
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.unit_tests
+    capability: unit_tests
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.integration_tests
+    capability: integration_tests
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.contract_boundary
+    capability: contract_boundary
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.property_verification
+    capability: property_verification
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.architecture
+    capability: architecture
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.complexity
+    capability: complexity
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.mutation
+    capability: mutation
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.diff_coverage
+    capability: diff_coverage
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.sast
+    capability: sast
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider: semgrep-config
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+    provider_missing: not_applicable
+  - id: docs-generic.root.secret_scan
+    capability: secret_scan
+    pack: docs-generic
+    cwd: .
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - '**/*'
+    provider: gitleaks-detect-private-key
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs --secrets-only
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: docs-generic.root.dependency_policy
+    capability: dependency_policy
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .github/workflows/**
+        - .pre-commit-config.yaml
+        - '**/*.yaml'
+        - '**/*.yml'
+    provider: workflow-policy
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs --workflows
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: docs-generic.root.accessibility
+    capability: accessibility
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: not_applicable
+    threshold:
+      metric: applicability
+      policy: not_applicable
+    thresholds:
+      platform_minimum:
+        metric: applicability
+        policy: not_applicable
+      recommendation:
+        metric: applicability
+        policy: not_applicable
+  - id: docs-generic.root.docs_policy
+    capability: docs_policy
+    pack: docs-generic
+    cwd: .
+    blocking: true
+    scope: changed
+    applies_when:
+      paths:
+        - '*.md'
+        - '**/*.md'
+        - '*.markdown'
+        - '**/*.markdown'
+        - docs/**
+        - architecture/adrs/**
+        - .ground-control.yaml
+    provider: vale-markdown-policy
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: docs-generic.root.traceability
+    capability: traceability
+    pack: docs-generic
+    cwd: .
+    blocking: false
+    scope: changed
+    applies_when:
+      paths:
+        - .__gc_never__/**
+    provider_missing: reviewer_fallback
+    threshold:
+      metric: provider_declared
+      policy: reviewer_fallback
+    thresholds:
+      platform_minimum:
+        metric: provider_declared
+        policy: reviewer_fallback
+      recommendation:
+        metric: provider_declared
+        policy: deterministic_provider_when_adopted
+  - id: docs-generic.root.policy
+    capability: policy
+    pack: docs-generic
+    cwd: .
+    blocking: true
+    scope: repo
+    applies_when:
+      paths:
+        - '**/*'
+    provider: repo-policy-or-doc-policy
+    command: node .gc/gate-packs/shifter/check-docs-baseline.mjs
+    threshold:
+      metric: exit_code
+      max: 0
+    thresholds:
+      platform_minimum:
+        metric: exit_code
+        max: 0
+      recommendation:
+        metric: exit_code
+        max: 0
+  - id: docs-generic.root.remote_status
+    capability: remote_status
+    pack: docs-generic
+    cwd: .
+    blocking: true
+    scope: repo
+    applies_when:
+      paths: []
+    provider: required-statuses
+    required_statuses:
+      - ci
+    threshold:
+      metric: required_statuses
+      policy: all_success
+    thresholds:
+      platform_minimum:
+        metric: required_statuses
+        policy: all_success
+      recommendation:
+        metric: required_statuses
+        policy: all_success

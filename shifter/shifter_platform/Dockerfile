@@ -81,8 +81,9 @@ COPY installation /opt/shifter-libs/installation
 # Copy application code (context is now shifter/, so path is shifter_platform)
 COPY --chown=appuser:appgroup shifter_platform .
 
-# Create staticfiles directory for collectstatic
-RUN mkdir -p /app/staticfiles && chown appuser:appgroup /app/staticfiles
+# Create writable runtime directories for collectstatic and django-health-check's
+# default-storage probe. The application source tree stays immutable.
+RUN mkdir -p /app/staticfiles /app/media && chown appuser:appgroup /app/staticfiles /app/media
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \

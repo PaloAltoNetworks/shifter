@@ -36,8 +36,8 @@ If something is required, make it fail when missing.
 ## Git Discipline
 
 ### Branching
-- `main` is production - always deployable
-- `dev` is integration - validation only
+- `main` is the production code branch; production deploys require manual dispatch
+- `dev` is integration - Quality only, no deploy
 - `aws-dev` deploys the AWS dev environment
 - `gcp-dev` deploys the GCP dev environment through the narrow fast path
 - `feature/*` for development work

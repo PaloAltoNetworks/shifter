@@ -100,7 +100,7 @@ GDC deployments use custom L2 networks (VXLAN-based) for per-range guest isolati
 
 The normal GCP deployment path is CI/CD:
 
-- push to `dev`: validate AWS and GCP paths, but do not deploy
+- push to `dev`: run Quality only; do not plan/apply infrastructure or deploy
 - push to `aws-dev`: deploy the AWS dev environment
 - push to `gcp-dev`: fast-validate and deploy the GCP dev environment
 
@@ -114,7 +114,7 @@ The GCP deploy flow executed by CI:
 6. installs or upgrades the Shifter chart
 7. waits for rollout and managed-certificate convergence
 
-`gcp-dev` intentionally skips the repo-wide quality workflow on branch pushes so GCP break/fix work can iterate quickly. The provider-local validation in `_gcp-dev.yml` remains mandatory before deploy, while the full lint/test/security matrix still runs on `dev`, on PRs, and on production.
+`gcp-dev` intentionally skips the repo-wide quality workflow on branch pushes so GCP break/fix work can iterate quickly. The provider-local validation in `_gcp-dev.yml` remains mandatory before deploy, while the full lint/test/security matrix still runs on PRs and on `dev`; production deploys are manual dispatches from `main`.
 
 `gdc-bootstrap` remains the operator bootstrap and recovery harness for first-time setup and controlled break-glass work, but it is no longer the normal deploy contract.
 

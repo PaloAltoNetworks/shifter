@@ -170,6 +170,7 @@ def _get_client_ip(request: HttpRequest) -> str | None:
 
 
 _FORBIDDEN_CHALLENGE_ACCESS_MSG = "Forbidden: You do not have access to this challenge"
+_CHALLENGE_FORM_TEMPLATE = "ctf/admin/challenge_form.html"
 
 
 def _check_event_ownership(event: CTFEvent, user: User) -> JsonResponse | None:
@@ -1410,7 +1411,7 @@ def _handle_challenge_create_post(request: HttpRequest, event: CTFEvent) -> Http
             return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
 
     context = {"form": form, "event": event, "is_edit": False}
-    return render(request, "ctf/admin/challenge_form.html", context)
+    return render(request, _CHALLENGE_FORM_TEMPLATE, context)
 
 
 @login_required
@@ -1438,7 +1439,7 @@ def admin_challenge_create(request: HttpRequest, event_id: UUID) -> HttpResponse
 
     form = CTFChallengeForm(event=event)
     context = {"form": form, "event": event, "is_edit": False}
-    return render(request, "ctf/admin/challenge_form.html", context)
+    return render(request, _CHALLENGE_FORM_TEMPLATE, context)
 
 
 @login_required
@@ -1581,7 +1582,7 @@ def _handle_challenge_edit_post(request: HttpRequest, challenge: CTFChallenge, e
             return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
 
     context = {"form": form, "event": event, "challenge": challenge, "is_edit": True}
-    return render(request, "ctf/admin/challenge_form.html", context)
+    return render(request, _CHALLENGE_FORM_TEMPLATE, context)
 
 
 @login_required
@@ -1610,7 +1611,7 @@ def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpRespon
 
     form = CTFChallengeForm(instance=challenge, event=event)
     context = {"form": form, "event": event, "challenge": challenge, "is_edit": True}
-    return render(request, "ctf/admin/challenge_form.html", context)
+    return render(request, _CHALLENGE_FORM_TEMPLATE, context)
 
 
 @login_required

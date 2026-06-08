@@ -41,7 +41,7 @@ repos:
   # Python - Ruff (linting + formatting)
   # Note: Ruff handles import sorting via "I" rules - no separate isort needed
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+    rev: v0.15.16
     hooks:
       - id: ruff
         name: ruff (shifter_platform)

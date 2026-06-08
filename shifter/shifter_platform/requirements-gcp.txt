@@ -2,4 +2,4 @@ google-auth>=2.38.0
 google-cloud-pubsub>=2.25.0
 google-cloud-secret-manager>=2.20.0
 google-cloud-storage>=2.18.0
-kubernetes>=32.0.0
+kubernetes>=36.0.2

@@ -316,7 +316,7 @@ jobs:
           PY
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build and push portal image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: ./shifter
           file: ./shifter/shifter_platform/Dockerfile
@@ -326,7 +326,7 @@ jobs:
             ${{ env.PORTAL_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push provisioner image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: ./shifter/engine/provisioner
           push: true
@@ -335,7 +335,7 @@ jobs:
             ${{ env.PROVISIONER_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push guacd image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: ./shifter/engine/guacd
           push: true
@@ -344,7 +344,7 @@ jobs:
             ${{ env.GUACD_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push guacamole-client image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: ./shifter/engine/guacamole
           push: true

@@ -127,7 +127,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and push guacd image (with RDP file transfer support)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./shifter/engine/guacd
           push: true
@@ -138,7 +138,7 @@ jobs:
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
           no-cache: true
       - name: Build and push guacamole-client image (with OIDC extension)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./shifter/engine/guacamole
           push: true
@@ -372,7 +372,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./shifter
           file: ./shifter/shifter_platform/Dockerfile

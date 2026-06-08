@@ -1,3 +1,28 @@
+variable "aws_profile" {
+  description = "AWS CLI/shared-config profile for Terraform. Set to aws-dev for the no-SSO aws-dev account; leave null to use the ambient AWS credential chain."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "aws_region" {
+  description = "AWS region for the Polaris standalone range."
+  type        = string
+  default     = "us-east-2"
+}
+
+variable "name_prefix" {
+  description = "Prefix for Terraform-created Polaris AWS resources."
+  type        = string
+  default     = "polaris"
+}
+
+variable "deployment_purpose" {
+  description = "Default AWS tag Purpose value."
+  type        = string
+  default     = "standalone-range"
+}
+
 variable "range_indices" {
   description = "String indices of the POLARIS ranges to provision. Each index gets its own /28 subnet + polaris VM + A2 DC. Default is a single range so a plain `terraform apply` still produces one working range."
   type        = list(string)
@@ -10,45 +35,86 @@ variable "range_indices" {
 }
 
 variable "polaris_cidr_block" {
-  description = "Base CIDR allocated to POLARIS. Carved into /28 subnets via cidrsubnet(block, 4, i), so a /24 yields 16 ranges, a /22 yields 64, a /21 yields 128. Default /24 holds the single-range smoke case + room to grow up to 16 without re-planning the VPC."
+  description = "Base CIDR allocated to POLARIS. Carved into /28 subnets via cidrsubnet(block, 4, i), so a /24 yields 16 ranges. Leave empty to derive a high /24 from the target VPC CIDR, e.g. 172.31.240.0/24 in the aws-dev default VPC."
   type        = string
-  default     = "10.1.100.0/24"
+  default     = ""
 }
 
 variable "range_vpc_id" {
-  description = "Dev range VPC to attach POLARIS subnets to."
+  description = "Target VPC to attach POLARIS subnets to. Leave empty to use the account's default VPC."
   type        = string
-  default     = "vpc-094a142a8c363541c"
+  default     = ""
 }
 
 variable "availability_zone" {
-  description = "AZ for the POLARIS subnets (matches existing range infrastructure)."
+  description = "AZ for the POLARIS subnets."
   type        = string
   default     = "us-east-2a"
 }
 
-variable "nat_gateway_id" {
-  description = "Existing dev range NAT gateway. Used to give every POLARIS subnet direct NAT egress (bypass the domain-filtered Network Firewall so docker hub / apt repos work during bake)."
+variable "egress_route_target" {
+  description = "Default route target for each Polaris subnet: igw for default-VPC public SSM egress, nat for the old private range-VPC bake path."
   type        = string
-  default     = "nat-0728570128ae96bfc"
+  default     = "igw"
+
+  validation {
+    condition     = contains(["igw", "nat"], var.egress_route_target)
+    error_message = "egress_route_target must be either igw or nat."
+  }
+}
+
+variable "internet_gateway_id" {
+  description = "Internet gateway for igw egress mode. Leave empty to discover the IGW attached to the target VPC."
+  type        = string
+  default     = ""
+}
+
+variable "nat_gateway_id" {
+  description = "NAT gateway for nat egress mode. Required only when egress_route_target is nat."
+  type        = string
+  default     = ""
 }
 
 variable "portal_vpc_cidr" {
-  description = "Portal VPC CIDR reachable via VPC peering (so the Shifter portal terminal UI + Guacamole can reach every POLARIS kali box)."
+  description = "Optional portal VPC CIDR reachable via VPC peering, also allowed to reach host-published SSH/RDP when set. Leave empty for standalone SSM-only management."
   type        = string
-  default     = "10.0.0.0/16"
+  default     = ""
 }
 
 variable "portal_peering_id" {
-  description = "VPC peering connection from the range VPC to the portal VPC."
+  description = "Optional VPC peering connection from the Polaris VPC to the portal VPC. Leave empty for standalone default-VPC mode."
   type        = string
-  default     = "pcx-0060068d711a534f4"
+  default     = ""
+}
+
+variable "management_ingress_cidrs" {
+  description = "Optional CIDRs allowed to reach host-published SSH/RDP on the Polaris VM and A2 DC. Leave empty for SSM-only management."
+  type        = list(string)
+  default     = []
+}
+
+variable "map_public_ip_on_launch" {
+  description = "Whether Polaris-created subnets should assign public IPs by default."
+  type        = bool
+  default     = true
+}
+
+variable "associate_public_ip_address" {
+  description = "Whether the Polaris and A2 instances should receive public IPs."
+  type        = bool
+  default     = true
+}
+
+variable "publish_kali_host_ports" {
+  description = "Publish a14-kali SSH/RDP on the Polaris EC2 host. Keep false for standalone SSM-only mode; set true only when portal/Guacamole ingress is configured."
+  type        = bool
+  default     = false
 }
 
 variable "ubuntu_ami_id" {
-  description = "Ubuntu base AMI (each host just runs Docker + the polaris docker-compose stack)."
+  description = "Ubuntu base AMI (each host just runs Docker + the polaris docker-compose stack). Leave empty to use the latest public Ubuntu 24.04 Noble amd64 AMI in the selected region."
   type        = string
-  default     = "ami-01c08a65f35fbc399" # shifter-ubuntu-1773805749
+  default     = ""
 }
 
 variable "instance_type" {
@@ -60,13 +126,21 @@ variable "instance_type" {
 variable "build_tarball_s3_uri" {
   description = "S3 URI of the polaris build tarball uploaded by the operator."
   type        = string
-  default     = "s3://shifter-polaris-bake-158151907940/polaris/build-v1.tar.gz"
+
+  validation {
+    condition     = trimspace(var.build_tarball_s3_uri) != ""
+    error_message = "build_tarball_s3_uri must be set to the uploaded Polaris build tarball S3 URI."
+  }
 }
 
 variable "build_tarball_bucket" {
   description = "S3 bucket holding the polaris build tarball (used to grant IAM read to the instance)."
   type        = string
-  default     = "shifter-polaris-bake-158151907940"
+
+  validation {
+    condition     = trimspace(var.build_tarball_bucket) != ""
+    error_message = "build_tarball_bucket must be set to the S3 bucket holding the Polaris build tarball."
+  }
 }
 
 variable "ssh_public_key_ssm_name" {
@@ -82,9 +156,9 @@ variable "kali_authorized_key" {
 }
 
 variable "a2_dc_ami_id" {
-  description = "Windows Server 2022 Full Base from Amazon. Stock base AMI boots cleanly, then we install AD-Domain-Services via SSM RunCommand after the agent reports online."
+  description = "Windows Server 2022 Full Base from Amazon. Leave empty to use the latest public Windows Server 2022 Full Base AMI in the selected region."
   type        = string
-  default     = "ami-08c41c6041bf318eb" # Windows_Server-2022-English-Full-Base-2026.03.11
+  default     = ""
 }
 
 variable "a2_instance_type" {

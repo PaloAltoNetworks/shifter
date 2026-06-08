@@ -178,6 +178,11 @@ variable "sqs_queue_urls" {
   type        = map(string)
 }
 
+variable "sqs_kms_key_arn" {
+  description = "ARN of the CMK encrypting the portal messaging SNS/SQS resources"
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # Bootstrap Configuration (Parameter Store + Lifecycle Hook)
 # ------------------------------------------------------------------------------

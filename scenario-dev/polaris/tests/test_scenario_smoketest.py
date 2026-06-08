@@ -570,9 +570,9 @@ _M5_KEY_PATH = "/home/kali/.ssh/splice_relay"
 _M5_RUNNER = "a14-kali"
 _M5_EXPECTED_ANSWER = "AHS-TAIL-7741AHS-LEG-MN07AHS-ARM-AL42"
 _M5_DEVID_BODIES = {
-    "tail-ctrl": "VendorName: Aurora\nProductName: AHS-TAIL-7741\nMajorMinorRevision: 2.4\n",
-    "leg-ctrl": "VendorName: Aurora\nProductName: AHS-LEG-MN07\nMajorMinorRevision: 2.4\n",
-    "arms-ctrl": "VendorName: Aurora\nProductName: AHS-ARM-AL42\nMajorMinorRevision: 2.4\n",
+    "tail-ctrl": "Device Identification:\n  VendorName: Aurora\n  ProductName: AHS-TAIL-7741\n  MajorMinorRevision: 2.4\n",
+    "leg-ctrl": "Device Identification:\n  VendorName: Aurora\n  ProductName: AHS-LEG-MN07\n  MajorMinorRevision: 2.4\n",
+    "arms-ctrl": "Device Identification:\n  VendorName: Aurora\n  ProductName: AHS-ARM-AL42\n  MajorMinorRevision: 2.4\n",
 }
 
 

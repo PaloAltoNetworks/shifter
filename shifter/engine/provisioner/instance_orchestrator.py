@@ -104,6 +104,7 @@ def _setup_one_other_instance(
     inst_id = inst["instance_id"]
     inst_uuid = inst.get("uuid", "")
     inst_config = uuid_to_config.get(inst_uuid, {})
+    is_polaris_vm = inst_config.get("ami_key") == "polaris-vm"
     spec = _InstanceSetupSpec(
         role=inst.get("role", "victim"),
         os_type=inst.get("os", "ubuntu"),
@@ -117,6 +118,7 @@ def _setup_one_other_instance(
             dc_ip=actual_dc_ip,
             domain_name=actual_domain,
         ),
+        set_local_password=not is_polaris_vm,
     )
     try:
         main._run_single_instance_setup(instance_data=inst, instance_id=inst_id, spec=spec)
@@ -126,11 +128,17 @@ def _setup_one_other_instance(
         # the compose override and force-recreate the dns + a14-kali
         # containers with this range's actual DC IP and per-instance pubkey.
         # Gate on ami_key so this only fires for polaris instances.
-        if inst_config.get("ami_key") == "polaris-vm":
+        if is_polaris_vm:
             _run_polaris_range_bootstrap(
                 instance_id=inst_id,
                 dc_ip=actual_dc_ip or "",
                 public_key=inst.get("public_key", ""),
+            )
+            main._set_attacker_container_password_after_bootstrap(
+                instance_data=inst,
+                instance_id=inst_id,
+                container_name="a14-kali",
+                ssh_user="kali",
             )
         return (inst_id, True, None)
     except Exception as e:

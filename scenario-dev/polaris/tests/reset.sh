@@ -8,13 +8,15 @@
 # miss real regressions.
 #
 # Usage:
-#     bash /home/atomik/range/reset.sh
+#     bash tests/reset.sh
 #     RANGE_DIR=/other bash reset.sh
 #
 # Exits 0 when sticky services are recreated and responding.
 
 set -euo pipefail
-RANGE_DIR="${RANGE_DIR:-/home/atomik/range}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_RANGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RANGE_DIR="${RANGE_DIR:-$DEFAULT_RANGE_DIR}"
 COMPOSE_FILE="${COMPOSE_FILE:-$RANGE_DIR/build/docker-compose.yml}"
 if [[ ! -f "$COMPOSE_FILE" ]] && [[ -f "$RANGE_DIR/docker-compose.yml" ]]; then
     COMPOSE_FILE="$RANGE_DIR/docker-compose.yml"

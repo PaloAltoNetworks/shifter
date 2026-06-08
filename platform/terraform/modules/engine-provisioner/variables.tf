@@ -351,3 +351,8 @@ variable "sns_topic_arn" {
   description = "ARN of the SNS topic for range event publishing"
   type        = string
 }
+
+variable "sns_kms_key_arn" {
+  description = "ARN of the CMK used by the encrypted SNS range-events topic"
+  type        = string
+}

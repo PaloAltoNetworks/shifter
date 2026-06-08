@@ -2,9 +2,9 @@
 # A2 Windows Domain Controller smoketest.
 #
 # Runs every flag path from an attacker's perspective against the live
-# boreas.local DC (Windows Server 2022 at 10.1.100.11 / dc01.boreas.local). Intended to
-# be executed from inside the a14-kali container. Every assertion mirrors
-# what a participant would do in a walkthrough.
+# boreas.local DC (Windows Server 2022 at dc01.boreas.local). Intended to be
+# executed from inside the a14-kali container. Every assertion mirrors what a
+# participant would do in a walkthrough.
 #
 # Usage (from the range host):
 #     docker cp smoketest.sh a14-kali:/tmp/a2-smoke.sh
@@ -59,12 +59,23 @@ tcp_open() {
     timeout 2 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null && return 0 || return 1
 }
 
+tcp_open_retry() {
+    local host="$1" port="$2" attempts="${3:-15}" delay="${4:-4}" n
+    for n in $(seq 1 "$attempts"); do
+        if tcp_open "$host" "$port"; then
+            return 0
+        fi
+        sleep "$delay"
+    done
+    return 1
+}
+
 echo "A2 smoketest - target=$DC_HOST ($DC_IP) domain=$DOMAIN"
 
 echo
 echo "--- Port sweep: 53, 88, 135, 389, 445, 464, 636, 3268 ---"
 for p in 53 88 135 389 445 464 636 3268; do
-    if tcp_open "$DC_IP" "$p"; then pass "tcp/$p open"; else fail "tcp/$p not reachable"; fi
+    if tcp_open_retry "$DC_IP" "$p"; then pass "tcp/$p open"; else fail "tcp/$p not reachable"; fi
 done
 
 echo

@@ -86,7 +86,7 @@ echo
 echo "--- Network reach: permitted targets ---"
 # A14 is on shared (172.20.0.0/24), corporate (172.20.10.0/24), and the
 # pre-wired splice-link to A9. Should reach A0 (shared), A1/A3/A4/A15/A16
-# (corporate), DNS (shared), A2 (GCP VM via host route), A9 (splice-link).
+# (corporate), DNS (shared), A2 (adjacent Windows DC), A9 (splice-link).
 # A7 Gitea is lab-only and NOT directly reachable from A14 — participants
 # must pivot through A16 to clone from Gitea.
 for label_host_port in \

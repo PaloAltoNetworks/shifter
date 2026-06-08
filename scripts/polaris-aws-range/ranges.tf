@@ -12,27 +12,27 @@
 resource "aws_subnet" "polaris" {
   for_each = local.range_subnets
 
-  vpc_id            = var.range_vpc_id
+  vpc_id            = local.target_vpc_id
   cidr_block        = each.value.cidr
   availability_zone = var.availability_zone
 
-  map_public_ip_on_launch = false
+  map_public_ip_on_launch = var.map_public_ip_on_launch
 
   tags = {
     Name    = "${local.name_prefix}-subnet-${each.key}"
     Project = "polaris"
-    Purpose = "bake"
+    Purpose = var.deployment_purpose
     Range   = each.key
   }
 }
 
-# Dedicated route table per range that bypasses the range Network Firewall
-# (which only allowlists GCP/Cortex IPs, not Docker Hub / apt archives).
-# Egress path: POLARIS subnet -> NAT gateway -> IGW.
+# Dedicated route table per range. Default-VPC standalone mode uses IGW
+# egress so SSM, Docker Hub, apt, and S3 work without NAT. The older
+# private range-VPC mode can still use NAT by setting egress_route_target=nat.
 resource "aws_route_table" "polaris" {
   for_each = local.range_subnets
 
-  vpc_id = var.range_vpc_id
+  vpc_id = local.target_vpc_id
 
   tags = {
     Name    = "${local.name_prefix}-rt-${each.key}"
@@ -41,18 +41,26 @@ resource "aws_route_table" "polaris" {
   }
 }
 
-resource "aws_route" "polaris_default" {
-  for_each = local.range_subnets
+resource "aws_route" "polaris_default_igw" {
+  for_each = var.egress_route_target == "igw" ? local.range_subnets : {}
+
+  route_table_id         = aws_route_table.polaris[each.key].id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = local.internet_gateway_id
+}
+
+resource "aws_route" "polaris_default_nat" {
+  for_each = var.egress_route_target == "nat" ? local.range_subnets : {}
 
   route_table_id         = aws_route_table.polaris[each.key].id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = var.nat_gateway_id
 }
 
-# Keep portal-to-range reachability (so the Shifter portal terminal UI +
-# Guacamole can hit the kali container's published ports).
+# Optional portal-to-range reachability (so the Shifter portal terminal UI +
+# Guacamole can hit the kali container's published ports in peered deployments).
 resource "aws_route" "polaris_portal_peering" {
-  for_each = local.range_subnets
+  for_each = trimspace(var.portal_peering_id) != "" && trimspace(var.portal_vpc_cidr) != "" ? local.range_subnets : {}
 
   route_table_id            = aws_route_table.polaris[each.key].id
   destination_cidr_block    = var.portal_vpc_cidr
@@ -84,9 +92,9 @@ resource "aws_route_table_association" "polaris" {
 resource "aws_security_group" "polaris" {
   for_each = local.range_subnets
 
-  vpc_id      = var.range_vpc_id
+  vpc_id      = local.target_vpc_id
   name        = "${local.name_prefix}-sg-${each.key}"
-  description = "POLARIS range ${each.key} - intra-${each.value.cidr} + portal-peering only"
+  description = "POLARIS range ${each.key} - intra-${each.value.cidr} + optional management ingress"
 
   ingress {
     description = "Intra-range /28 traffic (polaris VM to A2 DC and docker host-network Kali)"
@@ -96,20 +104,48 @@ resource "aws_security_group" "polaris" {
     cidr_blocks = [each.value.cidr]
   }
 
-  ingress {
-    description = "SSH from portal VPC (terminal UI key-auth)"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.portal_vpc_cidr]
+  dynamic "ingress" {
+    for_each = trimspace(var.portal_vpc_cidr) == "" ? [] : [var.portal_vpc_cidr]
+    content {
+      description = "SSH from portal VPC (terminal UI key-auth)"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
   }
 
-  ingress {
-    description = "RDP from portal VPC (Guacamole)"
-    from_port   = 3389
-    to_port     = 3389
-    protocol    = "tcp"
-    cidr_blocks = [var.portal_vpc_cidr]
+  dynamic "ingress" {
+    for_each = trimspace(var.portal_vpc_cidr) == "" ? [] : [var.portal_vpc_cidr]
+    content {
+      description = "RDP from portal VPC (Guacamole)"
+      from_port   = 3389
+      to_port     = 3389
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
+  }
+
+  dynamic "ingress" {
+    for_each = toset(var.management_ingress_cidrs)
+    content {
+      description = "Operator SSH management"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
+  }
+
+  dynamic "ingress" {
+    for_each = toset(var.management_ingress_cidrs)
+    content {
+      description = "Operator RDP management"
+      from_port   = 3389
+      to_port     = 3389
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
   }
 
   egress {
@@ -137,14 +173,14 @@ resource "aws_security_group" "polaris" {
 resource "aws_instance" "polaris" {
   for_each = local.range_subnets
 
-  ami                    = var.ubuntu_ami_id
+  ami                    = local.ubuntu_ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.polaris[each.key].id
   private_ip             = each.value.polaris_ip
   vpc_security_group_ids = [aws_security_group.polaris[each.key].id]
   iam_instance_profile   = aws_iam_instance_profile.polaris.name
 
-  associate_public_ip_address = false
+  associate_public_ip_address = var.associate_public_ip_address
 
   metadata_options {
     http_tokens                 = "required"
@@ -152,9 +188,10 @@ resource "aws_instance" "polaris" {
   }
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    tarball_s3_uri      = var.build_tarball_s3_uri
-    kali_authorized_key = var.kali_authorized_key
-    a2_private_ip       = each.value.a2_ip
+    tarball_s3_uri          = var.build_tarball_s3_uri
+    kali_authorized_key     = var.kali_authorized_key
+    a2_private_ip           = each.value.a2_ip
+    publish_kali_host_ports = var.publish_kali_host_ports
   })
 
   user_data_replace_on_change = true
@@ -190,14 +227,14 @@ resource "aws_instance" "polaris" {
 resource "aws_instance" "a2_dc" {
   for_each = local.range_subnets
 
-  ami                    = var.a2_dc_ami_id
+  ami                    = local.a2_dc_ami_id
   instance_type          = var.a2_instance_type
   subnet_id              = aws_subnet.polaris[each.key].id
   private_ip             = each.value.a2_ip
   vpc_security_group_ids = [aws_security_group.polaris[each.key].id]
   iam_instance_profile   = aws_iam_instance_profile.polaris.name
 
-  associate_public_ip_address = false
+  associate_public_ip_address = var.associate_public_ip_address
 
   get_password_data = false
 

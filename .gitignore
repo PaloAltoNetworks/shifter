@@ -474,7 +474,6 @@ CLAUDE.local.md
 # per-step telemetry). Tool-generated, ephemeral; .gc/plan-rules.md stays tracked.
 .gc/sonar/
 .gc/telemetry/
-.gc/vendor/
 
 temp/
 

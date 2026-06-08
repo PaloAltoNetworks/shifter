@@ -3,24 +3,11 @@ project: shifter
 github_repo: Brad-Edwards/shifter
 workflow:
   # shifter has no single-command test suite; CI runs many parallel jobs.
-  # lint_command remains the legacy local gate for agents that have not
-  # switched to the committed gate manifest yet.
+  # lint_command is the single most useful local gate.
   lint_command: python3 scripts/adr_guard/adr_guard.py --all --level ci
-  engine:
-    version: ^1.0.0
-  gate_manifest: .gc/gates.yaml
-  # Light consumer onboarding: use the Python platform root plus
-  # repository-level docs/policy checks. Existing Node packages continue to
-  # run through shifter's CI until a dedicated JS/TS pack adoption is scoped.
-  packs:
-    - id: python
-      version: ^1.0.0
-      scope: shifter/shifter_platform
-      profile: uv
-    - id: docs-generic
-      version: ^1.0.0
-      scope: .
-      profile: docs
+  # test_command and completion_command intentionally omitted; the
+  # implement skill will fall back to asking the agent which sub-project
+  # to test. A follow-up can add a top-level runner script.
 sonarcloud:
   project_key: Brad-Edwards_shifter
   organization: brad-edwards

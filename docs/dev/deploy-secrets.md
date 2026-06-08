@@ -134,7 +134,11 @@ publish the runtime DNS records:
   `alb_dns_name` as CNAME records. In Cloudflare, keep them DNS-only unless
   the deployment explicitly validates proxied Cloudflare behavior.
 - `ctfd_domain` points to the Terraform output `ctfd_elastic_ip` as an A
-  record.
+  record. In Cloudflare, publish the record as DNS-only until the CTFd host
+  has completed certbot and `https://<ctfd_domain>/login` works against the
+  origin. After that validation, the CTFd `A` record may be switched to
+  proxied with SSL/TLS mode `Full (strict)`. The DNS target is the bare
+  Elastic IP address, never an `http://` or `https://` URL.
 
 ALB access logs use a dedicated S3 bucket with SSE-S3 because Elastic Load
 Balancing does not support SSE-KMS for Application Load Balancer access-log

@@ -52,6 +52,28 @@ resource "aws_iam_role_policy" "cloudwatch_to_firehose" {
   })
 }
 
+resource "aws_iam_role_policy" "cloudwatch_to_firehose_kms" {
+  count = var.enable_log_aggregation && length(var.source_log_group_names) > 0 ? 1 : 0
+
+  name = "firehose-kms"
+  role = aws_iam_role.cloudwatch_to_firehose[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:GenerateDataKey"
+        ]
+        Resource = aws_kms_key.log_aggregation[0].arn
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # CloudWatch Log Subscription Filters
 # ------------------------------------------------------------------------------
@@ -64,4 +86,11 @@ resource "aws_cloudwatch_log_subscription_filter" "to_firehose" {
   filter_pattern  = "" # All logs
   destination_arn = aws_kinesis_firehose_delivery_stream.logs[0].arn
   role_arn        = aws_iam_role.cloudwatch_to_firehose[0].arn
+
+  depends_on = [
+    aws_iam_role_policy.cloudwatch_to_firehose,
+    aws_iam_role_policy.cloudwatch_to_firehose_kms,
+    aws_iam_role_policy.firehose_kms,
+    aws_s3_bucket_policy.logs,
+  ]
 }

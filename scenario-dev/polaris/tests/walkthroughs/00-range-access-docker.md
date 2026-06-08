@@ -1,6 +1,9 @@
 # Range Access — Docker Compose Environment
 
-Everything runs as containers on `ctf-range-builder` (10.100.0.5) in GCP project `prod-rwctxzl6shxk`, zone `us-east4-a`.
+The scenario runs as Docker containers on a Polaris Ubuntu host. A2 is a
+separate Windows Server 2022 VM in the same AWS /28 range subnet as the Ubuntu
+host. Historical test ranges used `ctf-range-builder`; AWS standalone ranges
+use SSM into the Polaris host.
 
 ## How to Connect
 
@@ -21,7 +24,7 @@ The Kali container is on two networks: `shared` (172.20.0.x) and `corporate` (17
 | A4 File Share | fileserv.boreas.local | 172.20.10.40 | 445 | `smbclient //172.20.10.40/Public` |
 | A15 Ops Eng | ops-eng01.boreas.local | 172.20.10.50 | 22, 80 | Pivot host for SCADA (flag 37 gate) |
 | A16 Research Analyst | analyst01.boreas.local | 172.20.10.60 | 22, 8080 | Pivot host for Lab + Gitea (flag 38) |
-| A2 Windows DC | dc01.boreas.local | 10.1.100.11 | 53, 88, 135, 389, 445, 464, 636, 3268, 3269, 49152-65535 | Windows Server 2022 AD DC in the range VPC (adjacent to the docker host) — reachable from Kali via `dc01.boreas.local` through the compose DNS forwarder |
+| A2 Windows DC | dc01.boreas.local | per-range AWS private IP | 53, 88, 135, 389, 445, 464, 636, 3268, 3269, 49152-65535 | Windows Server 2022 AD DC in the same AWS /28 range subnet as the Docker host; resolve `dc01.boreas.local` from Kali instead of hardcoding an IP |
 
 ### What Kali CANNOT reach (requires pivot)
 
@@ -64,28 +67,30 @@ The Kali container uses 172.20.0.2 as its DNS server. Hostnames like `boreas-sys
 
 ## Managing the Range
 
-From the builder VM (not inside Kali). The range source lives at
-`/home/atomik/range/` (mirror of `scenario-dev/polaris/` in the repo),
-so the compose file is at `$RANGE_DIR/build/docker-compose.yml` and all
-orchestration goes through the scripts in `$RANGE_DIR/tests/`:
+From the Polaris Ubuntu host over SSM (not inside Kali). In AWS standalone
+ranges the range source lives at `/opt/polaris/scenario-dev/polaris/`, so the
+compose file is at `$RANGE_DIR/build/docker-compose.yml` and all orchestration
+goes through the scripts in `$RANGE_DIR/tests/`:
 
 ```bash
-# Full setup: build + up + wait ready
-bash /home/atomik/range/tests/setup.sh
+export RANGE_DIR=/opt/polaris/scenario-dev/polaris
 
-# Run the full smoketest sweep (15 asset smoketests + isolation)
-bash /home/atomik/range/tests/run-all-smoketests.sh
+# Full setup: build + up + wait ready
+bash "$RANGE_DIR/tests/setup.sh"
+
+# Run the full smoketest sweep (asset smoketests + isolation)
+bash "$RANGE_DIR/tests/run-all-smoketests.sh"
 
 # Reset sticky-state services (a5/a10/a11/a12/a13) between test runs or
 # before handing to a new participant
-bash /home/atomik/range/tests/reset.sh
+bash "$RANGE_DIR/tests/reset.sh"
 
 # Raw docker compose commands. Project name defaults to "build" (the
 # parent dir of docker-compose.yml) which matches the production
 # user_data path and the polaris-splice-watcher's default
 # SPLICE_NETWORK=build_splice-link. Always cd into build/ first or pass
 # `-f` and let docker derive project=build from the file's parent dir.
-cd /home/atomik/range/build
+cd "$RANGE_DIR/build"
 docker compose ps
 docker compose down
 docker compose build a12-arms

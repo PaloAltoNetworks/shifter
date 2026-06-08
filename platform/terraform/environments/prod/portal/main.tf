@@ -21,7 +21,8 @@ provider "aws" {
 }
 
 locals {
-  name_prefix = "${var.environment}-portal"
+  name_prefix                 = "${var.environment}-portal"
+  alb_access_logs_bucket_name = "${local.name_prefix}-alb-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
   # Add padding to field_encryption_key (b64_url doesn't include padding, but Fernet requires it)
   field_encryption_key_padded = "${random_id.field_encryption_key.b64_url}="
 }
@@ -289,7 +290,8 @@ module "alb" {
 
   # Phase 5: ALB Access Logs and WAF Logging
   enable_access_logs      = var.enable_alb_access_logs
-  logs_bucket_name        = var.enable_alb_access_logs ? module.log_aggregation.logs_bucket_name : ""
+  logs_bucket_name        = var.enable_alb_access_logs ? local.alb_access_logs_bucket_name : ""
+  logs_bucket_policy_id   = var.enable_alb_access_logs ? module.log_aggregation.alb_logs_bucket_policy_id : ""
   enable_waf_logging      = var.enable_waf_logging
   waf_log_destination_arn = var.enable_waf_logging ? module.log_aggregation.waf_firehose_arn : ""
 
@@ -486,8 +488,9 @@ module "ec2" {
   log_retention_days   = var.log_retention_days
 
   # Messaging
-  sqs_queue_arns = values(module.messaging.sqs_queue_arns)
-  sqs_queue_urls = module.messaging.sqs_queue_urls
+  sqs_queue_arns  = values(module.messaging.sqs_queue_arns)
+  sqs_queue_urls  = module.messaging.sqs_queue_urls
+  sqs_kms_key_arn = module.messaging.kms_key_arn
 
   # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
@@ -497,6 +500,11 @@ module "ec2" {
   enable_ses              = true
 
   tags = var.tags
+
+  # First boot installs Docker and configures ECR/SSM-backed deployment. Make
+  # the portal AWS service endpoints part of the VPC dependency boundary so a
+  # fresh account does not race private AWS API reachability.
+  depends_on = [module.vpc]
 }
 
 # ------------------------------------------------------------------------------
@@ -522,6 +530,28 @@ module "s3" {
   cors_allowed_origins = ["https://${var.domain_name}"]
   kms_key_arn          = aws_kms_key.portal_s3.arn
   tags                 = var.tags
+}
+
+resource "aws_iam_role_policy" "range_instance_portal_s3_kms_read" {
+  name = "portal-s3-kms-read"
+  role = replace(data.terraform_remote_state.range.outputs.range_instance_role_arn, "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/", "")
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = aws_kms_key.portal_s3.arn
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "s3.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
 }
 
 # ------------------------------------------------------------------------------
@@ -677,11 +707,14 @@ module "engine_provisioner" {
   ngfw_instance_role_arn      = data.terraform_remote_state.range.outputs.ngfw_instance_role_arn != null ? data.terraform_remote_state.range.outputs.ngfw_instance_role_arn : ""
 
   # Messaging (SNS topic for range event publishing)
-  sns_topic_arn = module.messaging.sns_topic_arn
+  sns_topic_arn   = module.messaging.sns_topic_arn
+  sns_kms_key_arn = module.messaging.kms_key_arn
 
   # Alarms
   enable_alarms = true
   alarm_email   = var.alarm_email
+
+  depends_on = [module.vpc]
 }
 
 moved {
@@ -757,6 +790,32 @@ module "guacamole" {
   cognito_domain       = module.cognito.cognito_domain
   aws_region           = var.aws_region
   domain_name          = var.domain_name
+
+  depends_on = [module.vpc]
+}
+
+# ALB health checks and user traffic are routed through the portal inspection
+# boundary before they reach private targets. Source security group references
+# do not survive that middlebox path reliably, so keep those existing SG rules
+# and add CIDR-scoped ingress from only the ALB public subnet CIDRs.
+resource "aws_security_group_rule" "portal_app_from_alb_subnets" {
+  type              = "ingress"
+  from_port         = var.app_port
+  to_port           = var.app_port
+  protocol          = "tcp"
+  cidr_blocks       = module.vpc.public_subnet_cidrs
+  security_group_id = module.ec2.security_group_id
+  description       = "HTTP from ALB public subnets through inspection"
+}
+
+resource "aws_security_group_rule" "guacamole_client_from_alb_subnets" {
+  type              = "ingress"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  cidr_blocks       = module.vpc.public_subnet_cidrs
+  security_group_id = module.guacamole.guacamole_client_security_group_id
+  description       = "HTTP from ALB public subnets through inspection"
 }
 
 # ------------------------------------------------------------------------------

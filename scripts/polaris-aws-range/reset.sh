@@ -17,7 +17,7 @@
 #
 # Usage (from operator):
 #
-#   aws --profile panw-shifter-dev-workstation --region us-east-2 \
+#   aws --profile aws-dev --region us-east-2 \
 #     ssm send-command \
 #     --instance-ids <polaris-vm-id> \
 #     --document-name AWS-RunShellScript \
@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-BUILD_TARBALL_S3_URI="${BUILD_TARBALL_S3_URI:-s3://shifter-polaris-bake-158151907940/polaris/build-v1.tar.gz}"
+BUILD_TARBALL_S3_URI="${BUILD_TARBALL_S3_URI:-s3://shifter-polaris-bake-dev-741140496509/polaris/build-aws-dev-default-vpc.tar.gz}"
 POLARIS_ROOT="${POLARIS_ROOT:-/opt/polaris}"
 BUILD_DIR="${POLARIS_ROOT}/scenario-dev/polaris/build"
 REBUILD_SERVICES="${REBUILD_SERVICES:-dns a14-kali a16-research-analyst}"

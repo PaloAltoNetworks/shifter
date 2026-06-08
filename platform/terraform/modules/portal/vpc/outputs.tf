@@ -15,6 +15,11 @@ output "public_subnet_ids" {
   value       = aws_subnet.public[*].id
 }
 
+output "public_subnet_cidrs" {
+  description = "CIDR blocks of public subnets."
+  value       = aws_subnet.public[*].cidr_block
+}
+
 output "private_subnet_ids" {
   description = "IDs of private subnets"
   value       = aws_subnet.private[*].id
@@ -38,6 +43,16 @@ output "availability_zones" {
 output "private_route_table_ids" {
   description = "IDs of the per-AZ private route tables (ordered by availability_zones)."
   value       = aws_route_table.private[*].id
+}
+
+output "gateway_endpoint_ids" {
+  description = "Map of private-tier gateway VPC endpoint service key to endpoint ID."
+  value       = { for service, endpoint in aws_vpc_endpoint.gateway : service => endpoint.id }
+}
+
+output "interface_endpoint_ids" {
+  description = "Map of private-tier interface VPC endpoint service key to endpoint ID."
+  value       = { for service, endpoint in aws_vpc_endpoint.interface : service => endpoint.id }
 }
 
 output "flow_logs_log_group_name" {

@@ -34,7 +34,7 @@ variable "enable_sqs_notifications" {
 }
 
 variable "enable_alb_access_logs" {
-  description = "Enable ALB access logs (adds bucket policy for ALB service)"
+  description = "Enable the dedicated ALB access-log S3 bucket and bucket policy"
   type        = bool
   default     = false
 }

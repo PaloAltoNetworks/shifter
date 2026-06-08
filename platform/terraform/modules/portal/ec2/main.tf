@@ -305,6 +305,31 @@ resource "aws_iam_role_policy" "sqs_publish" {
   })
 }
 
+resource "aws_iam_role_policy" "sqs_kms" {
+  name = "sqs-kms-access"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = var.sqs_kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "sqs.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "ses_send" {
   count = var.enable_ses ? 1 : 0
 
@@ -629,7 +654,7 @@ resource "aws_instance" "this" {
   monitoring             = true
   ebs_optimized          = true
 
-  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+  user_data_base64 = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region                 = var.aws_region
     ecr_repository_url         = var.ecr_repository_url
     log_group_name             = local.log_group_name

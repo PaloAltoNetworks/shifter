@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # NORTHSTORM range setup: build all images and bring up the full topology.
 #
-# Runs from the range host (ctf-range-builder). Assumes docker-compose.yml
-# and all content dirs are already synced to $RANGE_DIR (default
-# /home/atomik/range) from the repo.
+# Runs from the range host. Assumes docker-compose.yml and all content dirs are
+# already synced to $RANGE_DIR, which defaults to this script's parent range
+# directory.
 #
 # Usage:
-#     bash /home/atomik/range/setup.sh
+#     bash tests/setup.sh
 #     RANGE_DIR=/some/other/path bash setup.sh
 #
 # Exits 0 on successful bring-up + readiness, 1 on any failure.
 
 set -euo pipefail
-RANGE_DIR="${RANGE_DIR:-/home/atomik/range}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_RANGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RANGE_DIR="${RANGE_DIR:-$DEFAULT_RANGE_DIR}"
 COMPOSE_FILE="${COMPOSE_FILE:-$RANGE_DIR/build/docker-compose.yml}"
 # Legacy flat-layout fallback: if new location doesn't exist, try $RANGE_DIR/docker-compose.yml
 if [[ ! -f "$COMPOSE_FILE" ]] && [[ -f "$RANGE_DIR/docker-compose.yml" ]]; then

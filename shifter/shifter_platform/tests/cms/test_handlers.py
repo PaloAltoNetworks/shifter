@@ -269,11 +269,12 @@ class TestProcessRangeEventStatusUpdates:
             patch("cms.handlers.range_events.RangeInstance") as MockRI,
             patch("cms.handlers.range_events.notify_ctf_range_status"),
         ):
-            MockRI.objects.get.return_value = mock_instance
+            MockRI.all_objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
 
             process_range_event(message)
 
+            MockRI.all_objects.get.assert_called_once_with(range_id=3)
             assert mock_instance.status == ResourceStatus.DESTROYED.value
             mock_instance.save.assert_called_once_with(update_fields=["status"])
 
@@ -564,3 +565,49 @@ class TestProcessRangeEventRequestLookup:
             # Verify lookup was by request_id, NOT range_id
             MockRI.objects.get.assert_called_once_with(request__request_id=str(request_uuid))
             assert mock_instance.status == ResourceStatus.READY.value
+
+    def test_destroyed_event_can_update_soft_deleted_request_range(self):
+        """Destroyed events resolve RangeInstance through the unfiltered manager.
+
+        Destroy requests hide the CMS row at ``destroying`` time, so the final
+        provisioner event must still be able to mark it destroyed.
+        """
+        from unittest.mock import MagicMock
+        from uuid import uuid4
+
+        from cms.handlers import process_range_event
+
+        request_uuid = uuid4()
+        user_id = 42
+
+        mock_instance = MagicMock()
+        mock_instance.range_id = 14
+        mock_instance.user_id = user_id
+        mock_instance.status = ResourceStatus.DESTROYING.value
+        mock_instance.pk = 14
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "request_id": str(request_uuid),
+                    "range_id": 14,
+                    "new_status": ResourceStatus.DESTROYED.value,
+                    "user_id": user_id,
+                }
+            )
+        }
+
+        with (
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
+        ):
+            MockRI.all_objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
+
+            process_range_event(message)
+
+            MockRI.objects.get.assert_not_called()
+            MockRI.all_objects.get.assert_called_once_with(request__request_id=str(request_uuid))
+            assert mock_instance.status == ResourceStatus.DESTROYED.value
+            mock_instance.save.assert_called_once_with(update_fields=["status"])

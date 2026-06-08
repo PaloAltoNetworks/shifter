@@ -151,19 +151,12 @@ jobs:
           FAST_GCP_DEPLOY="false"
 
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            if [ "${{ github.base_ref }}" == "main" ]; then
-              AWS_ENV="prod"
-              AWS_IS_DEV="false"
-              RUN_AWS="true"
-            elif [ "${{ github.base_ref }}" == "aws-dev" ]; then
+            if [ "${{ github.base_ref }}" == "aws-dev" ]; then
               RUN_AWS="true"
             elif [ "${{ github.base_ref }}" == "gcp-dev" ]; then
               RUN_GCP="true"
-            elif [ "${{ github.base_ref }}" == "dev" ]; then
-              RUN_AWS="true"
-              RUN_GCP="true"
             fi
-          else
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             BRANCH="${GITHUB_REF#refs/heads/}"
             case "$BRANCH" in
               main)
@@ -184,6 +177,19 @@ jobs:
               dev)
                 RUN_AWS="true"
                 RUN_GCP="true"
+                ;;
+            esac
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            case "$BRANCH" in
+              aws-dev)
+                RUN_AWS="true"
+                APPLY_AWS="true"
+                ;;
+              gcp-dev)
+                RUN_GCP="true"
+                DEPLOY_GCP="true"
+                FAST_GCP_DEPLOY="true"
                 ;;
             esac
           fi
@@ -237,8 +243,8 @@ jobs:
     name: Quality
     needs: changes
     # Run Quality on PRs and direct pushes to `dev` only.
-    # Pushes to env branches (aws-dev, gcp-dev, main) only happen via merge
-    # from `dev` (per repo rule: env branches must never be ahead of dev),
+    # Pushes to deployment branches (aws-dev, gcp-dev) only happen via merge
+    # from `dev` (per repo rule: deploy branches must never be ahead of dev),
     # so the same SHA already passed Quality on its dev push and re-running
     # here is pure duplicate work. Deploy jobs already tolerate skipped
     # Quality via `(needs.quality.result == 'success' || ... == 'skipped')`.

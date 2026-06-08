@@ -30,6 +30,11 @@ output "range_polaris_private_ips" {
   value       = { for k, i in aws_instance.polaris : k => i.private_ip }
 }
 
+output "range_polaris_public_ips" {
+  description = "polaris VM public IP per range index when associate_public_ip_address is true."
+  value       = { for k, i in aws_instance.polaris : k => i.public_ip }
+}
+
 output "range_a2_instance_ids" {
   description = "A2 Windows DC EC2 instance id per range index."
   value       = { for k, i in aws_instance.a2_dc : k => i.id }
@@ -38,6 +43,11 @@ output "range_a2_instance_ids" {
 output "range_a2_private_ips" {
   description = "A2 Windows DC private IP per range index (pinned to .11 of the subnet)."
   value       = { for k, i in aws_instance.a2_dc : k => i.private_ip }
+}
+
+output "range_a2_public_ips" {
+  description = "A2 Windows DC public IP per range index when associate_public_ip_address is true."
+  value       = { for k, i in aws_instance.a2_dc : k => i.public_ip }
 }
 
 output "range_security_group_ids" {
@@ -54,8 +64,8 @@ output "ssm_session_commands" {
   description = "aws ssm start-session commands per range, pre-formatted for copy-paste."
   value = {
     for k in var.range_indices : k => {
-      polaris = "aws --profile panw-shifter-dev-workstation --region us-east-2 ssm start-session --target ${aws_instance.polaris[k].id}"
-      a2_dc   = "aws --profile panw-shifter-dev-workstation --region us-east-2 ssm start-session --target ${aws_instance.a2_dc[k].id}"
+      polaris = "aws ${local.aws_cli_profile_args}--region ${var.aws_region} ssm start-session --target ${aws_instance.polaris[k].id}"
+      a2_dc   = "aws ${local.aws_cli_profile_args}--region ${var.aws_region} ssm start-session --target ${aws_instance.a2_dc[k].id}"
     }
   }
 }

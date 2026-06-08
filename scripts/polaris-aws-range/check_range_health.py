@@ -9,7 +9,7 @@ provisioning misses.
 
 Checks (per range):
 
-- docker container count == 22 (polaris compose stack)
+- docker container count == 17 (polaris compose stack)
 - any exited/dead containers
 - a14-kali container is running
 - a14-kali /etc/profile.d/claude-bedrock.sh exists and has the right
@@ -37,13 +37,13 @@ in batches, and writes the report.
 
 Usage::
 
-    python3 check_range_health.py --profile panw-shifter-dev-workstation
+    python3 check_range_health.py --profile aws-dev
 
     # full per-range detail table (not just issues)
-    python3 check_range_health.py --profile panw-shifter-dev-workstation --verbose
+    python3 check_range_health.py --profile aws-dev --verbose
 
     # write report to an explicit path
-    python3 check_range_health.py --profile panw-shifter-dev-workstation \\
+    python3 check_range_health.py --profile aws-dev \\
         --output /tmp/health.md
 """
 

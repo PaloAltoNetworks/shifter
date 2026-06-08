@@ -2961,8 +2961,8 @@ class TestBootstrapAccount:
             ]
             assert len(role_calls) > 0
 
-    def test_attaches_admin_policy_to_bootstrap_role(self, bootstrap_config, mock_subprocess, mock_repo_root):
-        """Function attaches AdministratorAccess to bootstrap role."""
+    def test_adds_admin_policy_to_bootstrap_role(self, bootstrap_config, mock_subprocess, mock_repo_root):
+        """Function adds AdministratorAccess-equivalent permissions to bootstrap role."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
@@ -2972,14 +2972,15 @@ class TestBootstrapAccount:
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
 
-            # Should call attach-role-policy with AdministratorAccess
+            # Should call put-role-policy with AdministratorAccess-equivalent policy
             policy_calls = [
                 c
                 for c in mock_subprocess.call_args_list
                 if len(c[0]) > 0
                 and len(c[0][0]) > 0
                 and c[0][0][0] == "aws"
-                and "attach-role-policy" in " ".join(c[0][0])
+                and "put-role-policy" in " ".join(c[0][0])
+                and "bootstrap-administrator-access" in " ".join(c[0][0])
             ]
             assert len(policy_calls) > 0
 

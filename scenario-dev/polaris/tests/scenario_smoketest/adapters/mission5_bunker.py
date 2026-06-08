@@ -50,7 +50,7 @@ _SSH_REMOTE_PREFIX = (
     _SPLICE_TARGET,
 )
 
-_PRODUCT_NAME_RE = re.compile(r"^ProductName:\s*(\S+)\s*$", re.MULTILINE)
+_PRODUCT_NAME_RE = re.compile(r"^\s*ProductName:\s*(\S+)\s*$", re.MULTILINE)
 
 
 def _extract_product_name(devid_body: str) -> str | None:

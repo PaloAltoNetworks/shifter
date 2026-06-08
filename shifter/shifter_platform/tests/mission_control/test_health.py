@@ -164,6 +164,24 @@ def test_health_with_alb_host_header_no_trailing_slash():
     )
 
 
+def test_health_is_not_redirected_when_ssl_redirect_enabled(settings):
+    """Production enables ``SECURE_SSL_REDIRECT``. ALB health checks are plain
+    HTTP and do not send ``X-Forwarded-Proto: https``, so `/health` must be
+    exempt from HTTPS redirects and still run the real readiness probes.
+    """
+    settings.SECURE_SSL_REDIRECT = True
+    settings.SECURE_REDIRECT_EXEMPT = [r"^health/?$"]
+
+    status, body = _get_health(
+        "/health",
+        HTTP_HOST="10.0.1.42",
+        HTTP_ACCEPT="application/json",
+    )
+
+    assert status == 200, body
+    assert "DatabaseBackend" in body
+
+
 # ---------------------------------------------------------------------------
 # Coarse public body — no DSN / hostname / secret-ID / stack-trace leaks
 # ---------------------------------------------------------------------------

@@ -43,13 +43,13 @@ def _healthy_fields() -> dict[str, str]:
 
 class ParseRecordTests(unittest.TestCase):
     def test_round_trips_pipe_delimited_record(self) -> None:
-        stdout = "noise\n__RECORD__host=polaris-vm-1|instance_id=i-aaa|container_count=22__END__\ntrailing"
+        stdout = "noise\n__RECORD__host=polaris-vm-1|instance_id=i-aaa|container_count=17__END__\ntrailing"
 
         record = parse_record(stdout)
 
         self.assertEqual(
             record,
-            {"host": "polaris-vm-1", "instance_id": "i-aaa", "container_count": "22"},
+            {"host": "polaris-vm-1", "instance_id": "i-aaa", "container_count": "17"},
         )
 
     def test_returns_empty_when_markers_missing(self) -> None:

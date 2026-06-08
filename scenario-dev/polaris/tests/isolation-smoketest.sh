@@ -5,31 +5,26 @@
 # network boundaries: every attack path the design says MUST work,
 # works; every path the design says MUST NOT work, fails.
 #
-# Runs from the range host (ctf-range-builder). Uses `docker exec`
-# into each source container and python3 sockets to probe TCP
-# reachability — python3 is present on every relevant container
+# Runs from the range host. Uses `docker exec` into each source container and
+# python3 sockets to probe TCP reachability — python3 is present on every relevant container
 # (alpine, debian, kali) which is not true for bash /dev/tcp.
 #
 # Usage:
-#     bash /home/atomik/range/isolation-smoketest.sh
+#     bash tests/isolation-smoketest.sh
 #
 # Exits 0 on full pass, 1 on any failure.
 
 set -u
 
-# A2 DC IP. Default to the production range-VPC pinned address (`.11` in
-# the polaris /28 carved by `scripts/polaris-aws-range/`), but resolve
-# `dc01.boreas.local` from inside the dns container if available so the
-# test works in any account / VPC layout where the DC isn't pinned to
-# 10.1.100.11. Earlier this was hardcoded to 10.1.100.11 which made the
-# test fail in any non-production VPC bake even when the DC was
-# perfectly healthy.
+# A2 DC IP. Resolve `dc01.boreas.local` from inside the dns container so the
+# test works in any account / VPC layout where the Windows DC is not pinned to
+# a legacy range address.
 A2_DC_IP="${A2_DC_IP:-}"
 if [[ -z "$A2_DC_IP" ]]; then
     A2_DC_IP="$(docker exec dns dig +short @127.0.0.1 dc01.boreas.local 2>/dev/null | head -n1)"
 fi
 if [[ -z "$A2_DC_IP" ]]; then
-    A2_DC_IP="10.1.100.11"  # production fallback
+    A2_DC_IP="10.1.100.11"  # legacy fallback
     echo "[isolation] WARN: dc01.boreas.local did not resolve via dns container — falling back to $A2_DC_IP" >&2
 fi
 echo "[isolation] A2 DC IP: $A2_DC_IP"
@@ -73,12 +68,12 @@ must_not_reach() {
 }
 
 echo "NORTHSTORM network isolation smoketest"
-echo "Topology: shared/corporate/scada/lab/bunker-ot bridges + A2 VM at 10.100.0.4"
+echo "Topology: shared/corporate/scada/lab/bunker-ot bridges + A2 VM at $A2_DC_IP"
 
 # =============================================================================
 # A14 Kali (shared + corporate)
-# Design: can reach A0, A1, A3, A4, A7, A2 (GCP VM), DNS. Cannot reach lab,
-# scada, or bunker-ot directly — must pivot through A3.
+# Design: can reach A0, A1, A3, A4, A7, A2, DNS. Cannot reach lab, scada, or
+# bunker-ot directly.
 # =============================================================================
 echo
 echo "=== a14-kali (shared+corporate) ==="

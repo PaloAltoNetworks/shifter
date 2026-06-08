@@ -137,8 +137,9 @@ The CLI walks through each component, shows the plan, and asks for confirmation 
 
 **Via CI/CD:**
 
-Push to `main` to deploy the AWS production environment after bootstrap and
-backend configuration are complete.
+Run `Deploy` with `workflow_dispatch` on `main` to deploy the AWS production
+environment after bootstrap and backend configuration are complete. Pushing or
+merging to `main` updates the production code branch only; it does not deploy.
 
 **Manual deployment:**
 
@@ -203,7 +204,7 @@ Create a CNAME record pointing your domain to the ALB DNS name.
 The first deploy creates empty ECR repos. Push the portal container:
 
 ```bash
-# Via CI/CD: push to main triggers build
+# Via CI/CD: run Deploy with workflow_dispatch on main
 # Or manually:
 ./scripts/build-and-push.sh prod
 ```

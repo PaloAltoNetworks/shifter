@@ -23,6 +23,7 @@ import pytest
 
 DOCKERFILE_PATH = Path(__file__).resolve().parent.parent / "Dockerfile"
 PROVISIONER_DIR = DOCKERFILE_PATH.parent
+TERRAFORM_RC_PATH = PROVISIONER_DIR / "terraform.tfrc"
 
 
 def _read_dockerfile() -> str:
@@ -176,6 +177,25 @@ class TestDockerfileNonRootUser:
             r"\bPULUMI_HOME=/home/appuser/\.pulumi\b",
             content,
         ), "Dockerfile must set PULUMI_HOME=/home/appuser/.pulumi"
+
+    def test_tool_downloads_retry_transient_failures(self):
+        content = _read_dockerfile()
+        assert content.count("--retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20") >= 2
+
+    def test_bakes_terraform_provider_mirror(self):
+        content = _read_dockerfile()
+        assert "terraform -chdir=terraform/modules/range providers mirror /opt/terraform-providers" in content
+        assert "terraform -chdir=terraform/modules/ngfw providers mirror /opt/terraform-providers" in content
+
+    def test_sets_terraform_cli_config_file(self):
+        content = _read_dockerfile()
+        assert "TF_CLI_CONFIG_FILE=/app/terraform.tfrc" in content
+
+    def test_terraform_cli_config_uses_only_filesystem_mirror_for_hashicorp(self):
+        content = TERRAFORM_RC_PATH.read_text(encoding="utf-8")
+        assert 'path    = "/opt/terraform-providers"' in content
+        assert 'include = ["registry.terraform.io/hashicorp/*"]' in content
+        assert 'exclude = ["registry.terraform.io/hashicorp/*"]' in content
 
 
 @pytest.mark.slow
@@ -342,4 +362,5 @@ class TestDockerfileRuntimeSmoke:
         env_dump = self._docker_run(built_image, ["env"])
         assert "TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache" in env_dump
         assert "PULUMI_HOME=/home/appuser/.pulumi" in env_dump
+        assert "TF_CLI_CONFIG_FILE=/app/terraform.tfrc" in env_dump
         assert "TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace" in env_dump

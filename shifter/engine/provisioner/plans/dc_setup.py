@@ -94,10 +94,82 @@ $ErrorActionPreference = "Stop"
 Write-Host "=== Enabling SSH Password Authentication ==="
 
 $sshdConfigPath = "C:\\ProgramData\\ssh\\sshd_config"
+$sshDir = Split-Path -Parent $sshdConfigPath
+
+Write-Host "Ensuring OpenSSH Server is available..."
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+$sshdExeCandidates = @(
+    (Join-Path $env:WINDIR "System32\\OpenSSH\\sshd.exe"),
+    (Join-Path $env:ProgramFiles "OpenSSH\\sshd.exe")
+)
+$sshdExe = $sshdExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $sshdService -and -not $sshdExe) {
+    throw "OpenSSH Server service/binary not found. Rebuild and publish a Polaris DC AMI with OpenSSH preinstalled."
+} else {
+    Write-Host "OpenSSH Server already present"
+}
+
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+$sshdExe = $sshdExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $sshdService -and $sshdExe) {
+    Write-Host "OpenSSH binary found at $sshdExe; creating sshd service"
+    New-Service -Name sshd `
+        -BinaryPathName ('"{0}"' -f $sshdExe) `
+        -DisplayName "OpenSSH SSH Server" `
+        -StartupType Automatic | Out-Null
+    $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+}
+
+if (-not $sshdService) {
+    throw "OpenSSH Server service is unavailable after install/bootstrap"
+}
+
+if (-not (Test-Path $sshDir)) {
+    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+}
+
+Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
+try {
+    Start-Service sshd -ErrorAction Stop
+    Write-Host "sshd service started"
+} catch {
+    Write-Host "WARNING: sshd did not start before config update: $($_.Exception.Message)"
+}
 
 if (-not (Test-Path $sshdConfigPath)) {
-    Write-Host "ERROR: sshd_config not found at $sshdConfigPath"
-    exit 1
+    $defaultConfigPath = Join-Path $env:WINDIR "System32\\OpenSSH\\sshd_config_default"
+    if (Test-Path $defaultConfigPath) {
+        Copy-Item $defaultConfigPath $sshdConfigPath -Force
+        Write-Host "Copied default sshd_config from $defaultConfigPath"
+    } else {
+        @"
+Port 22
+PubkeyAuthentication yes
+PasswordAuthentication yes
+Subsystem sftp sftp-server.exe
+
+Match Group administrators
+       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
+       PasswordAuthentication yes
+"@ | Set-Content -Path $sshdConfigPath -Encoding ascii
+        Write-Host "Created minimal sshd_config at $sshdConfigPath"
+    }
+}
+
+$firewallRule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
+if ($firewallRule) {
+    Enable-NetFirewallRule -Name "OpenSSH-Server-In-TCP" | Out-Null
+    Write-Host "Enabled existing OpenSSH firewall rule"
+} else {
+    New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
+        -DisplayName "OpenSSH Server (sshd)" `
+        -Enabled True `
+        -Direction Inbound `
+        -Protocol TCP `
+        -Action Allow `
+        -LocalPort 22 | Out-Null
+    Write-Host "Created OpenSSH firewall rule"
 }
 
 # Read current config
@@ -451,7 +523,7 @@ class DCSetupPlan:
                 SetupStep(
                     name="enable_ssh_password_auth",
                     script=ENABLE_SSH_AUTH_SCRIPT,
-                    timeout_seconds=60,
+                    timeout_seconds=600,
                 ),
             ]
         )

@@ -11,12 +11,12 @@ ARG PULUMI_VERSION=3.142.0
 # --create-home gives Terraform/Pulumi a writable HOME for plugin caches.
 RUN apt-get update && apt-get install -y curl openssh-client unzip && \
     # Install Terraform
-    curl -fsSL -o terraform.zip \
+    curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL -o terraform.zip \
       "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" && \
     unzip terraform.zip -d /usr/local/bin && \
     rm terraform.zip && \
     # Install Pulumi (keeping for backward compatibility)
-    curl -fsSL -o pulumi.tar.gz \
+    curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL -o pulumi.tar.gz \
       "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" && \
     tar -xzf pulumi.tar.gz -C /usr/local/bin --strip-components=1 && \
     rm pulumi.tar.gz && \
@@ -26,10 +26,10 @@ RUN apt-get update && apt-get install -y curl openssh-client unzip && \
     useradd --uid 1000 --gid appgroup --create-home --shell /bin/bash appuser && \
     mkdir -p /home/appuser/.terraform.d/plugin-cache /home/appuser/.pulumi && \
     chown -R appuser:appgroup /home/appuser && \
-    # Pre-create the Terraform workspace mount point. The runtime mounts an
-    # emptyDir / Fargate ephemeral volume here; chowning the parent means the
-    # mount inherits appuser ownership without needing fsGroup. terraform_base
-    # stages module sources under this path per request (issue #1103).
+    # Pre-create the Terraform workspace path. AWS ECS/Fargate runs this image
+    # as UID 1000 on the task's ephemeral writable layer; GKE-style deployers
+    # may also mount an emptyDir here. terraform_base stages module sources
+    # under this path per request (issue #1103).
     mkdir -p /var/run/provisioner/workspace && \
     chown -R appuser:appgroup /var/run/provisioner
 
@@ -45,15 +45,25 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # with application code at runtime (issue #1103, follow-up to #950).
 COPY . .
 
+# Bake the Terraform provider packages needed by the runtime range/NGFW
+# modules. Provisioner tasks run in private subnets without public Terraform
+# Registry egress, so terraform init must use this filesystem mirror instead
+# of resolving providers at runtime.
+RUN mkdir -p /opt/terraform-providers && \
+    terraform -chdir=terraform/modules/range providers mirror /opt/terraform-providers && \
+    terraform -chdir=terraform/modules/ngfw providers mirror /opt/terraform-providers && \
+    chown -R root:root /opt/terraform-providers
+
 # Set HOME explicitly so Terraform/Pulumi find the writable cache/config
 # directories created above (Docker's USER directive does not adjust HOME).
-# TERRAFORM_WORKSPACE_DIR documents the writable workspace mount contract;
-# any deployer mounting an emptyDir / Fargate ephemeral volume must mount it
-# at this path so terraform_base can stage modules and write
-# `.terraform/`, `.terraform.lock.hcl`, and `terraform.tfvars.json`.
+# TERRAFORM_WORKSPACE_DIR documents the writable workspace contract; deployers
+# that add a mounted writable volume must mount it at this path so
+# terraform_base can stage modules and write `.terraform/`,
+# `.terraform.lock.hcl`, and `terraform.tfvars.json`.
 ENV HOME=/home/appuser \
     PULUMI_HOME=/home/appuser/.pulumi \
     TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache \
+    TF_CLI_CONFIG_FILE=/app/terraform.tfrc \
     TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace
 
 # Drop privileges before invoking Terraform/Pulumi. Numeric UID:GID is used

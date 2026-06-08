@@ -91,7 +91,7 @@ with transaction.atomic():
                 r.save(update_fields=["status", "destroyed_at", "updated_at"])
                 print(f"soft-destroyed engine.Range id={r.id}")
 
-            stale_cms = RangeInstance.active.filter(user_id=user_id)
+            stale_cms = RangeInstance.objects.filter(user_id=user_id)
             for ri in stale_cms:
                 ri.status = "destroyed"
                 ri.save()

@@ -22,6 +22,11 @@ After apply:
 3. If the hostname should sit behind Cloudflare, switch the same `A` record to
    proxied after origin HTTPS works and set Cloudflare SSL/TLS mode to
    `Full (strict)`.
+   Do not leave a Managed Challenge, Bot Fight Mode, Browser Integrity Check,
+   or equivalent challenge action in front of the CTFd hostname unless the
+   event explicitly accepts that participant and API traffic may be challenged.
+   A smoke check to `https://<ctfd-hostname>/login` should return the CTFd login
+   page, not a Cloudflare `cf-mitigated: challenge` response.
 4. Complete the CTFd setup wizard in the browser.
 5. Generate an admin API token in CTFd and export it as `CTFD_TOKEN`.
 

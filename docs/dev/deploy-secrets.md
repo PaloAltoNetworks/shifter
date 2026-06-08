@@ -138,7 +138,11 @@ publish the runtime DNS records:
   has completed certbot and `https://<ctfd_domain>/login` works against the
   origin. After that validation, the CTFd `A` record may be switched to
   proxied with SSL/TLS mode `Full (strict)`. The DNS target is the bare
-  Elastic IP address, never an `http://` or `https://` URL.
+  Elastic IP address, never an `http://` or `https://` URL. Cloudflare
+  challenge actions must be disabled or explicitly skipped for the CTFd
+  hostname before event smoke testing; the CTFd sync scripts and automated
+  checks expect the CTFd app to answer directly instead of a Cloudflare
+  `cf-mitigated: challenge` page.
 
 ALB access logs use a dedicated S3 bucket with SSE-S3 because Elastic Load
 Balancing does not support SSE-KMS for Application Load Balancer access-log

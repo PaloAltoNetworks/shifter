@@ -112,6 +112,40 @@ must live in the account default VPC, not the Shifter range VPC or portal VPC.
    registered adapters are executable; use `--only` for the covered challenge
    ids until adapter coverage is complete.
 
+8. After validation passes, publish the Ubuntu host as the golden Polaris AMI
+   that the normal Shifter range provisioner consumes. The range provisioner
+   resolves `/shifter/ami/polaris-vm` at deploy time, so do not update the SSM
+   parameter until the AMI is available and smoke-tested:
+
+   ```bash
+   image_name="shifter-polaris-vm-$(date -u +%Y%m%d%H%M%S)"
+   image_id="$(AWS_PROFILE=aws-dev AWS_REGION=us-east-2 aws ec2 create-image \
+     --instance-id "$polaris_id" \
+     --name "$image_name" \
+     --description "Validated Polaris golden range host" \
+     --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=$image_name},{Key=Project,Value=polaris},{Key=Purpose,Value=golden-ami}]" \
+     --query ImageId \
+     --output text)"
+
+   AWS_PROFILE=aws-dev AWS_REGION=us-east-2 aws ec2 wait image-available \
+     --image-ids "$image_id"
+
+   AWS_PROFILE=aws-dev AWS_REGION=us-east-2 aws ssm put-parameter \
+     --name /shifter/ami/polaris-vm \
+     --type String \
+     --value "$image_id" \
+     --overwrite
+
+   AWS_PROFILE=aws-dev AWS_REGION=us-east-2 aws ssm get-parameter \
+     --name /shifter/ami/polaris-vm \
+     --query Parameter.Value \
+     --output text
+   ```
+
+   Keep the Terraform-created validation range until a fresh portal/engine
+   range launched from the new AMI has passed smoke tests. Then destroy the
+   temporary standalone range with `terraform destroy`.
+
 ## Networking notes
 
 Default-VPC mode creates Polaris-owned /28 subnets inside the default VPC. The

@@ -41,7 +41,7 @@ scenario-dev/polaris/
 │   ├── dns/                        BIND sidecar (boreas-systems.ctf + boreas.local zones, AXFR enabled)
 │   ├── a0/ ... a14/                Dockerfiles + runtime configs per asset
 │   └── A0-boreas-website/ ...      content generators (server.py, build_*.py, bootstrap.sh, init SQL)
-│       A14-kali/
+│       A14-kali/                   Kali starter text, warm-up note, Claude prompt
 │
 ├── tests/                          everything test-related
 │   ├── setup.sh                    build + up + wait ready
@@ -76,9 +76,10 @@ trust these in this order:
 
 1. `build/docker-compose.yml` and the build/runtime content under `build/`
 2. `build/ctfd-challenges.json` for the core Polaris board: challenge names, categories, values, hints, and prerequisites
-3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd-only onboarding content such as the landing page, quickstart page, and Start Here warm-up
-4. `tests/walkthroughs/` for the intended participant path through the live topology
-5. `design/` as the spec that should be kept in sync with the implementation
+3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd onboarding content such as the landing page, quickstart page, and Start Here warm-up
+4. `build/A14-kali/START_HERE.txt` and `build/A14-kali/welcome.txt` for the local Kali copy of the first-five-minutes path and warm-up flag note
+5. `tests/walkthroughs/` for the intended participant path through the live topology
+6. `design/` as the spec that should be kept in sync with the implementation
 
 If these disagree, reconcile the docs against the actual build and walkthroughs
 first instead of assuming the older design prose is correct.

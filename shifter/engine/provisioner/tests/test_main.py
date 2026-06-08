@@ -548,6 +548,56 @@ class TestGdcProvisioning:
         mock_dc_setup.assert_not_called()
         mock_single_setup.assert_not_called()
 
+    def test_polaris_bootstrap_runs_before_container_password_push(self):
+        from instance_orchestrator import _setup_one_other_instance
+
+        events = []
+
+        def record_single_setup(*, instance_data, instance_id, spec):
+            events.append(("setup", spec.set_local_password))
+            assert instance_id == "i-polaris"
+            assert instance_data["instance_id"] == "i-polaris"
+            assert spec.set_local_password is False
+
+        def record_bootstrap(*, instance_id, dc_ip, public_key):
+            events.append(("bootstrap", dc_ip, public_key))
+
+        def record_container_password(*, instance_data, instance_id, container_name, ssh_user):
+            events.append(("password", container_name, ssh_user))
+
+        with (
+            patch("main.get_agent_presigned_url", return_value=""),
+            patch("main._run_single_instance_setup", side_effect=record_single_setup),
+            patch("instance_orchestrator._run_polaris_range_bootstrap", side_effect=record_bootstrap),
+            patch(
+                "main._set_attacker_container_password_after_bootstrap",
+                side_effect=record_container_password,
+            ),
+        ):
+            result = _setup_one_other_instance(
+                {
+                    "uuid": "inst-polaris",
+                    "asset_type": "vm_runtime_vm",
+                    "role": "attacker",
+                    "os": "kali",
+                    "instance_id": "i-polaris",
+                    "hostname": "kali",
+                    "name": "kali",
+                    "public_key": "ssh-rsa AAAA",
+                },
+                {"inst-polaris": {"ami_key": "polaris-vm"}},
+                actual_dc_ip="10.1.2.8",
+                actual_domain="boreas.local",
+                range_id=9,
+            )
+
+        assert result == ("i-polaris", True, None)
+        assert events == [
+            ("setup", False),
+            ("bootstrap", "10.1.2.8", "ssh-rsa AAAA"),
+            ("password", "a14-kali", "kali"),
+        ]
+
     def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self, mocker):
         from main import _build_range_terraform_variables
 

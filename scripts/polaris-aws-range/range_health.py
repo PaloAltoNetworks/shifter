@@ -15,7 +15,7 @@ from typing import Iterable
 
 from botocore.exceptions import ClientError
 
-EXPECTED_CONTAINER_COUNT = 22
+EXPECTED_CONTAINER_COUNT = 17
 FLAG_CRITICAL_CONTAINERS = ("a5-scada", "a9-splice", "a0-website", "a14-kali")
 KALI_ENV_KEYS = (
     "CLAUDE_CODE_USE_BEDROCK",
@@ -294,7 +294,7 @@ def write_report(
             a14 = r.fields.get("a14_state", "?")
             sw = r.fields.get("splice_watcher", "?")
             lines.append(
-                f"| {r.range_id} | {r.user_id} | {r.instance_id} | {ok_m} | {cc}/22 | {a14} | {sw} | - |"
+                f"| {r.range_id} | {r.user_id} | {r.instance_id} | {ok_m} | {cc}/{EXPECTED_CONTAINER_COUNT} | {a14} | {sw} | - |"
             )
         lines.append("")
 

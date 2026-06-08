@@ -9,7 +9,7 @@ provisioning misses.
 
 Checks (per range):
 
-- docker container count == 22 (polaris compose stack)
+- docker container count == 17 (polaris compose stack)
 - any exited/dead containers
 - a14-kali container is running
 - a14-kali /etc/profile.d/claude-bedrock.sh exists and has the right

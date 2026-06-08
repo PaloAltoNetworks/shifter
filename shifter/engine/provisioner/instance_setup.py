@@ -57,6 +57,8 @@ class _InstanceSetupSpec:
     instance_name: str
     range_id: int
     domain_join: _DomainJoinSpec
+    set_local_password: bool = True
+    local_password_target_container: str | None = None
 
 
 class _InstanceSetupCtx:
@@ -117,6 +119,7 @@ def _set_local_password_or_raise(
     instance_data: dict[str, Any],
     platform: str,
     failure_prefix: str,
+    target_container: str | None = None,
 ) -> None:
     """Push the per-instance local guest password via SSM/SSH (#762)."""
     cloud_provider = _get_cloud_provider()
@@ -142,7 +145,7 @@ def _set_local_password_or_raise(
         if not fetched:
             raise SetupError(f"{failure_prefix}: per-instance RDP password fetch returned empty for {instance_id}")
         rdp_token = fetched
-    plan = SetLocalPasswordPlan(platform=platform)
+    plan = SetLocalPasswordPlan(platform=platform, target_container=target_container)
     context = plan.get_context({"rdp_username": ctx.ssh_user, "rdp_password": rdp_token})
     _run_setup_plan(
         orchestrator,
@@ -152,7 +155,15 @@ def _set_local_password_or_raise(
         execution.document_name,
         failure_prefix=failure_prefix,
     )
-    logger.info("Per-instance RDP password set on %s (%s)", instance_id, platform)
+    if target_container:
+        logger.info(
+            "Per-instance RDP password set on %s (%s container %s)",
+            instance_id,
+            platform,
+            target_container,
+        )
+    else:
+        logger.info("Per-instance RDP password set on %s (%s)", instance_id, platform)
 
 
 def _setup_attacker_role(
@@ -160,6 +171,9 @@ def _setup_attacker_role(
     execution: GuestExecutionContext,
     ctx: _InstanceSetupCtx,
     instance_data: dict[str, Any],
+    *,
+    set_local_password: bool = True,
+    local_password_target_container: str | None = None,
 ) -> None:
     """Run the Kali bootstrap plan for an attacker-role instance."""
     plan = LinuxBootstrapPlan()
@@ -171,15 +185,55 @@ def _setup_attacker_role(
         execution.document_name,
         failure_prefix="Kali setup failed",
     )
-    _set_local_password_or_raise(
-        orchestrator,
-        execution,
-        ctx,
-        instance_data,
-        platform="linux",
-        failure_prefix="Kali RDP password push failed",
-    )
+    if set_local_password:
+        _set_local_password_or_raise(
+            orchestrator,
+            execution,
+            ctx,
+            instance_data,
+            platform="linux",
+            failure_prefix="Kali RDP password push failed",
+            target_container=local_password_target_container,
+        )
+    else:
+        logger.info("Kali local password push deferred for %s", execution.target)
     logger.info("Kali setup complete for %s", execution.target)
+
+
+def _set_attacker_container_password_after_bootstrap(
+    instance_data: dict[str, Any],
+    instance_id: str,
+    *,
+    container_name: str,
+    ssh_user: str = "kali",
+) -> None:
+    """Set the per-instance password inside a container-backed Kali endpoint."""
+    import main
+
+    execution = main.build_guest_execution_context(instance_data, os_type="kali", role="attacker")
+    orchestrator = main.SetupOrchestrator(executor=execution.executor)
+    try:
+        logger.info("Waiting for %s connectivity on %s...", execution.transport_name, execution.target)
+        execution.wait_for_ready(timeout_seconds=120)
+        logger.info("Target %s is ready via %s", execution.target, execution.transport_name)
+        setup_name = instance_data.get("hostname", "") or instance_data.get("name", "")
+        ctx = _InstanceSetupCtx(
+            hostname=_resolve_setup_hostname(setup_name, instance_id),
+            public_key=instance_data.get("public_key", ""),
+            agent_presigned_url="",
+            ssh_user=ssh_user,
+        )
+        _set_local_password_or_raise(
+            orchestrator,
+            execution,
+            ctx,
+            instance_data,
+            platform="linux",
+            failure_prefix=f"{container_name} RDP password push failed",
+            target_container=container_name,
+        )
+    finally:
+        execution.close()
 
 
 def _install_xdr_or_raise(
@@ -344,7 +398,14 @@ def _dispatch_instance_setup_role(
 ) -> None:
     """Route an instance through the correct role/os setup path."""
     if spec.role == "attacker":
-        _setup_attacker_role(orchestrator, execution, ctx, instance_data)
+        _setup_attacker_role(
+            orchestrator,
+            execution,
+            ctx,
+            instance_data,
+            set_local_password=spec.set_local_password,
+            local_password_target_container=spec.local_password_target_container,
+        )
         return
     if spec.role != "victim":
         # Unknown role: leave behavior identical to pre-refactor (no plan runs).

@@ -153,6 +153,14 @@ during first deploy. The portal EC2 user_data also retries the AL2023 package
 metadata/install step so a transient repository timeout does not permanently
 strand cloud-init.
 
+Range status propagation depends on the portal worker containers consuming the
+encrypted portal messaging SQS queues. If range provisioner tasks exit 0 but
+CMS or CTF rows remain `pending`, check `docker logs worker-cms` on the portal
+EC2 instance. `KMS.AccessDeniedException` on the portal messaging CMK means the
+portal EC2 role is missing the SQS KMS decrypt/data-key grant; the
+`portal/ec2` module must receive `module.messaging.kms_key_arn` and attach its
+`sqs-kms-access` policy.
+
 When portal inspection is enabled, ALB health checks and user traffic route
 through the inspection boundary before reaching the private portal and
 Guacamole targets. The targets therefore allow ingress both from the ALB

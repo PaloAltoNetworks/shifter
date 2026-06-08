@@ -140,16 +140,16 @@ exit 0
 # `bash /opt/polaris/scenario-dev/polaris/tests/run-all-smoketests.sh`
 # works out-of-the-box without any per-range manual upload.
 #
-# The bucket + prefix is the one the dev-range-range-instance IAM role
-# already whitelists for GetObject (shifter-dev-user-storage-788327019743).
-# A new tarball is uploaded by the operator whenever the test harness or
-# an individual smoketest is fixed; the download is idempotent so re-runs
-# pick up the latest.
+# The bucket + prefix are rendered from the provisioner environment. By default
+# this uses AGENT_S3_BUCKET because the dev-range-range-instance IAM role is
+# already granted GetObject there. A new tarball is uploaded by the operator
+# whenever the test harness or an individual smoketest is fixed; the download
+# is idempotent so re-runs pick up the latest.
 FETCH_POLARIS_TESTS_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
-BUCKET="shifter-dev-user-storage-788327019743"
-KEY="polaris/tests/polaris-tests.tar.gz"
+BUCKET="{{ polaris_tests_bucket }}"
+KEY="{{ polaris_tests_key }}"
 DEST_ROOT="/opt/polaris/scenario-dev/polaris"
 TARBALL="/tmp/polaris-tests.tar.gz"
 

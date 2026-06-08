@@ -63,6 +63,23 @@ class TestSetLocalPasswordPlan:
         assert plan.verify_step.is_verification is True
         assert "passwd -S" in plan.verify_step.script
 
+    def test_linux_container_step_sets_password_inside_target_container(self):
+        from plans.set_local_password import SetLocalPasswordPlan
+
+        plan = SetLocalPasswordPlan(platform="linux", target_container="a14-kali")
+        step = plan.steps[0]
+
+        assert 'container="{{ rdp_container_name }}"' in step.script
+        assert 'docker exec -i "$container" chpasswd' in step.script
+        assert "{{ rdp_username }}:{{ rdp_password }}" in step.script
+        assert "echo " not in step.script.split("chpasswd", 1)[1].split("__SHIFTER_RDP_PW__", 1)[0]
+
+        context = plan.get_context({"rdp_username": "kali", "rdp_password": "PerInstancePw!"})
+        assert context["rdp_container_name"] == "a14-kali"
+
+        verify = plan.verify_step
+        assert 'docker exec "$container" passwd -S "$ssh_user"' in verify.script
+
     def test_windows_verify_step_checks_local_user_enabled(self):
         from plans.set_local_password import SetLocalPasswordPlan
 
@@ -92,3 +109,9 @@ class TestSetLocalPasswordPlan:
 
         with pytest.raises(ValueError, match="Unknown platform"):
             SetLocalPasswordPlan(platform="solaris")
+
+    def test_container_target_rejected_for_windows(self):
+        from plans.set_local_password import SetLocalPasswordPlan
+
+        with pytest.raises(ValueError, match="target_container"):
+            SetLocalPasswordPlan(platform="windows", target_container="a14-kali")

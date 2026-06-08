@@ -305,6 +305,31 @@ resource "aws_iam_role_policy" "sqs_publish" {
   })
 }
 
+resource "aws_iam_role_policy" "sqs_kms" {
+  name = "sqs-kms-access"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = var.sqs_kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "sqs.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "ses_send" {
   count = var.enable_ses ? 1 : 0
 

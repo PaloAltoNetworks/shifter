@@ -493,8 +493,9 @@ module "ec2" {
   log_retention_days   = var.log_retention_days
 
   # Messaging (SQS queues for message consumers)
-  sqs_queue_arns = values(module.messaging.sqs_queue_arns)
-  sqs_queue_urls = module.messaging.sqs_queue_urls
+  sqs_queue_arns  = values(module.messaging.sqs_queue_arns)
+  sqs_queue_urls  = module.messaging.sqs_queue_urls
+  sqs_kms_key_arn = module.messaging.kms_key_arn
 
   # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
@@ -566,6 +567,28 @@ module "s3" {
   cors_allowed_origins = ["https://${var.domain_name}"]
   kms_key_arn          = aws_kms_key.portal_s3.arn
   tags                 = var.tags
+}
+
+resource "aws_iam_role_policy" "range_instance_portal_s3_kms_read" {
+  name = "portal-s3-kms-read"
+  role = replace(data.terraform_remote_state.range.outputs.range_instance_role_arn, "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/", "")
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = aws_kms_key.portal_s3.arn
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "s3.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
 }
 
 # ------------------------------------------------------------------------------
@@ -721,7 +744,8 @@ module "engine_provisioner" {
   ngfw_instance_role_arn      = data.terraform_remote_state.range.outputs.ngfw_instance_role_arn != null ? data.terraform_remote_state.range.outputs.ngfw_instance_role_arn : ""
 
   # Messaging (SNS topic for range event publishing)
-  sns_topic_arn = module.messaging.sns_topic_arn
+  sns_topic_arn   = module.messaging.sns_topic_arn
+  sns_kms_key_arn = module.messaging.kms_key_arn
 
   depends_on = [module.vpc]
 }

@@ -29,6 +29,7 @@ for any attacker instance whose ami_key is polaris-vm, gated by the
 caller in main.py (no scenario_id plumbing needed).
 """
 
+import os
 from typing import Any, ClassVar
 
 from ._polaris_scripts import (
@@ -143,10 +144,24 @@ class PolarisRangeBootstrapPlan:
             "anthropic_small_fast_model",
             "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         )
+        polaris_tests_bucket = (
+            os.environ.get("POLARIS_TESTS_BUCKET")
+            or os.environ.get("AGENT_STORAGE_BUCKET")
+            or os.environ.get("AGENT_S3_BUCKET")
+            or ""
+        )
+        if not polaris_tests_bucket:
+            raise ValueError(
+                "PolarisRangeBootstrapPlan requires POLARIS_TESTS_BUCKET or "
+                "AGENT_S3_BUCKET so the range host can fetch the smoketest tarball"
+            )
+        polaris_tests_key = os.environ.get("POLARIS_TESTS_KEY", "polaris/tests/polaris-tests.tar.gz")
 
         return {
             "dc_ip": dc_ip,
             "public_key": public_key,
             "anthropic_model": anthropic_model,
             "anthropic_small_fast_model": anthropic_small_fast_model,
+            "polaris_tests_bucket": polaris_tests_bucket,
+            "polaris_tests_key": polaris_tests_key,
         }

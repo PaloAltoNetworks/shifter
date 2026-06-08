@@ -44,6 +44,41 @@ aws_ssm() {
     aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"
 }
 
+probe_ssm_command() {
+    local target="$1"
+    local command_id status deadline
+
+    command_id="$(aws_ssm ssm send-command \
+        --instance-ids "$target" \
+        --document-name "$SSM_PS_DOC" \
+        --parameters 'commands=["Write-Output ssm-ready"]' \
+        --timeout-seconds 45 \
+        --query "$SSM_QUERY_COMMAND_ID" \
+        --output text 2>/dev/null || true)"
+    if [[ -z "$command_id" || "$command_id" == "None" ]]; then
+        return 1
+    fi
+
+    deadline=$((SECONDS + 60))
+    while (( SECONDS < deadline )); do
+        status="$(aws_ssm ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$target" \
+            --query 'Status' --output text 2>/dev/null || echo Pending)"
+        case "$status" in
+            Success)
+                return 0
+                ;;
+            Failed|Cancelled|TimedOut|DeliveryTimedOut|Undeliverable|Terminated)
+                return 1
+                ;;
+            *)
+                sleep 3
+                ;;
+        esac
+    done
+    return 1
+}
+
 wait_for_ssm() {
     # Robust drop-then-back semantics. The naive "PingStatus == Online"
     # check returns true immediately when called between issuing a reboot
@@ -51,13 +86,12 @@ wait_for_ssm() {
     # reports Online from the prior session. Phase 2 then runs against
     # an unrebooted box and silently no-ops.
     #
-    # Strategy: capture LastPingDateTime up front. If it's stale by >60s
-    # we know the box has rebooted (agent stopped pinging). Once the
-    # timestamp moves AND age <30s, the agent is genuinely back.
+    # Strategy: prefer a fresh LastPingDateTime when the SSM API provides
+    # one, but fall back to an actual RunCommand round trip. In aws-dev we
+    # observed PingStatus=Online with a stale LastPingDateTime even though
+    # commands and AD services were already healthy after promotion.
     local target="$1"
     local deadline=$((SECONDS + 900))
-    local prev_last=""
-    local saw_stale=0
 
     while (( SECONDS < deadline )); do
         local ping last age
@@ -71,30 +105,21 @@ wait_for_ssm() {
             --output text 2>/dev/null || echo None)"
 
         if [[ "$ping" != "Online" ]]; then
-            saw_stale=1
             sleep 6
             continue
         fi
 
         if [[ -n "$last" && "$last" != "None" ]]; then
             age=$(( $(date +%s) - $(date -d "$last" +%s) ))
-            # Treat a ping that hasn't moved in 60+s as effectively stale —
-            # box is rebooting, the API just hasn't transitioned to
-            # ConnectionLost yet.
-            if [[ "$age" -gt 60 ]]; then
-                saw_stale=1
-                sleep 6
-                continue
-            fi
-            # Genuinely fresh + online. If we saw a stale state at any
-            # point, this is the post-reboot recovery — return.
-            # If we never saw stale (caller invoked wait_for_ssm without
-            # an outstanding reboot), still return — bootstrap entry path.
-            if [[ "$age" -lt 30 && ( ( -n "$prev_last" && "$prev_last" != "$last" ) || "$saw_stale" -eq 0 ) ]]; then
+            if [[ "$age" -lt 30 ]]; then
                 return 0
             fi
-            prev_last="$last"
         fi
+
+        if probe_ssm_command "$target"; then
+            return 0
+        fi
+
         sleep 6
     done
     echo "timeout waiting for SSM agent on ${target}" >&2

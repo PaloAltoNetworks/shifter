@@ -157,13 +157,12 @@ def _set_local_password_or_raise(
     )
     if target_container:
         logger.info(
-            "Per-instance RDP password set on %s (%s container %s)",
+            "Per-instance local credential set on %s (%s container target configured)",
             instance_id,
             platform,
-            target_container,
         )
     else:
-        logger.info("Per-instance RDP password set on %s (%s)", instance_id, platform)
+        logger.info("Per-instance local credential set on %s (%s)", instance_id, platform)
 
 
 def _setup_attacker_role(

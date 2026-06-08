@@ -107,11 +107,13 @@ Legacy local-compose flow:
    isolation. Does not verify CTFd challenge content.
 
 3. **Verify scenario content** — pre-event content check that every CTFd
-   challenge's hint path produces the configured flag:
+   covered hint path produces the configured flag:
    ```
-   ssh ctf-range-builder 'cd /home/atomik/range/tests && python3 -m scenario_smoketest'
+   ssh ctf-range-builder 'cd /home/atomik/range/tests && python3 -m scenario_smoketest --only 1,2,3,4,5,6,31'
    ```
-   Content-level (vs. step 2's infra sweep). Full usage, flags, and the
+   Content-level (vs. step 2's infra sweep). Current executable adapter
+   coverage is challenges `1-6` and `31`; an unfiltered run intentionally exits
+   non-zero while uncovered board challenges remain. Full usage, flags, and the
    CTFd-token security model live in
    [`tests/scenario_smoketest/README.md`](tests/scenario_smoketest/README.md).
 

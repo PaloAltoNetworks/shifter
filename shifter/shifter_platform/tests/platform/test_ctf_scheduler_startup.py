@@ -76,7 +76,20 @@ def test_aws_deploy_paths_start_ctf_scheduler_container(path: Path) -> None:
 
     assert f"docker stop portal worker-cms worker-engine worker-mc {SCHEDULER_NAME}" in deployment_text
     assert f"docker rm portal worker-cms worker-engine worker-mc {SCHEDULER_NAME}" in deployment_text
+    assert (
+        'WORKER_HEALTH_BASE="--health-interval 30s --health-timeout 5s --health-start-period 90s --health-retries 2"'
+    ) in deployment_text
+    for heartbeat in (
+        "worker-cms-heartbeat",
+        "worker-engine-heartbeat",
+        "worker-mc-heartbeat",
+        "ctf-scheduler-heartbeat",
+    ):
+        assert f"--health-cmd='find /tmp/{heartbeat} -mmin -2 | grep -q .'" in deployment_text
     assert f"docker run -d --name {SCHEDULER_NAME} --restart unless-stopped" in deployment_text
+    assert (
+        f'docker run -d --name {SCHEDULER_NAME} --restart unless-stopped $WORKER_HEALTH_BASE "$CTF_SCHEDULER_HEALTH"'
+    ) in deployment_text
     assert " ".join(SCHEDULER_COMMAND) in deployment_text
 
 

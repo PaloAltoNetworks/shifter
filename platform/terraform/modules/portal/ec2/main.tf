@@ -629,7 +629,7 @@ resource "aws_instance" "this" {
   monitoring             = true
   ebs_optimized          = true
 
-  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+  user_data_base64 = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region                 = var.aws_region
     ecr_repository_url         = var.ecr_repository_url
     log_group_name             = local.log_group_name

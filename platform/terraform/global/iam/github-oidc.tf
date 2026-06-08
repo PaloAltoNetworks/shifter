@@ -73,15 +73,33 @@ resource "aws_iam_role" "github_actions" {
 }
 
 # ------------------------------------------------------------------------------
-# AWS Managed Policy Attachments
-# Using full access managed policies during rapid development.
+# AWS Role Policy
+# Full access during rapid development.
 # TODO: Scope down to least privilege before production hardening.
 # ------------------------------------------------------------------------------
 
-# checkov:skip=CKV_AWS_274:Using AdministratorAccess during dev for velocity. Risk accepted.
-resource "aws_iam_role_policy_attachment" "admin" {
-  role       = aws_iam_role.github_actions.name
-  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+resource "aws_iam_role_policy" "admin" {
+  # checkov:skip=CKV_AWS_274:Dev deploy role is admin-equivalent. See ADR-004-R11 exception aws-dev-bootstrap-inline-admin.
+  # checkov:skip=CKV_AWS_288:Dev deploy role is admin-equivalent. See ADR-004-R11 exception aws-dev-bootstrap-inline-admin.
+  # checkov:skip=CKV_AWS_286:Dev deploy role is admin-equivalent. See ADR-004-R11 exception aws-dev-bootstrap-inline-admin.
+  # checkov:skip=CKV_AWS_62:Dev deploy role is admin-equivalent. See ADR-004-R11 exception aws-dev-bootstrap-inline-admin.
+  # checkov:skip=CKV_AWS_63:Dev deploy role is admin-equivalent. See ADR-004-R11 exception aws-dev-bootstrap-inline-admin.
+  # checkov:skip=CKV_AWS_287:Dev deploy role is admin-equivalent. See ADR-004-R11 exception aws-dev-bootstrap-inline-admin.
+  # checkov:skip=CKV2_AWS_40:Dev deploy role is admin-equivalent. See ADR-004-R11 exception aws-dev-bootstrap-inline-admin.
+
+  name = "administrator-access"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "*"
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 # ------------------------------------------------------------------------------

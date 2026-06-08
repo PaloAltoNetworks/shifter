@@ -15,6 +15,10 @@ locals {
   })
 }
 
+resource "terraform_data" "logs_bucket_policy_ready" {
+  input = var.logs_bucket_policy_id
+}
+
 # ------------------------------------------------------------------------------
 # Security Group
 # ------------------------------------------------------------------------------
@@ -118,6 +122,8 @@ resource "aws_lb" "this" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-alb"
   })
+
+  depends_on = [terraform_data.logs_bucket_policy_ready]
 }
 
 # ------------------------------------------------------------------------------

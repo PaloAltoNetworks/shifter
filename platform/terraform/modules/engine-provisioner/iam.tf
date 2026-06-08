@@ -169,27 +169,24 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # EC2 read and key-pair operations. Describe APIs require
         # Resource=*; key-pair names are generated per range/NGFW run.
-        Sid    = "EC2DescribeAndKeyPairOperations"
         Effect = "Allow"
         Action = [
-          "ec2:Describe*",
+          "ec2:Describe*"
+        ]
+        Resource = "*"
+      },
+      {
+        # Key-pair names are generated per range/NGFW run.
+        Effect = "Allow"
+        Action = [
           "ec2:ImportKeyPair",
           "ec2:DeleteKeyPair"
         ]
-        Resource = [
-          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:volume/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*",
-          "arn:aws:ec2:${local.region}::image/*"
-        ]
+        Resource = "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
       },
       {
         # Instance creation is restricted by the runtime Terraform tags that
         # the provisioner applies to every managed range/NGFW instance.
-        Sid    = "EC2TaggedInstanceCreate"
         Effect = "Allow"
         Action = [
           "ec2:RunInstances"
@@ -200,12 +197,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
           "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
           "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
           "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:route-table/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:internet-gateway/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:elastic-ip/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:natgateway/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint-service/*",
           "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
         ]
         Condition = {
@@ -220,7 +211,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # Tagging at create time is needed for the EC2 resources provisioner
         # Terraform creates and is bound to create APIs so it cannot retag
         # arbitrary EC2 resources.
-        Sid    = "EC2TagOnCreate"
         Effect = "Allow"
         Action = [
           "ec2:CreateTags"
@@ -253,7 +243,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - StopInstances, StartInstances for power management
         # - ModifyInstanceAttribute for runtime changes
         # - DeleteTags for cleanup
-        Sid    = "EC2TaggedInstanceLifecycle"
         Effect = "Allow"
         Action = [
           "ec2:TerminateInstances",
@@ -282,7 +271,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - CreateNetworkInterface for mgmt and data ENIs
         # - ModifyNetworkInterfaceAttribute for source_dest_check=False on data ENI
         # - DeleteNetworkInterface for cleanup
-        Sid    = "EC2NetworkInterfaceOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateNetworkInterface",
@@ -298,7 +286,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - ModifySubnetAttribute for map_public_ip_on_launch, etc.
         # - DescribeSubnets for state queries
         # Note: tag-on-create support is in EC2TagOnCreate.
-        Sid    = "EC2SubnetOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateSubnet",
@@ -314,7 +301,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - CreateRoute, DeleteRoute, ReplaceRoute for route entries
         # - AssociateRouteTable, DisassociateRouteTable for subnet associations
         # - DescribeRouteTables for state queries
-        Sid    = "EC2RouteTableOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateRouteTable",
@@ -334,7 +320,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - AuthorizeSecurityGroupIngress/Egress for inbound/outbound rules
         # - RevokeSecurityGroupIngress/Egress for rule removal
         # Note: DescribeSecurityGroups covered by Describe* in EC2InstanceOperations
-        Sid    = "EC2SecurityGroupOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateSecurityGroup",
@@ -349,7 +334,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # Internet Gateway lifecycle management
         # Required for routing traffic to/from the internet
-        Sid    = "EC2InternetGatewayOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateInternetGateway",
@@ -363,7 +347,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # Elastic IP lifecycle management
         # Required for static public IPs on instances/NAT gateways
-        Sid    = "EC2ElasticIPOperations"
         Effect = "Allow"
         Action = [
           "ec2:AllocateAddress",
@@ -377,7 +360,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # NAT Gateway lifecycle management
         # Required for private subnet outbound internet access
-        Sid    = "EC2NATGatewayOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateNatGateway",
@@ -389,7 +371,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # PassRole for range instances and NGFW instances
         # compact() filters out empty strings when NGFW is not enabled
-        Sid    = "PassRoleToInstances"
         Effect = "Allow"
         Action = "iam:PassRole"
         Resource = compact([
@@ -499,7 +480,6 @@ resource "aws_iam_role_policy" "gwlb" {
         # ELBv2 Describe APIs require Resource = "*" per the AWS service
         # authorization reference. Actions are enumerated so the wildcard
         # statement cannot grow silently to additional read APIs.
-        Sid    = "GWLBDescribe"
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:DescribeLoadBalancers",
@@ -517,7 +497,6 @@ resource "aws_iam_role_policy" "gwlb" {
         # resource types and gated on Shifter ownership request tags so
         # this statement cannot create ALB/NLB resources or untagged
         # resources.
-        Sid    = "GWLBCreate"
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:CreateLoadBalancer",
@@ -541,7 +520,6 @@ resource "aws_iam_role_policy" "gwlb" {
         # Existing-resource mutations. Restricted to Shifter-owned GWLB
         # resources via ELBv2 resource tags so the runtime cannot delete
         # or reconfigure load balancers it does not own.
-        Sid    = "GWLBMutateOwned"
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:DeleteLoadBalancer",
@@ -571,7 +549,6 @@ resource "aws_iam_role_policy" "gwlb" {
         # Tagging at create time. Bound to the GWLB create APIs and the
         # Shifter ownership request tags so this statement cannot tag
         # arbitrary ELBv2 resources or strip ownership tags later.
-        Sid    = "GWLBTagOnCreate"
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:AddTags"
@@ -614,7 +591,6 @@ resource "aws_iam_role_policy" "vpc_endpoints" {
     Statement = [
       {
         # VPC Endpoint Service operations (for GWLB service exposure)
-        Sid    = "VPCEndpointServiceOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateVpcEndpointServiceConfiguration",
@@ -630,7 +606,6 @@ resource "aws_iam_role_policy" "vpc_endpoints" {
       },
       {
         # VPC Endpoint operations (for GWLB endpoints in range subnets)
-        Sid    = "VPCEndpointOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateVpcEndpoint",
@@ -645,10 +620,12 @@ resource "aws_iam_role_policy" "vpc_endpoints" {
 }
 
 # ------------------------------------------------------------------------------
-# Task Role Policy - S3 Bootstrap Write
+# Task Role Policy - Runtime Writes
 # ------------------------------------------------------------------------------
 # Provisioner needs write access to bootstrap/* prefix for NGFW init-cfg.txt,
-# authcodes, and other bootstrap configuration files.
+# authcodes, and other bootstrap configuration files. It also publishes range
+# lifecycle events to SNS. Keep these together so SCP-constrained accounts that
+# require inline policies stay under IAM's aggregate inline-role policy limit.
 
 resource "aws_iam_role_policy" "s3_bootstrap" {
   name = "s3-bootstrap-write"
@@ -656,15 +633,22 @@ resource "aws_iam_role_policy" "s3_bootstrap" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:GetObjectTagging"
-      ]
-      Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:GetObjectTagging"
+        ]
+        Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "sns:Publish"
+        Resource = var.sns_topic_arn
+      }
+    ]
   })
 }
 
@@ -684,7 +668,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SSMParameterOperations"
         Effect = "Allow"
         Action = [
           # Create/Update
@@ -704,7 +687,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
       },
       {
         # Read-only access to AMI parameters (set by Packer builds)
-        Sid    = "SSMReadAMIParameters"
         Effect = "Allow"
         Action = [
           "ssm:GetParameter",
@@ -715,7 +697,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
       {
         # DescribeParameters required by Terraform for metadata lookup
         # Must be * resource per AWS API requirements
-        Sid      = "SSMDescribeParameters"
         Effect   = "Allow"
         Action   = "ssm:DescribeParameters"
         Resource = "*"
@@ -723,7 +704,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
       {
         # KMS permissions for SecureString parameters
         # Uses AWS managed key for SSM via service condition
-        Sid    = "KMSForSecureStringParameters"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -758,7 +738,6 @@ resource "aws_iam_role_policy" "ssm_run_command" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SSMSendCommand"
         Effect = "Allow"
         Action = [
           "ssm:SendCommand"
@@ -770,7 +749,6 @@ resource "aws_iam_role_policy" "ssm_run_command" {
         ]
       },
       {
-        Sid    = "SSMGetCommandInvocation"
         Effect = "Allow"
         Action = [
           "ssm:GetCommandInvocation",
@@ -779,7 +757,6 @@ resource "aws_iam_role_policy" "ssm_run_command" {
         Resource = "*"
       },
       {
-        Sid    = "SSMDescribeInstances"
         Effect = "Allow"
         Action = [
           "ssm:DescribeInstanceInformation"
@@ -787,7 +764,6 @@ resource "aws_iam_role_policy" "ssm_run_command" {
         Resource = "*"
       },
       {
-        Sid    = "EC2RebootInstances"
         Effect = "Allow"
         Action = [
           "ec2:RebootInstances"
@@ -812,7 +788,6 @@ resource "aws_iam_role_policy" "kms" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "EngineSecretsEncryption"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -824,7 +799,6 @@ resource "aws_iam_role_policy" "kms" {
         Resource = var.engine_secrets_kms_key_arn
       },
       {
-        Sid    = "SecretsManagerKMSAccess"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -839,28 +813,5 @@ resource "aws_iam_role_policy" "kms" {
         }
       }
     ]
-  })
-}
-
-# ------------------------------------------------------------------------------
-# Task Role Policy - SNS (for range event publishing)
-# ------------------------------------------------------------------------------
-# Provisioner publishes range lifecycle events to SNS for fan-out to
-# Django services (CMS, Engine, Mission Control).
-
-resource "aws_iam_role_policy" "sns_publish" {
-  name = "sns-publish"
-  role = aws_iam_role.ecs_task.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid    = "SNSPublishRangeEvents"
-      Effect = "Allow"
-      Action = [
-        "sns:Publish"
-      ]
-      Resource = var.sns_topic_arn
-    }]
   })
 }

@@ -258,6 +258,11 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
+# Default file storage needs a writable location for the
+# django-health-check storage probe. Keep it out of the immutable app source
+# tree so non-root production containers can prove storage readiness.
+MEDIA_ROOT = BASE_DIR / "media"
+
 # Use simple static storage for tests (no manifest required)
 if os.environ.get("TESTING") == "1":
     STORAGES = {
@@ -284,11 +289,12 @@ if not DEBUG:
 
     # HTTPS enforcement (issue #776). `SECURE_PROXY_SSL_HEADER` above tells
     # Django to read the LB's forwarded-proto, so `SECURE_SSL_REDIRECT`
-    # won't loop behind a TLS-terminating proxy. Health-check probes that
-    # arrive over plain HTTP without `X-Forwarded-Proto: https` will 301;
-    # add their paths to `SECURE_REDIRECT_EXEMPT` via env if the LB
-    # doesn't follow redirects.
+    # won't loop behind a TLS-terminating proxy. ALB health checks arrive
+    # over plain HTTP without `X-Forwarded-Proto: https` and do not follow
+    # redirects, so `/health` must remain a direct dependency-aware 200/500
+    # readiness surface instead of a 301.
     SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", True)
+    SECURE_REDIRECT_EXEMPT = [r"^health/?$"]
 
     # HSTS — defense in depth so an active downgrade can't strip the first
     # redirect. Defaults: 1 year, include subdomains, NO preload. Preload

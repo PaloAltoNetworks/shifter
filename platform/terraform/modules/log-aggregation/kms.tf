@@ -5,9 +5,9 @@
 # Checkov CKV_AWS_158 / CKV_AWS_240 / CKV_AWS_241 / CKV_AWS_27 / CKV_AWS_145.
 #
 # The key policy grants the AWS service principals for CloudWatch Logs and
-# S3 the operations they need, scoped to this account. SQS and Kinesis
-# Firehose call KMS as the deploying principal (the Firehose role or the
-# producer), so they reuse the broad root-account grant.
+# S3 the operations they need, scoped to this account. Firehose also gets an
+# explicit key-policy grant so CloudWatch Logs subscription-filter validation
+# can deliver its test record to the SSE-KMS delivery stream in fresh accounts.
 
 resource "aws_kms_key" "log_aggregation" {
   count = var.enable_log_aggregation ? 1 : 0
@@ -18,7 +18,7 @@ resource "aws_kms_key" "log_aggregation" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Sid       = "EnableRootAccountAdmin"
         Effect    = "Allow"
@@ -59,7 +59,34 @@ resource "aws_kms_key" "log_aggregation" {
           }
         }
       },
-    ]
+      {
+        Sid       = "AllowFirehoseRole"
+        Effect    = "Allow"
+        Principal = { AWS = aws_iam_role.firehose[count.index].arn }
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+          "kms:ReEncrypt*",
+        ]
+        Resource = "*"
+      },
+      ],
+      length(var.source_log_group_names) > 0 ? [
+        {
+          Sid       = "AllowCloudWatchToFirehoseRole"
+          Effect    = "Allow"
+          Principal = { AWS = aws_iam_role.cloudwatch_to_firehose[0].arn }
+          Action = [
+            "kms:Decrypt",
+            "kms:DescribeKey",
+            "kms:GenerateDataKey",
+          ]
+          Resource = "*"
+        }
+      ] : []
+    )
   })
 
   tags = merge(local.common_tags, {

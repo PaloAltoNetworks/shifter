@@ -85,6 +85,24 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
+    "reason": "aws-dev-bootstrap-inline-admin: CKV_AWS_274 / CKV_AWS_288 / CKV_AWS_286 / CKV_AWS_62 / CKV_AWS_63 / CKV_AWS_287 / CKV2_AWS_40 on the dev GitHub OIDC deploy role. The fresh aws-dev account is subject to an Organizations SCP that denies iam:AttachRolePolicy, so the role cannot use the managed AdministratorAccess policy attachment the module previously declared. During dev account bootstrap this role remains AdministratorAccess-equivalent by design; the SCP-compatible inline policy preserves the existing privilege model without broadening the trust policy.",
+    "expires_on": "2026-12-07",
+    "paths": [
+      "platform/terraform/global/iam/github-oidc.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "aws-dev-runner-inline-ssm: CKV_AWS_288 on the GitHub runner SSM agent policy. The same Organizations SCP denies iam:AttachRolePolicy, so the runner role cannot attach AmazonSSMManagedInstanceCore. The inline policy mirrors the AWS-managed SSM agent permissions; wildcard resources are required by the SSM, ssmmessages, and ec2messages agent APIs.",
+    "expires_on": "2026-12-07",
+    "paths": [
+      "platform/terraform/global/github-runner/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
     "reason": "CKV2_AWS_5 (Security Group unattached): SGs created here are attached at runtime by the engine provisioner (ECS task ENIs, range instances spawned by Pulumi), not statically by Terraform. Each unattached SG resource exports its ID via outputs.tf for the runtime consumer.",
     "expires_on": "2027-05-26",
     "paths": [
@@ -106,7 +124,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 (S3 access logging / versioning / cross-region replication / event notifications): the log-aggregation S3 bucket is the access log sink — logging access of the log bucket back to itself is a recursion, and versioning would double storage on append-only log data. Cross-region replication is not in scope for ephemeral log archive. Event notifications are only added when a consumer actually exists.",
+    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 / CKV_AWS_145 (S3 access logging / versioning / cross-region replication / event notifications / SSE-KMS): the log-aggregation S3 bucket is the access log sink — logging access of the log bucket back to itself is a recursion, and versioning would double storage on append-only log data. Cross-region replication is not in scope for ephemeral log archive. Event notifications are only added when a consumer actually exists. The dedicated ALB access-log bucket must use SSE-S3 because Elastic Load Balancing access-log delivery does not support SSE-KMS; central Firehose log archives remain protected by the log-aggregation CMK.",
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/log-aggregation/s3.tf",

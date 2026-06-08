@@ -104,7 +104,12 @@ The first slice intentionally stays small:
   launching a platform Terraform plan. The check also requires every
   `terraform plan` command in `_shifter-platform.yml` to include
   `-lock-timeout=5m`, so legitimate concurrent platform plans wait on the
-  backend state lock instead of failing immediately.
+  backend state lock instead of failing immediately. On apply workflows,
+  `_shifter-platform.yml` pushes the Guacamole ECR images before the
+  platform Terraform plan because the Guacamole module resolves current
+  image digests with `aws_ecr_image` data sources during plan. This ordering
+  is required for fresh AWS accounts where the repositories exist but the
+  tags have not been published yet.
 
 - `TFLint`
   Adds Terraform linting on top of `terraform fmt` and `terraform validate`.

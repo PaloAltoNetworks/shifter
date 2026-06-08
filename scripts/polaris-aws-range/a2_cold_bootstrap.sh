@@ -13,11 +13,12 @@
 #
 #   ./scripts/polaris-aws-range/a2_cold_bootstrap.sh i-xxxxxxxxxxxxxxxxx
 #
-# Requires: aws cli with panw-shifter-dev-workstation profile access to SSM.
+# Requires: aws cli with profile access to SSM. For aws-dev use
+# AWS_PROFILE=aws-dev AWS_REGION=us-east-2.
 
 set -euo pipefail
 
-AWS_PROFILE="${AWS_PROFILE:-panw-shifter-dev-workstation}"
+AWS_PROFILE="${AWS_PROFILE:-aws-dev}"
 AWS_REGION="${AWS_REGION:-us-east-2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 A2_ID="${1:-}"

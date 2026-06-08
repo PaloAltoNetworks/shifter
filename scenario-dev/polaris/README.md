@@ -85,7 +85,14 @@ first instead of assuming the older design prose is correct.
 
 ## Getting started
 
-1. **Deploy** — on the range host (ctf-range-builder GCP VM):
+For AWS standalone/default-VPC bring-up, use
+[`scripts/polaris-aws-range/README.md`](../../scripts/polaris-aws-range/README.md).
+That path provisions the Ubuntu range host and A2 Windows DC in AWS, then runs
+the same `tests/` validation scripts over SSM.
+
+Legacy local-compose flow:
+
+1. **Deploy** — on the range host:
    ```
    rsync -a scenario-dev/polaris/ ctf-range-builder:/home/atomik/range/
    ssh ctf-range-builder 'bash /home/atomik/range/tests/setup.sh'
@@ -95,7 +102,7 @@ first instead of assuming the older design prose is correct.
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/run-all-smoketests.sh'
    ```
-   Expected: `16 / 16 asset sweeps PASS`, `NORTHSTORM full range: PASS`.
+   Expected: all listed asset sweeps pass and `NORTHSTORM full range: PASS`.
    Infrastructure-level: per-asset connectivity + cross-cutting network
    isolation. Does not verify CTFd challenge content.
 
@@ -121,7 +128,7 @@ first instead of assuming the older design prose is correct.
 |--------|--------------------------|---------------------|-----|
 | A0     | shared                   | a14-kali            | a14 is on shared |
 | A1     | corporate                | a14-kali            | a14 is on corporate |
-| A2     | external GCP VM          | a14-kali            | routed via host |
+| A2     | adjacent Windows VM      | a14-kali            | routed via host/VPC |
 | A3     | corporate                | a14-kali            | a14 reaches on corporate |
 | A4     | corporate                | a14-kali            | a14 is on corporate |
 | A5     | scada (VLAN 40)          | a15-ops-eng         | only A15 reaches scada |

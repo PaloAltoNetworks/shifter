@@ -35,6 +35,9 @@ if [[ -n "${KALI_SPLICE_PRIVATE_KEY_B64:-}" ]]; then
     printf '%s' "$KALI_SPLICE_PRIVATE_KEY_B64" | base64 -d > /home/kali/.ssh/splice_relay
     chown kali:kali /home/kali/.ssh/splice_relay
     chmod 600 /home/kali/.ssh/splice_relay
+    install -d -m 700 /root/.ssh
+    cp /home/kali/.ssh/splice_relay /root/.ssh/splice_relay
+    chmod 600 /root/.ssh/splice_relay
 
     config_file=/home/kali/.ssh/config
     if ! [[ -f "$config_file" ]] || ! grep -q '^Host splice-relay' "$config_file"; then
@@ -49,6 +52,20 @@ Host splice-relay
 CFG_EOF
         chown kali:kali "$config_file"
         chmod 600 "$config_file"
+    fi
+
+    root_config_file=/root/.ssh/config
+    if ! [[ -f "$root_config_file" ]] || ! grep -q '^Host splice-relay' "$root_config_file"; then
+        cat >> "$root_config_file" <<'CFG_EOF'
+
+Host splice-relay
+    User root
+    IdentityFile ~/.ssh/splice_relay
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.ssh/known_hosts
+CFG_EOF
+        chmod 600 "$root_config_file"
     fi
 fi
 

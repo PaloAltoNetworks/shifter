@@ -495,7 +495,7 @@ def server_inventory():
         cell.fill = header_fill
 
     data = [
-        ("dc01.boreas.local", "172.20.10.10", 10, "Windows Server 2022", "4 vCPU", "8 GB", "100 GB", "Domain Controller", "d.kowalski"),
+        ("dc01.boreas.local", "resolve via DNS", "range subnet", "Windows Server 2022", "4 vCPU", "8 GB", "100 GB", "Domain Controller", "d.kowalski"),
         ("mail.boreas.local", "172.20.10.20", 10, "Debian 12", "2 vCPU", "4 GB", "50 GB", "Postfix/Dovecot/Roundcube", "d.kowalski"),
         ("intranet.boreas.local", "172.20.10.30", 10, "Debian 12", "2 vCPU", "4 GB", "30 GB", "Flask wiki/CMS", "d.kowalski"),
         ("fileserv.boreas.local", "172.20.10.40", 10, "Debian 12", "2 vCPU", "4 GB", "200 GB", "Samba file shares", "d.kowalski"),

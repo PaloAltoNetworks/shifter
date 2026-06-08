@@ -37,13 +37,13 @@ in batches, and writes the report.
 
 Usage::
 
-    python3 check_range_health.py --profile panw-shifter-dev-workstation
+    python3 check_range_health.py --profile aws-dev
 
     # full per-range detail table (not just issues)
-    python3 check_range_health.py --profile panw-shifter-dev-workstation --verbose
+    python3 check_range_health.py --profile aws-dev --verbose
 
     # write report to an explicit path
-    python3 check_range_health.py --profile panw-shifter-dev-workstation \\
+    python3 check_range_health.py --profile aws-dev \\
         --output /tmp/health.md
 """
 

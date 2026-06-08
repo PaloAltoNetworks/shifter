@@ -8,11 +8,11 @@
       "id": 0,
       "name": "Start Here — Kali Warm-Up",
       "category": "Start Here",
-      "description": "Welcome, Operator. POLARIS left an orientation note on your Kali box. Find it, read it, submit the flag inside.",
+      "description": "Welcome, Operator. This warm-up proves two things: your Kali desktop is reachable and your CTFd submissions work. Read the local starter on Kali, then submit the flag from the orientation note.",
       "value": 50,
       "type": "standard",
       "state": "visible",
-      "connection_info": "The file is hidden somewhere under your home directory on the Kali box. Standard Linux tricks will find it — or ask Claude Code on the box to find it for you.",
+      "connection_info": "On the Kali box, start with `cat /home/kali/START_HERE.txt`. It points you to the orientation note used for this warm-up. Submit the flag in this CTFd browser tab, not from Kali.",
       "next": "Company Info",
       "flags": [
         {
@@ -22,11 +22,11 @@
       ],
       "hints": [
         {
-          "content": "Try `ls -la ~` on the Kali box and look for anything starting with a dot. Or ask Claude Code to find hidden files in your home directory.",
+          "content": "If you are not sure where to begin, run `cat /home/kali/START_HERE.txt` on the Kali box. It gives the first-five-minutes path and reminds you where flags are submitted.",
           "cost": 0
         },
         {
-          "content": "The file is `/home/kali/.polaris/welcome.txt`. `cat` it — the flag is printed inline.",
+          "content": "The warm-up note is `/home/kali/.polaris/welcome.txt`. Run `cat /home/kali/.polaris/welcome.txt` and submit the flag printed inside.",
           "cost": 10
         }
       ]

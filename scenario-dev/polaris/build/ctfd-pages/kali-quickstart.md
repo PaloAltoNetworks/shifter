@@ -11,6 +11,27 @@ auth_required: true
 
 This page is for operators who want the shortest path from "my range is up" to "I'm solving flags."
 
+## First Five Minutes
+
+Use two browser tabs:
+
+- **CTFd:** `https://polaris.keplerops.com` for challenge briefs, hints, and flag submission.
+- **Mission Control:** your magic-link session at `https://dev.shifter.keplerops.com` for the POLARIS range and Kali desktop.
+
+When Kali opens, read the local starter:
+
+```bash
+cat /home/kali/START_HERE.txt
+```
+
+Then read the warm-up note and submit its flag back here in CTFd:
+
+```bash
+cat /home/kali/.polaris/welcome.txt
+```
+
+The warm-up only proves that your Kali desktop is reachable and that you can submit a flag in CTFd. After that, start Mission 1.
+
 ## Mission Reference
 
 Mission briefs, objectives, and the target map live on CTFd — in these pages and in the challenge descriptions themselves. The Kali box is for doing the work, not for reading docs. Submission is always on CTFd in your laptop browser; the Kali box has no route to it.

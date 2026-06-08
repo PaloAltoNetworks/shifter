@@ -33,8 +33,8 @@ Run from the range host (it executes commands in runner containers via
 `docker exec`):
 
 ```sh
-# Full range sweep against a staged range
-python3 -m scenario_smoketest
+# Covered range sweep against a staged range
+python3 -m scenario_smoketest --only 1,2,3,4,5,6,31
 
 # A subset of challenges
 python3 -m scenario_smoketest --only 1,2,3
@@ -58,6 +58,12 @@ smoketests under `../smoketests/`. Coverage is intentionally incremental: the
 report makes every uncovered challenge explicit, so the gap is visible rather
 than hidden. Add an adapter by registering a callable for a challenge id — see
 `adapters/mission1_osint.py` for the pattern.
+
+Current executable range-adapter coverage is challenges `1-6` and `31`. Use
+`--only 1,2,3,4,5,6,31` for pre-event validation until more adapters are added.
+Running `python3 -m scenario_smoketest` without `--only` is useful for coverage
+gap discovery, but it intentionally exits non-zero while uncovered board
+challenges remain.
 
 ## Tests
 

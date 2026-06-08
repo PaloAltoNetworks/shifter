@@ -15,9 +15,20 @@ AWS_PROFILE=panw-shifter-dev-workstation terraform apply -var-file=dev.tfvars
 After apply:
 
 1. Create the external DNS `A` record for the CTFd hostname to the new Elastic IP.
+   In Cloudflare, keep the record DNS-only for the first certbot run and put
+   only the IP address in the target field, not an `http://` or `https://` URL.
 2. Use the Terraform `certbot_command` output over SSM after DNS resolves.
-3. Complete the CTFd setup wizard in the browser.
-4. Generate an admin API token in CTFd and export it as `CTFD_TOKEN`.
+   Verify `https://<ctfd-hostname>/login` reaches CTFd from outside AWS.
+3. If the hostname should sit behind Cloudflare, switch the same `A` record to
+   proxied after origin HTTPS works and set Cloudflare SSL/TLS mode to
+   `Full (strict)`.
+   Do not leave a Managed Challenge, Bot Fight Mode, Browser Integrity Check,
+   or equivalent challenge action in front of the CTFd hostname unless the
+   event explicitly accepts that participant and API traffic may be challenged.
+   A smoke check to `https://<ctfd-hostname>/login` should return the CTFd login
+   page, not a Cloudflare `cf-mitigated: challenge` response.
+4. Complete the CTFd setup wizard in the browser.
+5. Generate an admin API token in CTFd and export it as `CTFD_TOKEN`.
 
 ## Polaris Onboarding Pages + Start Here Warm-Up
 

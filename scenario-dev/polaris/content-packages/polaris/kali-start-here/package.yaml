@@ -1,0 +1,3 @@
+# Visible participant starter text for /home/kali/START_HERE.txt.
+# The active A14 image copies scenario-dev/polaris/build/A14-kali/START_HERE.txt
+# directly; this package keeps the SDL content reference resolvable.

@@ -335,9 +335,10 @@
       "id": 31, "name": "Underground Signals", "category": "Mission 5 — Bunker",
       "description": "The relay sees several industrial hosts below. Before you can work with them, you need a map.",
       "value": 100, "type": "standard",
+      "connection_info": "After Lights Out, the local splice opens from Kali to the field relay. From Kali, run `ssh root@splice-relay`. No password is required: the range stages a per-range key at `/home/kali/.ssh/splice_relay` and `~/.ssh/config` uses it automatically. Once on the relay, start with `/root/README.txt` and `/root/scan_results.txt`.",
       "flags": [{"type": "static", "content": "FLAG{2e8c0a5d7f3b1946}"}],
       "hints": [
-        {"content": "Start on A9 with /root/scan_results.txt before you bother with a slow live scan.", "cost": 25},
+        {"content": "The relay is A9. From Kali, use `ssh root@splice-relay`; if SSH asks for a password, the range key staging failed and you should flag a runner.", "cost": 25},
         {"content": "Use /usr/local/bin/modbus_client.py <host> devid and keep the model strings from all three controllers.", "cost": 50}
       ],
       "tags": ["medium", "ot", "modbus"], "state": "visible",

@@ -34,6 +34,18 @@ Open this from Kali, not from your laptop:
 
   http://boreas-systems.ctf
 
+AFTER LIGHTS OUT
+
+If a Bunker objective tells you the local splice is open, connect from Kali:
+
+  ssh root@splice-relay
+
+No password is required. The range stages a per-range key at:
+
+  /home/kali/.ssh/splice_relay
+
+If SSH asks for a password, flag a runner.
+
 IF YOU ARE LOST
 
   - Reopen the CTFd Start Here page and Kali Quickstart.

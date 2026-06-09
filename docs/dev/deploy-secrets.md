@@ -249,6 +249,48 @@ terraform init -backend-config=dev.s3.tfbackend
 terraform plan
 ```
 
+For event-sized AWS dev runs, keep the GitHub Actions variable
+`AWS_PORTAL_ENABLE_AUTOSCALING=true` in sync with the portal tfvars. That
+variable controls whether the deploy job uses the ASG refresh path instead of
+the single-instance SSM path. The deployment-owned `TF_VARS_DEV_PORTAL` payload
+should also carry the event sizing values from the committed baseline when you
+want the live account to use the ASG, warm pool, Redis channel layer, and larger
+Guacamole/Postgres capacity:
+
+```hcl
+enable_autoscaling     = true
+asg_min_size           = 2
+asg_max_size           = 8
+asg_desired_capacity   = 2
+asg_warm_pool_min_size = 2
+asg_warm_pool_state    = "Stopped"
+enable_redis           = true
+
+db_instance_class        = "db.m6i.xlarge"
+db_allocated_storage     = 100
+db_max_allocated_storage = 500
+db_backup_retention_days = 7
+
+redis_node_type = "cache.m6g.xlarge"
+
+guacd_cpu                      = 2048
+guacd_memory                   = 4096
+guacamole_client_cpu           = 2048
+guacamole_client_memory        = 4096
+guacd_desired_count            = 6
+guacamole_client_desired_count = 4
+
+guacamole_db_instance_class        = "db.m6i.xlarge"
+guacamole_db_allocated_storage     = 100
+guacamole_db_max_allocated_storage = 500
+guacamole_db_multi_az              = true
+
+guacamole_enable_autoscaling       = true
+guacamole_autoscaling_min_capacity = 4
+guacamole_autoscaling_max_capacity = 10
+guacamole_autoscaling_cpu_target   = 60
+```
+
 ```sh
 # GCP gcp-dev
 cat > platform/terraform/gcp/environments/gcp-dev/local.auto.tfvars <<EOF

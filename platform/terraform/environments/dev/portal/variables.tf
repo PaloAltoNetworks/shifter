@@ -293,6 +293,21 @@ variable "asg_desired_capacity" {
   type        = number
 }
 
+variable "asg_warm_pool_min_size" {
+  description = "Minimum number of pre-initialized portal instances to keep in the ASG warm pool. Set 0 to disable."
+  type        = number
+}
+
+variable "asg_warm_pool_state" {
+  description = "Warm pool instance state. Valid values are Stopped, Running, or Hibernated."
+  type        = string
+
+  validation {
+    condition     = contains(["Stopped", "Running", "Hibernated"], var.asg_warm_pool_state)
+    error_message = "asg_warm_pool_state must be one of: Stopped, Running, Hibernated."
+  }
+}
+
 variable "scale_up_threshold" {
   description = "CPU percentage threshold to trigger scale up"
   type        = number

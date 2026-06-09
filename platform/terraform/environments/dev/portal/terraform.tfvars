@@ -34,11 +34,11 @@ enable_nat_gateway = true
 db_name                  = "shifter"
 db_username              = "shifter_admin"
 db_engine_version        = "16"
-db_instance_class        = "db.m5.large"
-db_allocated_storage     = 20
-db_max_allocated_storage = 50
+db_instance_class        = "db.m6i.xlarge"
+db_allocated_storage     = 100
+db_max_allocated_storage = 500
 db_multi_az              = true
-db_backup_retention_days = 1
+db_backup_retention_days = 7
 db_deletion_protection   = false
 db_skip_final_snapshot   = true
 db_apply_immediately     = true
@@ -49,8 +49,8 @@ db_apply_immediately     = true
 
 # Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
 ec2_ami_id           = "ami-00e428798e77d38d9"
-ec2_instance_type    = "m5.xlarge"
-ec2_root_volume_size = 30
+ec2_instance_type    = "m6i.xlarge"
+ec2_root_volume_size = 50
 
 # Standalone CTFd host in the portal VPC
 enable_ctfd                 = true
@@ -115,24 +115,25 @@ kali_instance_type   = "t3.large"
 # Autoscaling
 # ------------------------------------------------------------------------------
 
-enable_autoscaling   = false
-asg_min_size         = 1
-asg_max_size         = 1
-asg_desired_capacity = 1
-scale_up_threshold   = 70
-scale_down_threshold = 30
+enable_autoscaling     = true
+asg_min_size           = 2
+asg_max_size           = 8
+asg_desired_capacity   = 2
+asg_warm_pool_min_size = 2
+asg_warm_pool_state    = "Stopped"
+scale_up_threshold     = 70
+scale_down_threshold   = 30
 
 # Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
-# Dev keeps the in-memory channel layer (Redis provisioned but unused). Flip to
-# true to run the portal on Redis for event-representative websocket behavior;
-# no change to enable_autoscaling is required.
-enable_redis = false
+# Event-representative dev runs the portal on Redis so websocket behavior is
+# shared across the ASG instead of being pinned to per-instance memory.
+enable_redis = true
 
 # ------------------------------------------------------------------------------
 # Redis
 # ------------------------------------------------------------------------------
 
-redis_node_type          = "cache.m6g.large"
+redis_node_type          = "cache.m6g.xlarge"
 redis_engine_version     = "7.1"
 redis_enable_replication = true
 
@@ -187,29 +188,29 @@ dc_domain_name = "internal.shifter"
 
 guacd_image_tag                = "1.5.5"
 guacamole_client_image_tag     = "1.5.5"
-guacd_cpu                      = 1024
-guacd_memory                   = 2048
-guacamole_client_cpu           = 1024
-guacamole_client_memory        = 2048
-guacd_desired_count            = 4
-guacamole_client_desired_count = 3
+guacd_cpu                      = 2048
+guacd_memory                   = 4096
+guacamole_client_cpu           = 2048
+guacamole_client_memory        = 4096
+guacd_desired_count            = 6
+guacamole_client_desired_count = 4
 
 # Database
-guacamole_db_instance_class        = "db.m5.xlarge"
-guacamole_db_allocated_storage     = 20
-guacamole_db_max_allocated_storage = 50
+guacamole_db_instance_class        = "db.m6i.xlarge"
+guacamole_db_allocated_storage     = 100
+guacamole_db_max_allocated_storage = 500
 guacamole_db_engine_version        = "16"
-guacamole_db_multi_az              = false
+guacamole_db_multi_az              = true
 guacamole_db_backup_retention_days = 7
 guacamole_db_deletion_protection   = false
 guacamole_db_skip_final_snapshot   = true
 guacamole_db_apply_immediately     = true
 
-# Autoscaling (disabled for initial testing)
-guacamole_enable_autoscaling       = false
-guacamole_autoscaling_min_capacity = 1
-guacamole_autoscaling_max_capacity = 4
-guacamole_autoscaling_cpu_target   = 70
+# Autoscaling
+guacamole_enable_autoscaling       = true
+guacamole_autoscaling_min_capacity = 4
+guacamole_autoscaling_max_capacity = 10
+guacamole_autoscaling_cpu_target   = 60
 
 # Secrets
 guacamole_secrets_recovery_window_days = 0

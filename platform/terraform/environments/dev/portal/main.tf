@@ -481,16 +481,18 @@ module "ec2" {
   ecs_execution_role_arn     = module.engine_provisioner.ecs_execution_role_arn
 
   # Autoscaling configuration
-  enable_autoscaling   = var.enable_autoscaling
-  subnet_ids           = module.vpc.private_subnet_ids
-  target_group_arn     = module.alb.target_group_arn
-  asg_min_size         = var.asg_min_size
-  asg_max_size         = var.asg_max_size
-  asg_desired_capacity = var.asg_desired_capacity
-  redis_endpoint       = var.enable_redis ? module.redis.redis_endpoint : ""
-  scale_up_threshold   = var.scale_up_threshold
-  scale_down_threshold = var.scale_down_threshold
-  log_retention_days   = var.log_retention_days
+  enable_autoscaling     = var.enable_autoscaling
+  subnet_ids             = module.vpc.private_subnet_ids
+  target_group_arn       = module.alb.target_group_arn
+  asg_min_size           = var.asg_min_size
+  asg_max_size           = var.asg_max_size
+  asg_desired_capacity   = var.asg_desired_capacity
+  asg_warm_pool_min_size = var.asg_warm_pool_min_size
+  asg_warm_pool_state    = var.asg_warm_pool_state
+  redis_endpoint         = var.enable_redis ? module.redis.redis_endpoint : ""
+  scale_up_threshold     = var.scale_up_threshold
+  scale_down_threshold   = var.scale_down_threshold
+  log_retention_days     = var.log_retention_days
 
   # Messaging (SQS queues for message consumers)
   sqs_queue_arns  = values(module.messaging.sqs_queue_arns)

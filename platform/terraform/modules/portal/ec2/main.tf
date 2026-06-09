@@ -555,6 +555,19 @@ resource "aws_autoscaling_group" "this" {
     }
   }
 
+  dynamic "warm_pool" {
+    for_each = var.asg_warm_pool_min_size > 0 ? [1] : []
+
+    content {
+      min_size   = var.asg_warm_pool_min_size
+      pool_state = var.asg_warm_pool_state
+
+      instance_reuse_policy {
+        reuse_on_scale_in = true
+      }
+    }
+  }
+
   dynamic "tag" {
     for_each = merge(local.common_tags, {
       Name = "${var.name_prefix}-ec2"

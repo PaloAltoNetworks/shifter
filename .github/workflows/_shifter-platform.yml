@@ -343,7 +343,13 @@ jobs:
             sleep 30
           done
 
-          echo "::warning::Guacamole services did not stabilize within 20 minutes — continuing (services may still be starting)"
+          # Timeout is a failed deploy, not a warning: a green run that leaves
+          # Guacamole unstable reproduces the event-day inconsistent-RDP symptom
+          # with no pipeline evidence. The FAILED circuit-breaker branch above
+          # already exits 1; the timeout must too. If first boot legitimately
+          # needs longer, raise MAX_ATTEMPTS rather than downgrading the result.
+          echo "::error::Guacamole ECS services did not stabilize within 20 minutes (guacd: $GUACD_STATUS | guacamole-client: $CLIENT_STATUS) on cluster $CLUSTER_NAME. Inspect the ECS service events for $GUACD_SERVICE / $CLIENT_SERVICE."
+          exit 1
 
   build:
     permissions:

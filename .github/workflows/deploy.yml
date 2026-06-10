@@ -15,6 +15,15 @@ on:
           always require an active certificate.
         type: boolean
         default: true
+      aws_first_deploy:
+        description: >-
+          Allow the AWS engine deploy to skip the ECS task-family existence
+          check. Set true only for the first-ever deploy to a fresh AWS
+          environment, before the platform Terraform apply has created the
+          provisioner task definition. Automatic (push) deploys always require
+          the family to exist, so a typo'd family name fails the run.
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -401,6 +410,9 @@ jobs:
       environment: ${{ needs.changes.outputs.aws_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       deploy_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
+      # Only a manual workflow_dispatch may opt into the first-deploy bootstrap
+      # bypass; automatic (push) deploys always require the task family to exist.
+      first_deploy: ${{ github.event_name == 'workflow_dispatch' && inputs.aws_first_deploy }}
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}

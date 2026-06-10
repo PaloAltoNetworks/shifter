@@ -2573,6 +2573,177 @@ def check_platform_renders_deploy_tfvars(repo_root: Path, files: list[str] | Non
     return violations
 
 
+_FAIL_LOUD_CHECK = "deploy-verification-fail-loud"
+_FAIL_LOUD_RULE = "ADR-003-R3"
+_ENGINE_WORKFLOW_PATH = ".github/workflows/_shifter-engine.yml"
+_GUAC_STABILIZE_STEP = "Wait for Guacamole ECS services to stabilize"
+_ENGINE_TASKDEF_STEP = "Update ECS task definition"
+# The engine ECS task-family skip is only acceptable behind this explicit
+# bootstrap input (mirrors gcp_require_active_certificate); its presence in the
+# step proves the skip is gated rather than unconditional.
+_ENGINE_BOOTSTRAP_INPUT = "first_deploy"
+
+
+def _fail_loud_relevant(files: list[str] | None) -> bool:
+    if files is None:
+        return True
+    relevant = {
+        _PLATFORM_WORKFLOW_PATH,
+        _ENGINE_WORKFLOW_PATH,
+        _DEPLOY_WORKFLOW_PATH,
+        _ADR_GUARD_SCRIPT_PATH,
+    }
+    return any(path in relevant for path in files)
+
+
+def _fail_loud_violation(path: str, message: str) -> Violation:
+    return Violation(_FAIL_LOUD_CHECK, _FAIL_LOUD_RULE, path, message)
+
+
+def _workflow_step_block(workflow_text: str, step_name: str) -> list[str]:
+    """Return the raw lines of the named step, including its `run:` script.
+
+    A step is the `- name: <step_name>` list item and every more-indented line
+    beneath it, up to the next list item at the same indent or a dedent out of
+    the step list. Returns [] when the step is not found.
+    """
+    block: list[str] = []
+    in_block = False
+    step_indent: int | None = None
+    target = f"- name: {step_name}"
+    for raw_line in workflow_text.splitlines():
+        stripped = raw_line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if not in_block:
+            if stripped == target:
+                in_block = True
+                step_indent = indent
+            continue
+        # End the step at the next sibling list item or any dedent to/under it.
+        if stripped and step_indent is not None and indent <= step_indent:
+            break
+        block.append(raw_line)
+    return block
+
+
+def _noncomment_contains(lines: list[str], needle: str) -> bool:
+    return any(needle in line for line in lines if not line.lstrip().startswith("#"))
+
+
+def _check_guacamole_timeout_fails(platform_text: str) -> list[Violation]:
+    block = _workflow_step_block(platform_text, _GUAC_STABILIZE_STEP)
+    if not block:
+        return [
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"`{_GUAC_STABILIZE_STEP}` step is missing; ADR-003-R3 cannot verify "
+                "the Guacamole stabilization timeout fails the deploy",
+            )
+        ]
+    # The stabilization poll is the last `while ... done` loop in the step; its
+    # closing `done` separates the loop body from the timeout handler tail.
+    done_idx = max(
+        (i for i, line in enumerate(block) if line.strip() == "done"),
+        default=None,
+    )
+    if done_idx is None:
+        return [
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"`{_GUAC_STABILIZE_STEP}` step has no polling loop; ADR-003-R3 expects "
+                "a stabilization wait whose timeout fails the deploy",
+            )
+        ]
+    tail = block[done_idx + 1 :]
+    if not _noncomment_contains(tail, "exit 1") or _noncomment_contains(tail, "exit 0"):
+        return [
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"`{_GUAC_STABILIZE_STEP}` step must fail the deploy on stabilization "
+                "timeout: the handler after the polling loop must `exit 1` (not warn and "
+                "exit 0). Raise the timeout if first boot needs longer, but do not "
+                "downgrade a timeout to a warning",
+            )
+        ]
+    return []
+
+
+def _check_engine_task_family_fails(engine_text: str) -> list[Violation]:
+    block = _workflow_step_block(engine_text, _ENGINE_TASKDEF_STEP)
+    if not block:
+        return [
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                f"`{_ENGINE_TASKDEF_STEP}` step is missing; ADR-003-R3 cannot verify "
+                "a missing engine task family fails the deploy",
+            )
+        ]
+    violations: list[Violation] = []
+    if not _noncomment_contains(block, "exit 1"):
+        violations.append(
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                f"`{_ENGINE_TASKDEF_STEP}` step must `exit 1` when the ECS task "
+                "definition family cannot be described, so a missing/typo'd family "
+                "fails the deploy instead of skipping silently",
+            )
+        )
+    if not _noncomment_contains(block, _ENGINE_BOOTSTRAP_INPUT):
+        violations.append(
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                f"`{_ENGINE_TASKDEF_STEP}` step must gate any missing-family skip on the "
+                f"explicit `{_ENGINE_BOOTSTRAP_INPUT}` bootstrap input; an unconditional "
+                "`exit 0` skip lets a typo'd family skip every deploy forever",
+            )
+        )
+    return violations
+
+
+def check_deploy_verification_fail_loud(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Require deploy-verification steps to fail loud (ADR-003-R3).
+
+    Two deploy steps must fail the run when the thing they verify did not
+    happen, rather than warning and exiting 0:
+
+    - `_shifter-platform.yml`'s Guacamole stabilization wait must `exit 1` on
+      timeout (the FAILED circuit-breaker branch already does).
+    - `_shifter-engine.yml`'s task-definition update must `exit 1` when the ECS
+      task family cannot be described, with the only skip gated behind the
+      explicit `first_deploy` bootstrap input.
+    """
+    if not _fail_loud_relevant(files):
+        return []
+
+    violations: list[Violation] = []
+    platform_path = repo_root / _PLATFORM_WORKFLOW_PATH
+    engine_path = repo_root / _ENGINE_WORKFLOW_PATH
+
+    if not platform_path.exists():
+        violations.append(
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "Required workflow is missing; ADR-003-R3 cannot verify the Guacamole "
+                "stabilization timeout fails the deploy",
+            )
+        )
+    else:
+        violations.extend(_check_guacamole_timeout_fails(platform_path.read_text(encoding="utf-8")))
+
+    if not engine_path.exists():
+        violations.append(
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                "Required workflow is missing; ADR-003-R3 cannot verify a missing engine "
+                "task family fails the deploy",
+            )
+        )
+    else:
+        violations.extend(_check_engine_task_family_fails(engine_path.read_text(encoding="utf-8")))
+
+    return violations
+
+
 # Canonical Python packages whose pyproject.toml must enforce the per-function
 # complexity gate. Keyed off `.pre-commit-config.yaml` ruff hooks. Adding a new
 # Python package with a ruff-pre-commit hook means adding it here too.
@@ -3056,6 +3227,7 @@ CHECKS = {
     "python-complexity-gate": check_python_complexity_gate,
     "deploy-workflow-plan-scope": check_deploy_workflow_plan_scope,
     "aws-platform-renders-deploy-tfvars": check_platform_renders_deploy_tfvars,
+    "deploy-verification-fail-loud": check_deploy_verification_fail_loud,
 }
 CHECK_LEVELS = {
     "fast": [
@@ -3072,6 +3244,7 @@ CHECK_LEVELS = {
         "python-complexity-gate",
         "deploy-workflow-plan-scope",
         "aws-platform-renders-deploy-tfvars",
+        "deploy-verification-fail-loud",
     ],
     "ci": [
         "adr-registry",
@@ -3088,6 +3261,7 @@ CHECK_LEVELS = {
         "python-complexity-gate",
         "deploy-workflow-plan-scope",
         "aws-platform-renders-deploy-tfvars",
+        "deploy-verification-fail-loud",
     ],
     "all": list(CHECKS),
 }

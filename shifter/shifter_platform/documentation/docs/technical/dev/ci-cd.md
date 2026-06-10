@@ -179,6 +179,13 @@ Dispatch on main  → AWS prod deploy
 - The GCP portal auth contract is FirebaseUI/browser-side Identity Platform auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
 - Multi-cloud work enters through the shared cloud adapter layers rather than provider-specific calls in domain services.
 
+## Manual Deploy Bootstrap Inputs
+
+`deploy.yml` exposes `workflow_dispatch` inputs for rare first-time-bootstrap deploys. They are strict by default and only take effect on a manual dispatch; automatic (push) deploys always fail closed.
+
+- `aws_first_deploy` (default `false`): allow the AWS engine deploy to skip the ECS task-family existence check. Set `true` only for the first-ever deploy to a fresh AWS environment, before the platform Terraform apply has created the provisioner task definition. On any normal deploy a missing or typo'd task family fails the run instead of skipping silently. Clear it (re-run without the flag) once the platform stack has been applied.
+- `gcp_require_active_certificate` (default `true`): require the GKE ManagedCertificate to be Active for the public hostname. Set `false` only for first-time GCP bootstrap, before DNS for the hostname has been pointed at the ingress IP.
+
 ## Self-Hosted Runner
 
 All workflows run on `self-hosted` runners (not GitHub-hosted). The runner has:

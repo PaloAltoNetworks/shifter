@@ -3457,5 +3457,249 @@ class NoPopulatedSecretEnvFilesTests(unittest.TestCase):
         )
 
 
+class DeployVerificationFailLoudTests(unittest.TestCase):
+    """Tests for the deploy-verification fail-loud guardrail (ADR-003-R3).
+
+    The Guacamole stabilization timeout in `_shifter-platform.yml` and the
+    engine ECS task-family check in `_shifter-engine.yml` must fail the deploy
+    when verification fails, instead of warning and exiting 0. The engine skip
+    is allowed only behind the explicit `first_deploy` bootstrap input.
+    """
+
+    _PLATFORM_PROLOGUE = (
+        "name: Platform\n"
+        "jobs:\n"
+        "  apply:\n"
+        "    runs-on: self-hosted\n"
+        "    steps:\n"
+        "      - run: terraform apply -auto-approve\n"
+        "      - name: Wait for Guacamole ECS services to stabilize\n"
+        "        run: |\n"
+        "          CLUSTER_NAME=\"${ENV}-portal-guacamole\"\n"
+        "          for SVC in a b; do\n"
+        "            echo \"$SVC\"\n"
+        "          done\n"
+        "          ATTEMPTS=0\n"
+        "          while [ $ATTEMPTS -lt 40 ]; do\n"
+        "            if [ \"$S\" = \"COMPLETED\" ]; then exit 0; fi\n"
+        "            ATTEMPTS=$((ATTEMPTS + 1))\n"
+        "            sleep 30\n"
+        "          done\n"
+    )
+    _PLATFORM_EPILOGUE = "      - name: Build\n        run: echo build\n"
+
+    _ENGINE_PROLOGUE = (
+        "name: Shifter Engine\n"
+        "on:\n"
+        "  workflow_call:\n"
+        "    inputs:\n"
+        "      first_deploy:\n"
+        "        type: boolean\n"
+        "        default: false\n"
+        "jobs:\n"
+        "  deploy:\n"
+        "    runs-on: self-hosted\n"
+        "    env:\n"
+        "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
+        "    steps:\n"
+        "      - name: Update ECS task definition\n"
+        "        env:\n"
+        "          FIRST_DEPLOY: ${{ inputs.first_deploy }}\n"
+        "        run: |\n"
+        "          TASK_DEF=$(aws ecs describe-task-definition "
+        "--task-definition \"${TASK_FAMILY}\" --query 'taskDefinition' 2>/dev/null) || {\n"
+    )
+
+    def _write_platform(self, repo_root: Path, timeout_tail: str) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        (workflow_dir / "_shifter-platform.yml").write_text(
+            self._PLATFORM_PROLOGUE + timeout_tail + self._PLATFORM_EPILOGUE,
+            encoding="utf-8",
+        )
+
+    def _write_engine(self, repo_root: Path, failure_branch: str) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        (workflow_dir / "_shifter-engine.yml").write_text(
+            self._ENGINE_PROLOGUE + failure_branch,
+            encoding="utf-8",
+        )
+
+    def test_platform_timeout_warning_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::warning::Guacamole services did not stabilize'
+                ' — continuing (services may still be starting)"\n',
+            )
+            self._write_engine(
+                repo_root,
+                '            if [ "${FIRST_DEPLOY}" = "true" ]; then echo skip; exit 0; fi\n'
+                '            echo "::error::missing"; exit 1\n'
+                "          }\n",
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R3")
+            self.assertTrue(
+                any(".github/workflows/_shifter-platform.yml" in v.path for v in violations)
+            )
+
+    def test_platform_timeout_exit_1_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::error::Guacamole services did not stabilize"\n'
+                "          exit 1\n",
+            )
+            self._write_engine(
+                repo_root,
+                '            if [ "${FIRST_DEPLOY}" = "true" ]; then echo skip; exit 0; fi\n'
+                '            echo "::error::missing"; exit 1\n'
+                "          }\n",
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_engine_unconditional_skip_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::error::timeout"\n          exit 1\n',
+            )
+            # Unconditional warn + exit 0, no first_deploy gate, no exit 1.
+            engine = (
+                "name: Shifter Engine\n"
+                "jobs:\n"
+                "  deploy:\n"
+                "    runs-on: self-hosted\n"
+                "    env:\n"
+                "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
+                "    steps:\n"
+                "      - name: Update ECS task definition\n"
+                "        run: |\n"
+                "          TASK_DEF=$(aws ecs describe-task-definition "
+                "--task-definition \"${TASK_FAMILY}\" 2>/dev/null) || {\n"
+                '            echo "::warning::does not exist yet. Skipping deploy."\n'
+                "            exit 0\n"
+                "          }\n"
+            )
+            (repo_root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+            (repo_root / ".github" / "workflows" / "_shifter-engine.yml").write_text(
+                engine, encoding="utf-8"
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertTrue(
+                any(".github/workflows/_shifter-engine.yml" in v.path for v in violations)
+            )
+
+    def test_engine_gated_fail_closed_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::error::timeout"\n          exit 1\n',
+            )
+            self._write_engine(
+                repo_root,
+                '            if [ "${FIRST_DEPLOY}" = "true" ]; then\n'
+                '              echo "::warning::bootstrap skip"; exit 0\n'
+                "            fi\n"
+                '            echo "::error::task family ${TASK_FAMILY} does not exist"\n'
+                "            exit 1\n"
+                "          }\n",
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_missing_workflow_files_are_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            (repo_root / ".github" / "workflows").mkdir(parents=True)
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            flagged = {v.path for v in violations}
+            self.assertIn(".github/workflows/_shifter-platform.yml", flagged)
+            self.assertIn(".github/workflows/_shifter-engine.yml", flagged)
+
+    def _write_noncompliant_pair(self, repo_root: Path) -> None:
+        """Write workflows that both violate the rule (warn-and-continue +
+        unconditional skip), so any run of the check yields violations."""
+        self._write_platform(
+            repo_root,
+            '          echo "::warning::Guacamole services did not stabilize'
+            ' — continuing (services may still be starting)"\n',
+        )
+        engine = (
+            "name: Shifter Engine\n"
+            "jobs:\n"
+            "  deploy:\n"
+            "    runs-on: self-hosted\n"
+            "    env:\n"
+            "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
+            "    steps:\n"
+            "      - name: Update ECS task definition\n"
+            "        run: |\n"
+            "          TASK_DEF=$(aws ecs describe-task-definition "
+            "--task-definition \"${TASK_FAMILY}\" 2>/dev/null) || {\n"
+            '            echo "::warning::does not exist yet. Skipping deploy."\n'
+            "            exit 0\n"
+            "          }\n"
+        )
+        (repo_root / ".github" / "workflows" / "_shifter-engine.yml").write_text(
+            engine, encoding="utf-8"
+        )
+
+    def test_targeted_mode_skips_unrelated_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_noncompliant_pair(repo_root)
+
+            # Even with non-compliant workflows on disk, a changed-file set that
+            # touches none of the relevant paths must skip the check entirely.
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(
+                repo_root, ["shifter/shifter_platform/config/settings.py"]
+            )
+
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_targeted_mode_runs_for_relevant_workflow_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_noncompliant_pair(repo_root)
+
+            # A changed-file set that includes a relevant workflow must run the
+            # check and surface the non-compliant workflows' violations.
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(
+                repo_root, [".github/workflows/_shifter-engine.yml"]
+            )
+
+            self.assertTrue(violations)
+            self.assertTrue(all(v.rule_id == "ADR-003-R3" for v in violations))
+
+    def test_clean_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_deploy_verification_fail_loud(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_check_registered_at_ci_and_fast_levels(self) -> None:
+        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECKS)
+        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECK_LEVELS["ci"])
+        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECK_LEVELS["fast"])
+
+
 if __name__ == "__main__":
     unittest.main()

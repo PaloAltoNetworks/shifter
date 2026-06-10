@@ -111,6 +111,21 @@ The first slice intentionally stays small:
   is required for fresh AWS accounts where the repositories exist but the
   tags have not been published yet.
 
+- `deploy-verification-fail-loud`
+  Enforces ADR-003-R3: deploy-verification steps must fail the run when the
+  thing they verify did not happen, instead of warning and exiting 0. The
+  `Wait for Guacamole ECS services to stabilize` step in
+  `_shifter-platform.yml` must `exit 1` on stabilization timeout (the FAILED
+  circuit-breaker branch already does); raise the poll timeout if first boot
+  legitimately needs longer rather than downgrading the timeout to a warning.
+  The `Update ECS task definition` step in `_shifter-engine.yml` must `exit 1`
+  when the ECS task-definition family cannot be described, so a missing or
+  typo'd family fails the deploy instead of silently skipping it forever; the
+  only permitted skip is gated on the explicit `first_deploy` bootstrap input,
+  surfaced as the `aws_first_deploy` `workflow_dispatch` input in `deploy.yml`
+  (strict by default, settable to `true` only on a manual dispatch for the
+  first-ever deploy to a fresh AWS environment).
+
 - `TFLint`
   Adds Terraform linting on top of `terraform fmt` and `terraform validate`.
   The initial profile is intentionally narrow: it leaves existing repo-wide

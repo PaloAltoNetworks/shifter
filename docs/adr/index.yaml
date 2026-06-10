@@ -60,13 +60,20 @@
         "id": "ADR-003-R2",
         "description": "AWS platform Terraform plan routing must stay scoped to Terraform-consumed files, while platform application changes still trigger Quality through a separate app-source filter. AWS platform Terraform plan commands must wait for the state lock before failing.",
         "checks": ["deploy-workflow-plan-scope"]
+      },
+      {
+        "id": "ADR-003-R3",
+        "description": "Deploy-verification steps must fail the run when the thing they verify did not happen, instead of warning and exiting 0. The Guacamole stabilization wait in _shifter-platform.yml must exit 1 on timeout (raise the timeout if first boot needs longer rather than downgrading the result). The engine ECS task-definition update in _shifter-engine.yml must exit 1 when the task-definition family cannot be described, with the only skip gated on the explicit first_deploy bootstrap input (surfaced as the aws_first_deploy workflow_dispatch input in deploy.yml, strict by default and settable only on manual dispatch).",
+        "checks": ["deploy-verification-fail-loud"]
       }
     ],
     "exceptions": [],
     "enforcement": ["ci"],
     "evidence": [
       ".github/workflows/_quality.yml",
-      ".github/workflows/deploy.yml"
+      ".github/workflows/deploy.yml",
+      ".github/workflows/_shifter-engine.yml",
+      ".github/workflows/_shifter-platform.yml"
     ]
   },
   {

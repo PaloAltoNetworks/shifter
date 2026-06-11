@@ -59,14 +59,20 @@ Quality (must pass first)
     ▼
   Core (ECR)
     │
-    ├──────────────┬─────────────────┐
-    ▼              ▼                 ▼
-  Range    Shifter Engine    Portal Plan
-                   │                 │
-                   └────────┬────────┘
-                            ▼
-                      Portal Deploy
+    ├──────────────┐
+    ▼              ▼
+  Range    Shifter Engine
+    │              │
+    └──────────────┘
+            │
+            ▼
+  Shifter Platform Plan/Deploy
 ```
+
+Downstream AWS jobs use explicit `needs.<job>.result` gates. A skipped upstream
+is acceptable when its path filter did not select it, but a failed or cancelled
+upstream must stop dependent infrastructure work. In particular, Shifter Platform
+must not plan or apply on top of a failed Shifter Engine deploy.
 
 ## Change Detection
 
@@ -77,7 +83,8 @@ The orchestrator uses path filters to run only relevant jobs:
 | `core` | ECR module, environment root, deploy workflow |
 | `range` | Range Terraform, engine state module |
 | `shifter_engine` | Shifter Engine code, ECR module |
-| `shifter_platform` | Shifter Django code, portal/Guacamole Terraform |
+| `shifter_platform` | Portal/Guacamole Terraform and platform deploy workflow |
+| `shifter_app` | Shifter Django application source, routed to Quality without launching a platform Terraform plan |
 | `gcp` | GCP Terraform, GCP Kubernetes assets, GCP scripts, GCP cloud adapters |
 
 ## Quality Gate
@@ -144,7 +151,7 @@ After Terraform apply, AWS platform deployment:
 
 1. Build Docker image
 2. Push to ECR with tags: `latest`, `{git-sha}`
-3. Find target EC2 instance(s) via tags
+3. Find target EC2 instances via tags
 4. SSM send-command to pull and run new container
 
 **Single Instance Mode**: Deploys to `{env}-portal-ec2` tagged instance.

@@ -58,7 +58,6 @@ loud (`::error::`) when the active environment's secret is empty.
 | `AWS_ROLE_ARN_DEV` / `AWS_ROLE_ARN` | secret | yes | OIDC role assumed by the deploy job. |
 | `TF_VARS_DEV_PORTAL` | secret | yes (dev) | Whole-file `local.auto.tfvars` payload for the dev portal root, rendered verbatim over the committed baseline before `terraform plan` / `apply`. |
 | `TF_VARS_PROD_PORTAL` | secret | yes (prod) | As above, for the prod portal root. |
-| `AWS_PORTAL_ENABLE_AUTOSCALING` | variable | no | Default `false`. Enables ASG scaling steps in the deploy job. |
 
 The `TF_VARS_<ENV>_PORTAL` secret holds plain Terraform HCL — the same
 content you would put in a `local.auto.tfvars`. At minimum it must set the
@@ -249,13 +248,13 @@ terraform init -backend-config=dev.s3.tfbackend
 terraform plan
 ```
 
-For event-sized AWS dev runs, keep the GitHub Actions variable
-`AWS_PORTAL_ENABLE_AUTOSCALING=true` in sync with the portal tfvars. That
-variable controls whether the deploy job uses the ASG refresh path instead of
-the single-instance SSM path. The deployment-owned `TF_VARS_DEV_PORTAL` payload
-should also carry the event sizing values from the committed baseline when you
-want the live account to use the ASG, warm pool, Redis channel layer, and larger
-Guacamole/Postgres capacity:
+For event-sized AWS dev runs, put the full capacity overlay in
+`TF_VARS_DEV_PORTAL`. The deploy workflow reads `terraform output -json` from
+the applied portal state and derives its single-instance vs. ASG path from the
+Terraform `enable_autoscaling` output; there is no separate GitHub variable to
+keep in sync. The committed `terraform.tfvars` is a modest OSS default, while
+the secret payload below is the event-sized overlay for ASG, warm pool, Redis
+channel layer, and larger Guacamole/Postgres capacity:
 
 ```hcl
 enable_autoscaling     = true

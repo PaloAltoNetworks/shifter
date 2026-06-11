@@ -432,6 +432,155 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         self.assertEqual(violations, [], msg=f"Unexpected deploy workflow violations: {violations}")
 
 
+class PortalDeployModeSourceOfTruthTests(unittest.TestCase):
+    """Tests for the AWS portal deployment-mode source-of-truth guardrail."""
+
+    _WORKFLOW = (
+        "name: Platform\n"
+        "jobs:\n"
+        "  deploy:\n"
+        "    runs-on: self-hosted\n"
+        "    steps:\n"
+        "      - uses: hashicorp/setup-terraform@v3\n"
+        "      - name: Get deployment config\n"
+        "        run: |\n"
+        "          python3 \"${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py\" resolve-topology \\\n"
+        "            --terraform-dir \"platform/terraform/environments/${ENV}/portal\" \\\n"
+        "            --backend-config \"${ENV}.s3.tfbackend\" \\\n"
+        "            --instance-tag \"$INSTANCE_TAG\" \\\n"
+        "            --github-output \"$GITHUB_OUTPUT\"\n"
+        "      - name: Deploy via SSM (single instance mode)\n"
+        "        if: steps.config.outputs.enable_autoscaling != 'true'\n"
+        "        run: echo deploy single\n"
+        "      - name: Trigger ASG instance refresh\n"
+        "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
+        "        run: echo refresh asg\n"
+        "      - name: Verify ASG image tag\n"
+        "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
+        "        run: |\n"
+        "          python3 \"${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py\" verify-asg-image \\\n"
+        "            --asg-name \"${ASG_NAME}\" \\\n"
+        "            --image-tag \"${IMAGE_TAG}\"\n"
+    )
+    _OUTPUTS = (
+        'output "enable_autoscaling" {\n'
+        '  description = "Whether the portal EC2 tier is deployed as an Auto Scaling Group."\n'
+        "  value       = var.enable_autoscaling\n"
+        "}\n"
+    )
+    _HELPER = (
+        "terraform output -json\n"
+        "aws ec2 describe-instances --query Reservations[].Instances[].InstanceId\n"
+        "if len(running_instance_ids) != 1: raise PortalDeployError('exactly one')\n"
+        "aws autoscaling describe-auto-scaling-groups\n"
+        "aws ssm send-command\n"
+        "docker inspect\n"
+        "aws ssm get-command-invocation\n"
+    )
+
+    def _write_repo(
+        self,
+        repo_root: Path,
+        *,
+        workflow: str | None = None,
+        outputs: str | None = None,
+        helper: str | None = None,
+    ) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "_shifter-platform.yml").write_text(
+            self._WORKFLOW if workflow is None else workflow,
+            encoding="utf-8",
+        )
+        for environment in ("dev", "prod"):
+            output_dir = repo_root / "platform" / "terraform" / "environments" / environment / "portal"
+            output_dir.mkdir(parents=True)
+            (output_dir / "outputs.tf").write_text(
+                self._OUTPUTS if outputs is None else outputs,
+                encoding="utf-8",
+            )
+        helper_dir = repo_root / "scripts" / "portal_deploy"
+        helper_dir.mkdir(parents=True)
+        (helper_dir / "portal_deploy.py").write_text(
+            self._HELPER if helper is None else helper,
+            encoding="utf-8",
+        )
+
+    def test_clean_fixture_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(repo_root)
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_flags_github_variable_as_deployment_mode_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                workflow=self._WORKFLOW
+                + "      - name: Legacy mode\n"
+                + "        env:\n"
+                + "          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}\n",
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("AWS_PORTAL_ENABLE_AUTOSCALING", violations[0].message)
+
+    def test_flags_missing_terraform_mode_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(repo_root, outputs='output "asg_name" { value = module.ec2.asg_name }\n')
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn('output "enable_autoscaling"', violations[0].message)
+
+    def test_flags_helper_without_single_instance_cardinality_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                helper=(
+                    "terraform output -json\n"
+                    "aws ec2 describe-instances --query Reservations[0].Instances[0].InstanceId\n"
+                    "aws autoscaling describe-auto-scaling-groups\n"
+                    "aws ssm send-command\n"
+                    "docker inspect\n"
+                    "aws ssm get-command-invocation\n"
+                ),
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn("exactly one", violations[0].message)
+
+    def test_flags_workflow_without_asg_image_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                workflow=self._WORKFLOW.replace("verify-asg-image", "echo-no-verification"),
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn("verify-asg-image", violations[0].message)
+
+    def test_clean_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(
+            ADR_GUARD.REPO_ROOT, None
+        )
+        self.assertEqual(violations, [], msg=f"Unexpected portal deploy mode violations: {violations}")
+
+
 class PlatformRendersDeployTfvarsTests(unittest.TestCase):
     """Tests for the AWS platform deploy tfvars-render guardrail (ADR-011-R7)."""
 

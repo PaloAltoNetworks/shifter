@@ -186,9 +186,18 @@ user_storage_bucket   = "shifter-dev-user-storage-<account-id>"
 ```
 
 Terraform auto-loads `*.auto.tfvars` files alongside `terraform.tfvars`
-and the `.local`/`.auto.tfvars` values win. CI deploy workflows render
-`local.auto.tfvars` from GitHub secrets and repository variables; see
+and the `.local`/`.auto.tfvars` values win. AWS portal CI deploy workflows
+render `local.auto.tfvars` from GitHub secrets; see
 [`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
+
+The AWS portal deploy job derives its single-instance vs. ASG path from the
+applied Terraform state, not from a GitHub Actions variable. The portal roots
+export `enable_autoscaling`, `ec2_instance_id`, and `asg_name`; the deploy
+workflow reads those outputs before updating the portal image. In
+single-instance mode it also verifies that exactly one running EC2 instance is
+tagged for the portal before sending the SSM deploy command. In ASG mode it
+refreshes the Terraform-named ASG and verifies the new image tag on every
+in-service instance after the refresh.
 
 ### In Cloud Secret Managers (Runtime)
 

@@ -433,7 +433,7 @@ jobs:
       (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
-      needs.shifter-engine.result != 'cancelled' &&
+      (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
       (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_shifter-platform.yml
     with:

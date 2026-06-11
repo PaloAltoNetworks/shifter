@@ -2283,6 +2283,10 @@ _PLAN_SCOPE_CHECK = "deploy-workflow-plan-scope"
 _PLAN_SCOPE_RULE = "ADR-003-R2"
 _SHIFTER_APP_OUTPUT = "shifter_app: ${{ steps.filter.outputs.shifter_app }}"
 _SHIFTER_APP_QUALITY_CONDITION = "needs.changes.outputs.shifter_app == 'true'"
+_PORTAL_IMAGE_OUTPUT = "portal_image: ${{ steps.filter.outputs.portal_image }}"
+_PORTAL_IMAGE_DEPLOY_CONDITION = "needs.changes.outputs.portal_image == 'true'"
+_PORTAL_IMAGE_REQUIRED_GLOB = "shifter/shifter_platform/**"
+_PORTAL_IMAGE_BUILD_INPUT = "inputs.portal_image_changes"
 
 
 def _deploy_plan_scope_relevant(files: list[str] | None) -> bool:
@@ -2416,6 +2420,59 @@ def _check_deploy_workflow_plan_routing(deploy_text: str) -> list[Violation]:
     return violations
 
 
+def _check_deploy_workflow_portal_image_routing(deploy_text: str) -> list[Violation]:
+    """Require the portal-image deploy trigger restored by #913.
+
+    Application-code changes must reach the portal build/deploy path through
+    a dedicated `portal_image` filter, without widening the Terraform-scoped
+    `shifter_platform` plan trigger.
+    """
+    portal_block = _paths_filter_block(deploy_text, "portal_image")
+    changes_block = _workflow_job_block(deploy_text, "changes")
+    platform_job_block = _workflow_job_block(deploy_text, "shifter_platform")
+    if not portal_block or not _active_line_contains(changes_block, _PORTAL_IMAGE_OUTPUT):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "Portal application changes must retain a `portal_image` filter/output "
+                "so app-only pushes still build and deploy the portal image (#913); "
+                "missing the filter or changes-job output",
+            )
+        ]
+    if not _block_contains_glob(portal_block, _PORTAL_IMAGE_REQUIRED_GLOB):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                f"`portal_image` must include `{_PORTAL_IMAGE_REQUIRED_GLOB}` so portal "
+                "application changes trigger the image build/deploy path",
+            )
+        ]
+    if not _active_line_contains(platform_job_block, _PORTAL_IMAGE_DEPLOY_CONDITION):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The `shifter_platform` job must include "
+                f"`{_PORTAL_IMAGE_DEPLOY_CONDITION}` so application-code pushes still "
+                "invoke the portal build/deploy workflow",
+            )
+        ]
+    return []
+
+
+def _check_platform_build_portal_image_gate(platform_text: str) -> list[Violation]:
+    """Require the platform build job to gate on the portal-image input (#913)."""
+    build_block = _workflow_job_block(platform_text, "build")
+    if not build_block or not _active_line_contains(build_block, _PORTAL_IMAGE_BUILD_INPUT):
+        return [
+            _plan_scope_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"The `build` job must gate on `{_PORTAL_IMAGE_BUILD_INPUT}` so app-only "
+                "changes build and deploy the portal image without running Terraform",
+            )
+        ]
+    return []
+
+
 def _check_platform_plan_lock_timeout(platform_text: str) -> list[Violation]:
     violations: list[Violation] = []
     for lineno, line in enumerate(platform_text.splitlines(), start=1):
@@ -2453,7 +2510,9 @@ def check_deploy_workflow_plan_scope(repo_root: Path, files: list[str] | None) -
             )
         )
     else:
-        violations.extend(_check_deploy_workflow_plan_routing(deploy_path.read_text(encoding="utf-8")))
+        deploy_text = deploy_path.read_text(encoding="utf-8")
+        violations.extend(_check_deploy_workflow_plan_routing(deploy_text))
+        violations.extend(_check_deploy_workflow_portal_image_routing(deploy_text))
 
     if not platform_path.exists():
         violations.append(
@@ -2463,7 +2522,9 @@ def check_deploy_workflow_plan_scope(repo_root: Path, files: list[str] | None) -
             )
         )
     else:
-        violations.extend(_check_platform_plan_lock_timeout(platform_path.read_text(encoding="utf-8")))
+        platform_text = platform_path.read_text(encoding="utf-8")
+        violations.extend(_check_platform_plan_lock_timeout(platform_text))
+        violations.extend(_check_platform_build_portal_image_gate(platform_text))
 
     return violations
 

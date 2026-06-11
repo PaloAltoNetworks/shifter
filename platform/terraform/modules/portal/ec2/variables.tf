@@ -227,3 +227,9 @@ variable "lifecycle_hook_heartbeat_timeout" {
   type        = number
   default     = 600
 }
+
+variable "worker_health_alarm_actions" {
+  description = "SNS topic ARNs notified when the UnhealthyWorkers alarm (#953) fires; empty disables alarm notifications"
+  type        = list(string)
+  default     = []
+}

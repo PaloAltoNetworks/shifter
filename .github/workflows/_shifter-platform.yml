@@ -593,12 +593,40 @@ jobs:
           eval docker run -d --name worker-mc --restart unless-stopped $WORKER_HEALTH_BASE "$WORKER_MC_HEALTH" $COMMON_ENV "$IMAGE" python manage.py run_worker --queue mc
           eval docker run -d --name ctf-scheduler --restart unless-stopped $WORKER_HEALTH_BASE "$CTF_SCHEDULER_HEALTH" $COMMON_ENV "$IMAGE" python manage.py run_ctf_scheduler
           docker ps
+
+          # Worker-container health supervisor (#953) — byte-identical to the
+          # user_data.sh fresh-boot install; artifacts are single-sourced under
+          # modules/portal/ec2/worker-health/ and injected base64-encoded.
+          echo "Installing worker-container health supervisor..."
+          echo "__WH_MONITOR_B64__" | base64 -d > /usr/local/bin/shifter-worker-health.sh
+          chmod 0755 /usr/local/bin/shifter-worker-health.sh
+          echo "__WH_SERVICE_B64__" | base64 -d > /etc/systemd/system/shifter-worker-health.service
+          echo "__WH_TIMER_B64__" | base64 -d > /etc/systemd/system/shifter-worker-health.timer
+          # Per-environment metric dimension so dev and prod alarms stay independent.
+          echo "WH_NAME_PREFIX=__WH_NAME_PREFIX__" > /etc/shifter-worker-health.env
+          systemctl daemon-reload
+          systemctl enable --now shifter-worker-health.timer
+
           echo "Deployment complete!"
           EOFSCRIPT
           )
 
           # Substitute PS_PREFIX
           DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__PS_PREFIX__/${PS_PREFIX}}"
+
+          # Substitute worker-health artifact payloads (#953). base64 so the
+          # single-source files survive jq/SSM transport without quoting issues;
+          # both AWS deploy paths then install byte-identical files.
+          WH_DIR="platform/terraform/modules/portal/ec2/worker-health"
+          WH_MONITOR_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.sh")
+          WH_SERVICE_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.service")
+          WH_TIMER_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.timer")
+          DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__WH_MONITOR_B64__/$WH_MONITOR_B64}"
+          DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__WH_SERVICE_B64__/$WH_SERVICE_B64}"
+          DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__WH_TIMER_B64__/$WH_TIMER_B64}"
+          # name_prefix is "<environment>-portal"; matches the Terraform alarm dimension.
+          WH_NAME_PREFIX="$ENV-portal"
+          DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__WH_NAME_PREFIX__/$WH_NAME_PREFIX}"
 
           # Run deploy via SSM using temp file to avoid quoting issues
           PARAMS_FILE=$(mktemp)

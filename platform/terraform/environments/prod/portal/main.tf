@@ -448,6 +448,9 @@ module "ssm" {
 module "ec2" {
   source = "../../../modules/portal/ec2"
 
+  # Worker-container health alarm (#953) notifies the shared alerts topic.
+  worker_health_alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
+
   aws_region            = var.aws_region
   ec2_ami_id            = var.ec2_ami_id
   name_prefix           = local.name_prefix

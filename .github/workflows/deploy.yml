@@ -55,6 +55,7 @@ jobs:
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       shifter_app: ${{ steps.filter.outputs.shifter_app }}
+      portal_image: ${{ steps.filter.outputs.portal_image }}
       mcp: ${{ steps.filter.outputs.mcp }}
       gcp: ${{ steps.filter.outputs.gcp }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
@@ -102,6 +103,22 @@ jobs:
               - '.github/workflows/_shifter-platform.yml'
             shifter_app:
               - 'shifter/**'
+            # Portal image build/deploy trigger (#913). Mirrors the
+            # portal image's build inputs: the Docker context controls
+            # plus every tree the Dockerfile COPYs
+            # (shifter_platform, cyberscript, installation). Kept
+            # separate from the Terraform-only `shifter_platform`
+            # filter (ADR-003-R2) and from the broad Quality-only
+            # `shifter_app` filter so engine/packer-only changes do
+            # not redeploy the portal. In-app documentation under
+            # shifter/shifter_platform/documentation/** is image
+            # content, so it deploys with the image; top-level docs/**
+            # never does.
+            portal_image:
+              - 'shifter/shifter_platform/**'
+              - 'shifter/cyberscript/**'
+              - 'shifter/installation/**'
+              - 'shifter/.dockerignore'
             mcp:
               - 'mcp/**'
               - '.github/workflows/_quality.yml'
@@ -430,7 +447,9 @@ jobs:
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
-      (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.changes.outputs.shifter_platform == 'true' ||
+       needs.changes.outputs.portal_image == 'true' ||
+       github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
       (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
@@ -440,6 +459,12 @@ jobs:
       environment: ${{ needs.changes.outputs.aws_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       apply_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
+      # Split per concern (#913): Terraform plan/apply stays scoped to
+      # Terraform-relevant changes, while app-only changes drive just
+      # the portal image build/deploy. workflow_dispatch remains the
+      # deliberate full-deploy path for both concerns.
+      platform_changes: ${{ needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch' }}
+      portal_image_changes: ${{ needs.changes.outputs.portal_image == 'true' || github.event_name == 'workflow_dispatch' }}
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}

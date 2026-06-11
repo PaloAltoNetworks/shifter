@@ -85,6 +85,7 @@ The orchestrator uses path filters to run only relevant jobs:
 | `shifter_engine` | Shifter Engine code, ECR module |
 | `shifter_platform` | Portal/Guacamole Terraform and platform deploy workflow |
 | `shifter_app` | Shifter Django application source, routed to Quality without launching a platform Terraform plan |
+| `portal_image` | Portal image build inputs (`shifter/shifter_platform/**`, `cyberscript`, `installation`, `.dockerignore`); triggers the portal image build/deploy on environment branches without running Terraform |
 | `gcp` | GCP Terraform, GCP Kubernetes assets, GCP scripts, GCP cloud adapters |
 
 ## Quality Gate

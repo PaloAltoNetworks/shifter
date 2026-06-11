@@ -122,17 +122,29 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         *,
         platform_globs: list[str] | None = None,
         app_globs: list[str] | None = None,
+        portal_image_globs: list[str] | None = None,
         quality_condition: str = "needs.changes.outputs.shifter_app == 'true'",
+        include_portal_image_filter: bool = True,
+        portal_image_output: str = "portal_image: ${{ steps.filter.outputs.portal_image }}",
+        platform_job_condition: str = "needs.changes.outputs.portal_image == 'true'",
     ) -> str:
         platform_globs = platform_globs or ["platform/terraform/modules/portal/**"]
         app_globs = app_globs or ["shifter/**"]
+        portal_image_globs = portal_image_globs or ["shifter/shifter_platform/**"]
         platform_lines = "".join(f"              - '{glob}'\n" for glob in platform_globs)
         app_lines = "".join(f"              - '{glob}'\n" for glob in app_globs)
+        portal_image_filter = ""
+        if include_portal_image_filter:
+            portal_image_lines = "".join(
+                f"              - '{glob}'\n" for glob in portal_image_globs
+            )
+            portal_image_filter = f"            portal_image:\n{portal_image_lines}"
         return (
             "jobs:\n"
             "  changes:\n"
             "    outputs:\n"
             "      shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+            f"      {portal_image_output}\n"
             "    steps:\n"
             "      - id: filter\n"
             "        with:\n"
@@ -141,17 +153,28 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             f"{platform_lines}"
             "            shifter_app:\n"
             f"{app_lines}"
+            f"{portal_image_filter}"
             "  quality:\n"
             "    if: |\n"
             f"      {quality_condition}\n"
+            "  shifter_platform:\n"
+            "    if: |\n"
+            f"      {platform_job_condition}\n"
         )
 
-    def _platform_text(self, plan_args: str = "-no-color -lock-timeout=5m -out=tfplan") -> str:
+    def _platform_text(
+        self,
+        plan_args: str = "-no-color -lock-timeout=5m -out=tfplan",
+        build_condition: str = "inputs.portal_image_changes",
+    ) -> str:
         return (
             "jobs:\n"
             "  plan:\n"
             "    steps:\n"
             f"      - run: terraform plan {plan_args}\n"
+            "  build:\n"
+            "    if: |\n"
+            f"      {build_condition}\n"
         )
 
     def test_flags_python_glob_in_platform_plan_scope(self) -> None:
@@ -208,12 +231,19 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 repo_root,
                 "jobs:\n"
                 "  changes:\n"
+                "    outputs:\n"
+                "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
                 "    steps:\n"
                 "      - id: filter\n"
                 "        with:\n"
                 "          filters: |\n"
                 "            shifter_platform:\n"
-                "              - 'platform/terraform/modules/portal/**'\n",
+                "              - 'platform/terraform/modules/portal/**'\n"
+                "            portal_image:\n"
+                "              - 'shifter/shifter_platform/**'\n"
+                "  shifter_platform:\n"
+                "    if: |\n"
+                "      needs.changes.outputs.portal_image == 'true'\n",
                 self._platform_text(),
             )
 
@@ -248,6 +278,97 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             self.assertEqual(len(violations), 1)
             self.assertIn("Quality", violations[0].message)
 
+    def test_flags_missing_portal_image_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(include_portal_image_filter=False),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+            self.assertIn("portal_image", violations[0].message)
+
+    def test_flags_portal_image_filter_without_platform_source_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(portal_image_globs=["shifter/cyberscript/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("shifter/shifter_platform/**", violations[0].message)
+
+    def test_flags_missing_portal_image_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    portal_image_output="# portal_image: ${{ steps.filter.outputs.portal_image }}"
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("output", violations[0].message)
+
+    def test_flags_platform_job_without_portal_image_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    platform_job_condition="needs.changes.outputs.shifter_platform == 'true'"
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("needs.changes.outputs.portal_image == 'true'", violations[0].message)
+
+    def test_flags_commented_portal_image_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    platform_job_condition="# needs.changes.outputs.portal_image == 'true'"
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("needs.changes.outputs.portal_image == 'true'", violations[0].message)
+
+    def test_flags_platform_build_without_portal_image_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(build_condition="inputs.apply_changes"),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("inputs.portal_image_changes", violations[0].message)
+
     def test_flags_missing_required_workflow_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
@@ -267,6 +388,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "  changes:\n"
                 "    outputs:\n"
                 "      # shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+                "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
                 "    steps:\n"
                 "      - id: filter\n"
                 "        with:\n"
@@ -275,9 +397,14 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "              - 'platform/terraform/modules/portal/**'\n"
                 "            shifter_app:\n"
                 "              - 'shifter/**'\n"
+                "            portal_image:\n"
+                "              - 'shifter/shifter_platform/**'\n"
                 "  quality:\n"
                 "    if: |\n"
                 "      # needs.changes.outputs.shifter_app == 'true'\n"
+                "  shifter_platform:\n"
+                "    if: |\n"
+                "      needs.changes.outputs.portal_image == 'true'\n"
             )
             self._write_workflows(repo_root, deploy, self._platform_text())
 

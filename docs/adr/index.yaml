@@ -58,7 +58,7 @@
       },
       {
         "id": "ADR-003-R2",
-        "description": "AWS platform Terraform plan routing must stay scoped to Terraform-consumed files, while platform application changes still trigger Quality through a separate app-source filter. AWS platform Terraform plan commands must wait for the state lock before failing.",
+        "description": "AWS platform Terraform plan routing must stay scoped to Terraform-consumed files, while platform application changes still trigger Quality through a separate app-source filter. AWS platform Terraform plan commands must wait for the state lock before failing. Portal application changes must keep reaching the portal image build/deploy path through the dedicated portal_image filter wired into the shifter_platform job trigger and the platform build job's portal_image_changes input, without widening the Terraform-scoped plan trigger.",
         "checks": ["deploy-workflow-plan-scope"]
       },
       {

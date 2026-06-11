@@ -12,6 +12,19 @@ on:
       apply_changes:
         required: true
         type: boolean
+      # Split per concern (#913). `apply_changes` is deployment
+      # permission (environment branch / manual dispatch); these two
+      # say which paths actually changed. Terraform plan/apply and the
+      # Guacamole image publish run only for platform_changes;
+      # the portal image build/deploy runs for either signal.
+      platform_changes:
+        description: Terraform/platform-infrastructure inputs changed (or manual dispatch)
+        required: true
+        type: boolean
+      portal_image_changes:
+        description: Portal image source changed (or manual dispatch)
+        required: true
+        type: boolean
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -42,6 +55,7 @@ jobs:
     needs: push-guacamole-images
     if: |
       always() &&
+      inputs.platform_changes &&
       (needs.push-guacamole-images.result == 'success' ||
        needs.push-guacamole-images.result == 'skipped')
     defaults:
@@ -112,6 +126,7 @@ jobs:
     runs-on: self-hosted
     if: |
       inputs.apply_changes &&
+      inputs.platform_changes &&
       github.event_name != 'pull_request'
     env:
       GUACD_REPO: ${{ inputs.is_dev && 'shifter-dev-guacd' || 'shifter-guacd' }}
@@ -162,6 +177,7 @@ jobs:
     if: |
       always() &&
       inputs.apply_changes &&
+      inputs.platform_changes &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
       (needs.push-guacamole-images.result == 'success' || needs.push-guacamole-images.result == 'skipped') &&
       github.event_name != 'pull_request'
@@ -359,7 +375,19 @@ jobs:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
     needs: apply
-    if: inputs.apply_changes && github.event_name != 'pull_request'
+    # Runs for Terraform changes (after a successful apply) AND for
+    # app-only changes (#913), where plan/apply are legitimately
+    # skipped. Fail-closed: a skipped apply passes only when no
+    # Terraform change was requested, so a failed/cancelled plan or
+    # apply (or an upstream failure that skipped apply on a
+    # Terraform-relevant run) still blocks the image deploy.
+    if: |
+      always() &&
+      inputs.apply_changes &&
+      github.event_name != 'pull_request' &&
+      (inputs.platform_changes || inputs.portal_image_changes) &&
+      (needs.apply.result == 'success' ||
+       (needs.apply.result == 'skipped' && !inputs.platform_changes))
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:

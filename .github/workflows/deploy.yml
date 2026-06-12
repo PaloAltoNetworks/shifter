@@ -407,6 +407,8 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
+      TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
 
   shifter-engine:
     name: Shifter Engine

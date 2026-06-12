@@ -17,6 +17,15 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
+      # Whole-file local.auto.tfvars payload per environment. The committed
+      # terraform.tfvars is an example baseline; real per-deployment range
+      # values are rendered from these secrets before plan/apply. Declared
+      # required: false because GitHub evaluates reusable-workflow secrets at
+      # dispatch time; the render step fails loud for the active environment.
+      TF_VARS_DEV_RANGE:
+        required: false
+      TF_VARS_PROD_RANGE:
+        required: false
 
 jobs:
   plan:
@@ -40,6 +49,28 @@ jobs:
           terraform_version: "1.13.3"
       - run: terraform fmt -check -recursive
         working-directory: platform/terraform
+      - name: Render local.auto.tfvars from deployment secret
+        env:
+          IS_DEV: ${{ inputs.is_dev }}
+          TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
+          TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
+        run: |
+          # Select strictly on inputs.is_dev. Do not use an
+          # `is_dev && DEV_SECRET || PROD_SECRET` expression here: an empty
+          # active-environment secret is falsy and can fall through to the
+          # other environment's secret instead of failing loud.
+          if [ "${IS_DEV}" = "true" ]; then
+            RANGE_SECRET_NAME="TF_VARS_DEV_RANGE"
+            TF_VARS_RANGE="${TF_VARS_DEV_RANGE}"
+          else
+            RANGE_SECRET_NAME="TF_VARS_PROD_RANGE"
+            TF_VARS_RANGE="${TF_VARS_PROD_RANGE}"
+          fi
+          if [ -z "${TF_VARS_RANGE}" ]; then
+            echo "::error::Required secret ${RANGE_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          printf '%s\n' "${TF_VARS_RANGE}" > local.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
       - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
@@ -82,6 +113,26 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
+      - name: Render local.auto.tfvars from deployment secret
+        env:
+          IS_DEV: ${{ inputs.is_dev }}
+          TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
+          TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
+        run: |
+          # Keep the apply job's rendering logic identical to plan so the
+          # applied values cannot diverge from the reviewed plan inputs.
+          if [ "${IS_DEV}" = "true" ]; then
+            RANGE_SECRET_NAME="TF_VARS_DEV_RANGE"
+            TF_VARS_RANGE="${TF_VARS_DEV_RANGE}"
+          else
+            RANGE_SECRET_NAME="TF_VARS_PROD_RANGE"
+            TF_VARS_RANGE="${TF_VARS_PROD_RANGE}"
+          fi
+          if [ -z "${TF_VARS_RANGE}" ]; then
+            echo "::error::Required secret ${RANGE_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          printf '%s\n' "${TF_VARS_RANGE}" > local.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform apply -auto-approve
       - run: terraform output -json

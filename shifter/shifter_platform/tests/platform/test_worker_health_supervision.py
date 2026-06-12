@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 EC2_MODULE = REPO_ROOT / "platform" / "terraform" / "modules" / "portal" / "ec2"
 AWS_USER_DATA = EC2_MODULE / "user_data.sh"
 AWS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_shifter-platform.yml"
+AWS_REDEPLOY_SCRIPT = REPO_ROOT / "scripts" / "portal-deploy" / "deploy_portal.sh"
 WORKER_HEALTH_DIR = EC2_MODULE / "worker-health"
 MONITOR_SCRIPT = WORKER_HEALTH_DIR / "shifter-worker-health.sh"
 MONITOR_SERVICE = WORKER_HEALTH_DIR / "shifter-worker-health.service"
@@ -90,7 +91,7 @@ def test_systemd_timer_fires_on_the_health_interval() -> None:
     assert "WantedBy=timers.target" in text
 
 
-@pytest.mark.parametrize("path", [AWS_USER_DATA, AWS_WORKFLOW])
+@pytest.mark.parametrize("path", [AWS_USER_DATA, AWS_REDEPLOY_SCRIPT])
 def test_both_aws_deploy_paths_install_the_monitor(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert MONITOR_HOST_PATH in text
@@ -105,6 +106,17 @@ def test_both_aws_deploy_paths_install_the_monitor(path: Path) -> None:
     # supervisor run would read WH_NAME_PREFIX unset and emit metrics under
     # NamePrefix=unknown, silently collapsing dev/prod and defeating alarm scoping.
     assert text.index("WH_NAME_PREFIX=") < text.index(f"systemctl enable --now {TIMER_UNIT}")
+
+
+def test_workflow_invokes_tracked_redeploy_script() -> None:
+    text = AWS_WORKFLOW.read_text(encoding="utf-8")
+    assert "scripts/portal-deploy/deploy_portal.sh" in text
+    assert "base64 -d > /tmp/shifter-deploy-portal.sh" in text
+    assert "--worker-health-monitor-b64" in text
+    assert "--worker-health-service-b64" in text
+    assert "--worker-health-timer-b64" in text
+    assert "--worker-health-name-prefix" in text
+    assert "aws ssm send-command" in text
 
 
 def test_ec2_module_grants_putmetricdata_least_privilege() -> None:

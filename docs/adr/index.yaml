@@ -80,6 +80,7 @@
       ".github/workflows/_shifter-engine.yml",
       ".github/workflows/_shifter-platform.yml",
       "scripts/portal_deploy/portal_deploy.py",
+      "scripts/portal-deploy/deploy_portal.sh",
       "platform/terraform/environments/dev/portal/outputs.tf",
       "platform/terraform/environments/prod/portal/outputs.tf"
     ]

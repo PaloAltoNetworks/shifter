@@ -97,7 +97,7 @@ The first slice intentionally stays small:
   (`_gcp-dev.yml`) so retention and IAM policy bootstrap logic remains valid.
 
 - `deploy-workflow-plan-scope`
-  Enforces ADR-003-R2 for the AWS platform workflow. The `shifter_platform`
+  Enforces ADR-003-R2 for the AWS deploy workflows. The `shifter_platform`
   change filter in `.github/workflows/deploy.yml` must stay scoped to
   Terraform-consumed platform files, with application source changes routed
   through the separate `shifter_app` filter so Quality still runs without
@@ -108,14 +108,18 @@ The first slice intentionally stays small:
   condition, and consumed by the platform `build` job through the
   `portal_image_changes` input — so an app-only push to an environment branch
   builds and converges the portal image without running Terraform. The check
-  also requires every `terraform plan` command in `_shifter-platform.yml` to
-  include `-lock-timeout=5m`, so legitimate concurrent platform plans wait on
-  the backend state lock instead of failing immediately. On apply workflows,
-  `_shifter-platform.yml` pushes the Guacamole ECR images before the
-  platform Terraform plan because the Guacamole module resolves current
-  image digests with `aws_ecr_image` data sources during plan. This ordering
-  is required for fresh AWS accounts where the repositories exist but the
-  tags have not been published yet.
+  requires deploy concurrency to queue branch/manual runs rather than cancel
+  in-flight applies; PR cancellation may remain enabled. It also requires every
+  core, range, and platform `terraform plan` / saved-plan `terraform apply`
+  command to include `-lock-timeout=5m`, and requires each apply job to create
+  and execute a local saved `tfplan` instead of uploading raw binary plans as
+  artifacts or running a fresh unplanned apply. The platform Service Discovery
+  replacement check must inspect that same saved plan. On apply workflows,
+  `_shifter-platform.yml` still pushes the Guacamole ECR images before the
+  platform Terraform plan because the Guacamole module resolves current image
+  digests with `aws_ecr_image` data sources during plan. This ordering is
+  required for fresh AWS accounts where the repositories exist but the tags have
+  not been published yet.
 
 - `portal-deploy-mode-source-of-truth`
   Enforces ADR-003-R4 for the AWS portal deploy path. `_shifter-platform.yml`

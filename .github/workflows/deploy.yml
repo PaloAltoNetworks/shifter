@@ -27,12 +27,10 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  # Cancel an in-flight run when a newer push to the same ref arrives. Old
-  # behaviour (cancel-in-progress: false) queued every new push behind the
-  # previous run's full duration — fine if the older run was apply-bound to
-  # a different SHA, but for env-branch pushes the newer SHA always
-  # supersedes the old one (env branches never go backwards).
-  cancel-in-progress: true
+  # PR runs may be superseded safely, but env-branch deploys can be mid-apply.
+  # Queue branch/manual deploy runs so Terraform is not killed after mutating
+  # remote state or while holding the backend lock.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ============================================================================

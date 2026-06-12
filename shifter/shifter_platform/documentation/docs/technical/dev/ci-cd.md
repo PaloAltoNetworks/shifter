@@ -131,12 +131,26 @@ Each component follows the same pattern:
    - Checkout repo (tfvars are committed)
    - `terraform init`
    - `terraform validate`
-   - `terraform plan -out=tfplan`
+   - `terraform plan -lock-timeout=5m -out=tfplan`
    - Comment plan on PR (if PR)
 
 2. **Apply job** (if plan succeeds):
-   - Skip on PRs to prod
-   - `terraform apply -auto-approve`
+   - Skip on PRs
+   - Create a local saved `tfplan` with `terraform plan -lock-timeout=5m -out=tfplan`
+   - `terraform apply -lock-timeout=5m tfplan`
+
+Branch and manual deploy runs are queued by the Deploy workflow's concurrency
+group so a newer push cannot cancel a Terraform process after it has started
+mutating remote infrastructure or while it holds the backend lock. Pull request
+runs may still be cancelled by newer commits because they do not execute apply
+jobs.
+
+The saved plan file created inside the apply job is the apply contract. If state
+moves after that local plan, Terraform should fail the saved-plan apply instead
+of silently executing a fresh unplanned apply. Raw binary plans are not uploaded
+as workflow artifacts because they can include unredacted plan/state data. The
+platform Service Discovery replacement check reads the same saved `tfplan` that
+the apply step consumes.
 
 **Note**: The committed `terraform.tfvars` files ship an `example.com`
 baseline. Deployment-specific values (domains, alarm emails, allow-list

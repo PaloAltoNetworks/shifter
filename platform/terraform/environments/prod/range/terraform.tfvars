@@ -28,13 +28,17 @@ enable_flow_logs = true
 # Range Instance IAM
 # ------------------------------------------------------------------------------
 
-agent_s3_bucket = "shifter-user-storage-7a3f9c2e"
+# Per-deployment value rendered from TF_VARS_PROD_RANGE into local.auto.tfvars.
+# Keep the committed baseline account-neutral; apply jobs fail loud when the
+# deployment overlay is absent.
+agent_s3_bucket = "REPLACE_AGENT_S3_BUCKET"
 
 # ------------------------------------------------------------------------------
 # VM-Series NGFW (optional)
 # ------------------------------------------------------------------------------
 
-vm_series_ami_id        = "ami-065e27477b191614c" # PAN-OS 11.2.8
+# Regional PAN-OS Marketplace AMI rendered from the deployment overlay.
+vm_series_ami_id        = "REPLACE_VM_SERIES_AMI_ID"
 vm_series_instance_type = "m5.xlarge"
 
 # ------------------------------------------------------------------------------

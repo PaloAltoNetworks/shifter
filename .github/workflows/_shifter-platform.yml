@@ -437,6 +437,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -444,14 +449,12 @@ jobs:
 
       - name: Get deployment config
         id: config
-        env:
-          # `vars` are repository / environment variables managed in
-          # GitHub settings; this avoids parsing the committed example
-          # tfvars baseline. Default `false` for safety — autoscaling
-          # opts in explicitly per environment.
-          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}
         run: |
-          echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> "$GITHUB_OUTPUT"
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" resolve-topology \
+            --terraform-dir "${GITHUB_WORKSPACE}/platform/terraform/environments/${ENV}/portal" \
+            --backend-config "${ENV}.s3.tfbackend" \
+            --instance-tag "$INSTANCE_TAG" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Update Parameter Store with new image tag
         env:
@@ -488,11 +491,10 @@ jobs:
         id: instance
         if: steps.config.outputs.enable_autoscaling != 'true'
         run: |
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' --output text)
-          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "Error: Could not find running Platform EC2 instance with tag: $INSTANCE_TAG"; exit 1
+          INSTANCE_ID="${{ steps.config.outputs.instance_id }}"
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "::error::Terraform resolved single-instance mode but did not return an instance id"
+            exit 1
           fi
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
 
@@ -500,11 +502,10 @@ jobs:
         id: asg
         if: steps.config.outputs.enable_autoscaling == 'true'
         run: |
-          ASG_NAME=$(aws autoscaling describe-auto-scaling-groups \
-            --query "AutoScalingGroups[?contains(AutoScalingGroupName, '${ENV}-portal-asg')].AutoScalingGroupName | [0]" \
-            --output text)
-          if [ "$ASG_NAME" == "None" ] || [ -z "$ASG_NAME" ]; then
-            echo "Error: Could not find ASG with name containing: ${ENV}-portal-asg"; exit 1
+          ASG_NAME="${{ steps.config.outputs.asg_name }}"
+          if [ -z "$ASG_NAME" ]; then
+            echo "::error::Terraform resolved ASG mode but did not return an ASG name"
+            exit 1
           fi
           echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"
 
@@ -761,3 +762,13 @@ jobs:
           done
 
           echo "Platform ASG deployment successful!"
+
+      - name: Verify ASG image tag
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" verify-asg-image \
+            --asg-name "$ASG_NAME" \
+            --image-tag "$IMAGE_TAG"

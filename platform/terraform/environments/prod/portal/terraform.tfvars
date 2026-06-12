@@ -2,7 +2,7 @@
 # This file IS `terraform.tfvars` (committed). Deployment-specific overrides go in
 # a sibling `local.auto.tfvars` (gitignored) — Terraform auto-loads
 # `*.auto.tfvars` and the local values win. CI deploys render the overrides
-# from GitHub secrets/repository variables; see docs/dev/deploy-secrets.md.
+# from GitHub secrets; see docs/dev/deploy-secrets.md.
 
 
 # ------------------------------------------------------------------------------

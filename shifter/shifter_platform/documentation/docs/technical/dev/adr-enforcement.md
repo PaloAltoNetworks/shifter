@@ -117,6 +117,15 @@ The first slice intentionally stays small:
   is required for fresh AWS accounts where the repositories exist but the
   tags have not been published yet.
 
+- `portal-deploy-mode-source-of-truth`
+  Enforces ADR-003-R4 for the AWS portal deploy path. `_shifter-platform.yml`
+  must call `scripts/portal_deploy/portal_deploy.py resolve-topology` instead
+  of reading `AWS_PORTAL_ENABLE_AUTOSCALING`; both AWS portal roots must export
+  `enable_autoscaling`; the helper must reject single-instance deploys unless
+  exactly one running tagged instance matches Terraform state; and the ASG path
+  must call `verify-asg-image` after instance refresh so every in-service
+  instance is checked for the new portal image tag.
+
 - `deploy-verification-fail-loud`
   Enforces ADR-003-R3: deploy-verification steps must fail the run when the
   thing they verify did not happen, instead of warning and exiting 0. The

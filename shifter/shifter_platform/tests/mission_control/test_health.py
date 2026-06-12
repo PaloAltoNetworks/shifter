@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytest
 from django.test import Client
 from health_check.exceptions import ServiceUnavailable
+from health_check.plugins import plugin_dir
 
 # A non-secret sentinel used as the forced failure reason in probe-patches.
 # Tests use it as a positive control: if the public response surfaces *this*
@@ -106,6 +107,16 @@ def _force_probe_failure(target: str):
     return patch(target, side_effect=ServiceUnavailable(_FORCED_FAILURE_REASON))
 
 
+@pytest.fixture
+def health_check_registry():
+    """Restore the global django-health-check plugin registry after tests."""
+    original_registry = list(plugin_dir._registry)
+    try:
+        yield plugin_dir._registry
+    finally:
+        plugin_dir._registry = original_registry
+
+
 def test_health_returns_non_200_when_db_probe_fails():
     with _force_probe_failure("health_check.db.backends.DatabaseBackend.check_status"):
         status, _ = _get_health("/health/")
@@ -122,6 +133,54 @@ def test_health_returns_non_200_when_storage_probe_fails():
     with _force_probe_failure("health_check.storage.backends.DefaultFileStorageHealthCheck.check_status"):
         status, _ = _get_health("/health/")
     assert status != 200, "storage probe failure must surface as a non-200 /health"
+
+
+def test_in_memory_channel_layer_does_not_register_redis_probe(settings, health_check_registry):
+    from config.health_checks import ChannelLayerRedisHealthCheck, register_channel_layer_redis_health_check
+
+    settings.CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+    health_check_registry.clear()
+
+    register_channel_layer_redis_health_check()
+
+    assert all(plugin is not ChannelLayerRedisHealthCheck for plugin, _ in health_check_registry)
+
+
+def test_redis_channel_layer_registers_redis_probe(settings, health_check_registry):
+    from config.health_checks import ChannelLayerRedisHealthCheck, register_channel_layer_redis_health_check
+
+    settings.CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer"}}
+    health_check_registry.clear()
+
+    register_channel_layer_redis_health_check()
+
+    assert any(plugin is ChannelLayerRedisHealthCheck for plugin, _ in health_check_registry)
+
+
+def test_redis_health_check_uses_installed_health_check_plugin_base():
+    from health_check.backends import HealthCheck
+
+    from config.health_checks import ChannelLayerRedisHealthCheck
+
+    assert issubclass(ChannelLayerRedisHealthCheck, HealthCheck)
+
+
+def test_health_returns_non_200_when_channel_layer_redis_probe_fails(settings, health_check_registry):
+    from config.health_checks import ChannelLayerRedisHealthCheck, register_channel_layer_redis_health_check
+
+    settings.CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer"}}
+    health_check_registry.clear()
+    register_channel_layer_redis_health_check()
+
+    with patch.object(ChannelLayerRedisHealthCheck, "_probe", side_effect=ServiceUnavailable(_FORCED_FAILURE_REASON)):
+        status, body = _get_health("/health/", HTTP_ACCEPT="application/json")
+
+    assert status != 200, "Redis channel-layer probe failure must surface as a non-200 /health"
+    assert "ChannelLayerRedisHealthCheck" in body, body
+    assert '"unavailable"' in body, body
+    lowered = body.lower()
+    for marker in _FORBIDDEN_LEAK_MARKERS:
+        assert marker not in lowered, f"public /health body leaked sensitive marker {marker!r}: {body!r}"
 
 
 # ---------------------------------------------------------------------------

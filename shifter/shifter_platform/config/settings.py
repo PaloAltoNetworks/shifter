@@ -113,6 +113,7 @@ INSTALLED_APPS = [
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
+    "config.apps.PortalConfig",
     "rest_framework",
     "mission_control.apps.MissionControlConfig",
     "risk_register.apps.RiskRegisterConfig",

@@ -27,8 +27,10 @@ No new Ground Control requirement is attached.
   required to serve user traffic fail.
 - `django-health-check` is the incumbent readiness implementation. The
   installed `health_check.db`, `health_check.cache`, and
-  `health_check.storage` checks are the canonical probe set unless a later
-  issue deliberately changes the dependency contract.
+  `health_check.storage` checks are the canonical baseline probe set. Issue
+  #919 deliberately extends that contract with a conditional Channels Redis
+  probe when the resolved default channel layer is
+  `channels_redis.core.RedisChannelLayer`.
 - Host-header accommodation for load-balancer probes is allowed only as a
   narrow admission concern. Middleware may normalize or permit the probe to
   reach the health view, but it must not create the health response, status
@@ -112,6 +114,8 @@ Useful assertions include:
 
 - the old middleware short-circuit cannot satisfy `/health` or `/health/`;
 - a failing DB/cache/storage check can make `/health` non-200;
+- when Channels resolves to Redis, a failing channel-layer Redis probe can
+  make `/health` non-200;
 - host-header handling for the load-balancer probe reaches the real health
   view instead of failing early or returning synthetic success;
 - public output remains coarse when a dependency raises;
@@ -131,12 +135,14 @@ Useful assertions include:
   internet-facing health consumers.
 - Database readiness is already a startup gate in `entrypoint.sh`; runtime
   readiness still matters because dependencies can fail after boot.
-- Cache readiness means both Django cache health and Channels/Redis posture
-  must not be conceptually conflated. If only the installed cache probe is
-  exercised, do not claim websocket/channel-layer readiness beyond that.
-- Storage readiness should use the configured storage backend. Do not add a
-  parallel S3/GCS client just for health unless `django-health-check.storage`
-  cannot express the required check.
+- Cache readiness means Django cache health and Channels/Redis posture must
+  not be conceptually conflated. Since #919, channel-layer Redis readiness is
+  a separate conditional probe that is registered only when the resolved
+  `CHANNEL_LAYERS` backend is Redis.
+- Storage readiness should use the configured storage backend. The current
+  `health_check.storage` plugin exercises Django's default storage; do not
+  describe it as S3/GCS readiness unless the configured backend and probe
+  actually exercise S3/GCS.
 
 ## Anti-Patterns
 

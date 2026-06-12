@@ -6,6 +6,8 @@ from django.apps import AppConfig
 
 
 class PortalConfig(AppConfig):
+    """Register config-level startup hooks for the portal runtime."""
+
     name = "config"
 
     def ready(self) -> None:

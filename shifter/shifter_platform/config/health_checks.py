@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Any
+from typing import Protocol
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -30,6 +30,17 @@ __all__ = [
 _logger = logging.getLogger(__name__)
 _REDIS_CHANNEL_LAYER = "channels_redis.core.RedisChannelLayer"
 _PROBE_TIMEOUT_SECONDS = 2.0
+HealthCheckMessage = dict[str, str]
+
+
+class ChannelLayerProbe(Protocol):
+    """Minimal Channels layer protocol needed by the Redis readiness probe."""
+
+    async def new_channel(self, prefix: str = "specific") -> str: ...
+
+    async def send(self, channel: str, message: HealthCheckMessage) -> None: ...
+
+    async def receive(self, channel: str) -> HealthCheckMessage: ...
 
 
 def channel_layer_uses_redis() -> bool:
@@ -63,13 +74,15 @@ def register_channel_layer_redis_health_check() -> None:
 
 
 async def _probe_configured_channel_layer() -> None:
+    """Run a bounded round trip against the configured default channel layer."""
     layer = get_channel_layer()
     if layer is None:
         raise ServiceUnavailable("Default channel layer is unavailable")
     await asyncio.wait_for(_round_trip(layer), timeout=_PROBE_TIMEOUT_SECONDS)
 
 
-async def _round_trip(layer: Any) -> None:
+async def _round_trip(layer: ChannelLayerProbe) -> None:
+    """Send and receive a unique health-check message through ``layer``."""
     channel = await layer.new_channel("health.check")
     message = {"type": "health.check", "id": uuid.uuid4().hex}
     await layer.send(channel, message)

@@ -111,11 +111,24 @@ class AdrGuardTests(unittest.TestCase):
 class DeployWorkflowPlanScopeTests(unittest.TestCase):
     """Tests for the AWS platform plan trigger and lock-timeout guardrail."""
 
-    def _write_workflows(self, repo_root: Path, deploy: str, platform: str) -> None:
+    def _write_workflows(
+        self,
+        repo_root: Path,
+        deploy: str,
+        platform: str,
+        core: str | None = None,
+        range_workflow: str | None = None,
+    ) -> None:
         workflow_dir = repo_root / ".github" / "workflows"
         workflow_dir.mkdir(parents=True)
         (workflow_dir / "deploy.yml").write_text(deploy, encoding="utf-8")
         (workflow_dir / "_shifter-platform.yml").write_text(platform, encoding="utf-8")
+        (workflow_dir / "_core.yml").write_text(
+            core or self._terraform_workflow_text("core"), encoding="utf-8"
+        )
+        (workflow_dir / "_range.yml").write_text(
+            range_workflow or self._terraform_workflow_text("range"), encoding="utf-8"
+        )
 
     def _deploy_text(
         self,
@@ -127,6 +140,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         include_portal_image_filter: bool = True,
         portal_image_output: str = "portal_image: ${{ steps.filter.outputs.portal_image }}",
         platform_job_condition: str = "needs.changes.outputs.portal_image == 'true'",
+        cancel_in_progress: str = "${{ github.event_name == 'pull_request' }}",
     ) -> str:
         platform_globs = platform_globs or ["platform/terraform/modules/portal/**"]
         app_globs = app_globs or ["shifter/**"]
@@ -140,6 +154,9 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             )
             portal_image_filter = f"            portal_image:\n{portal_image_lines}"
         return (
+            "concurrency:\n"
+            "  group: deploy-${{ github.ref }}\n"
+            f"  cancel-in-progress: {cancel_in_progress}\n"
             "jobs:\n"
             "  changes:\n"
             "    outputs:\n"
@@ -166,16 +183,147 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         self,
         plan_args: str = "-no-color -lock-timeout=5m -out=tfplan",
         build_condition: str = "inputs.portal_image_changes",
+        apply_plan_command: str | None = "terraform plan -lock-timeout=5m -out=tfplan",
+        before_apply_command: str | None = None,
+        apply_command: str = "terraform apply -lock-timeout=5m tfplan",
     ) -> str:
+        apply_plan_step = f"      - run: {apply_plan_command}\n" if apply_plan_command else ""
+        before_apply_step = f"      - run: {before_apply_command}\n" if before_apply_command else ""
         return (
             "jobs:\n"
             "  plan:\n"
             "    steps:\n"
             f"      - run: terraform plan {plan_args}\n"
+            "  apply:\n"
+            "    steps:\n"
+            f"{apply_plan_step}"
+            f"{before_apply_step}"
+            f"      - run: {apply_command}\n"
             "  build:\n"
             "    if: |\n"
             f"      {build_condition}\n"
         )
+
+    def _terraform_workflow_text(
+        self,
+        component: str,
+        *,
+        plan_args: str = "-no-color -lock-timeout=5m -out=tfplan",
+        apply_plan_command: str | None = "terraform plan -lock-timeout=5m -out=tfplan",
+        apply_command: str = "terraform apply -lock-timeout=5m tfplan",
+    ) -> str:
+        apply_plan_step = f"      - run: {apply_plan_command}\n" if apply_plan_command else ""
+        return (
+            "jobs:\n"
+            "  plan:\n"
+            "    steps:\n"
+            f"      - run: terraform plan {plan_args}\n"
+            "  apply:\n"
+            "    steps:\n"
+            f"{apply_plan_step}"
+            f"      - run: {apply_command}\n"
+        )
+
+    def test_flags_deploy_workflow_that_cancels_env_branch_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(cancel_in_progress="true"),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+            self.assertIn("queue", violations[0].message)
+
+    def test_flags_core_and_range_plan_without_lock_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(),
+                core=self._terraform_workflow_text("core", plan_args="-no-color -out=tfplan"),
+                range_workflow=self._terraform_workflow_text(
+                    "range", plan_args="-no-color -out=tfplan"
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            flagged = {violation.path.split(":", 1)[0] for violation in violations}
+            self.assertIn(".github/workflows/_core.yml", flagged)
+            self.assertIn(".github/workflows/_range.yml", flagged)
+            self.assertTrue(all(violation.rule_id == "ADR-003-R2" for violation in violations))
+
+    def test_flags_core_apply_without_local_saved_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(),
+                core=self._terraform_workflow_text(
+                    "core",
+                    apply_plan_command=None,
+                    apply_command="terraform apply -auto-approve",
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            core_violations = [
+                violation
+                for violation in violations
+                if violation.path.startswith(".github/workflows/_core.yml")
+            ]
+            self.assertGreaterEqual(len(core_violations), 1)
+            self.assertTrue(
+                all(violation.rule_id == "ADR-003-R2" for violation in core_violations)
+            )
+            self.assertTrue(
+                any(
+                    "local saved Terraform plan" in violation.message
+                    for violation in core_violations
+                )
+            )
+
+    def test_flags_apply_without_local_saved_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(
+                    apply_plan_command=None,
+                    apply_command="terraform apply -auto-approve",
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            messages = "\n".join(violation.message for violation in violations)
+            self.assertIn("local saved Terraform plan", messages)
+            self.assertIn("saved Terraform plan", messages)
+
+    def test_flags_apply_job_that_removes_saved_plan_before_applying(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(
+                    before_apply_command="rm -f tfplan",
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("must not remove `tfplan`", violations[0].message)
 
     def test_flags_python_glob_in_platform_plan_scope(self) -> None:
         cases = ("shifter/**", "shifter/shifter_platform/**", "shifter/**/*.py")
@@ -212,9 +360,10 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
     def test_targeted_mode_runs_for_relevant_workflow_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
+            app_glob = "shifter/**"
             self._write_workflows(
                 repo_root,
-                self._deploy_text(platform_globs=["shifter/**"]),
+                self._deploy_text(platform_globs=[app_glob]),
                 self._platform_text(),
             )
 
@@ -223,6 +372,8 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             )
 
             self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+            self.assertIn(app_glob, violations[0].message)
 
     def test_flags_missing_app_quality_scope_after_platform_scope_split(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

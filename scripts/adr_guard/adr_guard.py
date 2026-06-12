@@ -2277,10 +2277,13 @@ def check_no_tracked_generated_artifacts(
 
 
 _DEPLOY_WORKFLOW_PATH = ".github/workflows/deploy.yml"
+_CORE_WORKFLOW_PATH = ".github/workflows/_core.yml"
+_RANGE_WORKFLOW_PATH = ".github/workflows/_range.yml"
 _PLATFORM_WORKFLOW_PATH = ".github/workflows/_shifter-platform.yml"
 _ADR_GUARD_SCRIPT_PATH = "scripts/adr_guard/adr_guard.py"
 _PLAN_SCOPE_CHECK = "deploy-workflow-plan-scope"
 _PLAN_SCOPE_RULE = "ADR-003-R2"
+_TERRAFORM_PLAN_FILE = "tfplan"
 _SHIFTER_APP_OUTPUT = "shifter_app: ${{ steps.filter.outputs.shifter_app }}"
 _SHIFTER_APP_QUALITY_CONDITION = "needs.changes.outputs.shifter_app == 'true'"
 _PORTAL_IMAGE_OUTPUT = "portal_image: ${{ steps.filter.outputs.portal_image }}"
@@ -2297,8 +2300,18 @@ _PORTAL_PROD_OUTPUTS_PATH = "platform/terraform/environments/prod/portal/outputs
 def _deploy_plan_scope_relevant(files: list[str] | None) -> bool:
     if files is None:
         return True
-    relevant = {_DEPLOY_WORKFLOW_PATH, _PLATFORM_WORKFLOW_PATH, _ADR_GUARD_SCRIPT_PATH}
+    relevant = {
+        _DEPLOY_WORKFLOW_PATH,
+        _CORE_WORKFLOW_PATH,
+        _RANGE_WORKFLOW_PATH,
+        _PLATFORM_WORKFLOW_PATH,
+        _ADR_GUARD_SCRIPT_PATH,
+    }
     return any(path in relevant for path in files)
+
+
+def _should_check_plan_scope_file(files: list[str] | None, path: str) -> bool:
+    return files is None or path in files or _ADR_GUARD_SCRIPT_PATH in files
 
 
 def _paths_filter_block(deploy_text: str, filter_name: str) -> list[str]:
@@ -2366,7 +2379,79 @@ def _terraform_plan_has_lock_timeout(stripped_line: str) -> bool:
         tokens = shlex.split(command, comments=True)
     except ValueError:
         tokens = command.split()
-    return "-lock-timeout=5m" in tokens
+    for index, token in enumerate(tokens[:-1]):
+        if token != "terraform" or tokens[index + 1] != "plan":
+            continue
+        plan_tokens: list[str] = []
+        for plan_token in tokens[index + 2 :]:
+            if plan_token in {"&&", "||", ";", "|"}:
+                break
+            plan_tokens.append(plan_token)
+        return "-lock-timeout=5m" in plan_tokens
+    return False
+
+
+def _terraform_plan_writes_saved_plan(stripped_line: str) -> bool:
+    if stripped_line.startswith("- run:"):
+        command = stripped_line.split(":", 1)[1].strip()
+    else:
+        command = stripped_line
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    for index, token in enumerate(tokens[:-1]):
+        if token != "terraform" or tokens[index + 1] != "plan":
+            continue
+        plan_tokens: list[str] = []
+        for plan_token in tokens[index + 2 :]:
+            if plan_token in {"&&", "||", ";", "|"}:
+                break
+            plan_tokens.append(plan_token)
+        if f"-out={_TERRAFORM_PLAN_FILE}" in plan_tokens:
+            return True
+        return any(
+            plan_token == "-out"
+            and next_index + 1 < len(plan_tokens)
+            and plan_tokens[next_index + 1] == _TERRAFORM_PLAN_FILE
+            for next_index, plan_token in enumerate(plan_tokens)
+        )
+    return False
+
+
+def _terraform_apply_uses_saved_plan(stripped_line: str) -> bool:
+    if stripped_line.startswith("- run:"):
+        command = stripped_line.split(":", 1)[1].strip()
+    else:
+        command = stripped_line
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    for index, token in enumerate(tokens[:-1]):
+        if token != "terraform" or tokens[index + 1] != "apply":
+            continue
+        apply_tokens = tokens[index + 2 :]
+        return (
+            "-lock-timeout=5m" in apply_tokens
+            and _TERRAFORM_PLAN_FILE in apply_tokens
+            and "-auto-approve" not in apply_tokens
+        )
+    return False
+
+
+def _line_removes_tfplan(stripped_line: str) -> bool:
+    if _TERRAFORM_PLAN_FILE not in stripped_line:
+        return False
+    if stripped_line.startswith("- run:"):
+        command = stripped_line.split(":", 1)[1].strip()
+    else:
+        command = stripped_line
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    return "rm" in tokens and _TERRAFORM_PLAN_FILE in tokens
 
 
 def _plan_scope_violation(path: str, message: str) -> Violation:
@@ -2478,9 +2563,46 @@ def _check_platform_build_portal_image_gate(platform_text: str) -> list[Violatio
     return []
 
 
-def _check_platform_plan_lock_timeout(platform_text: str) -> list[Violation]:
+def _check_deploy_concurrency_queues_apply_runs(deploy_text: str) -> list[Violation]:
+    """Require deploy runs that can apply infrastructure to queue, not cancel.
+
+    PR cancellation is still allowed because PR runs do not execute environment
+    branch applies. A global `true` cancellation policy can kill Terraform
+    mid-apply on `aws-dev` / `gcp-dev` pushes.
+    """
+    cancel_value: str | None = None
+    for line in deploy_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped.startswith("cancel-in-progress:"):
+            continue
+        cancel_value = stripped.split(":", 1)[1].strip()
+        break
+
+    if cancel_value is None:
+        return []
+
+    normalized = cancel_value.strip()
+    if normalized in {"false", "${{ false }}"}:
+        return []
+    if (
+        "github.event_name == 'pull_request'" in normalized
+        or 'github.event_name == "pull_request"' in normalized
+    ):
+        return []
+
+    return [
+        _plan_scope_violation(
+            _DEPLOY_WORKFLOW_PATH,
+            "Deploy workflow concurrency must queue env-branch apply runs instead "
+            "of cancelling an in-flight Terraform apply; restrict cancellation to "
+            "pull_request runs or set `cancel-in-progress: false`",
+        )
+    ]
+
+
+def _check_terraform_plan_lock_timeout(workflow_text: str, path: str) -> list[Violation]:
     violations: list[Violation] = []
-    for lineno, line in enumerate(platform_text.splitlines(), start=1):
+    for lineno, line in enumerate(workflow_text.splitlines(), start=1):
         stripped = line.strip()
         if "terraform plan" not in stripped:
             continue
@@ -2490,11 +2612,121 @@ def _check_platform_plan_lock_timeout(platform_text: str) -> list[Violation]:
             continue
         violations.append(
             _plan_scope_violation(
-                f"{_PLATFORM_WORKFLOW_PATH}:{lineno}",
-                "AWS platform Terraform plan commands must include `-lock-timeout=5m` "
+                f"{path}:{lineno}",
+                "AWS Terraform plan commands must include `-lock-timeout=5m` "
                 "so legitimate concurrent plans wait for the state lock instead of failing",
             )
         )
+    return violations
+
+
+def _check_saved_plan_apply_contract(workflow_text: str, path: str) -> list[Violation]:
+    """Require the apply job to create and consume a local saved Terraform plan."""
+    violations: list[Violation] = []
+    plan_block = _workflow_job_block(workflow_text, "plan")
+    apply_block = _workflow_job_block(workflow_text, "apply")
+
+    if not plan_block:
+        return [
+            _plan_scope_violation(
+                path,
+                "Terraform workflow is missing a `plan` job; ADR-003-R2 cannot verify "
+                "saved-plan apply integrity",
+            )
+        ]
+    if not apply_block:
+        return [
+            _plan_scope_violation(
+                path,
+                "Terraform workflow is missing an `apply` job; ADR-003-R2 cannot verify "
+                "saved-plan apply integrity",
+            )
+        ]
+
+    apply_plan_idx: int | None = None
+    apply_command_idx: int | None = None
+    for index, line in enumerate(apply_block):
+        stripped = line.strip()
+        if stripped.startswith(("#", "echo ")):
+            continue
+        if apply_plan_idx is None and "terraform plan" in stripped:
+            apply_plan_idx = index
+        if apply_command_idx is None and "terraform apply" in stripped:
+            apply_command_idx = index
+
+    if apply_plan_idx is None:
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job must create a local saved Terraform plan "
+                "(`terraform plan -lock-timeout=5m -out=tfplan`) immediately before "
+                "applying, avoiding raw binary plan artifacts while ensuring apply "
+                "executes a reviewed saved plan",
+            )
+        )
+    elif not _terraform_plan_writes_saved_plan(apply_block[apply_plan_idx]):
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job's local plan command must write `-out=tfplan` "
+                "so the subsequent apply consumes a saved plan file",
+            )
+        )
+
+    if apply_command_idx is None:
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job must run `terraform apply -lock-timeout=5m "
+                "tfplan` after creating the saved plan",
+            )
+        )
+    elif apply_plan_idx is not None and apply_plan_idx > apply_command_idx:
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job must create the saved `tfplan` before "
+                "running `terraform apply`",
+            )
+        )
+
+    for index, line in enumerate(apply_block):
+        stripped = line.strip()
+        if stripped.startswith(("#", "echo ")):
+            continue
+        if (
+            apply_plan_idx is not None
+            and apply_command_idx is not None
+            and apply_plan_idx < index < apply_command_idx
+            and _line_removes_tfplan(stripped)
+        ):
+            violations.append(
+                _plan_scope_violation(
+                    path,
+                    "The Terraform `apply` job must not remove `tfplan` before applying; "
+                    "Service Discovery checks and Terraform apply must consume the same "
+                    "saved plan file",
+                )
+            )
+        if "terraform apply" not in stripped:
+            continue
+        if _terraform_apply_uses_saved_plan(stripped):
+            continue
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "Terraform apply commands must apply the saved Terraform plan with "
+                "`terraform apply -lock-timeout=5m tfplan`, not run a fresh "
+                "`terraform apply -auto-approve`",
+            )
+        )
+    return violations
+
+
+def _check_terraform_workflow_integrity(workflow_text: str, path: str) -> list[Violation]:
+    violations: list[Violation] = []
+    violations.extend(_check_terraform_plan_lock_timeout(workflow_text, path))
+    violations.extend(_check_saved_plan_apply_contract(workflow_text, path))
     return violations
 
 
@@ -2505,30 +2737,57 @@ def check_deploy_workflow_plan_scope(repo_root: Path, files: list[str] | None) -
 
     violations: list[Violation] = []
     deploy_path = repo_root / _DEPLOY_WORKFLOW_PATH
+    core_path = repo_root / _CORE_WORKFLOW_PATH
+    range_path = repo_root / _RANGE_WORKFLOW_PATH
     platform_path = repo_root / _PLATFORM_WORKFLOW_PATH
 
-    if not deploy_path.exists():
+    check_deploy_and_platform = files is None or any(
+        path in {_DEPLOY_WORKFLOW_PATH, _PLATFORM_WORKFLOW_PATH, _ADR_GUARD_SCRIPT_PATH}
+        for path in files
+    )
+
+    if check_deploy_and_platform and not deploy_path.exists():
         violations.append(
             _plan_scope_violation(
                 _DEPLOY_WORKFLOW_PATH,
                 "Required workflow is missing; ADR-003-R2 cannot verify platform plan routing",
             )
         )
-    else:
+    elif check_deploy_and_platform:
         deploy_text = deploy_path.read_text(encoding="utf-8")
+        violations.extend(_check_deploy_concurrency_queues_apply_runs(deploy_text))
         violations.extend(_check_deploy_workflow_plan_routing(deploy_text))
         violations.extend(_check_deploy_workflow_portal_image_routing(deploy_text))
 
-    if not platform_path.exists():
+    for path, workflow_path in (
+        (_CORE_WORKFLOW_PATH, core_path),
+        (_RANGE_WORKFLOW_PATH, range_path),
+    ):
+        if not _should_check_plan_scope_file(files, path):
+            continue
+        if not workflow_path.exists():
+            violations.append(
+                _plan_scope_violation(
+                    path,
+                    "Required workflow is missing; ADR-003-R2 cannot verify Terraform "
+                    "lock-timeout and saved-plan apply integrity",
+                )
+            )
+            continue
+        violations.extend(
+            _check_terraform_workflow_integrity(workflow_path.read_text(encoding="utf-8"), path)
+        )
+
+    if check_deploy_and_platform and not platform_path.exists():
         violations.append(
             _plan_scope_violation(
                 _PLATFORM_WORKFLOW_PATH,
                 "Required workflow is missing; ADR-003-R2 cannot verify platform Terraform plan commands",
             )
         )
-    else:
+    elif check_deploy_and_platform:
         platform_text = platform_path.read_text(encoding="utf-8")
-        violations.extend(_check_platform_plan_lock_timeout(platform_text))
+        violations.extend(_check_terraform_workflow_integrity(platform_text, _PLATFORM_WORKFLOW_PATH))
         violations.extend(_check_platform_build_portal_image_gate(platform_text))
 
     return violations

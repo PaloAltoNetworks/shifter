@@ -13,6 +13,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[4]
 AWS_USER_DATA = REPO_ROOT / "platform" / "terraform" / "modules" / "portal" / "ec2" / "user_data.sh"
 AWS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_shifter-platform.yml"
+AWS_REDEPLOY_SCRIPT = REPO_ROOT / "scripts" / "portal-deploy" / "deploy_portal.sh"
 BASE_MANIFEST_DIR = REPO_ROOT / "platform" / "k8s" / "gcp" / "base"
 CHART_DIR = REPO_ROOT / "platform" / "charts" / "shifter"
 COMPOSE_FILE = REPO_ROOT / "shifter" / "shifter_platform" / "docker-compose.yml"
@@ -70,27 +71,32 @@ def test_local_compose_starts_ctf_scheduler_service() -> None:
     assert "ctf-scheduler-heartbeat" in " ".join(service["healthcheck"]["test"])
 
 
-@pytest.mark.parametrize("path", [AWS_USER_DATA, AWS_WORKFLOW])
+@pytest.mark.parametrize("path", [AWS_USER_DATA, AWS_REDEPLOY_SCRIPT])
 def test_aws_deploy_paths_start_ctf_scheduler_container(path: Path) -> None:
     deployment_text = path.read_text(encoding="utf-8")
 
     assert f"docker stop portal worker-cms worker-engine worker-mc {SCHEDULER_NAME}" in deployment_text
     assert f"docker rm portal worker-cms worker-engine worker-mc {SCHEDULER_NAME}" in deployment_text
-    assert (
-        'WORKER_HEALTH_BASE="--health-interval 30s --health-timeout 5s --health-start-period 90s --health-retries 2"'
-    ) in deployment_text
+    assert "health-interval 30s" in deployment_text
+    assert "health-timeout 5s" in deployment_text
+    assert "health-start-period 90s" in deployment_text
+    assert "health-retries 2" in deployment_text
     for heartbeat in (
         "worker-cms-heartbeat",
         "worker-engine-heartbeat",
         "worker-mc-heartbeat",
         "ctf-scheduler-heartbeat",
     ):
-        assert f"--health-cmd='find /tmp/{heartbeat} -mmin -2 | grep -q .'" in deployment_text
+        assert f"/tmp/{heartbeat} -mmin -2 | grep -q ." in deployment_text  # noqa: S108
     assert f"docker run -d --name {SCHEDULER_NAME} --restart unless-stopped" in deployment_text
-    assert (
-        f'docker run -d --name {SCHEDULER_NAME} --restart unless-stopped $WORKER_HEALTH_BASE "$CTF_SCHEDULER_HEALTH"'
-    ) in deployment_text
     assert " ".join(SCHEDULER_COMMAND) in deployment_text
+
+
+def test_aws_workflow_invokes_tracked_single_instance_deploy_script() -> None:
+    workflow_text = AWS_WORKFLOW.read_text(encoding="utf-8")
+    assert "scripts/portal-deploy/deploy_portal.sh" in workflow_text
+    assert "base64 -d > /tmp/shifter-deploy-portal.sh" in workflow_text
+    assert "--worker-health-name-prefix" in workflow_text
 
 
 @pytest.mark.parametrize(

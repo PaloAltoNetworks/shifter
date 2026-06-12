@@ -598,7 +598,7 @@ resource "aws_autoscaling_group" "this" {
   name_prefix               = "${var.name_prefix}-asg-"
   vpc_zone_identifier       = var.subnet_ids
   target_group_arns         = [var.target_group_arn]
-  health_check_type         = "ELB"
+  health_check_type         = "EC2"
   health_check_grace_period = 900
 
   min_size         = var.asg_min_size

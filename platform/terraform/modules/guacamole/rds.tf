@@ -87,7 +87,7 @@ resource "aws_secretsmanager_secret_version" "json_auth" {
 # ------------------------------------------------------------------------------
 
 resource "aws_db_instance" "guacamole" {
-  # checkov:skip=CKV_AWS_157:Guacamole uses password auth — IAM DB auth would require rewriting the Guacamole JDBC connector. See ADR-004-R11 exception.
+  # checkov:skip=CKV_AWS_157:Multi-AZ controlled by var.db_multi_az; environments choose.
   # checkov:skip=CKV_AWS_293:Deletion protection controlled by var.db_deletion_protection (dev false / prod true).
   identifier = "${var.name_prefix}-guacamole-db"
 
@@ -96,6 +96,7 @@ resource "aws_db_instance" "guacamole" {
   engine_version       = var.db_engine_version
   instance_class       = var.db_instance_class
   parameter_group_name = aws_db_parameter_group.guacamole.name
+  ca_cert_identifier   = var.db_ca_cert_identifier
 
   # Storage
   allocated_storage     = var.db_allocated_storage
@@ -133,6 +134,10 @@ resource "aws_db_instance" "guacamole" {
   performance_insights_enabled          = true
   performance_insights_retention_period = 7
   performance_insights_kms_key_id       = aws_kms_key.rds.arn
+
+  # IAM Database Authentication can be enabled without changing the
+  # Guacamole JDBC/password runtime path.
+  iam_database_authentication_enabled = true
 
   # CloudWatch Log Exports
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]

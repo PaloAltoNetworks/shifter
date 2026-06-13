@@ -42,6 +42,16 @@ variable "engine_version" {
   type        = string
 }
 
+variable "ca_cert_identifier" {
+  description = "RDS CA certificate identifier for the DB server certificate."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.ca_cert_identifier)) > 0
+    error_message = "ca_cert_identifier must be a non-empty RDS CA certificate identifier."
+  }
+}
+
 variable "instance_class" {
   description = "RDS instance class"
   type        = string

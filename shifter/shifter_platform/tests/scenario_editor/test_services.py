@@ -2,6 +2,7 @@
 
 import ast
 import inspect
+import json
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -12,11 +13,17 @@ from cms.models import Scenario, ScenarioMetadata
 from cms.scenario_editor.services import (
     ScenarioEditorError,
     clone_scenario,
+    clone_scenario_from_form_post,
     create_scenario,
+    create_scenario_from_form_post,
+    create_scenario_from_yaml_post,
     delete_scenario,
     export_scenario_yaml,
+    parse_scenario_form_fields,
     update_metadata,
     update_scenario,
+    update_scenario_from_form_post,
+    update_scenario_from_yaml_post,
     validate_definition,
     validate_yaml,
 )
@@ -507,6 +514,101 @@ class TestScenarioIdValidation:
         assert scenario.scenario_id == "my-valid_id-123"
         persisted = Scenario.objects.get(scenario_id="my-valid_id-123")
         assert persisted.pk == scenario.pk
+
+
+class TestScenarioEditorPostHelpers:
+    """Tests for service-owned view-flow validation helpers."""
+
+    def _form_data(self, valid_definition, **overrides):
+        data = {
+            "scenario_id": "form-service-test",
+            "name": "Form Service Test",
+            "description": "Created through service helper",
+            "instances_json": json.dumps(valid_definition["instances"]),
+            "subnets_json": json.dumps(valid_definition["subnets"]),
+        }
+        data.update(overrides)
+        return data
+
+    def test_form_parser_returns_context_and_errors(self):
+        fields, errors = parse_scenario_form_fields(
+            {
+                "scenario_id": "Bad ID",
+                "name": "",
+                "description": "",
+                "instances_json": "not json",
+            },
+            require_id=True,
+        )
+
+        assert fields.as_context(include_id=True)["id"] == "Bad ID"
+        assert "Name is required" in errors
+        assert "Description is required" in errors
+        assert "Invalid instances JSON" in errors
+
+    def test_create_from_form_post_creates_scenario(self, staff_user, valid_definition):
+        fields, errors = create_scenario_from_form_post(staff_user, self._form_data(valid_definition))
+
+        assert errors == []
+        assert fields.scenario_id == "form-service-test"
+        assert Scenario.objects.filter(scenario_id="form-service-test").exists()
+
+    def test_update_from_form_post_updates_scenario(self, staff_user, custom_scenario, valid_definition):
+        _, errors = update_scenario_from_form_post(
+            staff_user,
+            custom_scenario.scenario_id,
+            self._form_data(valid_definition, name="Updated Helper"),
+        )
+
+        assert errors == []
+        custom_scenario.refresh_from_db()
+        assert custom_scenario.name == "Updated Helper"
+
+    def test_create_from_yaml_post_creates_scenario(self, staff_user):
+        yaml_content = """
+id: yaml-service-test
+name: YAML Service Test
+description: Created through service helper
+instances:
+  - name: A
+    role: attacker
+    os_type: kali
+"""
+        fields, errors = create_scenario_from_yaml_post(staff_user, yaml_content)
+
+        assert errors == []
+        assert fields is not None
+        assert fields.scenario_id == "yaml-service-test"
+        assert Scenario.objects.filter(scenario_id="yaml-service-test").exists()
+
+    def test_update_from_yaml_post_updates_scenario(self, staff_user, custom_scenario):
+        yaml_content = """
+id: custom-test
+name: YAML Updated
+description: Updated through service helper
+instances:
+  - name: A
+    role: attacker
+    os_type: kali
+"""
+        errors = update_scenario_from_yaml_post(
+            staff_user,
+            custom_scenario.scenario_id,
+            yaml_content,
+            fallback_name=custom_scenario.name,
+            fallback_description=custom_scenario.description,
+        )
+
+        assert errors == []
+        custom_scenario.refresh_from_db()
+        assert custom_scenario.name == "YAML Updated"
+
+    def test_clone_from_form_post_validates_new_id(self, staff_user):
+        scenario, new_name, errors = clone_scenario_from_form_post(staff_user, "basic", {})
+
+        assert scenario is None
+        assert new_name is None
+        assert errors == ["New scenario ID is required"]
 
 
 class TestDuplicateIdRaceCondition:

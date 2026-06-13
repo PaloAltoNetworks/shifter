@@ -159,6 +159,16 @@ variable "db_engine_version" {
   type        = string
 }
 
+variable "db_ca_cert_identifier" {
+  description = "RDS CA certificate identifier for the Guacamole DB server certificate."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.db_ca_cert_identifier)) > 0
+    error_message = "db_ca_cert_identifier must be a non-empty RDS CA certificate identifier."
+  }
+}
+
 variable "db_multi_az" {
   description = "Enable Multi-AZ deployment for RDS"
   type        = bool

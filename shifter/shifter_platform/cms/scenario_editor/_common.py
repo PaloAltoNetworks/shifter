@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 class ScenarioEditorError(CMSError):
     """Error raised by scenario editor operations."""
 
+    @property
+    def public_message(self) -> str:
+        """Return the user-facing service message without debug details."""
+        return self.message
+
 
 def validate_user(user: User, func_name: str) -> None:
     """Delegate to the shared CMS authoring user validator."""

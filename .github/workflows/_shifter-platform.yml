@@ -509,6 +509,85 @@ jobs:
           fi
           echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Run database migrations (ASG mode)
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+        run: |
+          echo "Selecting one in-service ASG instance for deploy-owned migration: $ASG_NAME"
+          MIGRATION_INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" \
+            --output text)
+
+          if [ -z "$MIGRATION_INSTANCE_ID" ] || [ "$MIGRATION_INSTANCE_ID" = "None" ]; then
+            echo "::error::No healthy in-service instance found in ASG $ASG_NAME for database migration"
+            exit 1
+          fi
+
+          echo "Running migration on instance: $MIGRATION_INSTANCE_ID"
+
+          # Wait for cloud-init to complete so Docker and the ECR credential helper are available.
+          for i in $(seq 1 30); do
+            RESULT=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$MIGRATION_INSTANCE_ID" \
+              --parameters 'commands=["cloud-init status --wait || cloud-init status"]' \
+              --query "Command.CommandId" --output text 2>/dev/null) || true
+            if [ -n "$RESULT" ]; then
+              sleep 10
+              STATUS=$(aws ssm get-command-invocation --command-id "$RESULT" --instance-id "$MIGRATION_INSTANCE_ID" \
+                --query "StandardOutputContent" --output text 2>/dev/null) || true
+              if echo "$STATUS" | grep -q "done"; then echo "Cloud-init complete"; break; fi
+            fi
+            echo "Attempt $i: Waiting for cloud-init..."; sleep 10
+          done
+
+          DEPLOY_SCRIPT_PATH="${GITHUB_WORKSPACE}/scripts/portal-deploy/deploy_portal.sh"
+          DEPLOY_SCRIPT_B64=$(base64 -w0 "$DEPLOY_SCRIPT_PATH")
+          DEPLOY_ARGS=$(jq -cn \
+            --arg awsRegion "$AWS_REGION" \
+            --arg psPrefix "$PS_PREFIX" \
+            '[
+              "--aws-region", $awsRegion,
+              "--ps-prefix", $psPrefix,
+              "--migrate-only"
+            ]')
+
+          PARAMS_FILE=$(mktemp)
+          jq -n \
+            --arg deployScriptB64 "$DEPLOY_SCRIPT_B64" \
+            --argjson deployArgs "$DEPLOY_ARGS" \
+            '{
+              commands: [
+                ("printf %s " + ($deployScriptB64 | @sh) + " | base64 -d > /tmp/shifter-deploy-portal.sh"),
+                "chmod 0755 /tmp/shifter-deploy-portal.sh",
+                ((["/tmp/shifter-deploy-portal.sh"] + $deployArgs) | @sh)
+              ]
+            }' > "$PARAMS_FILE"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$MIGRATION_INSTANCE_ID" \
+            --parameters "file://$PARAMS_FILE" \
+            --timeout-seconds 900 \
+            --query "Command.CommandId" --output text)
+
+          rm -f "$PARAMS_FILE"
+
+          echo "Migration SSM Command ID: $COMMAND_ID"
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$MIGRATION_INSTANCE_ID" \
+            --cli-read-timeout 30 \
+            --cli-connect-timeout 30
+
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$MIGRATION_INSTANCE_ID" --query "Status" --output text)
+          if [ "$STATUS" != "Success" ]; then
+            echo "Migration failed!"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$MIGRATION_INSTANCE_ID" --query "StandardErrorContent" --output text
+            exit 1
+          fi
+          echo "Database migration completed successfully."
+
       - name: Deploy via SSM (single instance mode)
         if: steps.config.outputs.enable_autoscaling != 'true'
         env:

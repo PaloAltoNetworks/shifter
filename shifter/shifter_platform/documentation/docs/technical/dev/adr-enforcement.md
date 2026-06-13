@@ -96,6 +96,14 @@ The first slice intentionally stays small:
   This includes the GCP deploy workflow's Terraform state-backend hardening
   (`_gcp-dev.yml`) so retention and IAM policy bootstrap logic remains valid.
 
+- Django i18n/static artifact tests
+  Enforce ADR-016-R3 in
+  `shifter/shifter_platform/tests/config/test_i18n_configuration.py` and
+  `shifter/shifter_platform/tests/platform/test_portal_dockerfile.py` by
+  requiring portal image builds to run `compilemessages` before
+  `collectstatic`, and requiring `entrypoint.sh` to stay free of runtime
+  static-artifact rebuilds.
+
 - `deploy-workflow-plan-scope`
   Enforces ADR-003-R2 for the AWS deploy workflows. The `shifter_platform`
   change filter in `.github/workflows/deploy.yml` must stay scoped to

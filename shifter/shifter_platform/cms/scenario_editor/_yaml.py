@@ -38,3 +38,28 @@ def export_scenario_yaml(scenario_id: str) -> str:
         export["subnets"] = data["subnets"]
 
     return yaml.dump(export, default_flow_style=False, sort_keys=False)
+
+
+def new_scenario_template_yaml() -> str:
+    """Return the starter YAML shown by the YAML create view."""
+    return (
+        "id: my-new-scenario\n"
+        "name: My New Scenario\n"
+        "description: Describe your scenario here.\n"
+        "ngfw: false\n"
+        "\n"
+        "instances:\n"
+        "  - name: Attacker\n"
+        "    role: attacker\n"
+        "    os_type: kali\n"
+        "    xdr_agent: false\n"
+        "\n"
+        "  - name: Workstation\n"
+        "    role: victim\n"
+        "    os_type: from_agent\n"
+        "    xdr_agent: true\n"
+        "\n"
+        "subnets:\n"
+        "  - name: core\n"
+        "    instances: [Attacker, Workstation]\n"
+    )

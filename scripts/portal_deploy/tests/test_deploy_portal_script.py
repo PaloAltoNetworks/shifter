@@ -194,7 +194,9 @@ class DeployPortalScriptTests(unittest.TestCase):
             env["MISSING_OPTIONAL_PARAMS"] = "1"
         return env
 
-    def _script_args(self, root: Path, *, ps_prefix: str = "/shifter/dev/portal") -> list[str]:
+    def _script_args(
+        self, root: Path, *, ps_prefix: str = "/shifter/dev/portal"
+    ) -> list[str]:
         return [
             str(SCRIPT_PATH),
             "--aws-region",
@@ -271,14 +273,20 @@ class DeployPortalScriptTests(unittest.TestCase):
             log = (root / "calls.log").read_text(encoding="utf-8")
             self.assertNotIn("docker pull", log)
 
-    def test_deploy_rewrites_worker_health_artifacts_and_tolerates_repeated_runs(self) -> None:
+    def test_deploy_rewrites_worker_health_artifacts_and_tolerates_repeated_runs(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = self._install_stubs(root)
             args = self._script_args(root)
 
-            first = subprocess.run(args, check=False, capture_output=True, text=True, env=env)
-            second = subprocess.run(args, check=False, capture_output=True, text=True, env=env)
+            first = subprocess.run(
+                args, check=False, capture_output=True, text=True, env=env
+            )
+            second = subprocess.run(
+                args, check=False, capture_output=True, text=True, env=env
+            )
 
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertEqual(second.returncode, 0, second.stderr)
@@ -289,23 +297,69 @@ class DeployPortalScriptTests(unittest.TestCase):
                 "monitor-v1\n",
             )
             self.assertEqual(
-                (root / "etc" / "shifter-worker-health.env").read_text(encoding="utf-8"),
+                (root / "etc" / "shifter-worker-health.env").read_text(
+                    encoding="utf-8"
+                ),
                 "WH_NAME_PREFIX=dev-portal\n",
             )
             log = (root / "calls.log").read_text(encoding="utf-8")
             self.assertEqual(log.count("docker run -d --name portal"), 2)
+            self.assertEqual(log.count("docker run --rm"), 2)
+            self.assertLess(
+                log.index("docker run --rm"),
+                log.index(
+                    "docker stop portal worker-cms worker-engine worker-mc ctf-scheduler"
+                ),
+            )
+            self.assertIn("python manage.py migrate --noinput", log)
+            self.assertIn("SKIP_MIGRATIONS=1", log)
             for name in ("worker-cms", "worker-engine", "worker-mc", "ctf-scheduler"):
                 self.assertIn(f"docker run -d --name {name}", log)
             self.assertIn("run_worker --queue cms", log)
             self.assertIn("run_worker --queue engine", log)
             self.assertIn("run_worker --queue mc", log)
             self.assertIn("python manage.py run_ctf_scheduler", log)
-            self.assertIn("docker stop portal worker-cms worker-engine worker-mc ctf-scheduler", log)
+            self.assertIn(
+                "docker stop portal worker-cms worker-engine worker-mc ctf-scheduler",
+                log,
+            )
             self.assertIn(
                 "DJANGO_ALLOWED_HOSTS=portal.dev.example.test,localhost,127.0.0.1",
                 log,
             )
             self.assertIn("systemctl enable --now shifter-worker-health.timer", log)
+
+    def test_migrate_only_runs_single_migration_without_runtime_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self._install_stubs(root)
+
+            result = subprocess.run(
+                [
+                    str(SCRIPT_PATH),
+                    "--aws-region",
+                    "us-east-2",
+                    "--ps-prefix",
+                    "/shifter/dev/portal",
+                    "--migrate-only",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            log = (root / "calls.log").read_text(encoding="utf-8")
+            self.assertIn(
+                "docker pull 123456789012.dkr.ecr.us-east-2.amazonaws.com/shifter-dev-portal:abc123",
+                log,
+            )
+            self.assertIn("docker run --rm", log)
+            self.assertIn("SKIP_MIGRATIONS=1", log)
+            self.assertIn("python manage.py migrate --noinput", log)
+            self.assertNotIn("docker run -d --name portal", log)
+            self.assertNotIn("systemctl", log)
 
     def test_missing_optional_params_are_not_emitted_as_empty_env_vars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -351,7 +405,9 @@ class DeployPortalScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             log = (root / "calls.log").read_text(encoding="utf-8")
-            self.assertRegex(log, r"DJANGO_ALLOWED_HOSTS=portal\.dev\.example\.test(?!,)")
+            self.assertRegex(
+                log, r"DJANGO_ALLOWED_HOSTS=portal\.dev\.example\.test(?!,)"
+            )
             self.assertNotIn(
                 "DJANGO_ALLOWED_HOSTS=portal.dev.example.test,localhost,127.0.0.1",
                 log,

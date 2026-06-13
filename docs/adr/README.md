@@ -32,6 +32,11 @@ Current mechanisms:
   patch counts, including baseline allowance increases against the branch
   reference, fail the `boundary-mock-policy` check.
 - `.pre-commit-config.yaml`: local fast checks
+  - The `Deploy` workflow's always-present `Pre-commit` job runs the
+    file-hygiene and secret-scan subset (`trailing-whitespace`,
+    `end-of-file-fixer`, YAML/JSON checks, large-file and merge-conflict
+    checks, private-key detection, and gitleaks) and feeds `PR Gate`, so
+    protected-branch PRs cannot bypass that baseline through path filters.
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
     Shifter-owned, Terraform-managed instances.
@@ -45,9 +50,14 @@ Current mechanisms:
   action majors for checkout, artifact restore, Java setup, and the
   SonarQube Cloud scan so runner deprecation warnings do not mask real
   SonarCloud quality findings.
+  - Repository branch protection for `main` and `dev` requires the
+    aggregate `PR Gate`, CodeQL, and pull-request title lint with strict
+    up-to-date status checks. Admin bypass remains enabled for emergency
+    override; normal changes land through PRs.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
-  runs on push to `dev`, on pull requests against `dev`, and on a
+  runs on pushes to `main` and `dev`, on pull requests against either
+  protected branch, and on a
   weekly schedule. Least-privilege permissions (`contents: read`,
   `security-events: write`, `actions: read`); no `pull_request_target`.
 - `.github/workflows/pr-title-lint.yml`: pull-request title validation

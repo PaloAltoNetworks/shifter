@@ -6,8 +6,11 @@ scenario templates. Uses CMS models directly.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -34,6 +37,44 @@ class ScenarioEditorError(CMSError):
     """Error raised by scenario editor operations."""
 
 
+@dataclass(frozen=True)
+class ScenarioFormFields:
+    """Validated form-submitted scenario fields."""
+
+    scenario_id: str
+    name: str
+    description: str
+    ngfw: bool
+    instances: Any
+    subnets: Any
+
+    @property
+    def definition(self) -> dict[str, Any]:
+        return {"instances": self.instances, "subnets": self.subnets, "ngfw": self.ngfw}
+
+    def as_context(self, *, include_id: bool) -> dict[str, Any]:
+        context = {
+            "name": self.name,
+            "description": self.description,
+            "ngfw": self.ngfw,
+            "instances": self.instances,
+            "subnets": self.subnets,
+        }
+        if include_id:
+            context["id"] = self.scenario_id
+        return context
+
+
+@dataclass(frozen=True)
+class ScenarioYamlFields:
+    """Validated YAML-submitted scenario fields."""
+
+    scenario_id: str
+    name: str
+    description: str
+    definition: dict[str, Any]
+
+
 def _validate_user(user: User, func_name: str) -> None:
     """Delegate to the shared CMS authoring user validator (see shared.auth)."""
     validate_cms_authoring_user(user, func_name)
@@ -42,6 +83,226 @@ def _validate_user(user: User, func_name: str) -> None:
 # Regex for valid scenario IDs: lowercase alphanumeric, hyphens, underscores.
 # Must start and end with a letter or digit.
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
+
+
+def _post_value(post_data: Mapping[str, Any], key: str, default: str = "") -> str:
+    value = post_data.get(key, default)
+    if isinstance(value, list):
+        value = value[-1] if value else default
+    if value is None:
+        value = default
+    return str(value).strip()
+
+
+def _load_json_field(raw_value: str, label: str) -> tuple[Any, list[str]]:
+    try:
+        return json.loads(raw_value), []
+    except (json.JSONDecodeError, TypeError):
+        return [], [f"Invalid {label} JSON"]
+
+
+def parse_scenario_form_fields(
+    post_data: Mapping[str, Any], *, require_id: bool
+) -> tuple[ScenarioFormFields, list[str]]:
+    """Validate scenario create/edit form fields."""
+    scenario_id = _post_value(post_data, "scenario_id")
+    name = _post_value(post_data, "name")
+    description = _post_value(post_data, "description")
+    ngfw = _post_value(post_data, "ngfw") == "on"
+    instances, instance_errors = _load_json_field(_post_value(post_data, "instances_json", "[]"), "instances")
+    subnets, subnet_errors = _load_json_field(_post_value(post_data, "subnets_json", "[]"), "subnets")
+
+    errors: list[str] = []
+    if require_id:
+        if not scenario_id:
+            errors.append("Scenario ID is required")
+        elif not _SCENARIO_ID_RE.match(scenario_id):
+            errors.append("Scenario ID must contain only lowercase letters, numbers, hyphens, and underscores")
+    if not name:
+        errors.append("Name is required")
+    if not description:
+        errors.append("Description is required")
+
+    errors.extend(instance_errors)
+    errors.extend(subnet_errors)
+    if not instances:
+        errors.append("At least one instance is required")
+
+    return ScenarioFormFields(scenario_id, name, description, ngfw, instances, subnets), errors
+
+
+def create_scenario_from_form_post(user: User, post_data: Mapping[str, Any]) -> tuple[ScenarioFormFields, list[str]]:
+    """Create a scenario from submitted form fields."""
+    fields, errors = parse_scenario_form_fields(post_data, require_id=True)
+    if errors:
+        return fields, errors
+
+    try:
+        create_scenario(
+            user,
+            scenario_id=fields.scenario_id,
+            name=fields.name,
+            description=fields.description,
+            definition=fields.definition,
+        )
+    except ScenarioEditorError as e:
+        return fields, [str(e)]
+    return fields, []
+
+
+def update_scenario_from_form_post(
+    user: User, scenario_id: str, post_data: Mapping[str, Any]
+) -> tuple[ScenarioFormFields, list[str]]:
+    """Update a scenario from submitted form fields."""
+    fields, errors = parse_scenario_form_fields(post_data, require_id=False)
+    if errors:
+        return fields, errors
+
+    try:
+        update_scenario(
+            user,
+            scenario_id,
+            name=fields.name,
+            description=fields.description,
+            definition=fields.definition,
+        )
+    except ScenarioEditorError as e:
+        return fields, [str(e)]
+    return fields, []
+
+
+def _definition_from_yaml_fields(parsed: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "instances": parsed.get("instances", []),
+        "subnets": parsed.get("subnets", []),
+        "ngfw": parsed.get("ngfw", False),
+    }
+
+
+def parse_yaml_create_fields(yaml_content: str) -> tuple[ScenarioYamlFields | None, list[str]]:
+    """Validate YAML fields required to create a scenario."""
+    parsed, errors = validate_yaml(yaml_content)
+    if errors:
+        return None, errors
+
+    parsed = parsed or {}
+    scenario_id = str(parsed.get("id") or "").strip()
+    name = str(parsed.get("name") or "").strip()
+    description = str(parsed.get("description") or "").strip()
+
+    yaml_errors = []
+    if not scenario_id:
+        yaml_errors.append("YAML must include an 'id' field")
+    if not name:
+        yaml_errors.append("YAML must include a 'name' field")
+    if not description:
+        yaml_errors.append("YAML must include a 'description' field")
+    if yaml_errors:
+        return None, yaml_errors
+
+    return ScenarioYamlFields(scenario_id, name, description, _definition_from_yaml_fields(parsed)), []
+
+
+def create_scenario_from_yaml_post(user: User, yaml_content: str) -> tuple[ScenarioYamlFields | None, list[str]]:
+    """Create a scenario from submitted YAML content."""
+    fields, errors = parse_yaml_create_fields(yaml_content)
+    if errors or fields is None:
+        return fields, errors
+
+    try:
+        create_scenario(
+            user,
+            scenario_id=fields.scenario_id,
+            name=fields.name,
+            description=fields.description,
+            definition=fields.definition,
+        )
+    except ScenarioEditorError as e:
+        return fields, [str(e)]
+    return fields, []
+
+
+def update_scenario_from_yaml_post(
+    user: User,
+    scenario_id: str,
+    yaml_content: str,
+    *,
+    fallback_name: str,
+    fallback_description: str,
+) -> list[str]:
+    """Update a scenario from submitted YAML content."""
+    parsed, errors = validate_yaml(yaml_content)
+    if errors:
+        return errors
+
+    parsed = parsed or {}
+    try:
+        update_scenario(
+            user,
+            scenario_id,
+            name=parsed.get("name", fallback_name),
+            description=parsed.get("description", fallback_description),
+            definition=_definition_from_yaml_fields(parsed),
+        )
+    except ScenarioEditorError as e:
+        return [str(e)]
+    return []
+
+
+def clone_scenario_from_form_post(
+    user: User, source_scenario_id: str, post_data: Mapping[str, Any]
+) -> tuple[Scenario | None, str | None, list[str]]:
+    """Clone a scenario from submitted clone-form fields."""
+    new_scenario_id = _post_value(post_data, "new_scenario_id")
+    new_name = _post_value(post_data, "new_name") or None
+    if not new_scenario_id:
+        return None, new_name, ["New scenario ID is required"]
+
+    try:
+        scenario = clone_scenario(
+            user,
+            source_scenario_id,
+            new_scenario_id=new_scenario_id,
+            new_name=new_name,
+        )
+    except ScenarioEditorError as e:
+        return None, new_name, [str(e)]
+    return scenario, new_name, []
+
+
+def toggle_scenario_metadata_flag(user: User, scenario_id: str, *, field: str, default: bool) -> bool:
+    """Toggle a boolean scenario metadata flag and return the new value."""
+    from cms.scenarios.registry import get_scenario_detail
+
+    current = get_scenario_detail(scenario_id)
+    new_value = not current.get(field, default)
+    update_metadata(user, scenario_id, **{field: new_value})
+    return new_value
+
+
+def new_scenario_template_yaml() -> str:
+    """Return the starter YAML shown by the YAML create view."""
+    return (
+        "id: my-new-scenario\n"
+        "name: My New Scenario\n"
+        "description: Describe your scenario here.\n"
+        "ngfw: false\n"
+        "\n"
+        "instances:\n"
+        "  - name: Attacker\n"
+        "    role: attacker\n"
+        "    os_type: kali\n"
+        "    xdr_agent: false\n"
+        "\n"
+        "  - name: Workstation\n"
+        "    role: victim\n"
+        "    os_type: from_agent\n"
+        "    xdr_agent: true\n"
+        "\n"
+        "subnets:\n"
+        "  - name: core\n"
+        "    instances: [Attacker, Workstation]\n"
+    )
 
 
 def validate_definition(definition: dict[str, Any]) -> list[str]:

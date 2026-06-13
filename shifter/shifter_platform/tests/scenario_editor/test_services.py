@@ -1,11 +1,14 @@
 """Tests for scenario editor services."""
 
+import ast
+import inspect
 import json
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 
+import cms.scenario_editor.services as scenario_services
 from cms.models import Scenario, ScenarioMetadata
 from cms.scenario_editor.services import (
     ScenarioEditorError,
@@ -41,6 +44,17 @@ def custom_scenario(staff_user, valid_definition):
         created_by=staff_user,
         updated_by=staff_user,
     )
+
+
+class TestServiceModuleStructure:
+    def test_services_module_is_public_facade(self):
+        source = inspect.getsource(scenario_services)
+        tree = ast.parse(source)
+
+        function_names = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+
+        assert function_names == []
+        assert len(source.splitlines()) <= 80
 
 
 class TestValidateDefinition:
@@ -139,6 +153,10 @@ class TestCreateScenario:
         assert scenario.scenario_id == "new-scenario"
         assert scenario.name == "New Scenario"
         assert scenario.created_by == staff_user
+        persisted = Scenario.objects.get(scenario_id="new-scenario")
+        assert persisted.pk == scenario.pk
+        assert persisted.name == "New Scenario"
+        assert persisted.created_by == staff_user
 
     def test_collision_with_yaml_default(self, staff_user, valid_definition):
         with pytest.raises(ScenarioEditorError, match="built-in default"):
@@ -179,6 +197,8 @@ class TestUpdateScenario:
             name="Updated Name",
         )
         assert updated.name == "Updated Name"
+        custom_scenario.refresh_from_db()
+        assert custom_scenario.name == "Updated Name"
 
     def test_update_definition(self, staff_user, custom_scenario):
         new_def = {
@@ -194,6 +214,8 @@ class TestUpdateScenario:
             definition=new_def,
         )
         assert updated.definition["ngfw"] is True
+        custom_scenario.refresh_from_db()
+        assert custom_scenario.definition["ngfw"] is True
 
     def test_cannot_update_default(self, staff_user):
         with pytest.raises(ScenarioEditorError, match="Cannot edit default"):
@@ -235,6 +257,8 @@ class TestUpdateMetadata:
         meta = update_metadata(staff_user, "basic", enabled=False)
         assert meta.scenario_id == "basic"
         assert meta.enabled is False
+        persisted = ScenarioMetadata.objects.get(scenario_id="basic")
+        assert persisted.enabled is False
 
     def test_update_existing_metadata(self, staff_user, db):
         ScenarioMetadata.objects.create(
@@ -246,6 +270,9 @@ class TestUpdateMetadata:
         meta = update_metadata(staff_user, "basic", staff_only=True)
         assert meta.staff_only is True
         assert meta.enabled is True  # Not changed
+        persisted = ScenarioMetadata.objects.get(scenario_id="basic")
+        assert persisted.staff_only is True
+        assert persisted.enabled is True
 
     def test_scenario_must_exist(self, staff_user, db):
         with pytest.raises(ScenarioEditorError, match="not found"):
@@ -262,6 +289,9 @@ class TestCloneScenario:
         assert clone.scenario_id == "basic-clone"
         assert clone.name == "Copy of Basic Range"
         assert len(clone.definition["instances"]) == 2
+        persisted = Scenario.objects.get(scenario_id="basic-clone")
+        assert persisted.pk == clone.pk
+        assert persisted.name == "Copy of Basic Range"
 
     def test_clone_custom(self, staff_user, custom_scenario):
         clone = clone_scenario(
@@ -272,6 +302,9 @@ class TestCloneScenario:
         )
         assert clone.scenario_id == "custom-clone"
         assert clone.name == "My Clone"
+        persisted = Scenario.objects.get(scenario_id="custom-clone")
+        assert persisted.pk == clone.pk
+        assert persisted.name == "My Clone"
 
     def test_clone_source_not_found(self, staff_user, db):
         with pytest.raises(ScenarioEditorError, match="not found"):
@@ -300,6 +333,26 @@ class TestExportScenarioYaml:
     def test_export_does_not_include_enabled(self, db):
         yaml_str = export_scenario_yaml("basic")
         assert "enabled:" not in yaml_str
+
+    def test_export_custom_round_trips_through_yaml_validation(self, custom_scenario):
+        yaml_str = export_scenario_yaml("custom-test")
+
+        parsed, errors = validate_yaml(yaml_str)
+
+        assert errors == []
+        assert parsed is not None
+        assert parsed["id"] == custom_scenario.scenario_id
+        assert parsed["name"] == custom_scenario.name
+        assert parsed["description"] == custom_scenario.description
+        assert len(parsed["instances"]) == len(custom_scenario.definition["instances"])
+        for expected, actual in zip(custom_scenario.definition["instances"], parsed["instances"], strict=True):
+            for key, value in expected.items():
+                assert actual[key] == value
+        assert len(parsed["subnets"]) == len(custom_scenario.definition["subnets"])
+        for expected, actual in zip(custom_scenario.definition["subnets"], parsed["subnets"], strict=True):
+            for key, value in expected.items():
+                assert actual[key] == value
+        assert parsed["ngfw"] == custom_scenario.definition["ngfw"]
 
 
 class TestUserValidation:
@@ -354,6 +407,8 @@ class TestUserValidation:
             definition=valid_definition,
         )
         assert scenario.scenario_id == "tr-create"
+        persisted = Scenario.objects.get(scenario_id="tr-create")
+        assert persisted.pk == scenario.pk
 
     def test_inactive_threat_research_user_denied(self, threat_research_user, valid_definition):
         threat_research_user.is_active = False
@@ -457,6 +512,8 @@ class TestScenarioIdValidation:
             definition=valid_definition,
         )
         assert scenario.scenario_id == "my-valid_id-123"
+        persisted = Scenario.objects.get(scenario_id="my-valid_id-123")
+        assert persisted.pk == scenario.pk
 
 
 class TestScenarioEditorPostHelpers:

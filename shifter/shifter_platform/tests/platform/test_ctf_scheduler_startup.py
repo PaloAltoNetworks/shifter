@@ -99,6 +99,31 @@ def test_aws_workflow_invokes_tracked_single_instance_deploy_script() -> None:
     assert "--worker-health-name-prefix" in workflow_text
 
 
+def test_aws_workflow_runs_one_asg_migration_before_instance_refresh() -> None:
+    workflow_text = AWS_WORKFLOW.read_text(encoding="utf-8")
+
+    migration_index = workflow_text.index("Run database migrations (ASG mode)")
+    refresh_index = workflow_text.index("aws autoscaling start-instance-refresh")
+
+    assert migration_index < refresh_index
+    assert "Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" in workflow_text
+    assert "--migrate-only" in workflow_text
+    assert "Migration failed!" in workflow_text
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_runtime_skip"),
+    [
+        (AWS_USER_DATA, 'COMMON_ENV="$COMMON_ENV -e SKIP_MIGRATIONS=1"'),
+        (AWS_REDEPLOY_SCRIPT, 'append_env SKIP_MIGRATIONS "1"'),
+    ],
+)
+def test_aws_runtime_containers_skip_boot_migrations(path: Path, expected_runtime_skip: str) -> None:
+    deployment_text = path.read_text(encoding="utf-8")
+
+    assert expected_runtime_skip in deployment_text
+
+
 @pytest.mark.parametrize(
     ("source_name", "loader"),
     [

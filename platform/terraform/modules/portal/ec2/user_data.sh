@@ -248,6 +248,10 @@ if [[ -n "$CTFD_PLATFORM_URL" ]]; then
   COMMON_ENV="$COMMON_ENV -e CTFD_PLATFORM_URL=$CTFD_PLATFORM_URL"
 fi
 
+# Migrations are deploy-owned. Runtime containers skip boot-time migration so
+# ASG refreshes and warm-pool reuse cannot race the same RDS schema.
+COMMON_ENV="$COMMON_ENV -e SKIP_MIGRATIONS=1"
+
 # ------------------------------------------------------------------------------
 # Deploy containers
 # ------------------------------------------------------------------------------

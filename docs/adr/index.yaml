@@ -672,7 +672,7 @@
     "title": "Django templates use native gettext for user-facing literals",
     "status": "accepted",
     "scope": "shifter_platform",
-    "decision": "Django-rendered user-facing template literals are routed through Django's native gettext template tags and the platform-owned English catalog. Shifter adopts the minimum i18n infrastructure needed for template analysis and future catalog growth: `LocaleMiddleware` sits between session and common middleware, `LOCALE_PATHS` points at `shifter/shifter_platform/locale`, templates use `{% trans %}` / `{% blocktrans %}`, and runtime startup compiles message catalogs before static collection. English remains the only catalog for now; URL locale prefixes, locale-switching UX, translator workflow, RTL support, and locale-aware formatting are explicitly out of scope until a separate requirement adopts them.",
+    "decision": "Django-rendered user-facing template literals are routed through Django's native gettext template tags and the platform-owned English catalog. Shifter adopts the minimum i18n infrastructure needed for template analysis and future catalog growth: `LocaleMiddleware` sits between session and common middleware, `LOCALE_PATHS` points at `shifter/shifter_platform/locale`, templates use `{% trans %}` / `{% blocktrans %}`, and portal image builds compile message catalogs before static collection so runtime container startup does not rebuild immutable artifacts. English remains the only catalog for now; URL locale prefixes, locale-switching UX, translator workflow, RTL support, and locale-aware formatting are explicitly out of scope until a separate requirement adopts them.",
     "rules": [
       {
         "id": "ADR-016-R1",
@@ -686,14 +686,15 @@
       },
       {
         "id": "ADR-016-R3",
-        "description": "Container startup compiles Django message catalogs before static collection or application startup so runtime `.mo` files are present without committing generated binaries.",
-        "checks": ["django-compilemessages-runtime"]
+        "description": "Portal image builds compile Django message catalogs before static collection so runtime `.mo` files and static assets are present without committing generated binaries or rebuilding them at container startup.",
+        "checks": ["django-compilemessages-build"]
       }
     ],
     "exceptions": [],
     "enforcement": ["tests", "sonarcloud", "agent-policy"],
     "evidence": [
       "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/Dockerfile",
       "shifter/shifter_platform/entrypoint.sh",
       "shifter/shifter_platform/locale/en/LC_MESSAGES/django.po",
       "shifter/shifter_platform/tests/config/test_i18n_configuration.py",

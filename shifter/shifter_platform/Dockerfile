@@ -97,6 +97,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Switch to non-root user
 USER appuser
 
+# Build immutable Django runtime artifacts once per image. These commands use
+# build-only settings env; runtime secrets are still hydrated by
+# entrypoint.sh when the container starts.
+RUN BUILD_DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" && \
+    BUILD_FIELD_ENCRYPTION_KEY="$( \
+      python -c 'import cryptography.fernet as f; print(f.Fernet.generate_key().decode())' \
+    )" && \
+    DJANGO_SECRET_KEY="$BUILD_DJANGO_SECRET_KEY" \
+    FIELD_ENCRYPTION_KEY="$BUILD_FIELD_ENCRYPTION_KEY" \
+    OIDC_RP_CLIENT_ID=build-time-client \
+    OIDC_AUTH_DOMAIN=https://auth.example.test \
+    OIDC_ISSUER_URL=https://issuer.example.test \
+    python manage.py compilemessages && \
+    DJANGO_SECRET_KEY="$BUILD_DJANGO_SECRET_KEY" \
+    FIELD_ENCRYPTION_KEY="$BUILD_FIELD_ENCRYPTION_KEY" \
+    OIDC_RP_CLIENT_ID=build-time-client \
+    OIDC_AUTH_DOMAIN=https://auth.example.test \
+    OIDC_ISSUER_URL=https://issuer.example.test \
+    python manage.py collectstatic --noinput
+
 # Health check using Python (curl not available in slim image)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')" || exit 1

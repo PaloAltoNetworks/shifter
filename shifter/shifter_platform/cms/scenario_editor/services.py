@@ -36,6 +36,24 @@ logger = logging.getLogger(__name__)
 class ScenarioEditorError(CMSError):
     """Error raised by scenario editor operations."""
 
+    @property
+    def public_message(self) -> str:
+        """Return the user-facing service message without debug details."""
+        return self.message
+
+
+FIELD_DESCRIPTION = "description"
+FIELD_ID = "id"
+FIELD_INSTANCES = "instances"
+FIELD_INSTANCES_JSON = "instances_json"
+FIELD_NAME = "name"
+FIELD_NEW_NAME = "new_name"
+FIELD_NEW_SCENARIO_ID = "new_scenario_id"
+FIELD_NGFW = "ngfw"
+FIELD_SCENARIO_ID = "scenario_id"
+FIELD_SUBNETS = "subnets"
+FIELD_SUBNETS_JSON = "subnets_json"
+
 
 @dataclass(frozen=True)
 class ScenarioFormFields:
@@ -50,18 +68,18 @@ class ScenarioFormFields:
 
     @property
     def definition(self) -> dict[str, Any]:
-        return {"instances": self.instances, "subnets": self.subnets, "ngfw": self.ngfw}
+        return {FIELD_INSTANCES: self.instances, FIELD_SUBNETS: self.subnets, FIELD_NGFW: self.ngfw}
 
     def as_context(self, *, include_id: bool) -> dict[str, Any]:
         context = {
-            "name": self.name,
-            "description": self.description,
-            "ngfw": self.ngfw,
-            "instances": self.instances,
-            "subnets": self.subnets,
+            FIELD_NAME: self.name,
+            FIELD_DESCRIPTION: self.description,
+            FIELD_NGFW: self.ngfw,
+            FIELD_INSTANCES: self.instances,
+            FIELD_SUBNETS: self.subnets,
         }
         if include_id:
-            context["id"] = self.scenario_id
+            context[FIELD_ID] = self.scenario_id
         return context
 
 
@@ -105,12 +123,12 @@ def parse_scenario_form_fields(
     post_data: Mapping[str, Any], *, require_id: bool
 ) -> tuple[ScenarioFormFields, list[str]]:
     """Validate scenario create/edit form fields."""
-    scenario_id = _post_value(post_data, "scenario_id")
-    name = _post_value(post_data, "name")
-    description = _post_value(post_data, "description")
-    ngfw = _post_value(post_data, "ngfw") == "on"
-    instances, instance_errors = _load_json_field(_post_value(post_data, "instances_json", "[]"), "instances")
-    subnets, subnet_errors = _load_json_field(_post_value(post_data, "subnets_json", "[]"), "subnets")
+    scenario_id = _post_value(post_data, FIELD_SCENARIO_ID)
+    name = _post_value(post_data, FIELD_NAME)
+    description = _post_value(post_data, FIELD_DESCRIPTION)
+    ngfw = _post_value(post_data, FIELD_NGFW) == "on"
+    instances, instance_errors = _load_json_field(_post_value(post_data, FIELD_INSTANCES_JSON, "[]"), FIELD_INSTANCES)
+    subnets, subnet_errors = _load_json_field(_post_value(post_data, FIELD_SUBNETS_JSON, "[]"), FIELD_SUBNETS)
 
     errors: list[str] = []
     if require_id:
@@ -146,7 +164,7 @@ def create_scenario_from_form_post(user: User, post_data: Mapping[str, Any]) -> 
             definition=fields.definition,
         )
     except ScenarioEditorError as e:
-        return fields, [str(e)]
+        return fields, [e.public_message]
     return fields, []
 
 
@@ -167,15 +185,15 @@ def update_scenario_from_form_post(
             definition=fields.definition,
         )
     except ScenarioEditorError as e:
-        return fields, [str(e)]
+        return fields, [e.public_message]
     return fields, []
 
 
 def _definition_from_yaml_fields(parsed: dict[str, Any]) -> dict[str, Any]:
     return {
-        "instances": parsed.get("instances", []),
-        "subnets": parsed.get("subnets", []),
-        "ngfw": parsed.get("ngfw", False),
+        FIELD_INSTANCES: parsed.get(FIELD_INSTANCES, []),
+        FIELD_SUBNETS: parsed.get(FIELD_SUBNETS, []),
+        FIELD_NGFW: parsed.get(FIELD_NGFW, False),
     }
 
 
@@ -186,17 +204,17 @@ def parse_yaml_create_fields(yaml_content: str) -> tuple[ScenarioYamlFields | No
         return None, errors
 
     parsed = parsed or {}
-    scenario_id = str(parsed.get("id") or "").strip()
-    name = str(parsed.get("name") or "").strip()
-    description = str(parsed.get("description") or "").strip()
+    scenario_id = str(parsed.get(FIELD_ID) or "").strip()
+    name = str(parsed.get(FIELD_NAME) or "").strip()
+    description = str(parsed.get(FIELD_DESCRIPTION) or "").strip()
 
     yaml_errors = []
     if not scenario_id:
-        yaml_errors.append("YAML must include an 'id' field")
+        yaml_errors.append(f"YAML must include an '{FIELD_ID}' field")
     if not name:
-        yaml_errors.append("YAML must include a 'name' field")
+        yaml_errors.append(f"YAML must include a '{FIELD_NAME}' field")
     if not description:
-        yaml_errors.append("YAML must include a 'description' field")
+        yaml_errors.append(f"YAML must include a '{FIELD_DESCRIPTION}' field")
     if yaml_errors:
         return None, yaml_errors
 
@@ -218,7 +236,7 @@ def create_scenario_from_yaml_post(user: User, yaml_content: str) -> tuple[Scena
             definition=fields.definition,
         )
     except ScenarioEditorError as e:
-        return fields, [str(e)]
+        return fields, [e.public_message]
     return fields, []
 
 
@@ -240,12 +258,12 @@ def update_scenario_from_yaml_post(
         update_scenario(
             user,
             scenario_id,
-            name=parsed.get("name", fallback_name),
-            description=parsed.get("description", fallback_description),
+            name=parsed.get(FIELD_NAME, fallback_name),
+            description=parsed.get(FIELD_DESCRIPTION, fallback_description),
             definition=_definition_from_yaml_fields(parsed),
         )
     except ScenarioEditorError as e:
-        return [str(e)]
+        return [e.public_message]
     return []
 
 
@@ -253,8 +271,8 @@ def clone_scenario_from_form_post(
     user: User, source_scenario_id: str, post_data: Mapping[str, Any]
 ) -> tuple[Scenario | None, str | None, list[str]]:
     """Clone a scenario from submitted clone-form fields."""
-    new_scenario_id = _post_value(post_data, "new_scenario_id")
-    new_name = _post_value(post_data, "new_name") or None
+    new_scenario_id = _post_value(post_data, FIELD_NEW_SCENARIO_ID)
+    new_name = _post_value(post_data, FIELD_NEW_NAME) or None
     if not new_scenario_id:
         return None, new_name, ["New scenario ID is required"]
 
@@ -266,7 +284,7 @@ def clone_scenario_from_form_post(
             new_name=new_name,
         )
     except ScenarioEditorError as e:
-        return None, new_name, [str(e)]
+        return None, new_name, [e.public_message]
     return scenario, new_name, []
 
 

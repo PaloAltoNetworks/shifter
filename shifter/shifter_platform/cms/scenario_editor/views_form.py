@@ -15,7 +15,15 @@ from cms.scenario_editor.services import (
     create_scenario_from_form_post,
     update_scenario_from_form_post,
 )
-from cms.scenario_editor.view_support import render_unexpected_error, resolve_editable_scenario
+from cms.scenario_editor.view_support import (
+    ERRORS_CONTEXT_KEY,
+    MODE_CONTEXT_KEY,
+    SCENARIO_CONTEXT_KEY,
+    VIEW_RECOVERABLE_EXCEPTIONS,
+    render_internal_error,
+    render_unexpected_error,
+    resolve_editable_scenario,
+)
 from shared.auth import threat_research_required
 from shared.log_sanitize import safe_log_value
 
@@ -29,12 +37,16 @@ DETAIL_ROUTE = "scenario_editor:detail"
 
 
 def _create_context(fields: ScenarioFormFields | None, errors: list[str]) -> dict[str, Any]:
-    return {"mode": "create", "scenario": fields.as_context(include_id=True) if fields else None, "errors": errors}
+    return {
+        MODE_CONTEXT_KEY: "create",
+        SCENARIO_CONTEXT_KEY: fields.as_context(include_id=True) if fields else None,
+        ERRORS_CONTEXT_KEY: errors,
+    }
 
 
 def _edit_context(scenario: dict[str, Any], fields: ScenarioFormFields, errors: list[str]) -> dict[str, Any]:
     scenario.update(fields.as_context(include_id=False))
-    return {"mode": "edit", "scenario": scenario, "errors": errors}
+    return {MODE_CONTEXT_KEY: "edit", SCENARIO_CONTEXT_KEY: scenario, ERRORS_CONTEXT_KEY: errors}
 
 
 def _handle_create_post(request: HttpRequest) -> HttpResponse:
@@ -59,7 +71,7 @@ def scenario_create_form(request: HttpRequest) -> HttpResponse:
         if request.method == "GET":
             return render(request, FORM_TEMPLATE, _create_context(None, []))
         return _handle_create_post(request)
-    except Exception:
+    except VIEW_RECOVERABLE_EXCEPTIONS:
         return render_unexpected_error(request, logger, "scenario_create_form")
 
 
@@ -87,9 +99,14 @@ def _scenario_edit_form_impl(request: HttpRequest, scenario_id: str) -> HttpResp
     )
     if error is not None:
         return error
-    assert scenario is not None
+    if scenario is None:
+        return render_internal_error(request, logger, "scenario_edit_form", scenario_id=scenario_id)
     if request.method == "GET":
-        return render(request, FORM_TEMPLATE, {"mode": "edit", "scenario": scenario, "errors": []})
+        return render(
+            request,
+            FORM_TEMPLATE,
+            {MODE_CONTEXT_KEY: "edit", SCENARIO_CONTEXT_KEY: scenario, ERRORS_CONTEXT_KEY: []},
+        )
     return _handle_edit_post(request, scenario_id, scenario)
 
 
@@ -99,5 +116,5 @@ def scenario_edit_form(request: HttpRequest, scenario_id: str) -> HttpResponse:
     """Form-based scenario editing for custom scenarios."""
     try:
         return _scenario_edit_form_impl(request, scenario_id)
-    except Exception:
+    except VIEW_RECOVERABLE_EXCEPTIONS:
         return render_unexpected_error(request, logger, "scenario_edit_form", scenario_id=scenario_id)

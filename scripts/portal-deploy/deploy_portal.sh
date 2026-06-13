@@ -7,6 +7,7 @@ WORKER_HEALTH_MONITOR_B64=""
 WORKER_HEALTH_SERVICE_B64=""
 WORKER_HEALTH_TIMER_B64=""
 WORKER_HEALTH_NAME_PREFIX=""
+MIGRATE_ONLY=false
 WORKER_HEALTH_BIN_PATH="/usr/local/bin/shifter-worker-health.sh"
 WORKER_HEALTH_SERVICE_PATH="/etc/systemd/system/shifter-worker-health.service"
 WORKER_HEALTH_TIMER_PATH="/etc/systemd/system/shifter-worker-health.timer"
@@ -15,10 +16,12 @@ DOCKER_ENV=()
 
 usage() {
   cat <<'EOF'
-Usage: deploy_portal.sh --ps-prefix PREFIX --worker-health-monitor-b64 B64 --worker-health-service-b64 B64 --worker-health-timer-b64 B64 --worker-health-name-prefix PREFIX [options]
+Usage: deploy_portal.sh --ps-prefix PREFIX [options]
 
 Required:
   --ps-prefix PREFIX
+
+Required unless --migrate-only is set:
   --worker-health-monitor-b64 B64
   --worker-health-service-b64 B64
   --worker-health-timer-b64 B64
@@ -26,6 +29,7 @@ Required:
 
 Options:
   --aws-region REGION
+  --migrate-only
   --worker-health-bin-path PATH
   --worker-health-service-path PATH
   --worker-health-timer-path PATH
@@ -64,6 +68,10 @@ parse_args() {
         require_value "$1" "${2:-}"
         PS_PREFIX="$2"
         shift 2
+        ;;
+      --migrate-only)
+        MIGRATE_ONLY=true
+        shift
         ;;
       --worker-health-monitor-b64)
         require_value "$1" "${2:-}"
@@ -112,10 +120,12 @@ parse_args() {
   done
 
   [[ -n "$PS_PREFIX" ]] || die_usage "--ps-prefix is required"
-  [[ -n "$WORKER_HEALTH_MONITOR_B64" ]] || die_usage "--worker-health-monitor-b64 is required"
-  [[ -n "$WORKER_HEALTH_SERVICE_B64" ]] || die_usage "--worker-health-service-b64 is required"
-  [[ -n "$WORKER_HEALTH_TIMER_B64" ]] || die_usage "--worker-health-timer-b64 is required"
-  [[ -n "$WORKER_HEALTH_NAME_PREFIX" ]] || die_usage "--worker-health-name-prefix is required"
+  if [[ "$MIGRATE_ONLY" != "true" ]]; then
+    [[ -n "$WORKER_HEALTH_MONITOR_B64" ]] || die_usage "--worker-health-monitor-b64 is required"
+    [[ -n "$WORKER_HEALTH_SERVICE_B64" ]] || die_usage "--worker-health-service-b64 is required"
+    [[ -n "$WORKER_HEALTH_TIMER_B64" ]] || die_usage "--worker-health-timer-b64 is required"
+    [[ -n "$WORKER_HEALTH_NAME_PREFIX" ]] || die_usage "--worker-health-name-prefix is required"
+  fi
 }
 
 get_param() {
@@ -173,6 +183,16 @@ install_worker_health() {
   printf 'WH_NAME_PREFIX=%s\n' "$WORKER_HEALTH_NAME_PREFIX" > "$WORKER_HEALTH_ENV_PATH"
   systemctl daemon-reload
   systemctl enable --now shifter-worker-health.timer
+}
+
+run_migrations() {
+  local image="$1"
+  shift
+  local -a common_env=("$@")
+
+  echo "Running database migrations..."
+  docker pull "$image"
+  docker run --rm "${common_env[@]}" -e SKIP_MIGRATIONS=1 "$image" python manage.py migrate --noinput
 }
 
 run_containers() {
@@ -297,6 +317,13 @@ main() {
   append_env_if_set PLATFORM_BOOTSTRAP_STAFF_EMAILS "$platform_bootstrap_staff_emails"
   append_env_if_set PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS "$platform_bootstrap_superuser_emails"
 
+  run_migrations "$image" "${DOCKER_ENV[@]}"
+  if [[ "$MIGRATE_ONLY" == "true" ]]; then
+    echo "Migration complete!"
+    return
+  fi
+
+  append_env SKIP_MIGRATIONS "1"
   run_containers "$image" "${DOCKER_ENV[@]}"
   install_worker_health
   echo "Deployment complete!"

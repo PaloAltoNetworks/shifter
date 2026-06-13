@@ -3556,6 +3556,26 @@
       "target": "risk_register.services.AuditLog.log"
     },
     {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/scenario_editor/test_view_error_flows.py",
+      "target": "cms.scenario_editor.services.clone_scenario"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/scenario_editor/test_view_error_flows.py",
+      "target": "cms.scenario_editor.services.create_scenario"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/scenario_editor/test_view_error_flows.py",
+      "target": "cms.scenario_editor.services.update_scenario"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/scenario_editor/test_view_error_flows.py",
+      "target": "cms.scenario_editor.services.validate_yaml"
+    },
+    {
       "count": 4,
       "path": "shifter/shifter_platform/tests/shared/cloud/test_aws_storage.py",
       "target": "storage._get_client"
@@ -3611,6 +3631,5 @@
       "target": "mission_control.views.logger"
     }
   ],
-  "description": "Legacy first-party internal mock patch counts for ADR-019-R1. Counts may shrink but must not grow.",
   "version": 1
 }

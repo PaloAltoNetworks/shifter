@@ -3575,8 +3575,8 @@ def _git_text(repo_root: Path, args: list[str]) -> str | None:
     return result.stdout
 
 
-def _boundary_mock_reference_candidates(repo_root: Path) -> list[str]:
-    """Return commit-ish candidates for the baseline ratchet reference."""
+def _boundary_mock_base_reference_candidates(repo_root: Path) -> list[str]:
+    """Return base-branch commit-ish candidates for the baseline ratchet reference."""
     candidates: list[str] = []
     for env_name in _BOUNDARY_MOCK_BASE_REF_ENVS:
         base_ref = os.environ.get(env_name, "").strip()
@@ -3602,6 +3602,13 @@ def _boundary_mock_reference_candidates(repo_root: Path) -> list[str]:
             refs.append(ref)
             seen.add(ref)
 
+    return refs
+
+
+def _boundary_mock_fallback_reference_candidates(repo_root: Path) -> list[str]:
+    """Return fallback commit-ish candidates for shallow/synthetic repositories."""
+    refs: list[str] = []
+    seen: set[str] = set()
     for fallback in ("HEAD^1", "HEAD"):
         ref = _git_text(repo_root, ["rev-parse", "--verify", f"{fallback}^{{commit}}"])
         if ref is None:
@@ -3618,7 +3625,16 @@ def _load_boundary_mock_reference_baseline(
     repo_root: Path,
 ) -> tuple[Counter[tuple[str, str]] | None, Violation | None]:
     """Load the baseline from the branch reference point, when one exists."""
-    for ref in _boundary_mock_reference_candidates(repo_root):
+    base_refs = _boundary_mock_base_reference_candidates(repo_root)
+    for ref in base_refs:
+        raw = _git_text(repo_root, ["show", f"{ref}:{_BOUNDARY_MOCK_BASELINE_PATH}"])
+        if raw is None:
+            continue
+        return _parse_boundary_mock_baseline(raw, f"git reference {ref}")
+    if base_refs:
+        return None, None
+
+    for ref in _boundary_mock_fallback_reference_candidates(repo_root):
         raw = _git_text(repo_root, ["show", f"{ref}:{_BOUNDARY_MOCK_BASELINE_PATH}"])
         if raw is None:
             continue

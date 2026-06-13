@@ -121,7 +121,8 @@ Current mechanisms:
   when legacy mock-coupled tests are rewritten; the check compares the
   committed baseline to the branch reference so authors cannot raise
   counts to land new topology-coupled tests without a dated ADR
-  exception.
+  exception. During initial adoption, a base branch without the baseline
+  file starts the ratchet from the first merged baseline.
 
 ## Adding A Rule
 

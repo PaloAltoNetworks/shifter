@@ -41,7 +41,10 @@ Current mechanisms:
 - `.github/workflows/_quality.yml`: CI architecture gate. Its SonarCloud
   job restores coverage artifacts, sets up Temurin Java 21, and disables
   SonarScanner JRE auto-provisioning so the quality gate does not depend
-  on downloading a runtime during analysis.
+  on downloading a runtime during analysis. The job uses Node 24-backed
+  action majors for checkout, artifact restore, Java setup, and the
+  SonarQube Cloud scan so runner deprecation warnings do not mask real
+  SonarCloud quality findings.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
   runs on push to `dev`, on pull requests against `dev`, and on a

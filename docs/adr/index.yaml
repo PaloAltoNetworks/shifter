@@ -790,5 +790,28 @@
       "docs/architecture/portal-channel-layer-backend.md",
       "docs/architecture/aws-portal-redis-channel-layer-preflight-849.md"
     ]
+  },
+  {
+    "id": "ADR-019",
+    "title": "Tests mock external boundaries, not first-party topology",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "New tests shall patch only real process, network, cloud, or framework transport boundaries. First-party service functions, views, model helpers, render/logging/transaction aliases, and other internal callables are observable behavior dependencies and must not be patched as topology seams. Existing internal patch debt is tracked in a committed baseline that may shrink but not grow.",
+    "rules": [
+      {
+        "id": "ADR-019-R1",
+        "description": "Python tests must not introduce new first-party internal `patch()` or statically resolvable `patch.object()` targets. The `boundary-mock-policy` ADR guard check compares current internal patch counts against `scripts/adr_guard/boundary_mock_baseline.json` and rejects baseline allowance growth against the branch reference; process/network/cloud boundary patches remain allowed.",
+        "checks": ["boundary-mock-policy"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "agent-policy"],
+    "evidence": [
+      "scripts/adr_guard/adr_guard.py",
+      "scripts/adr_guard/boundary_mock_baseline.json",
+      "scripts/adr_guard/tests/test_adr_guard.py",
+      "docs/adr/README.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md"
+    ]
   }
 ]

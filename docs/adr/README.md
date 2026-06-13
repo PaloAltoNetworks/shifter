@@ -26,6 +26,11 @@ python3 scripts/adr_guard/adr_guard.py --checks layer-imports guardrail-docs --a
 Current mechanisms:
 
 - `scripts/adr_guard/adr_guard.py`: repo-native policy runner
+- `scripts/adr_guard/boundary_mock_baseline.json`: current legacy
+  first-party internal mock-patch counts for ADR-019. Counts may shrink
+  as tests move to behavioral assertions, but new or increased internal
+  patch counts, including baseline allowance increases against the branch
+  reference, fail the `boundary-mock-policy` check.
 - `.pre-commit-config.yaml`: local fast checks
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
@@ -77,14 +82,14 @@ Current mechanisms:
   with owner, reason, expiry, affected paths, and the Checkov policy ID.
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
   flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
-  `child_process` (any shape — named, default, namespace, CommonJS
+  `child_process` (any shape: named, default, namespace, CommonJS
   destructure, or bare-`require` property access, with or without
   the `node:` prefix) AND uses one of the shell-string call shapes:
   `execSync(...)`, `exec(...)`, an `execSync as <alias>` rename
   used as `<alias>(`, or `spawn`/`spawnSync`/`execFile`/
   `execFileSync` invoked with `{ shell: true }`. String literals
   and comments are flattened to whitespace by a small per-state
-  consumer (one helper per state — code / line-comment /
+  consumer (one helper per state: code / line-comment /
   block-comment / string, preserving newlines), so
   `"https://..."` URLs do not accidentally erase a real call site,
   and so commented-out call sites or strings containing
@@ -96,6 +101,20 @@ Current mechanisms:
   `mcp/ngfw/*` migrated to argv-array helpers via the shared
   `mcp/shared/aws-helpers.js` module in #759, alongside the
   original `mcp/ops/*` migration in #763.
+- `scripts/adr_guard/adr_guard.py` `boundary-mock-policy` check:
+  enforces ADR-019-R1 for Python tests. The checker statically parses
+  tracked test files for `patch()` / mock `.patch()` string targets and
+  statically resolvable `patch.object(imported_module_or_class, ...)`
+  calls. Targets rooted in first-party Python modules are rejected unless
+  their `(test file, target)` count is already present in
+  `scripts/adr_guard/boundary_mock_baseline.json`. Patches against real
+  process/network/cloud/framework transport boundaries, such as
+  `subprocess`, `boto3`, HTTP clients, SMTP/socket/SSL, and channel-layer
+  transports, remain allowed. The baseline is a ratchet: lower counts
+  when legacy mock-coupled tests are rewritten; the check compares the
+  committed baseline to the branch reference so authors cannot raise
+  counts to land new topology-coupled tests without a dated ADR
+  exception.
 
 ## Adding A Rule
 

@@ -1,0 +1,3616 @@
+{
+  "allowed_internal_patch_counts": [
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.Path.home"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy._fetch_existing_gdc_bootstrap_material"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy._gcp_identity_access_token"
+    },
+    {
+      "count": 4,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy._gcp_identity_admin_request"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy._run_gcp_bootstrap_probe"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.apply_gcp_control_plane_terraform"
+    },
+    {
+      "count": 3,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.bootstrap_account"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.bootstrap_gcp_control_plane"
+    },
+    {
+      "count": 8,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.check_dependencies"
+    },
+    {
+      "count": 18,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.confirm"
+    },
+    {
+      "count": 8,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.confirm_or_manual"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.deploy_gcp_control_plane_with_helm"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gcp_control_plane_namespaces"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gcp_identity_platform_operator"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gdc_access_secret"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gdc_apis"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gdc_instances"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gdc_network"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gdc_service_account"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gdc_vm_image_secret"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.ensure_gke_gcloud_auth_plugin"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.error"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.fetch_gdc_kubeconfig"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.full_deployment"
+    },
+    {
+      "count": 6,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.gcloud_resource_exists"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.gcp_terraform_bootstrap_credentials"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.gdc_bootstrap_cluster"
+    },
+    {
+      "count": 11,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.get_aws_account_id"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.get_gcp_managed_certificate_status"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.get_gdc_instance_ssh_metadata"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.get_latest_gcp_secret_payload"
+    },
+    {
+      "count": 32,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.get_repo_root"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.helm_release_exists"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.install_gke_gcloud_auth_plugin_user_space"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.list_gcp_helm_cutover_resources"
+    },
+    {
+      "count": 4,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.load_bootstrap_env_values"
+    },
+    {
+      "count": 3,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.os.geteuid"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.prepare_gcp_helm_cutover"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.prompt_for_gcp_bootstrap_operator_credentials"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.prune_stale_gcp_terraform_bootstrap_keys"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.push_gcp_control_plane_images"
+    },
+    {
+      "count": 7,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.resolve_gcp_bootstrap_operator_credentials"
+    },
+    {
+      "count": 23,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.run_cmd"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.run_gcp_terraform_apply_with_retry"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.run_gcp_terraform_init_with_retry"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.run_gdc_workstation_script"
+    },
+    {
+      "count": 6,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.shutil.which"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.stage_gcp_control_plane_values"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.stage_gdc_bootstrap_assets"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.sync_gdc_access_secret"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.sync_gdc_instance_ssh_metadata"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.sync_gdc_vm_image_secret"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.tempfile.TemporaryDirectory"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.terraform_deploy"
+    },
+    {
+      "count": 10,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.time.sleep"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.upload_gdc_assets"
+    },
+    {
+      "count": 2,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.urllib_request.urlopen"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.verify_gcp_public_portal"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.wait_for_gcp_managed_certificate_active"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.wait_for_gcp_terraform_bootstrap_access"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.wait_for_gdc_ssh"
+    },
+    {
+      "count": 4,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.wait_for_user"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_acm_validation"
+    },
+    {
+      "count": 3,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_backend_config"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_cognito_user"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_dns_setup"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_final_steps"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_gcp_dns_setup_and_wait_for_tls"
+    },
+    {
+      "count": 1,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_git_commit"
+    },
+    {
+      "count": 3,
+      "path": "scripts/bootstrap/tests/test_deploy.py",
+      "target": "deploy.walkthrough_github_secrets"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/cloud/test_network_inventory.py",
+      "target": "cloud.gcp.network.load_gdc_network_access_config"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_aws_executor.py",
+      "target": "executors._aws_executor_vpc_endpoints.time.sleep"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_config.py",
+      "target": "cloud.get_object_storage"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_config.py",
+      "target": "cloud.get_secrets_store"
+    },
+    {
+      "count": 11,
+      "path": "shifter/engine/provisioner/tests/test_events.py",
+      "target": "events._publish_event"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_events.py",
+      "target": "events.get_event_bus"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_executor_factory.py",
+      "target": "executors.factory.GuestSSHExecutor"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_executor_factory.py",
+      "target": "executors.factory.SSMExecutor"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_executor_factory.py",
+      "target": "executors.factory.get_secrets_store"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_range_networks.py",
+      "target": "gdc_range_networks._build_kube_api_client"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_range_networks.py",
+      "target": "gdc_range_networks._import_kubernetes_modules"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_range_networks.py",
+      "target": "gdc_range_networks.load_gdc_network_access_config"
+    },
+    {
+      "count": 4,
+      "path": "shifter/engine/provisioner/tests/test_gdc_scenario_pods.py",
+      "target": "gdc_scenario_pods._build_kube_api_client"
+    },
+    {
+      "count": 4,
+      "path": "shifter/engine/provisioner/tests/test_gdc_scenario_pods.py",
+      "target": "gdc_scenario_pods._import_kubernetes_modules"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_scenario_pods.py",
+      "target": "gdc_scenario_pods._wait_for_pod_deleted"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_scenario_pods.py",
+      "target": "gdc_scenario_pods._wait_for_pod_ready"
+    },
+    {
+      "count": 4,
+      "path": "shifter/engine/provisioner/tests/test_gdc_scenario_pods.py",
+      "target": "gdc_scenario_pods.load_gdc_network_access_config"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_gdc_scenario_pods.py",
+      "target": "gdc_scenario_pods.load_gdc_scenario_pod_config"
+    },
+    {
+      "count": 5,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._build_kube_api_client"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._collect_vmi_metadata"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._delete_rdp_password_secret"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._delete_ssh_secret"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._ensure_gcs_image_secret"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._ensure_rdp_password_secret"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._ensure_ssh_secret"
+    },
+    {
+      "count": 5,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._import_kubernetes_modules"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._render_user_data"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._wait_for_deleted"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._wait_for_disk_ready"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._wait_for_vm_ready"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets._wait_for_vm_stopped"
+    },
+    {
+      "count": 5,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets.load_gdc_network_access_config"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmruntime_assets.py",
+      "target": "gdc_vmruntime_assets.load_gdc_vmruntime_config"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._apply_namespaced_custom_object"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._build_kube_api_client"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._create_bootstrap_iso"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._ensure_gcs_image_secret"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._ensure_ssh_secret"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._import_kubernetes_modules"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._wait_for_disk_ready"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw._wait_for_vm_ready"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw.load_gdc_network_access_config"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_gdc_vmseries_ngfw.py",
+      "target": "gdc_vmseries_ngfw.load_gdc_palo_alto_vmseries_config"
+    },
+    {
+      "count": 7,
+      "path": "shifter/engine/provisioner/tests/test_get_range_data.py",
+      "target": "main.get_db_connection"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "components.network.allocate_subnets"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "gdc_vmseries_ngfw.run_power_operation"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "instance_orchestrator._run_polaris_range_bootstrap"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.BootstrapPlan"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.DCSetupPlan"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.SetupOrchestrator"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._build_range_terraform_variables"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._get_dc_instance_type"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._get_kali_instance_type"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._get_victim_instance_type"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._get_windows_instance_type"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._run_dc_setup"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._run_single_instance_setup"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._set_attacker_container_password_after_bootstrap"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._should_promote_dc_at_runtime"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._should_run_dc_bootstrap_plan"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main._update_range_config"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.build_guest_execution_context"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.generate_presigned_url"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.get_agent_presigned_url"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.get_ami_id"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.get_db_connection"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.get_ngfw_data_by_request_id"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.get_range_availability_zone"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.get_range_data_by_request_id"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.get_user_ngfw_data"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.load_range_network_config"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.publish_ngfw_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.publish_ready"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.publish_status_update"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.range_terraform_runner.apply_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.run_instance_setup"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.update_instance_state"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_main.py",
+      "target": "main.write_provisioned_state"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_network_component.py",
+      "target": "cloud.get_db_auth"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_network_component.py",
+      "target": "components.network._get_db_connection"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_network_component.py",
+      "target": "components.network._get_network_inventory"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_network_component.py",
+      "target": "components.network.psycopg.connect"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops.AWSExecutor"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops.NGFWStartPlan"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops.OpsOrchestrator"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops._update_ngfw_status"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops.get_range_ngfw_info"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops.publish_ngfw_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops.time"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops._update_instance_statuses"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops.ensure_ngfw_running"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops.get_db_connection"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops.get_range_data_by_request_id"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops.get_range_instance_ids"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops.pause_ngfw_for_range"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops.publish_status_update"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_provider_guard.py",
+      "target": "range_ops.update_range_status"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_terraform_runner.py",
+      "target": "range_terraform_runner.gdc_range_networks.apply_range_networks"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_terraform_runner.py",
+      "target": "range_terraform_runner.gdc_range_networks.destroy_range_networks"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_terraform_runner.py",
+      "target": "range_terraform_runner.gdc_scenario_pods.apply_range_assets"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_terraform_runner.py",
+      "target": "range_terraform_runner.gdc_scenario_pods.destroy_range_assets"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_terraform_runner.py",
+      "target": "range_terraform_runner.gdc_vmruntime_assets.apply_range_assets"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_range_terraform_runner.py",
+      "target": "range_terraform_runner.gdc_vmruntime_assets.destroy_range_assets"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_range_terraform_runner.py",
+      "target": "terraform_base.run_terraform"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_ssh_executor.py",
+      "target": "executors.ssh_executor.paramiko.SSHClient"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_base.py",
+      "target": "terraform_base.get_object_storage"
+    },
+    {
+      "count": 9,
+      "path": "shifter/engine/provisioner/tests/test_terraform_base.py",
+      "target": "terraform_base.run_terraform"
+    },
+    {
+      "count": 5,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main._build_range_terraform_variables"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main._run_terraform_destroy"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main._run_terraform_provision"
+    },
+    {
+      "count": 7,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main.get_range_data_by_request_id"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main.mark_range_instances_destroyed"
+    },
+    {
+      "count": 4,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main.publish_destroyed"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main.publish_failed"
+    },
+    {
+      "count": 7,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main.range_terraform_runner"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_terraform_destroy_failed_range.py",
+      "target": "main.remove_ngfw_subnets"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "cloud.get_object_storage"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "cloud.get_secrets_store"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform.NGFWExecutor"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform.SetupOrchestrator"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._cleanup_failed_ngfw_provision"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._cleanup_ngfw_bootstrap_objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._run_deprovision"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._run_gdc_deprovision"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._run_gdc_provision"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._run_ngfw_operation_for_provider"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._run_pan_os_post_provision"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform._run_provision"
+    },
+    {
+      "count": 5,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform.publish_ngfw_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform.terraform_runner.apply_ngfw"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform.terraform_runner.cleanup_ngfw_state"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform.terraform_runner.destroy_ngfw"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform.time.sleep"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform_cleanup.NGFWExecutor"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform_cleanup._deactivate_aws_vmseries_license"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform_cleanup._deactivate_vmseries_license"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform_cleanup.publish_ngfw_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform_cleanup.terraform_runner.cleanup_ngfw_state"
+    },
+    {
+      "count": 1,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "ngfw_terraform_cleanup.terraform_runner.destroy_ngfw"
+    },
+    {
+      "count": 3,
+      "path": "shifter/engine/provisioner/tests/test_terraform_runner.py",
+      "target": "terraform_base.run_terraform"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/assets/test_s3.py",
+      "target": "cms.assets.s3.get_object_storage"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_consumers.py",
+      "target": "cms.experiments.consumers.ExperimentStatusConsumer._get_experiment"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_consumers.py",
+      "target": "cms.experiments.consumers.ExperimentStatusConsumer._get_runs"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_events.py",
+      "target": "cms.experiments.events.get_queue_publisher"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_events.py",
+      "target": "cms.experiments.events.settings"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "channels.layers.get_channel_layer"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers.Experiment"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers.Experiment.objects.get"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers.Experiment.objects.only"
+    },
+    {
+      "count": 12,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers.ExperimentOrchestrator"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers.ExperimentRun"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers.ExperimentRun.objects.get"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers._broadcast_experiment_status"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers._broadcast_experiment_status_if_terminal"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers._broadcast_run_status"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers._broadcast_run_status_for"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers._experiment_recipient_id"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers._publish_experiment_status_notification"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_handlers.py",
+      "target": "cms.experiments.handlers._publish_run_status_notification"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.orchestrator.Experiment"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.orchestrator.ExperimentRun"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.orchestrator.engine_create_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.services.cancel_experiment"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.services.create_experiment"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.services.delete_script"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.services.initiate_script_upload"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_integration.py",
+      "target": "cms.experiments.services.start_experiment"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_models.py",
+      "target": "cms.experiments.models.Experiment.save"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_models.py",
+      "target": "cms.experiments.models.ExperimentRun.save"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_models.py",
+      "target": "cms.experiments.models.ScriptAsset.objects.filter"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_notifications.py",
+      "target": "cms.experiments.notifications.Experiment.objects.filter"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_notifications.py",
+      "target": "cms.experiments.notifications.publish_notification"
+    },
+    {
+      "count": 16,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator.py",
+      "target": "cms.experiments.orchestrator.Experiment"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator.py",
+      "target": "cms.experiments.orchestrator.ExperimentRun"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator.py",
+      "target": "cms.experiments.orchestrator.ExperimentScript"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator.py",
+      "target": "cms.experiments.orchestrator.audit_log_system_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator.py",
+      "target": "cms.experiments.orchestrator.build_instance_data"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator.py",
+      "target": "cms.experiments.orchestrator.engine_create_range"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator.py",
+      "target": "cms.experiments.orchestrator.start_experiment_task"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator_command_safety.py",
+      "target": "cms.experiments.orchestrator.Experiment"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator_command_safety.py",
+      "target": "cms.experiments.orchestrator.ExperimentScript"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator_dispatch.py",
+      "target": "cms.experiments.orchestrator.Experiment"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_orchestrator_dispatch.py",
+      "target": "cms.experiments.orchestrator.start_experiment_task"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_range_bridge.py",
+      "target": "cms.handlers.experiment_bridge.publish_range_provisioned_for_experiment"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_range_bridge.py",
+      "target": "cms.handlers.range_events.RangeInstance"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_range_bridge.py",
+      "target": "cms.handlers.range_events.notify_ctf_range_status"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_range_bridge.py",
+      "target": "cms.handlers.range_events.notify_experiment_on_range_ready"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_s3_tokens.py",
+      "target": "cms.experiments.s3.settings"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services.ScriptAsset"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services._check_result_type"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services.audit_log"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services.delete_s3_object"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services.read_script_header"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services.transaction"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services.verify_s3_object"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_script_inspection.py",
+      "target": "cms.experiments.services.verify_upload_token"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services.Experiment"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services.ExperimentScript"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services.ScriptAsset"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services._check_result_type"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services.audit_log"
+    },
+    {
+      "count": 13,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services.check_scenario_access"
+    },
+    {
+      "count": 13,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services.load_scenario_template"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services.py",
+      "target": "cms.experiments.services.transaction"
+    },
+    {
+      "count": 13,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services_lifecycle.py",
+      "target": "cms.experiments.services.Experiment"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services_lifecycle.py",
+      "target": "cms.experiments.services.ExperimentRun"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services_lifecycle.py",
+      "target": "cms.experiments.services._check_result_type"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services_lifecycle.py",
+      "target": "cms.experiments.services.audit_log"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services_lifecycle.py",
+      "target": "cms.experiments.services.load_scenario_template"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services_lifecycle.py",
+      "target": "cms.experiments.services.publish_experiment_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_services_lifecycle.py",
+      "target": "cms.experiments.services.transaction"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_view_flows.py",
+      "target": "cms.experiments.views._validate_experiment_create_input"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_view_flows.py",
+      "target": "cms.scenarios.registry.list_all_scenarios"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_view_flows.py",
+      "target": "cms.scenarios.registry.load_scenario_template"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.render"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.services.cancel_experiment"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.services.create_experiment"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.services.get_experiment"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.services.get_scenario_instances"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.services.list_experiments"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.services.list_scripts"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.experiments.views.services.start_experiment"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.scenarios.registry.list_all_scenarios"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/experiments/test_views.py",
+      "target": "cms.scenarios.registry.load_scenario_template"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/cms/test_assets.py",
+      "target": "cms.assets.services.AgentConfig"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/test_assets.py",
+      "target": "cms.assets.services.OperatingSystem"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/test_assets.py",
+      "target": "cms.assets.services.audit_log"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/cms/test_assets.py",
+      "target": "cms.assets.services.s3_delete"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_credentials.py",
+      "target": "cms.models.Credential.objects.create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_credentials.py",
+      "target": "cms.models.CredentialType.objects.create"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers.py",
+      "target": "cms.experiments.handlers.process_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers.py",
+      "target": "cms.handlers.process_ngfw_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers.py",
+      "target": "cms.handlers.process_range_event"
+    },
+    {
+      "count": 12,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers.py",
+      "target": "cms.handlers.range_events.RangeInstance"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers.py",
+      "target": "cms.handlers.range_events.notify_ctf_range_status"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers.py",
+      "target": "cms.handlers.range_events.notify_experiment_on_range_ready"
+    },
+    {
+      "count": 14,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers_ngfw.py",
+      "target": "cms.handlers.ngfw_events.App.objects.get"
+    },
+    {
+      "count": 14,
+      "path": "shifter/shifter_platform/tests/cms/test_handlers_ngfw.py",
+      "target": "cms.handlers.ngfw_events.Instance.objects.get"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/test_models.py",
+      "target": "cms.models.Credential.objects.create"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_models.py",
+      "target": "cms.models.Credential.objects.filter"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_models.py",
+      "target": "cms.models.CredentialType.objects.create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_models_agent_config.py",
+      "target": "cms.models.AgentConfig.objects.filter"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_models_asset.py",
+      "target": "cms.models.AgentConfig.objects.filter"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_models_operating_system.py",
+      "target": "cms.models.OperatingSystem.objects.for_extension"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_models_range_instance.py",
+      "target": "cms.models.RangeInstance.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_models_subnet.py",
+      "target": "cms.models.Subnet.validate_data"
+    },
+    {
+      "count": 23,
+      "path": "shifter/shifter_platform/tests/cms/test_scenario_hydrator.py",
+      "target": "cms.scenarios.hydrator.load_scenario"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/test_services.py",
+      "target": "cms.services.RangeInstance.objects"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/cms/test_services.py",
+      "target": "cms.services.engine_get_instance_ips_by_uuid"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/cms/test_services_agents.py",
+      "target": "cms.models.AgentConfig.active_for_user"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/test_services_agents.py",
+      "target": "cms.models.AgentConfig.objects.get"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/test_services_agents.py",
+      "target": "cms.services.assets_create_agent"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/test_services_agents.py",
+      "target": "cms.services.assets_delete_agent"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/cms/test_services_agents.py",
+      "target": "cms.services.get_agent"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.App.objects.create"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.App.objects.filter"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.App.objects.select_related"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.AppType.objects.get"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.Credential"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.Instance.objects.create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.InstanceType.objects.get"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.models.Request.objects.create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.scenarios.hydrator.hydrate_ngfw"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.services._ngfws.cast"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "cms.services.audit_log"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "engine.services.create_ngfw"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_ngfws.py",
+      "target": "engine.services.destroy_ngfw"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.models.Request.objects.create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.scenarios.hydrator.hydrate_scenario"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.scenarios.registry.load_scenario_template"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.services.RangeInstance.objects.create"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.services.RangeInstance.objects.filter"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.services.RangeInstance.objects.get"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.services.audit_log"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.services.engine_create_range"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.services.get_active_range"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range.py",
+      "target": "cms.services.get_agent"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.models.Request.objects.create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.scenarios.hydrator.hydrate_scenario"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.scenarios.registry.load_scenario_template"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.RangeInstance.objects.create"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.RangeInstance.objects.get"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.audit_log"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.engine_cancel_range_by_request"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.engine_create_range"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.engine_destroy_range_by_request"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.get_active_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.get_agent"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_destroy_cancel.py",
+      "target": "cms.services.get_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.scenarios.registry.load_scenario_template"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.services.RangeInstance.objects.filter"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.services.RangeInstance.objects.get"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.services.audit_log"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.services.engine_cancel_range_by_request"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.services.engine_destroy_range_by_request"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.services.get_active_range"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_lifecycle.py",
+      "target": "cms.services.get_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.models.Request.objects.create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.scenarios.hydrator.hydrate_scenario"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.scenarios.registry.load_scenario_template"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.RangeInstance.objects.create"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.RangeInstance.objects.filter"
+    },
+    {
+      "count": 14,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.RangeInstance.objects.get"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.audit_log"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.engine_create_range"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.engine_pause_range"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.engine_resume_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.get_active_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/cms/test_services_range_pause_resume.py",
+      "target": "cms.services.get_agent"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/test_services_scenarios.py",
+      "target": "cms.scenarios.registry.get_scenario_detail"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/cms/test_services_scenarios.py",
+      "target": "cms.scenarios.registry.list_all_scenarios"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/test_services_scenarios.py",
+      "target": "cms.scenarios.registry.load_scenario_template"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/test_services_storage.py",
+      "target": "cms.assets.services.get_storage_used"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload.py",
+      "target": "cms.assets.s3.generate_presigned_upload_url"
+    },
+    {
+      "count": 14,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload.py",
+      "target": "cms.assets.services.get_storage_used"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload.py",
+      "target": "cms.assets.upload_token.generate_upload_token"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload.py",
+      "target": "cms.assets.validation.validate_file_extension"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_cancel.py",
+      "target": "cms.assets.s3.delete_agent"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_cancel.py",
+      "target": "cms.assets.upload_token.verify_upload_token"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_complete.py",
+      "target": "cms.assets.s3.delete_agent"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_complete.py",
+      "target": "cms.assets.s3.read_agent_header"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_complete.py",
+      "target": "cms.assets.s3.tag_s3_object"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_complete.py",
+      "target": "cms.assets.s3.verify_s3_object_exists"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_complete.py",
+      "target": "cms.assets.services.create_agent"
+    },
+    {
+      "count": 13,
+      "path": "shifter/shifter_platform/tests/cms/test_services_upload_complete.py",
+      "target": "cms.assets.upload_token.verify_upload_token"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/config/test_logout.py",
+      "target": "config.views.logout"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/conftest.py",
+      "target": "cms.services.create_range"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.attachment.add_challenge_file"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.attachment.get_download_url"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.attachment.remove_challenge_file"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.challenge.add_flag"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.challenge.add_prerequisite"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.challenge.remove_flag"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.create_challenge"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.create_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.delete_challenge"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.hint.add_hint"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.hint.remove_hint"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.hint.use_hint"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.invite_participant"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.range.provision_participant_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.resend_invite"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.submission.rate_challenge"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.submission.submit_flag"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.update_challenge"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
+      "target": "ctf.services.update_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
+      "target": "ctf.bridges.cms_list_scenarios"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
+      "target": "ctf.services.attachment.add_challenge_file"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
+      "target": "ctf.services.force_delete_event"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
+      "target": "ctf.services.notification.send_announcement"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
+      "target": "ctf.services.notification.send_invitations"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
+      "target": "ctf.services.range.provision_event_ranges"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
+      "target": "ctf.services.resend_invite"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_attachments.py",
+      "target": "ctf.s3.get_s3_client"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "config.dev_auth.Group.objects.filter"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "config.dev_auth.Group.objects.get_or_create"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "config.dev_auth.User.objects.get_or_create"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "config.dev_auth.get_user_profile"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "config.dev_auth.login"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "config.oidc.Group.objects.get_or_create"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "config.oidc.get_user_profile"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "ctf.models.CTFEvent.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "ctf.models.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "ctf.services.get_organizer_events"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "ctf.services.participant.is_active_participant"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "ctf.views._get_active_participant"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "ctf.views.render"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "management.services.get_user_profile"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth.py",
+      "target": "management.services.set_active_ctf_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "ctf.models.CTFEvent.objects"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "ctf.models.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "ctf.services.get_organizer_events"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "ctf.services.participant.is_active_participant"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "ctf.views._get_active_participant"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "ctf.views.render"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "management.services.get_user_profile"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_auth_registration.py",
+      "target": "management.services.set_active_ctf_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_brackets.py",
+      "target": "ctf.services.scoring.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_challenge_navigation.py",
+      "target": "cms.services.get_range_target_instances"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.context_processors.ctf_navigation"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.models.CTFChallengeFile.all_objects"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.models.CTFEvent.all_objects"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.models.CTFParticipant.all_objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.s3.delete_challenge_file"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.services.event.CTFEvent.all_objects"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.services.event._cancel_event_tasks"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.services.event.transaction.atomic"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.services.force_delete_event"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.services.get_event_stats"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.services.range._destroy_single_range"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "ctf.views.get_user_role"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "mission_control.context_processors.active_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "shared.context_processors.user_permissions"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "ctf.context_processors.ctf_navigation"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "ctf.services.event.CTFEvent.objects"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "ctf.services.event._cancel_event_tasks"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "ctf.services.event._schedule_event_tasks"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "ctf.services.event.transaction.atomic"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "ctf.services.range.cleanup_event_ranges"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "ctf.views.get_user_role"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "mission_control.context_processors.active_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "target": "shared.context_processors.user_permissions"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "ctf.bridges.cms_list_scenarios"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "ctf.context_processors.ctf_navigation"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "ctf.services.get_event"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "ctf.services.get_event_stats"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "ctf.services.get_organizer_events"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "ctf.views.get_user_role"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "mission_control.context_processors.active_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
+      "target": "shared.context_processors.user_permissions"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_models.py",
+      "target": "ctf.models.CTFEvent.save"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_models.py",
+      "target": "ctf.models.CTFParticipant.save"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_models.py",
+      "target": "ctf.models.CTFParticipant.user"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_models.py",
+      "target": "ctf.models.CTFScheduledTask.save"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.models.CTFEmailTemplate.objects"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.models.CTFNotification.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.models.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.services.challenge.get_challenge"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.services.get_challenge"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.services.get_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.services.hint.use_hint"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.services.participant.is_active_participant"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.services.scoring.get_scoreboard"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.services.scoring.get_team_scoreboard"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.views._get_participant_for_challenge"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.views._resolve_bracket_filter"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.views.get_user_role"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_organizer_access.py",
+      "target": "ctf.views.render"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_programmable_flags.py",
+      "target": "ctf.validators._build_https_connection"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/ctf/test_programmable_flags_security.py",
+      "target": "ctf.validators._build_https_connection"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring.py",
+      "target": "ctf.models.CTFChallenge.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring.py",
+      "target": "ctf.services.scoring.CTFAward.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring.py",
+      "target": "ctf.services.scoring.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring.py",
+      "target": "ctf.services.scoring.CTFSubmission.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring.py",
+      "target": "ctf.services.scoring.CTFTeam.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_statistics.py",
+      "target": "ctf.models.CTFChallenge.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_statistics.py",
+      "target": "ctf.models.CTFEvent.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_statistics.py",
+      "target": "ctf.services.scoring.CTFAward.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_statistics.py",
+      "target": "ctf.services.scoring.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_statistics.py",
+      "target": "ctf.services.scoring.CTFSubmission.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_statistics.py",
+      "target": "ctf.services.scoring.CTFTeam.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_statistics.py",
+      "target": "ctf.services.scoring.get_scoreboard"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_timeline.py",
+      "target": "ctf.models.event.timezone"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_timeline.py",
+      "target": "ctf.services.scoring.CTFAward.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_timeline.py",
+      "target": "ctf.services.scoring.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_timeline.py",
+      "target": "ctf.services.scoring.CTFSubmission.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_scoring_timeline.py",
+      "target": "ctf.services.scoring.CTFTeam.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.models.CTFEmailTemplate.objects"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.models.CTFScheduledTask"
+    },
+    {
+      "count": 21,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.notification.CTFEvent"
+    },
+    {
+      "count": 15,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.notification.CTFNotification"
+    },
+    {
+      "count": 15,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.notification.CTFParticipant"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.notification._build_registration_url"
+    },
+    {
+      "count": 12,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.notification._render_email"
+    },
+    {
+      "count": 14,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.notification._send_email"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.participant.bulk_import_participants"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_notification.py",
+      "target": "ctf.services.participant.invite_participant"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.bridges.cms_create_range"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.bridges.cms_destroy_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.bridges.cms_find_range_instance_id"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.bridges.cms_get_range_status"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.models.CTFEvent.objects"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.models.CTFParticipant.objects"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.services.notification.notify_organizer_provision_failure"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.services.range.logger"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.services.range.provision_participant_range_with_retry"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_range.py",
+      "target": "ctf.services.range.time.sleep"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_scheduler_handlers.py",
+      "target": "ctf.services.event.activate_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_scheduler_handlers.py",
+      "target": "ctf.services.event.complete_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_scheduler_handlers.py",
+      "target": "ctf.services.notification.notify_organizer_event_end"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_scheduler_handlers.py",
+      "target": "ctf.services.notification.notify_organizer_event_start"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_scheduler_handlers.py",
+      "target": "ctf.services.notification.send_reminder"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_scheduler_handlers.py",
+      "target": "ctf.services.range.cleanup_event_ranges"
+    },
+    {
+      "count": 18,
+      "path": "shifter/shifter_platform/tests/ctf/test_services/test_submission.py",
+      "target": "ctf.services.submission.verify_flag"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/documentation/test_views.py",
+      "target": "documentation.views.render"
+    },
+    {
+      "count": 19,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_get_task_status.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_local_provisioner.py",
+      "target": "engine.ecs._run_local_provisioner"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_local_provisioner.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_ecs_task.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_ecs_task_gcp.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_ngfw_ecs_task.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_ngfw_provisioning.py",
+      "target": "engine.ecs._start_ngfw_ecs_task"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_ngfw_provisioning.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_ngfw_teardown.py",
+      "target": "engine.ecs._start_ngfw_ecs_task"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_ngfw_teardown.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_provisioning.py",
+      "target": "engine.ecs._start_ecs_task"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_provisioning.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_range_operation.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_teardown.py",
+      "target": "engine.ecs._start_ecs_task"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/ecs/test_start_teardown.py",
+      "target": "engine.ecs.get_task_runner"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/engine/services/test_cancel_range.py",
+      "target": "engine.models.Range.objects.filter"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/services/test_cancel_range.py",
+      "target": "engine.models.Range.objects.get"
+    },
+    {
+      "count": 18,
+      "path": "shifter/shifter_platform/tests/engine/services/test_connect_ngfw_terminal.py",
+      "target": "engine.models.Instance.objects.select_related"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/engine/services/test_connect_ngfw_terminal.py",
+      "target": "engine.secrets.get_ssh_key"
+    },
+    {
+      "count": 22,
+      "path": "shifter/shifter_platform/tests/engine/services/test_connect_terminal.py",
+      "target": "engine.models.Range.objects.filter"
+    },
+    {
+      "count": 15,
+      "path": "shifter/shifter_platform/tests/engine/services/test_connect_terminal.py",
+      "target": "engine.secrets.get_ssh_key"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
+      "target": "engine.ecs.start_range_provisioning"
+    },
+    {
+      "count": 13,
+      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
+      "target": "engine.interpreter.interpret"
+    },
+    {
+      "count": 12,
+      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
+      "target": "engine.models.Range.allocate_subnet_index"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
+      "target": "engine.models.Range.objects.create"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
+      "target": "engine.models.Subnet"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
+      "target": "engine.services.transaction"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_ngfw.py",
+      "target": "engine.ecs.start_ngfw_teardown"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_ngfw.py",
+      "target": "engine.models.Instance.objects.filter"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_ngfw.py",
+      "target": "engine.models.Range.objects.filter"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_ngfw.py",
+      "target": "engine.models.Request.objects.get"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
+      "target": "engine.ecs.start_range_teardown"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
+      "target": "engine.ecs.start_teardown"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
+      "target": "engine.models.Range.objects.filter"
+    },
+    {
+      "count": 17,
+      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
+      "target": "engine.models.Range.objects.get"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/engine/services/test_get_instance_ips_by_uuid.py",
+      "target": "engine.models.Range.objects.get"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/engine/services/test_get_range_status.py",
+      "target": "engine.models.Range.objects.get"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/engine/services/test_get_rdp_connection_info.py",
+      "target": "engine.models.Range.get_active_for_user"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/services/test_get_rdp_connection_info.py",
+      "target": "engine.secrets.get_ssh_key"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/engine/services/test_get_rdp_connection_info.py",
+      "target": "engine.services.get_rdp_password"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/engine/services/test_get_ssh_connection_info.py",
+      "target": "engine.models.Range.objects.filter"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/services/test_get_ssh_connection_info.py",
+      "target": "engine.secrets.get_ssh_key"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/engine/services/test_ngfw_lifecycle.py",
+      "target": "engine.ecs.start_ngfw_operation"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/engine/services/test_ngfw_lifecycle.py",
+      "target": "engine.models.Instance.objects.filter"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/engine/services/test_ngfw_lifecycle.py",
+      "target": "engine.models.Request.objects.get"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/engine/services/test_pause_range.py",
+      "target": "engine.ecs.start_range_operation"
+    },
+    {
+      "count": 17,
+      "path": "shifter/shifter_platform/tests/engine/services/test_pause_range.py",
+      "target": "engine.models.Range.objects.select_for_update"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/engine/services/test_resume_range.py",
+      "target": "engine.ecs.start_range_operation"
+    },
+    {
+      "count": 18,
+      "path": "shifter/shifter_platform/tests/engine/services/test_resume_range.py",
+      "target": "engine.models.Range.objects.select_for_update"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/engine/services/test_secrets.py",
+      "target": "engine.secrets.get_secrets_store"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/ssh/test_ssh_connection.py",
+      "target": "engine.ssh.asyncio.wait_for"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/engine/ssh/test_ssh_connection.py",
+      "target": "engine.ssh.asyncssh"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/ssh/test_ssh_connection.py",
+      "target": "engine.ssh.asyncssh.connect"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/engine/ssh/test_ssh_connection.py",
+      "target": "engine.ssh.asyncssh.import_private_key"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/engine/test_handlers.py",
+      "target": "engine.handlers.Range.objects.get"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/engine/test_handlers.py",
+      "target": "engine.handlers.audit_log_system_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/engine/test_handlers.py",
+      "target": "engine.handlers.process_ngfw_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/engine/test_handlers.py",
+      "target": "engine.handlers.process_range_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/integration/engine/test_range_lifecycle.py",
+      "target": "engine.services.get_rdp_password"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/management/test_apps.py",
+      "target": "management.apps.post_save"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/management/test_apps.py",
+      "target": "management.apps.settings"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/management/test_check_model_fks.py",
+      "target": "management.management.commands.check_model_fks.Command.analyze_fks"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/management/test_check_model_fks.py",
+      "target": "management.management.commands.check_model_fks.Command.compute_stats"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/management/test_services.py",
+      "target": "management.models.ActivityLog.log"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/management/test_services.py",
+      "target": "management.models.UserProfile.objects.create"
+    },
+    {
+      "count": 10,
+      "path": "shifter/shifter_platform/tests/management/test_services.py",
+      "target": "management.models.UserProfile.objects.get_or_create"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/management/test_services.py",
+      "target": "management.services.audit_log"
+    },
+    {
+      "count": 20,
+      "path": "shifter/shifter_platform/tests/management/test_services.py",
+      "target": "management.services.get_user_profile"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/consumers/test_range_status_consumer.py",
+      "target": "cms.services.get_range_by_request_id"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/consumers/test_ssh_consumer.py",
+      "target": "engine.services.connect_terminal"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/consumers/test_ssh_consumer_capacity.py",
+      "target": "engine.services.connect_terminal"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/consumers/test_ssh_consumer_capacity.py",
+      "target": "mission_control.consumers.audit_session_event"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
+      "target": "mission_control.views.cms_delete_agent"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
+      "target": "mission_control.views.cms_list_agents"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
+      "target": "mission_control.views.get_allowed_extensions"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
+      "target": "mission_control.views.render"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/mission_control/test_api_instance_ssh_url.py",
+      "target": "engine.services.get_ssh_connection_info"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_api_instance_ssh_url.py",
+      "target": "mission_control.guacamole.create_guacamole_ssh_url"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/mission_control/test_api_ngfw_ssh_url.py",
+      "target": "engine.services.connect_ngfw_terminal"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/mission_control/test_api_ngfw_ssh_url.py",
+      "target": "mission_control.guacamole.create_guacamole_ssh_url"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_asset_hierarchy.py",
+      "target": "cms.models.AgentConfig.objects.filter"
+    },
+    {
+      "count": 20,
+      "path": "shifter/shifter_platform/tests/mission_control/test_context_processors.py",
+      "target": "mission_control.context_processors.get_active_range"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/mission_control/test_context_processors.py",
+      "target": "mission_control.context_processors.is_ctf_participant_only"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/test_context_processors.py",
+      "target": "mission_control.context_processors.logger"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_models.py",
+      "target": "engine.models.Range.objects"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_models.py",
+      "target": "engine.models.connection"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_models.py",
+      "target": "engine.models.transaction"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
+      "target": "engine.ecs.start_range_provisioning"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
+      "target": "engine.interpreter.interpret"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
+      "target": "engine.models.Range.allocate_subnet_index"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
+      "target": "engine.models.Range.objects.create"
+    },
+    {
+      "count": 15,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
+      "target": "engine.models.Range.objects.get"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
+      "target": "engine.models.Subnet"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
+      "target": "engine.services.transaction.atomic"
+    },
+    {
+      "count": 6,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
+      "target": "engine.ecs.start_teardown"
+    },
+    {
+      "count": 17,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
+      "target": "engine.models.Range.objects.get"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
+      "target": "engine.services.transaction.atomic"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_readiness.py",
+      "target": "mission_control.guacamole.time.sleep"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_ssh.py",
+      "target": "mission_control.guacamole.create_guacamole_auth_payload"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_ssh.py",
+      "target": "mission_control.guacamole.get_guacamole_auth_token"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_ssh.py",
+      "target": "mission_control.guacamole.sign_and_encrypt_payload"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
+      "target": "mission_control.handlers.async_to_sync"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
+      "target": "mission_control.handlers.logger"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
+      "target": "mission_control.handlers.process_ngfw_event"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
+      "target": "mission_control.handlers.process_range_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_health.py",
+      "target": "config.health_checks.ChannelLayerRedisHealthCheck._probe"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_health.py",
+      "target": "config.health_checks.async_to_sync"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_health.py",
+      "target": "config.health_checks.get_channel_layer"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
+      "target": "cms.models.AgentConfig.objects.filter"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
+      "target": "cms.models.OperatingSystem.objects.for_extension"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
+      "target": "engine.models.Range.objects"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
+      "target": "management.models.ActivityLog.objects.create"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_ngfw_detail.py",
+      "target": "engine.services.get_ranges_for_ngfw"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_ngfw_detail.py",
+      "target": "mission_control.views.cms_get_ngfw"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_ngfw_detail.py",
+      "target": "mission_control.views.render"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_oidc.py",
+      "target": "config.oidc.OIDCAuthenticationBackend.create_user"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_oidc.py",
+      "target": "config.oidc.OIDCAuthenticationBackend.update_user"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_oidc.py",
+      "target": "config.oidc.audit_auth_event"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_oidc.py",
+      "target": "config.oidc.logger"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_oidc.py",
+      "target": "config.oidc.update_cognito_sub"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
+      "target": "cms.services.cancel_range"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
+      "target": "cms.services.destroy_range"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
+      "target": "mission_control.views.cms_create_range"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
+      "target": "mission_control.views.cms_get_agent"
+    },
+    {
+      "count": 9,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
+      "target": "mission_control.views.cms_list_scenarios"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
+      "target": "mission_control.views.get_active_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
+      "target": "engine.models.Range.SUBNET_INDEX_MAX"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
+      "target": "engine.models.Range.objects"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
+      "target": "engine.models.transaction"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
+      "target": "mission_control.views.cms_create_range"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
+      "target": "mission_control.views.cms_get_agent"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
+      "target": "mission_control.views.cms_list_agents"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
+      "target": "mission_control.views.cms_list_scenarios"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "cms.services.cancel_range"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "cms.services.destroy_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "cms.services.destroy_range_by_request_id"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "cms.services.pause_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "cms.services.resume_range"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "mission_control.views.audit_log_from_request"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "mission_control.views.cms_create_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "mission_control.views.cms_get_agent"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
+      "target": "mission_control.views.cms_list_scenarios"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views.py",
+      "target": "cms.assets.services.AgentConfig"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views.py",
+      "target": "mission_control.views.render"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
+      "target": "mission_control.views._files.complete_script_upload"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
+      "target": "mission_control.views._files.delete_script"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
+      "target": "mission_control.views._files.initiate_script_upload"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
+      "target": "mission_control.views._files.list_scripts"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
+      "target": "mission_control.views.render"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_guacamole.py",
+      "target": "engine.services.connect_ngfw_terminal"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_guacamole.py",
+      "target": "engine.services.get_rdp_connection_info"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_guacamole.py",
+      "target": "engine.services.get_ssh_connection_info"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_guacamole.py",
+      "target": "mission_control.guacamole.create_guacamole_rdp_url"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_guacamole.py",
+      "target": "mission_control.guacamole.create_guacamole_ssh_url"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_guacamole.py",
+      "target": "mission_control.views._guacamole_bootstrap.enqueue_guacamole_bootstrap"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_ngfw.py",
+      "target": "mission_control.views._ngfw.cms_create_ngfw"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_ngfw.py",
+      "target": "mission_control.views._ngfw.cms_destroy_ngfw"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_ngfw.py",
+      "target": "mission_control.views._ngfw.cms_list_credentials"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_ngfw.py",
+      "target": "mission_control.views._ngfw.cms_list_ngfws"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_ngfw.py",
+      "target": "mission_control.views.cms_get_ngfw"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_ngfw.py",
+      "target": "mission_control.views.render"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
+      "target": "mission_control.views._uploads.cms_cancel_upload"
+    },
+    {
+      "count": 2,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
+      "target": "mission_control.views._uploads.cms_complete_upload"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
+      "target": "mission_control.views._uploads.cms_initiate_upload"
+    },
+    {
+      "count": 7,
+      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
+      "target": "mission_control.views._uploads.set_upload_in_progress"
+    },
+    {
+      "count": 8,
+      "path": "shifter/shifter_platform/tests/risk_register/test_audit_services.py",
+      "target": "risk_register.services.AuditLog.log"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/shared/cloud/test_aws_storage.py",
+      "target": "storage._get_client"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/shared/cloud/test_gcp_storage.py",
+      "target": "storage._get_client"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/shared/test_email.py",
+      "target": "shared.email.send_email"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/shared/test_notifications.py",
+      "target": "shared.notifications.WebSocketNotification.objects.get"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/shared/test_notifications.py",
+      "target": "shared.notifications.WebSocketNotification.objects.get_or_create"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/shared/test_notifications.py",
+      "target": "shared.notifications.async_to_sync"
+    },
+    {
+      "count": 5,
+      "path": "shifter/shifter_platform/tests/shared/test_notifications.py",
+      "target": "shared.notifications.get_channel_layer"
+    },
+    {
+      "count": 11,
+      "path": "shifter/shifter_platform/tests/views/test_launch_range_scenarios.py",
+      "target": "mission_control.views.cms_create_range"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/views/test_launch_range_scenarios.py",
+      "target": "mission_control.views.cms_get_agent"
+    },
+    {
+      "count": 4,
+      "path": "shifter/shifter_platform/tests/views/test_launch_range_scenarios.py",
+      "target": "mission_control.views.cms_list_scenarios"
+    },
+    {
+      "count": 3,
+      "path": "shifter/shifter_platform/tests/views/test_launch_range_scenarios.py",
+      "target": "mission_control.views.logger"
+    }
+  ],
+  "description": "Legacy first-party internal mock patch counts for ADR-019-R1. Counts may shrink but must not grow.",
+  "version": 1
+}

@@ -34,6 +34,7 @@ VIEW_RECOVERABLE_EXCEPTIONS = (
 
 
 def render_error_message(request: HttpRequest, message: str, *, status: int = 200) -> HttpResponse:
+    """Render the standard scenario-editor error template."""
     return render(request, ERROR_TEMPLATE, {MESSAGE_CONTEXT_KEY: message}, status=status)
 
 
@@ -78,6 +79,7 @@ def render_unexpected_error(
 
 
 def render_not_found(request: HttpRequest, logger: logging.Logger, log_name: str, scenario_id: str) -> HttpResponse:
+    """Render the standard scenario not-found page."""
     logger.warning("%s: scenario not found scenario_id=%s", log_name, safe_log_value(scenario_id))
     return render(request, NOT_FOUND_TEMPLATE, {SCENARIO_ID_CONTEXT_KEY: scenario_id}, status=404)
 

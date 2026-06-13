@@ -45,10 +45,12 @@ VALID_RESPONSE_KEY = "valid"
 
 
 def _yaml_editor_context(scenario: dict[str, Any], yaml_content: str, errors: list[str]) -> dict[str, Any]:
+    """Build template context for the YAML editor."""
     return {SCENARIO_CONTEXT_KEY: scenario, YAML_CONTENT_CONTEXT_KEY: yaml_content, ERRORS_CONTEXT_KEY: errors}
 
 
 def _handle_yaml_editor_post(request: HttpRequest, scenario_id: str, scenario: dict[str, Any]) -> HttpResponse:
+    """Update a scenario from submitted YAML editor content."""
     submitted_yaml = request.POST.get(YAML_CONTENT_CONTEXT_KEY, "")
     errors = update_scenario_from_yaml_post(
         cast("User", request.user),
@@ -70,6 +72,7 @@ def _handle_yaml_editor_post(request: HttpRequest, scenario_id: str, scenario: d
 
 
 def _scenario_yaml_editor_impl(request: HttpRequest, scenario_id: str) -> HttpResponse:
+    """Render or process the YAML editor for an editable scenario."""
     scenario, error = resolve_editable_scenario(
         request,
         scenario_id,
@@ -78,16 +81,18 @@ def _scenario_yaml_editor_impl(request: HttpRequest, scenario_id: str) -> HttpRe
         log_name="scenario_yaml_editor",
     )
     if error is not None:
-        return error
-    if scenario is None:
-        return render_internal_error(request, logger, "scenario_yaml_editor", scenario_id=scenario_id)
-    if request.method == "GET":
-        return render(
+        response = error
+    elif scenario is None:
+        response = render_internal_error(request, logger, "scenario_yaml_editor", scenario_id=scenario_id)
+    elif request.method == "GET":
+        response = render(
             request,
             YAML_EDITOR_TEMPLATE,
             _yaml_editor_context(scenario, export_scenario_yaml(scenario_id), []),
         )
-    return _handle_yaml_editor_post(request, scenario_id, scenario)
+    else:
+        response = _handle_yaml_editor_post(request, scenario_id, scenario)
+    return response
 
 
 @threat_research_required
@@ -101,6 +106,7 @@ def scenario_yaml_editor(request: HttpRequest, scenario_id: str) -> HttpResponse
 
 
 def _handle_yaml_create_post(request: HttpRequest) -> HttpResponse:
+    """Create a scenario from submitted YAML content."""
     submitted_yaml = request.POST.get(YAML_CONTENT_CONTEXT_KEY, "")
     fields, errors = create_scenario_from_yaml_post(cast("User", request.user), submitted_yaml)
     if errors:

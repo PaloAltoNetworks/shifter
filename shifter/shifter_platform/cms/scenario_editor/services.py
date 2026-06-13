@@ -63,8 +63,8 @@ class ScenarioFormFields:
     name: str
     description: str
     ngfw: bool
-    instances: Any
-    subnets: Any
+    instances: object
+    subnets: object
 
     @property
     def definition(self) -> dict[str, Any]:
@@ -104,6 +104,7 @@ _SCENARIO_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 
 
 def _post_value(post_data: Mapping[str, Any], key: str, default: str = "") -> str:
+    """Return a stripped scalar POST value for form parsing."""
     value = post_data.get(key, default)
     if isinstance(value, list):
         value = value[-1] if value else default
@@ -112,7 +113,8 @@ def _post_value(post_data: Mapping[str, Any], key: str, default: str = "") -> st
     return str(value).strip()
 
 
-def _load_json_field(raw_value: str, label: str) -> tuple[Any, list[str]]:
+def _load_json_field(raw_value: str, label: str) -> tuple[object, list[str]]:
+    """Parse a JSON form field and return validation errors."""
     try:
         return json.loads(raw_value), []
     except (json.JSONDecodeError, TypeError):
@@ -190,6 +192,7 @@ def update_scenario_from_form_post(
 
 
 def _definition_from_yaml_fields(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Extract the persisted scenario definition fields from parsed YAML."""
     return {
         FIELD_INSTANCES: parsed.get(FIELD_INSTANCES, []),
         FIELD_SUBNETS: parsed.get(FIELD_SUBNETS, []),

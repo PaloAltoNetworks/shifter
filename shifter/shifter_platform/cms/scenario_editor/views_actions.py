@@ -42,6 +42,8 @@ LIST_ROUTE = "scenario_editor:list"
 
 @dataclass(frozen=True)
 class ToggleFlagSpec:
+    """Configuration for a scenario metadata toggle view."""
+
     field: str
     default: bool
     log_name: str
@@ -71,6 +73,7 @@ def scenario_delete_view(request: HttpRequest, scenario_id: str) -> HttpResponse
 
 
 def _toggle_metadata_flag(request: HttpRequest, scenario_id: str, spec: ToggleFlagSpec) -> HttpResponse:
+    """Toggle one scenario metadata flag and render the view response."""
     try:
         new_value = toggle_scenario_metadata_flag(
             cast("User", request.user),
@@ -79,22 +82,23 @@ def _toggle_metadata_flag(request: HttpRequest, scenario_id: str, spec: ToggleFl
             default=spec.default,
         )
     except ValueError:
-        return render_not_found(request, logger, spec.log_name, scenario_id)
+        response = render_not_found(request, logger, spec.log_name, scenario_id)
     except ScenarioEditorError as e:
-        return render_error_message(request, e.public_message)
+        response = render_error_message(request, e.public_message)
     except VIEW_RECOVERABLE_EXCEPTIONS:
-        return render_unexpected_error(request, logger, spec.log_name, scenario_id=scenario_id)
-
-    logger.info(
-        "%s: toggled %s=%s for scenario_id=%s by user_id=%s",
-        spec.log_name,
-        spec.field,
-        new_value,
-        safe_log_value(scenario_id),
-        request.user.id,
-    )
-    messages.success(request, spec.on_message if new_value else spec.off_message)
-    return redirect(LIST_ROUTE)
+        response = render_unexpected_error(request, logger, spec.log_name, scenario_id=scenario_id)
+    else:
+        logger.info(
+            "%s: toggled %s=%s for scenario_id=%s by user_id=%s",
+            spec.log_name,
+            spec.field,
+            new_value,
+            safe_log_value(scenario_id),
+            request.user.id,
+        )
+        messages.success(request, spec.on_message if new_value else spec.off_message)
+        response = redirect(LIST_ROUTE)
+    return response
 
 
 @threat_research_required
@@ -132,6 +136,7 @@ def scenario_toggle_staff_only(request: HttpRequest, scenario_id: str) -> HttpRe
 
 
 def _handle_clone_post(request: HttpRequest, scenario_id: str, source: dict[str, Any]) -> HttpResponse:
+    """Clone a scenario from submitted clone form data."""
     scenario, new_name, errors = clone_scenario_from_form_post(cast("User", request.user), scenario_id, request.POST)
     if errors:
         return render(request, CLONE_TEMPLATE, {SOURCE_CONTEXT_KEY: source, ERRORS_CONTEXT_KEY: errors})
@@ -149,6 +154,7 @@ def _handle_clone_post(request: HttpRequest, scenario_id: str, source: dict[str,
 
 
 def _scenario_clone_view_impl(request: HttpRequest, scenario_id: str) -> HttpResponse:
+    """Render or process the clone view for a source scenario."""
     try:
         source = get_scenario_detail(scenario_id)
     except ValueError:

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def _verify_scenario_exists(scenario_id: str, *, user_id: int) -> None:
+    """Confirm the scenario exists in the registry before metadata changes."""
     try:
         get_scenario_detail(scenario_id)
     except ValueError as e:

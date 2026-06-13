@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _raise_invalid_definition(errors: list[str]) -> None:
+    """Raise a scenario editor error for schema validation failures."""
     raise ScenarioEditorError(f"Invalid scenario definition: {'; '.join(errors)}")
 
 
@@ -38,6 +39,7 @@ def _candidate_update_payload(
     description: str | None,
     definition: dict[str, Any] | None,
 ) -> tuple[str, str, dict[str, Any]]:
+    """Return the scenario values that would be persisted after an update."""
     return (
         scenario.name if name is None else name,
         scenario.description if description is None else description,

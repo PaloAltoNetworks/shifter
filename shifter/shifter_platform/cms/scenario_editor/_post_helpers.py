@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 from cms.scenarios.registry import get_scenario_detail
 
@@ -15,7 +15,7 @@ from ._validation import validate_scenario_id
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from cms.models import Scenario
+    from cms.models import Scenario, ScenarioMetadata
 
 FIELD_DESCRIPTION = "description"
 FIELD_ID = "id"
@@ -28,13 +28,58 @@ FIELD_NGFW = "ngfw"
 FIELD_SCENARIO_ID = "scenario_id"
 FIELD_SUBNETS = "subnets"
 FIELD_SUBNETS_JSON = "subnets_json"
+ScenarioDefinition = dict[str, object]
 
 
-def _public_services() -> Any:
+class _PublicServices(Protocol):
+    """Public scenario-editor facade methods used by post helpers."""
+
+    def create_scenario(
+        self,
+        user: User,
+        *,
+        scenario_id: str,
+        name: str,
+        description: str,
+        definition: ScenarioDefinition,
+    ) -> Scenario: ...
+
+    def update_scenario(
+        self,
+        user: User,
+        scenario_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        definition: ScenarioDefinition | None = None,
+    ) -> Scenario: ...
+
+    def clone_scenario(
+        self,
+        user: User,
+        source_scenario_id: str,
+        *,
+        new_scenario_id: str,
+        new_name: str | None = None,
+    ) -> Scenario: ...
+
+    def update_metadata(
+        self,
+        user: User,
+        scenario_id: str,
+        *,
+        enabled: bool | None = None,
+        staff_only: bool | None = None,
+    ) -> ScenarioMetadata: ...
+
+    def validate_yaml(self, yaml_content: str) -> tuple[dict | None, list[str]]: ...
+
+
+def _public_services() -> _PublicServices:
     """Return the public facade so callers can patch the stable import path."""
     from cms.scenario_editor import services
 
-    return services
+    return cast("_PublicServices", services)
 
 
 @dataclass(frozen=True)
@@ -49,10 +94,10 @@ class ScenarioFormFields:
     subnets: object
 
     @property
-    def definition(self) -> dict[str, Any]:
+    def definition(self) -> ScenarioDefinition:
         return {FIELD_INSTANCES: self.instances, FIELD_SUBNETS: self.subnets, FIELD_NGFW: self.ngfw}
 
-    def as_context(self, *, include_id: bool) -> dict[str, Any]:
+    def as_context(self, *, include_id: bool) -> dict[str, object]:
         context = {
             FIELD_NAME: self.name,
             FIELD_DESCRIPTION: self.description,
@@ -72,10 +117,10 @@ class ScenarioYamlFields:
     scenario_id: str
     name: str
     description: str
-    definition: dict[str, Any]
+    definition: ScenarioDefinition
 
 
-def _post_value(post_data: Mapping[str, Any], key: str, default: str = "") -> str:
+def _post_value(post_data: Mapping[str, object], key: str, default: str = "") -> str:
     """Return a stripped scalar POST value for form parsing."""
     value = post_data.get(key, default)
     if isinstance(value, list):
@@ -94,7 +139,7 @@ def _load_json_field(raw_value: str, label: str) -> tuple[object, list[str]]:
 
 
 def parse_scenario_form_fields(
-    post_data: Mapping[str, Any], *, require_id: bool
+    post_data: Mapping[str, object], *, require_id: bool
 ) -> tuple[ScenarioFormFields, list[str]]:
     """Validate scenario create/edit form fields."""
     scenario_id = _post_value(post_data, FIELD_SCENARIO_ID)
@@ -126,7 +171,7 @@ def parse_scenario_form_fields(
     return ScenarioFormFields(scenario_id, name, description, ngfw, instances, subnets), errors
 
 
-def create_scenario_from_form_post(user: User, post_data: Mapping[str, Any]) -> tuple[ScenarioFormFields, list[str]]:
+def create_scenario_from_form_post(user: User, post_data: Mapping[str, object]) -> tuple[ScenarioFormFields, list[str]]:
     """Create a scenario from submitted form fields."""
     fields, errors = parse_scenario_form_fields(post_data, require_id=True)
     if errors:
@@ -146,7 +191,7 @@ def create_scenario_from_form_post(user: User, post_data: Mapping[str, Any]) -> 
 
 
 def update_scenario_from_form_post(
-    user: User, scenario_id: str, post_data: Mapping[str, Any]
+    user: User, scenario_id: str, post_data: Mapping[str, object]
 ) -> tuple[ScenarioFormFields, list[str]]:
     """Update a scenario from submitted form fields."""
     fields, errors = parse_scenario_form_fields(post_data, require_id=False)
@@ -166,7 +211,7 @@ def update_scenario_from_form_post(
     return fields, []
 
 
-def _definition_from_yaml_fields(parsed: dict[str, Any]) -> dict[str, Any]:
+def _definition_from_yaml_fields(parsed: Mapping[str, object]) -> ScenarioDefinition:
     """Extract the persisted scenario definition fields from parsed YAML."""
     return {
         FIELD_INSTANCES: parsed.get(FIELD_INSTANCES, []),
@@ -181,10 +226,10 @@ def parse_yaml_create_fields(yaml_content: str) -> tuple[ScenarioYamlFields | No
     if errors:
         return None, errors
 
-    parsed = parsed or {}
-    scenario_id = str(parsed.get(FIELD_ID) or "").strip()
-    name = str(parsed.get(FIELD_NAME) or "").strip()
-    description = str(parsed.get(FIELD_DESCRIPTION) or "").strip()
+    parsed_map: Mapping[str, object] = parsed or {}
+    scenario_id = str(parsed_map.get(FIELD_ID) or "").strip()
+    name = str(parsed_map.get(FIELD_NAME) or "").strip()
+    description = str(parsed_map.get(FIELD_DESCRIPTION) or "").strip()
 
     yaml_errors = []
     if not scenario_id:
@@ -196,7 +241,7 @@ def parse_yaml_create_fields(yaml_content: str) -> tuple[ScenarioYamlFields | No
     if yaml_errors:
         return None, yaml_errors
 
-    return ScenarioYamlFields(scenario_id, name, description, _definition_from_yaml_fields(parsed)), []
+    return ScenarioYamlFields(scenario_id, name, description, _definition_from_yaml_fields(parsed_map)), []
 
 
 def create_scenario_from_yaml_post(user: User, yaml_content: str) -> tuple[ScenarioYamlFields | None, list[str]]:
@@ -231,14 +276,16 @@ def update_scenario_from_yaml_post(
     if errors:
         return errors
 
-    parsed = parsed or {}
+    parsed_map: Mapping[str, object] = parsed or {}
+    name = cast("str", parsed_map.get(FIELD_NAME, fallback_name))
+    description = cast("str", parsed_map.get(FIELD_DESCRIPTION, fallback_description))
     try:
         _public_services().update_scenario(
             user,
             scenario_id,
-            name=parsed.get(FIELD_NAME, fallback_name),
-            description=parsed.get(FIELD_DESCRIPTION, fallback_description),
-            definition=_definition_from_yaml_fields(parsed),
+            name=name,
+            description=description,
+            definition=_definition_from_yaml_fields(parsed_map),
         )
     except ScenarioEditorError as e:
         return [e.public_message]
@@ -246,7 +293,7 @@ def update_scenario_from_yaml_post(
 
 
 def clone_scenario_from_form_post(
-    user: User, source_scenario_id: str, post_data: Mapping[str, Any]
+    user: User, source_scenario_id: str, post_data: Mapping[str, object]
 ) -> tuple[Scenario | None, str | None, list[str]]:
     """Clone a scenario from submitted clone-form fields."""
     new_scenario_id = _post_value(post_data, FIELD_NEW_SCENARIO_ID)

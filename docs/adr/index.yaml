@@ -148,6 +148,11 @@
         "id": "ADR-004-R11",
         "description": "Checkov is a blocking gate for first-party Terraform under `platform/terraform/`. The pre-commit hook (`.pre-commit-config.yaml` `checkov`) and the GitHub Actions security-iac job (`.github/workflows/_quality.yml`) both consume the same canonical config at `platform/terraform/.checkov.yaml`; `--soft-fail` is not set on either surface. Accepted-risk waivers (Checkov `skip-check` entries in `.checkov.yaml` or inline `# checkov:skip=CKV_X:...` comments on individual resources) MUST have a matching entry in `docs/adr/exceptions.yaml` with `rule_id: ADR-004-R11`, owner, reason (containing the Checkov policy ID), `expires_on`, and the affected `paths`. `adr_guard.py` rejects expired exceptions, forcing owner re-review. Terraform Checkov policy and Kubernetes Checkov policy are separate surfaces: the `security-k8s` job intentionally remains `soft_fail: true` while manifest hardening proceeds under a separate issue, and Kubernetes soft-fail debt does NOT justify Terraform soft-fail. If rule-level policy grows beyond a flat skip list, centralize it in `platform/terraform/.checkov.yaml` only — do NOT duplicate skip semantics across pre-commit args and workflow inputs.",
         "checks": []
+      },
+      {
+        "id": "ADR-004-R12",
+        "description": "First-party AWS RDS DB instances under `platform/terraform/modules/portal/rds/main.tf` and `platform/terraform/modules/guacamole/rds.tf` MUST keep `iam_database_authentication_enabled = true` and MUST explicitly set `ca_cert_identifier` to a non-empty expression. Checkov covers IAM authentication through CKV_AWS_161, but CKV_AWS_211 currently passes when the CA attribute is absent; the repo-native `scripts/check_tf_rds_security/check_tf_rds_security.py` checker closes that gap. The checker is wired as the `check-tf-rds-security` pre-commit hook and a CI step in `.github/workflows/_quality.yml`, and its unittest suite is included in the `check_tf_*` checker tests.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -161,6 +166,7 @@
       ".github/workflows/_quality.yml",
       "scripts/adr_guard/adr_guard.py",
       "scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py",
+      "scripts/check_tf_rds_security/check_tf_rds_security.py",
       "platform/terraform/.checkov.yaml",
       "docs/adr/exceptions.yaml",
       "docs/architecture/checkov-soft-fail-preflight-757.md",

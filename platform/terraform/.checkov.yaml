@@ -87,8 +87,6 @@ skip-check:
   - CKV_AWS_157
   # CKV_AWS_293 — RDS deletion protection controlled by var.deletion_protection.
   - CKV_AWS_293
-  # CKV_AWS_161 — Guacamole RDS uses password auth (JDBC contract).
-  - CKV_AWS_161
 
   # ── Container networking ────────────────────────────────────────────────────
   # CKV_AWS_341 — Launch template hop_limit=2 required for bridged containers.

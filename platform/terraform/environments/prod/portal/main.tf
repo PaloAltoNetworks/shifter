@@ -256,6 +256,7 @@ module "rds" {
   db_name               = var.db_name
   db_username           = var.db_username
   engine_version        = var.db_engine_version
+  ca_cert_identifier    = var.db_ca_cert_identifier
   instance_class        = var.db_instance_class
   allocated_storage     = var.db_allocated_storage
   max_allocated_storage = var.db_max_allocated_storage
@@ -772,6 +773,7 @@ module "guacamole" {
   db_allocated_storage     = var.guacamole_db_allocated_storage
   db_max_allocated_storage = var.guacamole_db_max_allocated_storage
   db_engine_version        = var.guacamole_db_engine_version
+  db_ca_cert_identifier    = var.guacamole_db_ca_cert_identifier
   db_multi_az              = var.guacamole_db_multi_az
   db_backup_retention_days = var.guacamole_db_backup_retention_days
   db_deletion_protection   = var.guacamole_db_deletion_protection

@@ -357,7 +357,7 @@ def validate_yaml(yaml_content: str) -> tuple[dict | None, list[str]]:
         data = yaml.safe_load(yaml_content)
     except yaml.YAMLError as e:
         logger.warning("validate_yaml: YAML parse error: %s", e)
-        return None, [f"Invalid YAML: {e}"]
+        return None, ["Invalid YAML format"]
 
     if not isinstance(data, dict):
         logger.warning("validate_yaml: YAML is not a mapping")

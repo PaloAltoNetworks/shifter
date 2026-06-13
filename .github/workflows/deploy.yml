@@ -130,6 +130,7 @@ jobs:
               - 'scripts/check_tf_iam_elb_scope/**'
               - 'scripts/check_tf_sg_cidrs/**'
               - 'scripts/check_tf_kms_secrets_grant/**'
+              - 'scripts/check_tf_rds_security/**'
               # Guardrail / ADR-registry surfaces. A change to any of
               # these must re-run Quality so adr_guard catches a broken
               # registry, malformed exception entry, or pre-commit hook

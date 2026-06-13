@@ -30,6 +30,9 @@ Current mechanisms:
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
     Shifter-owned, Terraform-managed instances.
+  - `check-tf-rds-security`: local Terraform RDS hardening check that
+    keeps the portal and Guacamole RDS instances on IAM DB auth and an
+    explicit CA certificate identifier.
 - `.github/workflows/_quality.yml`: CI architecture gate. Its SonarCloud
   job restores coverage artifacts, sets up Temurin Java 21, and disables
   SonarScanner JRE auto-provisioning so the quality gate does not depend
@@ -75,6 +78,10 @@ Current mechanisms:
   soft-fail while manifest hardening proceeds as a separate workstream.
   Accepted-risk waivers MUST have an entry in `docs/adr/exceptions.yaml`
   with owner, reason, expiry, affected paths, and the Checkov policy ID.
+- `scripts/check_tf_rds_security/check_tf_rds_security.py`: ADR-004-R12
+  RDS hardening check for the two first-party AWS RDS instances. It
+  requires literal IAM DB auth enablement and an explicit non-empty CA
+  certificate identifier, complementing Checkov's RDS policies.
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
   flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
   `child_process` (any shape — named, default, namespace, CommonJS

@@ -62,6 +62,12 @@ variable "db_engine_version" {
   type        = string
 }
 
+variable "db_ca_cert_identifier" {
+  description = "RDS CA certificate identifier for portal and provisioner database TLS."
+  type        = string
+  default     = "rds-ca-rsa2048-g1"
+}
+
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
@@ -391,6 +397,12 @@ variable "guacamole_db_max_allocated_storage" {
 variable "guacamole_db_engine_version" {
   description = "PostgreSQL engine version for Guacamole"
   type        = string
+}
+
+variable "guacamole_db_ca_cert_identifier" {
+  description = "RDS CA certificate identifier for Guacamole database TLS."
+  type        = string
+  default     = "rds-ca-rsa2048-g1"
 }
 
 variable "guacamole_db_multi_az" {

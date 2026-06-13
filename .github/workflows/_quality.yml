@@ -114,6 +114,16 @@ jobs:
           python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py \
             platform/terraform/modules/engine-provisioner/iam.tf
 
+      # ADR-004-R12 / issue #140: first-party RDS instances must keep
+      # IAM DB auth enabled and explicitly pin a CA identifier. Checkov
+      # enforces IAM auth, but CKV_AWS_211 currently passes when the CA
+      # attribute is absent, so this repo-native guard closes that gap.
+      - name: Run check-tf-rds-security
+        run: |
+          python3 scripts/check_tf_rds_security/check_tf_rds_security.py \
+            platform/terraform/modules/portal/rds/main.tf \
+            platform/terraform/modules/guacamole/rds.tf
+
       # Pin the behavior of the check_tf_* IAM/security checkers
       # themselves. The live-file invocations above only exercise the
       # happy-path shape; the test suites cover wildcards, list
@@ -130,6 +140,7 @@ jobs:
           python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs
           python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
+          python3 -m unittest scripts.check_tf_rds_security.test_check_tf_rds_security
 
   # Pin the behavior of the Polaris CTFd workshop sync helpers. Issue #702
   # shipped 38/39 challenges unsubmittable because flag-row reconciliation

@@ -218,7 +218,21 @@ repos:
         files: ^(platform/terraform/modules/engine-provisioner/iam\.tf|platform/terraform/modules/portal/ec2/main\.tf|platform/terraform/modules/guacamole/iam\.tf)$
         pass_filenames: false
 
-      # Pin the behavior of the three custom check_tf_* IAM/security
+      # Custom: RDS instance IAM auth and explicit CA certificate check.
+      # Checkov enforces IAM DB auth, but its current modern-CA rule
+      # passes when ca_cert_identifier is absent; this checker closes
+      # that gap for the two first-party RDS resources.
+      - id: check-tf-rds-security
+        name: RDS IAM auth and CA certificate (portal + Guacamole)
+        entry: >-
+          python3 scripts/check_tf_rds_security/check_tf_rds_security.py
+          platform/terraform/modules/portal/rds/main.tf
+          platform/terraform/modules/guacamole/rds.tf
+        language: system
+        files: ^(platform/terraform/modules/portal/rds/main\.tf|platform/terraform/modules/guacamole/rds\.tf)$
+        pass_filenames: false
+
+      # Pin the behavior of the custom check_tf_* IAM/security
       # checkers themselves. Their test suites (synthetic HCL fixtures
       # covering wildcards, list resources, scoped conditions, missing
       # grants, etc.) only exercise edge cases that the live-file
@@ -239,10 +253,11 @@ repos:
           python3 -m unittest scripts.check_tf_iam_ec2_scope.test_check_tf_iam_ec2_scope &&
           python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope &&
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs &&
-          python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
+          python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant &&
+          python3 -m unittest scripts.check_tf_rds_security.test_check_tf_rds_security
           '
         language: system
-        files: ^scripts/check_tf_(iam_ec2_scope|iam_elb_scope|sg_cidrs|kms_secrets_grant)/
+        files: ^scripts/check_tf_(iam_ec2_scope|iam_elb_scope|sg_cidrs|kms_secrets_grant|rds_security)/
         pass_filenames: false
 
   # Kubernetes schema validation

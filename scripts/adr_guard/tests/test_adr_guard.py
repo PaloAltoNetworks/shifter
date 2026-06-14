@@ -138,15 +138,25 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         platform_globs: list[str] | None = None,
         app_globs: list[str] | None = None,
         portal_image_globs: list[str] | None = None,
-        quality_condition: str = "needs.changes.outputs.shifter_app == 'true'",
+        quality_only_globs: list[str] | None = None,
+        quality_condition: str = (
+            "needs.changes.outputs.shifter_app == 'true' ||\n"
+            "      needs.changes.outputs.quality_only == 'true'"
+        ),
         include_portal_image_filter: bool = True,
+        include_quality_only_filter: bool = True,
         portal_image_output: str = "portal_image: ${{ steps.filter.outputs.portal_image }}",
+        quality_only_output: str = "quality_only: ${{ steps.filter.outputs.quality_only }}",
         platform_job_condition: str = "needs.changes.outputs.portal_image == 'true'",
         cancel_in_progress: str = "${{ github.event_name == 'pull_request' }}",
     ) -> str:
         platform_globs = platform_globs or ["platform/terraform/modules/portal/**"]
         app_globs = app_globs or ["shifter/**"]
         portal_image_globs = portal_image_globs or ["shifter/shifter_platform/**"]
+        quality_only_globs = quality_only_globs or [
+            "scripts/polaris-aws-range/**",
+            "scenario-dev/polaris/tests/**",
+        ]
         platform_lines = "".join(f"              - '{glob}'\n" for glob in platform_globs)
         app_lines = "".join(f"              - '{glob}'\n" for glob in app_globs)
         portal_image_filter = ""
@@ -155,6 +165,12 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 f"              - '{glob}'\n" for glob in portal_image_globs
             )
             portal_image_filter = f"            portal_image:\n{portal_image_lines}"
+        quality_only_filter = ""
+        if include_quality_only_filter:
+            quality_only_lines = "".join(
+                f"              - '{glob}'\n" for glob in quality_only_globs
+            )
+            quality_only_filter = f"            quality_only:\n{quality_only_lines}"
         return (
             "concurrency:\n"
             "  group: deploy-${{ github.ref }}\n"
@@ -164,6 +180,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             "    outputs:\n"
             "      shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
             f"      {portal_image_output}\n"
+            f"      {quality_only_output}\n"
             "    steps:\n"
             "      - id: filter\n"
             "        with:\n"
@@ -173,6 +190,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             "            shifter_app:\n"
             f"{app_lines}"
             f"{portal_image_filter}"
+            f"{quality_only_filter}"
             "  quality:\n"
             "    if: |\n"
             f"      {quality_condition}\n"
@@ -386,6 +404,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "  changes:\n"
                 "    outputs:\n"
                 "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
+                "      quality_only: ${{ steps.filter.outputs.quality_only }}\n"
                 "    steps:\n"
                 "      - id: filter\n"
                 "        with:\n"
@@ -394,6 +413,12 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "              - 'platform/terraform/modules/portal/**'\n"
                 "            portal_image:\n"
                 "              - 'shifter/shifter_platform/**'\n"
+                "            quality_only:\n"
+                "              - 'scripts/polaris-aws-range/**'\n"
+                "              - 'scenario-dev/polaris/tests/**'\n"
+                "  quality:\n"
+                "    if: |\n"
+                "      needs.changes.outputs.quality_only == 'true'\n"
                 "  shifter_platform:\n"
                 "    if: |\n"
                 "      needs.changes.outputs.portal_image == 'true'\n",
@@ -422,7 +447,12 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
     def test_flags_shifter_app_condition_outside_quality_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
-            deploy = self._deploy_text(quality_condition="needs.changes.outputs.mcp == 'true'")
+            deploy = self._deploy_text(
+                quality_condition=(
+                    "needs.changes.outputs.mcp == 'true' ||\n"
+                    "      needs.changes.outputs.quality_only == 'true'"
+                )
+            )
             deploy += "  gcp-dev:\n    if: needs.changes.outputs.shifter_app == 'true'\n"
             self._write_workflows(repo_root, deploy, self._platform_text())
 
@@ -430,6 +460,62 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
 
             self.assertEqual(len(violations), 1)
             self.assertIn("Quality", violations[0].message)
+
+    def test_flags_missing_quality_only_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(include_quality_only_filter=False),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("quality_only", violations[0].message)
+
+    def test_flags_quality_only_filter_without_polaris_range_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(quality_only_globs=["scenario-dev/polaris/tests/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("scripts/polaris-aws-range/**", violations[0].message)
+
+    def test_flags_quality_only_filter_without_scenario_smoketest_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(quality_only_globs=["scripts/polaris-aws-range/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("scenario-dev/polaris/tests/**", violations[0].message)
+
+    def test_flags_quality_without_quality_only_condition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(quality_condition="needs.changes.outputs.shifter_app == 'true'"),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("needs.changes.outputs.quality_only == 'true'", violations[0].message)
 
     def test_flags_missing_portal_image_filter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -542,6 +628,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "    outputs:\n"
                 "      # shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
                 "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
+                "      quality_only: ${{ steps.filter.outputs.quality_only }}\n"
                 "    steps:\n"
                 "      - id: filter\n"
                 "        with:\n"
@@ -552,9 +639,13 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "              - 'shifter/**'\n"
                 "            portal_image:\n"
                 "              - 'shifter/shifter_platform/**'\n"
+                "            quality_only:\n"
+                "              - 'scripts/polaris-aws-range/**'\n"
+                "              - 'scenario-dev/polaris/tests/**'\n"
                 "  quality:\n"
                 "    if: |\n"
                 "      # needs.changes.outputs.shifter_app == 'true'\n"
+                "      needs.changes.outputs.quality_only == 'true'\n"
                 "  shifter_platform:\n"
                 "    if: |\n"
                 "      needs.changes.outputs.portal_image == 'true'\n"

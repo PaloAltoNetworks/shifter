@@ -772,6 +772,24 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  cyberscript-tests:
+    permissions:
+      contents: read
+    name: Tests (cyberscript)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run tests
+        working-directory: shifter/cyberscript
+        env:
+          PYTHONPATH: ../shifter_platform
+        run: uv run --with pytest pytest tests/
+
   bootstrap-tests:
     permissions:
       contents: read
@@ -821,6 +839,24 @@ jobs:
       - name: Run tests
         working-directory: scripts/gcp
         run: uv run pytest tests/
+
+  polaris-aws-range-tests:
+    permissions:
+      contents: read
+    name: Tests (polaris-aws-range)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run tests
+        working-directory: scripts/polaris-aws-range
+        run: |
+          uv run --with boto3 python -m unittest \
+            test_common test_provisioning_state test_range_health -v
 
   check-layer-imports-tests:
     permissions:
@@ -901,6 +937,44 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  migration-proof-tests:
+    permissions:
+      contents: read
+    name: Tests (migration proof)
+    if: ${{ !inputs.skip_tests }}
+    needs: [shifter-platform-lint, shifter-platform-sast]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Run migration proof
+        working-directory: shifter/shifter_platform
+        run: uv run pytest engine/tests/test_subnet_allocation_migrations_postgres.py
+
+  scenario-smoketest-tests:
+    permissions:
+      contents: read
+    name: Tests (scenario smoketest)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run tests
+        env:
+          PYTHONPATH: scenario-dev/polaris/tests
+        run: uv run --with pytest pytest scenario-dev/polaris/tests/test_scenario_smoketest.py
+
   adr-guard-tests:
     permissions:
       contents: read
@@ -970,7 +1044,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [ngfw, ops, shared]
+        package: [ngfw, ops, planner, shared]
     steps:
       - uses: actions/checkout@v6
 
@@ -999,7 +1073,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [ngfw, ops]
+        package: [ngfw, ops, planner]
     steps:
       - uses: actions/checkout@v6
 

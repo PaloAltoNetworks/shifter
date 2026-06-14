@@ -3087,26 +3087,6 @@
     },
     {
       "count": 5,
-      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
-      "target": "mission_control.views.cms_delete_agent"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
-      "target": "mission_control.views.cms_list_agents"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
-      "target": "mission_control.views.get_allowed_extensions"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_agents.py",
-      "target": "mission_control.views.render"
-    },
-    {
-      "count": 5,
       "path": "shifter/shifter_platform/tests/mission_control/test_api_instance_ssh_url.py",
       "target": "engine.services.get_ssh_connection_info"
     },
@@ -3126,11 +3106,6 @@
       "target": "mission_control.guacamole.create_guacamole_ssh_url"
     },
     {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_asset_hierarchy.py",
-      "target": "cms.models.AgentConfig.objects.filter"
-    },
-    {
       "count": 20,
       "path": "shifter/shifter_platform/tests/mission_control/test_context_processors.py",
       "target": "mission_control.context_processors.get_active_range"
@@ -3144,71 +3119,6 @@
       "count": 4,
       "path": "shifter/shifter_platform/tests/mission_control/test_context_processors.py",
       "target": "mission_control.context_processors.logger"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_models.py",
-      "target": "engine.models.Range.objects"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_models.py",
-      "target": "engine.models.connection"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_models.py",
-      "target": "engine.models.transaction"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.ecs.start_range_provisioning"
-    },
-    {
-      "count": 9,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.interpreter.interpret"
-    },
-    {
-      "count": 9,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Range.allocate_subnet_index"
-    },
-    {
-      "count": 8,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Range.objects.create"
-    },
-    {
-      "count": 15,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Subnet"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.services.transaction.atomic"
-    },
-    {
-      "count": 6,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
-      "target": "engine.ecs.start_teardown"
-    },
-    {
-      "count": 17,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
-      "target": "engine.services.transaction.atomic"
     },
     {
       "count": 7,
@@ -3231,26 +3141,6 @@
       "target": "mission_control.guacamole.sign_and_encrypt_payload"
     },
     {
-      "count": 9,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.async_to_sync"
-    },
-    {
-      "count": 4,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.logger"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.process_ngfw_event"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.process_range_event"
-    },
-    {
       "count": 1,
       "path": "shifter/shifter_platform/tests/mission_control/test_health.py",
       "target": "config.health_checks.ChannelLayerRedisHealthCheck._probe"
@@ -3264,26 +3154,6 @@
       "count": 1,
       "path": "shifter/shifter_platform/tests/mission_control/test_health.py",
       "target": "config.health_checks.get_channel_layer"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
-      "target": "cms.models.AgentConfig.objects.filter"
-    },
-    {
-      "count": 4,
-      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
-      "target": "cms.models.OperatingSystem.objects.for_extension"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
-      "target": "engine.models.Range.objects"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_models.py",
-      "target": "management.models.ActivityLog.objects.create"
     },
     {
       "count": 3,
@@ -3324,126 +3194,6 @@
       "count": 7,
       "path": "shifter/shifter_platform/tests/mission_control/test_oidc.py",
       "target": "config.oidc.update_cognito_sub"
-    },
-    {
-      "count": 4,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
-      "target": "cms.services.cancel_range"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
-      "target": "cms.services.destroy_range"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
-      "target": "mission_control.views.cms_create_range"
-    },
-    {
-      "count": 8,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
-      "target": "mission_control.views.cms_get_agent"
-    },
-    {
-      "count": 9,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
-      "target": "mission_control.views.cms_list_scenarios"
-    },
-    {
-      "count": 4,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api.py",
-      "target": "mission_control.views.get_active_range"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
-      "target": "engine.models.Range.SUBNET_INDEX_MAX"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
-      "target": "engine.models.Range.objects"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
-      "target": "engine.models.transaction"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
-      "target": "mission_control.views.cms_create_range"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
-      "target": "mission_control.views.cms_get_agent"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
-      "target": "mission_control.views.cms_list_agents"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_agents_subnets.py",
-      "target": "mission_control.views.cms_list_scenarios"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "cms.services.cancel_range"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "cms.services.destroy_range"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "cms.services.destroy_range_by_request_id"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "cms.services.pause_range"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "cms.services.resume_range"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "mission_control.views.audit_log_from_request"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "mission_control.views.cms_create_range"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "mission_control.views.cms_get_agent"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_range_api_audit.py",
-      "target": "mission_control.views.cms_list_scenarios"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views.py",
-      "target": "cms.assets.services.AgentConfig"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views.py",
-      "target": "mission_control.views.render"
     },
     {
       "count": 2,

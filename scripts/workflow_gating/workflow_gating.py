@@ -34,34 +34,6 @@ REUSABLE_DEPLOY_WORKFLOWS = (
     "_gcp-dev.yml",
 )
 
-# Self-hosted jobs that are intentionally reachable from pull_request events
-# because they only run `terraform plan` and post a PR comment (read-only).
-# Every other self-hosted job must block pull_request (runner-exposure fix).
-# The suite additionally asserts these stay free of mutation steps, so a
-# mutation cannot be smuggled into an allowlisted "plan" job to dodge the guard.
-READ_ONLY_SELF_HOSTED_PLAN_JOBS = frozenset(
-    {
-        ("_core.yml", "plan"),
-        ("_range.yml", "plan"),
-        ("_shifter-platform.yml", "plan"),
-    }
-)
-
-# Mutation signals scanned in a self-hosted job's `run` steps. Precise verbs
-# only - the bare word "deploy" appears in plan-job step names and is not a
-# mutation by itself.
-_MUTATION_RE = re.compile(
-    r"terraform\s+apply"
-    r"|docker\s+push"
-    r"|ecs\s+update-service"
-    r"|register-task-definition"
-    r"|kubectl\s+apply"
-    r"|helm\s+(?:upgrade|install)"
-    r"|start-instance-refresh"
-    r"|aws\s+ecs\s+(?:update|register)",
-    re.IGNORECASE,
-)
-
 _RESULT_REF = re.compile(r"needs\.([A-Za-z0-9_-]+)\.result")
 
 
@@ -129,13 +101,6 @@ def is_self_hosted(job):
         return ro == "self-hosted"
     if isinstance(ro, (list, tuple)):
         return "self-hosted" in ro
-    return False
-
-
-def job_has_mutation_step(job):
-    for step in job.get("steps", []) or []:
-        if _MUTATION_RE.search(str(step.get("run", ""))):
-            return True
     return False
 
 

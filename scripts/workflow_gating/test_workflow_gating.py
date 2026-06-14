@@ -24,7 +24,6 @@ from __future__ import annotations
 import unittest
 
 from .workflow_gating import (
-    READ_ONLY_SELF_HOSTED_PLAN_JOBS,
     REUSABLE_DEPLOY_WORKFLOWS,
     WorkflowShapeError,
     evaluate_env,
@@ -33,7 +32,6 @@ from .workflow_gating import (
     is_self_hosted,
     job_denied_on_pull_request,
     job_denied_when_upstream,
-    job_has_mutation_step,
     job_if,
     job_runs_when_eligible,
     jobs,
@@ -142,12 +140,17 @@ class TestBranchEventMatrix(unittest.TestCase):
             self.assertEqual(out["apply_aws"], "false", ref)
             self.assertEqual(out["deploy_gcp"], "false", ref)
 
-    def test_pr_to_dev_and_main_produce_no_deploy(self):
-        for base in ("dev", "main"):
+    def test_no_pull_request_routes_a_provider_deploy(self):
+        # PR-triggered deploy runs are hosted-only quality gates: no PR base
+        # branch (dev/main OR the deploy branches) may route a provider deploy.
+        # deploy.yml hardened this from the older "PR to a deploy branch plans"
+        # behavior - PRs now never reach the self-hosted provider jobs at all.
+        for base in ("dev", "main", "aws-dev", "gcp-dev"):
             out = self.env("pull_request", base_ref=base)
             self.assertEqual(out["run_aws"], "false", base)
             self.assertEqual(out["run_gcp"], "false", base)
             self.assertEqual(out["apply_aws"], "false", base)
+            self.assertEqual(out["deploy_gcp"], "false", base)
 
     def test_push_to_aws_dev_plans_and_applies(self):
         out = self.env("push", ref="refs/heads/aws-dev")
@@ -161,14 +164,6 @@ class TestBranchEventMatrix(unittest.TestCase):
         self.assertEqual(out["run_gcp"], "true")
         self.assertEqual(out["deploy_gcp"], "true")
         self.assertEqual(out["fast_gcp_deploy"], "true")
-
-    def test_pr_to_deploy_branches_is_plan_only(self):
-        aws = self.env("pull_request", base_ref="aws-dev")
-        self.assertEqual(aws["run_aws"], "true")
-        self.assertEqual(aws["apply_aws"], "false")  # plan, never apply on a PR
-        gcp = self.env("pull_request", base_ref="gcp-dev")
-        self.assertEqual(gcp["run_gcp"], "true")
-        self.assertEqual(gcp["deploy_gcp"], "false")
 
     def test_workflow_dispatch_main_is_the_only_prod_apply_path(self):
         prod = self.env("workflow_dispatch", ref="refs/heads/main")
@@ -277,26 +272,26 @@ class TestChangeFilterCoverage(unittest.TestCase):
 
 
 class TestRunnerExposure(unittest.TestCase):
-    """runner-exposure / DP-2: no PR event reaches a self-hosted deploy job."""
+    """runner-exposure / DP-2: no PR event reaches a self-hosted deploy job.
 
-    def test_self_hosted_mutating_jobs_block_pull_request(self):
+    deploy.yml routes no provider deploy on a pull_request, and the reusable
+    workflows fail closed independently: every self-hosted job (plan, apply,
+    build, deploy) must itself block pull_request events, so PR code can never
+    reach a privileged self-hosted runner even if the caller gate regresses.
+    This is verified semantically (the if-expression evaluator), which is
+    stronger than a substring check: a guard broadened with `|| always()`
+    would be caught here.
+    """
+
+    def test_every_self_hosted_job_fails_closed_on_pull_request(self):
+        checked = 0
         for wf_name in REUSABLE_DEPLOY_WORKFLOWS:
             wf = load_workflow(wf_name)
             for jid, job in jobs(wf, wf_name).items():
                 if not is_self_hosted(job):
                     continue
-                if (wf_name, jid) in READ_ONLY_SELF_HOSTED_PLAN_JOBS:
-                    # Allowlisted plan jobs are PR-reachable BUT must stay
-                    # read-only - a mutation step here would dodge the guard.
-                    self.assertFalse(
-                        job_has_mutation_step(job),
-                        f"{wf_name}:{jid} is allowlisted read-only but mutates",
-                    )
-                    continue
+                checked += 1
                 expr = job_if(job)
-                # Semantic proof: evaluate the `if:` for a pull_request event
-                # (every other condition permissive) and assert the job does
-                # not run - a broadened guard elsewhere cannot fake this.
                 self.assertTrue(
                     job_denied_on_pull_request(expr),
                     f"{wf_name}:{jid} runs on self-hosted but is reachable from "
@@ -307,18 +302,10 @@ class TestRunnerExposure(unittest.TestCase):
                     f"{wf_name}:{jid} never runs even on a push; its "
                     f"PR-denial assertion would be vacuous. if: {expr}",
                 )
-
-    def test_allowlisted_plan_jobs_actually_exist(self):
-        # Fail closed if an allowlisted plan job is renamed/removed: the
-        # allowlist must not silently grant PR-reachability to nothing.
-        for wf_name, jid in READ_ONLY_SELF_HOSTED_PLAN_JOBS:
-            wf = load_workflow(wf_name)
-            self.assertIn(
-                jid, jobs(wf, wf_name), f"{wf_name}:{jid} allowlisted but absent"
-            )
-            self.assertTrue(
-                is_self_hosted(wf["jobs"][jid]), f"{wf_name}:{jid} not self-hosted"
-            )
+        # Fail closed if the inventory ever drops to nothing (e.g. a parsing
+        # regression made every job look hosted): there must be self-hosted
+        # deploy jobs to guard.
+        self.assertGreater(checked, 0, "no self-hosted deploy jobs were found")
 
     def test_negative_fixture_unguarded_self_hosted_apply_is_flagged(self):
         # Without the PR guard the job still runs on a pull_request event.

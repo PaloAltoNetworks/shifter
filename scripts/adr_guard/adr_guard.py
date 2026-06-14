@@ -41,6 +41,8 @@ GUARDRAIL_PREFIXES = (
 )
 GUARDRAIL_FILES = {
     ".pre-commit-config.yaml",
+    ".ground-control.yaml",
+    ".gc/plan-rules.md",
     ".claude/settings.json",
     "AGENTS.md",
     ".github/CODEOWNERS",

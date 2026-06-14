@@ -8,6 +8,14 @@ on:
         required: false
         type: boolean
         default: false
+      run_stack_smoke:
+        description: >-
+          Run the built-image stack-smoke job. Driven by the caller from the
+          portal_image / shifter_platform path filters so it only builds and
+          boots the portal image when the image's inputs change.
+        required: false
+        type: boolean
+        default: false
     secrets:
       SONAR_TOKEN:
         description: 'SonarCloud analysis token (sonarcloud job)'
@@ -1226,6 +1234,34 @@ jobs:
           DB_USER: test
           DB_PASSWORD: test
         run: uv run python manage.py check_model_fks
+
+  # ===========================================================================
+  # Built-image stack smoke (#922)
+  #
+  # Boots the *production* portal image under its real entrypoint.sh against
+  # local Postgres / Redis / ElasticMQ doubles and asserts /health readiness,
+  # an authenticated websocket handshake, and worker/scheduler heartbeats. This
+  # catches container-runtime regressions (the June-7 /home/appuser and worker
+  # healthcheck failures) that the source-tree pytest estate cannot see. Gated
+  # on `run_stack_smoke`, which the caller drives from the portal_image /
+  # shifter_platform path filters, so it only builds the image when the image's
+  # inputs change. Hosted runner, no cloud credentials.
+  # ===========================================================================
+
+  stack-smoke:
+    permissions:
+      contents: read
+    name: Stack smoke (built image)
+    if: ${{ inputs.run_stack_smoke && !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Boot built portal image and assert health/WS/workers
+        run: bash scripts/stack-smoke/stack_smoke.sh
 
   # ===========================================================================
   # Static analysis — SonarCloud

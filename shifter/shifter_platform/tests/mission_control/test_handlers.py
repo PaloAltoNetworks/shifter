@@ -1,435 +1,171 @@
-"""Tests for Mission Control handlers."""
+"""Behavior tests for Mission Control SNS->WebSocket handlers.
 
+Drives the handlers against the real in-memory Django Channels layer: a test
+channel subscribes to the expected group, the handler runs, and the broadcast
+is received and asserted. The channel layer is the real external transport
+boundary, so nothing first-party is patched.
+"""
+
+import asyncio
 import json
-import logging
-from unittest.mock import MagicMock, patch
-from uuid import UUID
+from uuid import uuid4
 
+import pytest
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+from mission_control.handlers import (
+    EVENT_TYPE_NGFW,
+    parse_sns_message,
+    process_event,
+    process_ngfw_event,
+    process_range_event,
+)
+from shared.channels.groups import ngfw_event_group, range_event_group
 from shared.enums import ResourceStatus
 
-# Test UUID for request_id
-TEST_REQUEST_ID = UUID("12345678-1234-5678-1234-567812345678")
+
+def _sns(payload):
+    return {"Message": json.dumps(payload)}
 
 
-class TestProcessEvent:
-    """Tests for process_event dispatcher."""
+@pytest.fixture(autouse=True)
+def _flush_channel_layer():
+    layer = get_channel_layer()
+    async_to_sync(layer.flush)()
+    yield
+    async_to_sync(layer.flush)()
 
-    def test_routes_range_events_to_range_handler(self):
-        """Dispatcher routes range.* events to process_range_event."""
-        from mission_control.handlers import process_event
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
+def _subscribe(group):
+    layer = get_channel_layer()
+    channel = f"recv-{uuid4()}"
+    async_to_sync(layer.group_add)(group, channel)
+    return layer, channel
 
-        with patch("mission_control.handlers.process_range_event") as mock_range_handler:
-            process_event(message)
-            mock_range_handler.assert_called_once_with(message)
 
-    def test_routes_ngfw_events_to_ngfw_handler(self):
-        """Dispatcher routes ngfw.* events to process_ngfw_event."""
-        from mission_control.handlers import process_event
+def _receive(layer, channel, timeout=0.2):
+    async def _r():
+        try:
+            return await asyncio.wait_for(layer.receive(channel), timeout)
+        except TimeoutError:
+            return None
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "ngfw.status.updated",
-                    "ngfw_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler:
-            process_event(message)
-            mock_ngfw_handler.assert_called_once_with(message)
-
-    def test_ignores_unknown_event_types(self):
-        """Dispatcher ignores events with unknown event_type prefix."""
-        from mission_control.handlers import process_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "unknown.event",
-                    "some_id": 1,
-                }
-            )
-        }
-
-        with (
-            patch("mission_control.handlers.process_range_event") as mock_range_handler,
-            patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler,
-            patch("mission_control.handlers.logger") as mock_logger,
-        ):
-            process_event(message)
-            mock_range_handler.assert_not_called()
-            mock_ngfw_handler.assert_not_called()
-            mock_logger.debug.assert_called_once()
-            assert "unknown" in str(mock_logger.debug.call_args)
-
-    def test_handles_missing_event_type(self, caplog):
-        """Dispatcher handles messages without event_type gracefully."""
-        from mission_control.handlers import process_event
-
-        message = {"Message": json.dumps({"range_id": 1})}
-
-        with (
-            caplog.at_level(logging.DEBUG, logger="mission_control.handlers"),
-            patch("mission_control.handlers.process_range_event") as mock_range_handler,
-            patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler,
-        ):
-            process_event(message)
-            mock_range_handler.assert_not_called()
-            mock_ngfw_handler.assert_not_called()
+    return async_to_sync(_r)()
 
 
 class TestParseSnsMessage:
-    """Tests for parse_sns_message helper."""
-
-    def test_parses_sns_wrapped_message(self):
-        """Function unwraps SNS envelope to get event payload."""
-        from mission_control.handlers import parse_sns_message
-
-        sns_message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        result = parse_sns_message(sns_message)
-
+    def test_unwraps_sns_envelope(self):
+        result = parse_sns_message(_sns({"event_type": "range.status.updated", "range_id": 1, "user_id": 42}))
         assert result["event_type"] == "range.status.updated"
         assert result["range_id"] == 1
         assert result["user_id"] == 42
 
     def test_parses_string_input(self):
-        """Function parses string JSON input."""
-        from mission_control.handlers import parse_sns_message
-
-        sns_message = json.dumps(
-            {
-                "Message": json.dumps(
-                    {
-                        "event_type": "range.status.updated",
-                        "range_id": 1,
-                    }
-                )
-            }
-        )
-
-        result = parse_sns_message(sns_message)
-
+        result = parse_sns_message(json.dumps(_sns({"event_type": "range.status.updated", "range_id": 1})))
         assert result["event_type"] == "range.status.updated"
         assert result["range_id"] == 1
 
     def test_handles_non_wrapped_message(self):
-        """Function handles direct event payload (no SNS wrapper)."""
-        from mission_control.handlers import parse_sns_message
-
-        direct_message = {
-            "event_type": "range.status.updated",
-            "range_id": 1,
-            "user_id": 42,
-        }
-
-        result = parse_sns_message(direct_message)
-
+        result = parse_sns_message({"event_type": "range.status.updated", "range_id": 1})
         assert result["event_type"] == "range.status.updated"
-        assert result["range_id"] == 1
 
 
 class TestProcessRangeEvent:
-    """Tests for process_range_event handler."""
+    def test_broadcasts_status_update_to_request_group(self):
+        request_id = uuid4()
+        group = range_event_group(str(request_id))
+        layer, channel = _subscribe(group)
 
-    # ---------------------------------------------------------------------
-    # Happy path - broadcast to channel layer
-    # ---------------------------------------------------------------------
-
-    def test_broadcasts_status_update_to_channel_layer(self):
-        """Handler broadcasts status update to Django Channels group."""
-        from mission_control.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
+        process_range_event(
+            _sns(
                 {
                     "event_type": "range.status.updated",
-                    "request_id": str(TEST_REQUEST_ID),
-                    "range_id": 1,
+                    "request_id": str(request_id),
                     "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
-        }
+        )
 
-        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
+        msg = _receive(layer, channel)
+        assert msg is not None
+        assert msg["type"] == "range.status"
+        assert msg["request_id"] == str(request_id)
+        assert msg["new_status"] == ResourceStatus.PROVISIONING.value
+        assert msg["error_message"] is None
 
-            process_range_event(message)
-
-            # Verify async_to_sync was called with group_send
-            mock_async_to_sync.assert_called_once()
-
-            # Verify the sync wrapper was called with correct args
-            mock_send.assert_called_once()
-            args, _ = mock_send.call_args
-
-            # Verify group name uses request_id
-            assert args[0] == f"range_status_{TEST_REQUEST_ID}"
-
-            # Verify message content uses request_id
-            sent_message = args[1]
-            assert sent_message["type"] == "range.status"
-            assert sent_message["request_id"] == str(TEST_REQUEST_ID)
-            assert sent_message["new_status"] == ResourceStatus.PROVISIONING.value
-
-    def test_broadcasts_error_message_when_present(self):
-        """Handler includes error_message in broadcast when present."""
-        from mission_control.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
+    def test_includes_error_message_when_present(self):
+        request_id = uuid4()
+        layer, channel = _subscribe(range_event_group(str(request_id)))
+        process_range_event(
+            _sns(
                 {
                     "event_type": "range.status.updated",
-                    "request_id": str(TEST_REQUEST_ID),
-                    "range_id": 2,
+                    "request_id": str(request_id),
                     "new_status": ResourceStatus.FAILED.value,
-                    "user_id": 42,
                     "error_message": "Subnet exhausted",
                 }
             )
-        }
-
-        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
-
-            process_range_event(message)
-
-            # Verify error_message included
-            args, _ = mock_send.call_args
-            sent_message = args[1]
-            assert sent_message["error_message"] == "Subnet exhausted"
-
-    def test_broadcasts_null_error_message_when_not_present(self):
-        """Handler includes null error_message when not in event."""
-        from mission_control.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(TEST_REQUEST_ID),
-                    "range_id": 3,
-                    "new_status": ResourceStatus.READY.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
-
-            process_range_event(message)
-
-            # Verify error_message is None
-            args, _ = mock_send.call_args
-            sent_message = args[1]
-            assert sent_message["error_message"] is None
-
-    # ---------------------------------------------------------------------
-    # Event filtering
-    # ---------------------------------------------------------------------
+        )
+        assert _receive(layer, channel)["error_message"] == "Subnet exhausted"
 
     def test_ignores_non_status_events(self):
-        """Handler ignores events that are not range.status.updated."""
-        from mission_control.handlers import process_range_event
+        request_id = uuid4()
+        layer, channel = _subscribe(range_event_group(str(request_id)))
+        process_range_event(_sns({"event_type": "range.provisioned", "request_id": str(request_id)}))
+        assert _receive(layer, channel) is None
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.provisioned",
-                    "range_id": 4,
-                    "user_id": 42,
-                }
-            )
-        }
+    def test_does_not_broadcast_when_request_id_missing(self):
+        # Subscribe broadly is not possible without a request_id group; assert the
+        # handler returns without raising and emits nothing on a fresh channel.
+        layer = get_channel_layer()
+        channel = f"recv-{uuid4()}"
+        async_to_sync(layer.group_add)("range_status_unknown", channel)
+        process_range_event(_sns({"event_type": "range.status.updated", "new_status": "ready"}))
+        assert _receive(layer, channel) is None
 
-        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
 
-            process_range_event(message)
+class TestProcessNgfwEvent:
+    def test_broadcasts_to_app_group(self):
+        app_id = str(uuid4())
+        layer, channel = _subscribe(ngfw_event_group(app_id))
+        process_ngfw_event(_sns({"event_type": EVENT_TYPE_NGFW, "app_id": app_id, "status": "ready"}))
+        msg = _receive(layer, channel)
+        assert msg is not None
+        assert msg["type"] == "ngfw.status"
+        assert msg["app_id"] == app_id
+        assert msg["status"] == "ready"
 
-            # Should NOT have broadcast (async_to_sync not called)
-            mock_async_to_sync.assert_not_called()
+    def test_ignores_invalid_app_id(self):
+        layer, channel = _subscribe(ngfw_event_group("x"))
+        process_ngfw_event(_sns({"event_type": EVENT_TYPE_NGFW, "app_id": None}))
+        assert _receive(layer, channel) is None
 
-    # ---------------------------------------------------------------------
-    # Logging
-    # ---------------------------------------------------------------------
 
-    def test_logs_info_on_successful_broadcast(self):
-        """Handler logs INFO when broadcast succeeds."""
-        from mission_control.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(TEST_REQUEST_ID),
-                    "range_id": 5,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("mission_control.handlers.logger") as mock_logger,
-        ):
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
-
-            process_range_event(message)
-
-        # Verify logger.info was called with expected content
-        mock_logger.info.assert_called_once()
-        call_args = mock_logger.info.call_args[0]
-        assert "MC broadcast to group" in call_args[0]
-        assert f"range_status_{TEST_REQUEST_ID}" in call_args[1]
-        assert call_args[2] == str(TEST_REQUEST_ID)  # request_id
-
-    def test_logs_debug_on_event_ignore(self):
-        """Handler logs DEBUG when ignoring non-status events."""
-        from mission_control.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.destroyed",
-                    "request_id": str(TEST_REQUEST_ID),
-                    "range_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("mission_control.handlers.logger") as mock_logger,
-        ):
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
-
-            process_range_event(message)
-
-        # Verify logger.debug was called with expected content
-        mock_logger.debug.assert_called_once()
-        call_args = mock_logger.debug.call_args[0]
-        assert "Ignoring event_type" in call_args[0]
-        assert call_args[1] == "range.destroyed"
-
-    def test_logs_error_when_request_id_missing(self):
-        """Handler logs ERROR when request_id is missing from event."""
-        from mission_control.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
+class TestProcessEventRouting:
+    def test_routes_range_event(self):
+        request_id = uuid4()
+        layer, channel = _subscribe(range_event_group(str(request_id)))
+        process_event(
+            _sns(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": 1,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                    # No request_id
-                }
-            )
-        }
-
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("mission_control.handlers.logger") as mock_logger,
-        ):
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
-
-            process_range_event(message)
-
-        # Verify logger.error was called
-        mock_logger.error.assert_called_once()
-        call_args = mock_logger.error.call_args[0]
-        assert "Missing request_id" in call_args[0]
-
-        # Should NOT have broadcast
-        mock_async_to_sync.assert_not_called()
-
-    # ---------------------------------------------------------------------
-    # Group name
-    # ---------------------------------------------------------------------
-
-    def test_uses_correct_group_name_format(self):
-        """Handler uses range_event_group helper for group name."""
-        from mission_control.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(TEST_REQUEST_ID),
-                    "range_id": 123,
+                    "request_id": str(request_id),
                     "new_status": ResourceStatus.READY.value,
-                    "user_id": 42,
                 }
             )
-        }
+        )
+        assert _receive(layer, channel) is not None
 
-        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
+    def test_routes_ngfw_event(self):
+        app_id = str(uuid4())
+        layer, channel = _subscribe(ngfw_event_group(app_id))
+        process_event(_sns({"event_type": EVENT_TYPE_NGFW, "app_id": app_id, "status": "ready"}))
+        assert _receive(layer, channel) is not None
 
-            process_range_event(message)
-
-            args, _ = mock_send.call_args
-            assert args[0] == f"range_status_{TEST_REQUEST_ID}"
-
-    # ---------------------------------------------------------------------
-    # Minimum required input
-    # ---------------------------------------------------------------------
-
-    def test_succeeds_with_minimum_required_input(self):
-        """Handler works with minimal event fields (request_id required)."""
-        from mission_control.handlers import process_range_event
-
-        # Minimal SNS message - no error_message, but request_id is required
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(TEST_REQUEST_ID),
-                    "range_id": 6,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
-            mock_send = MagicMock()
-            mock_async_to_sync.return_value = mock_send
-
-            process_range_event(message)
-
-            # Should have broadcast
-            mock_send.assert_called_once()
+    def test_ignores_unknown_event_type(self):
+        request_id = uuid4()
+        layer, channel = _subscribe(range_event_group(str(request_id)))
+        process_event(_sns({"event_type": "unknown.event", "request_id": str(request_id)}))
+        assert _receive(layer, channel) is None

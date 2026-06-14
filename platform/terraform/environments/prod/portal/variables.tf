@@ -313,6 +313,11 @@ variable "firewall_log_retention_days" {
   type        = number
 }
 
+variable "portal_inspection_delete_protection" {
+  description = "Enable delete protection on the portal inspection Network Firewall. Dev sets false to allow intentional teardown; prod keeps true. Mirrors the db_deletion_protection convention."
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # Engine Provisioner
 # ------------------------------------------------------------------------------

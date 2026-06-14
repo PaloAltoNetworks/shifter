@@ -46,3 +46,7 @@ vm_series_instance_type = "m5.xlarge"
 # ------------------------------------------------------------------------------
 
 enable_ngfw_infrastructure = true
+
+# Network Firewall lifecycle
+# dev: allow intentional teardown; apply once with this false before destroying
+network_firewall_delete_protection = false

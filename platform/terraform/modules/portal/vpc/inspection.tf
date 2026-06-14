@@ -169,6 +169,7 @@ resource "aws_networkfirewall_firewall_policy" "portal" {
 
 resource "aws_networkfirewall_firewall" "portal" {
   # checkov:skip=CKV2_AWS_63:Logging defined in aws_networkfirewall_logging_configuration.portal below.
+  # checkov:skip=CKV_AWS_344:Deletion protection controlled by var.portal_inspection_delete_protection (dev false / prod true). See ADR-004-R11 exception ckv-aws-344-nf-delete-protection.
   count = var.enable_portal_inspection ? 1 : 0
 
   encryption_configuration {
@@ -179,7 +180,7 @@ resource "aws_networkfirewall_firewall" "portal" {
   name                = "${var.name_prefix}-portal-firewall"
   firewall_policy_arn = aws_networkfirewall_firewall_policy.portal[0].arn
   vpc_id              = aws_vpc.this.id
-  delete_protection   = true
+  delete_protection   = var.portal_inspection_delete_protection
 
   dynamic "subnet_mapping" {
     for_each = aws_subnet.firewall

@@ -201,6 +201,16 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_344 (Network Firewall delete protection): delete protection is variableized as a Terraform lifecycle toggle (var.network_firewall_delete_protection on the range egress firewall, var.portal_inspection_delete_protection on the portal inspection firewall) so disposable dev environments can complete `terraform destroy`/rebuild (#934). The secure default is `true`; production keeps it `true` and only dev sets it `false`. Same dev-false / prod-true convention as the RDS CKV_AWS_293 and ALB deletion-protection toggles. Each firewall resource carries an inline `# checkov:skip=CKV_AWS_344` pointer back to this entry.",
+    "expires_on": "2027-06-14",
+    "paths": [
+      "platform/terraform/modules/portal/vpc/inspection.tf",
+      "platform/terraform/modules/range/vpc/firewall.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
     "reason": "CKV_AWS_336 (ECS container read-only root filesystem) on the guacd task: guacd writes its UNIX listener socket to /var/run/ and uses /tmp/ at runtime. Making the root FS read-only requires explicit tmpfs volume mounts for both paths, which is a follow-up hardening pass.",
     "expires_on": "2026-11-26",
     "paths": [

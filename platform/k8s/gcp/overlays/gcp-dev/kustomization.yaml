@@ -19,19 +19,19 @@ secretGenerator:
       - platform-runtime-secrets.env
 
 images:
-  - name: placeholder-portal
+  - name: us-docker.pkg.dev/placeholder-project/shifter/portal
     newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-portal/portal
-    newTag: latest
-  - name: placeholder-guacd
+    newTag: 0.0.0
+  - name: us-docker.pkg.dev/placeholder-project/shifter/guacd
     newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-guacd/guacd
-    newTag: latest
-  - name: placeholder-guacamole-client
+    newTag: 0.0.0
+  - name: us-docker.pkg.dev/placeholder-project/shifter/guacamole-client
     newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-guacamole-client/guacamole-client
-    newTag: latest
+    newTag: 0.0.0
 
 patches:
-  - path: patch-runtime-secretref.yaml
-  - path: patch-serviceaccounts.yaml
+  - path: patch-runtime-secretref.patch
+  - path: patch-serviceaccounts.patch
   - target:
       kind: ConfigMap
       name: platform-runtime

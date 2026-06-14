@@ -25,7 +25,13 @@ credentials** — the only AWS surface is a local ElasticMQ SQS double reached v
 4. **Websocket** — an authenticated handshake completes through
    `AllowedHostsOriginValidator` → `AuthMiddlewareStack` → a routed consumer
    (`ws/notifications/`), using a throwaway session in the smoke database.
-5. **Workers** — the SQS worker and CTF scheduler boot from the same image and
+5. **Authenticated page renders** — the real dashboard / range / terminal /
+   settings / help pages return 200 off the built image, and every local
+   `/static/` asset they reference (plus any declared sourcemap) resolves —
+   catching the missing-terminal-sourcemaps / static-asset regression class
+   (`#923` TEST-3, range-independent subset). Range-dependent checks (live
+   terminal data exchange, Guacamole) and real OIDC login are out of scope.
+6. **Workers** — the SQS worker and CTF scheduler boot from the same image and
    produce their `/tmp/<name>-heartbeat` files.
 
 ## Run it locally
@@ -53,6 +59,7 @@ variation is a parameter change rather than a copy of the workflow block.
 | `SMOKE_WEB_PORT` | `18000` | Host port mapped to the web container's 8000 |
 | `SMOKE_HEALTH_PATH` | `/health/` | Readiness path to poll for 200 |
 | `SMOKE_WS_PATH` | `ws/notifications/` | Routed websocket consumer path |
+| `SMOKE_PAGES` | dashboard/range/terminal/settings/help | Space-separated authenticated page paths to render + asset-check |
 | `SMOKE_BOOT_TIMEOUT` | `180` | Seconds to wait for readiness |
 | `SMOKE_HEARTBEAT_TIMEOUT` | `120` | Seconds to wait for each heartbeat |
 | `SMOKE_WORKER_SPECS` | cms worker + ctf-scheduler | `name\|heartbeat_file\|command` per line |

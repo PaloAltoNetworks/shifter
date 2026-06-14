@@ -140,6 +140,24 @@ def test_harness_asserts_health_ws_and_worker_heartbeats(smoke_script: str) -> N
     assert "ctf-scheduler-heartbeat" in smoke_script
 
 
+def test_harness_asserts_authenticated_page_renders(smoke_script: str) -> None:
+    # The range-independent half of the post-deploy functional gate (#923 TEST-3):
+    # render real authenticated pages off the built image and assert their static
+    # assets resolve, catching the missing-terminal-sourcemaps / static class.
+    assert "page_smoke.py" in smoke_script
+    assert "/mission-control/terminal/" in smoke_script
+    assert "$session_key" in smoke_script  # reuses the authenticated WS session
+
+
+def test_page_smoke_helper_checks_static_and_sourcemaps() -> None:
+    helper = WS_HELPER.parent.joinpath("page_smoke.py").read_text(encoding="utf-8")
+    assert "/static/" in helper
+    assert "sourceMappingURL" in helper
+    # Mirrors the production ALB so the DEBUG=False image serves instead of
+    # issuing its HTTPS redirect.
+    assert "X-Forwarded-Proto" in helper
+
+
 def test_harness_does_not_override_image_user(smoke_script: str) -> None:
     # The /home/appuser HOME regression is only caught when the container runs as
     # the image's non-root user; the harness must not pass --user/-u to escape it.

@@ -38,6 +38,9 @@ SMOKE_CONTEXT="${SMOKE_CONTEXT:-shifter}"
 SMOKE_WEB_PORT="${SMOKE_WEB_PORT:-18000}"
 SMOKE_HEALTH_PATH="${SMOKE_HEALTH_PATH:-/health/}"
 SMOKE_WS_PATH="${SMOKE_WS_PATH:-ws/notifications/}"
+# Authenticated, range-independent pages whose render + static assets are
+# asserted off the built image (the #923 TEST-3 range-independent subset).
+SMOKE_PAGES="${SMOKE_PAGES:-/dashboard/ /mission-control/ /mission-control/terminal/ /mission-control/settings/ /mission-control/help/}"
 SMOKE_BOOT_TIMEOUT="${SMOKE_BOOT_TIMEOUT:-180}"
 SMOKE_HEARTBEAT_TIMEOUT="${SMOKE_HEARTBEAT_TIMEOUT:-120}"
 
@@ -235,6 +238,14 @@ uv run --with 'websockets==12.0' python "${SCRIPT_DIR}/ws_handshake.py" \
   --url "ws://127.0.0.1:${SMOKE_WEB_PORT}/${SMOKE_WS_PATH}" \
   --session "$session_key" \
   --origin "http://localhost"
+
+log "Asserting authenticated page renders and static assets resolve"
+# Reuses the same smoke session. Catches the June container-runtime class
+# (missing terminal sourcemaps / static assets) the source-tree tests miss.
+python3 "${SCRIPT_DIR}/page_smoke.py" \
+  --base "http://127.0.0.1:${SMOKE_WEB_PORT}" \
+  --session "$session_key" \
+  --paths "$SMOKE_PAGES"
 
 log "Booting worker / scheduler containers and asserting heartbeats"
 while IFS='|' read -r wname hbfile wcmd; do

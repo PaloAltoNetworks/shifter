@@ -1,0 +1,64 @@
+[project]
+name = "event-load-harness"
+version = "0.1.0"
+description = "Scripted, repeatable event-load harness that drives a deployed Shifter portal and renders a sanitized concurrency-envelope report (#926)"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "websockets>=13",
+]
+
+[project.optional-dependencies]
+# Provider-metrics plug. client-only mode (the default) needs none of this.
+aws = [
+    "boto3>=1.34",
+]
+
+[project.scripts]
+event-load-harness = "event_load_harness.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+include = ["event_load_harness*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [".venv", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "T20", "SIM", "RUF", "C901"]
+# T201: print is the operator-facing CLI output channel.
+# S101: assert is the normal pytest idiom.
+# S311: random is used to distribute load across route classes, not for crypto.
+ignore = ["S101", "T201", "S311"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.bandit]
+exclude_dirs = [".venv", "tests"]
+skips = ["B101"]

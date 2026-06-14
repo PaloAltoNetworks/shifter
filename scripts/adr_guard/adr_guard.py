@@ -2317,6 +2317,11 @@ _QUALITY_GUARDRAIL_DOCS_REQUIRED_GLOBS = (
 _PR_GATE_SKIPPED_QUALITY_GUARD = (
     '[ "$quality_result" = "skipped" ] && [ "$quality_relevant" != "false" ]'
 )
+_QUALITY_ONLY_OUTPUT = "quality_only: ${{ steps.filter.outputs.quality_only }}"
+_QUALITY_ONLY_REQUIRED_GLOBS = (
+    "scripts/polaris-aws-range/**",
+    "scenario-dev/polaris/tests/**",
+)
 _PORTAL_IMAGE_OUTPUT = "portal_image: ${{ steps.filter.outputs.portal_image }}"
 _PORTAL_IMAGE_DEPLOY_CONDITION = "needs.changes.outputs.portal_image == 'true'"
 _PORTAL_IMAGE_REQUIRED_GLOB = "shifter/shifter_platform/**"
@@ -2594,6 +2599,36 @@ def _check_deploy_workflow_plan_routing(deploy_text: str) -> list[Violation]:
     return violations
 
 
+def _check_deploy_workflow_quality_only_routing(deploy_text: str) -> list[Violation]:
+    """Require non-deploy test-support paths to remain categorized."""
+    quality_only_block = _paths_filter_block(deploy_text, "quality_only")
+    changes_block = _workflow_job_block(deploy_text, "changes")
+    if not quality_only_block or not _active_line_contains(changes_block, _QUALITY_ONLY_OUTPUT):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "Non-deploy test-support changes must retain a `quality_only` "
+                "filter/output; missing the filter or changes-job output",
+            )
+        ]
+
+    missing_globs = [
+        glob
+        for glob in _QUALITY_ONLY_REQUIRED_GLOBS
+        if not _block_contains_glob(quality_only_block, glob)
+    ]
+    if missing_globs:
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "`quality_only` must include "
+                f"{', '.join(missing_globs)} so orphaned support test suites stay "
+                "categorized without triggering deploy jobs",
+            )
+        ]
+    return []
+
+
 def _check_deploy_workflow_portal_image_routing(deploy_text: str) -> list[Violation]:
     """Require the portal-image deploy trigger restored by #913.
 
@@ -2841,6 +2876,7 @@ def check_deploy_workflow_plan_scope(repo_root: Path, files: list[str] | None) -
         deploy_text = deploy_path.read_text(encoding="utf-8")
         violations.extend(_check_deploy_concurrency_queues_apply_runs(deploy_text))
         violations.extend(_check_deploy_workflow_plan_routing(deploy_text))
+        violations.extend(_check_deploy_workflow_quality_only_routing(deploy_text))
         violations.extend(_check_deploy_workflow_portal_image_routing(deploy_text))
 
     for path, workflow_path in (

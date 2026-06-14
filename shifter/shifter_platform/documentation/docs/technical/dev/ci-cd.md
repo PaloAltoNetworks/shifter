@@ -87,6 +87,8 @@ The orchestrator uses path filters to run only relevant jobs:
 | `quality_relevant` | Any non-docs change, plus guardrail docs; controls whether Quality runs without launching deploy or Terraform plan jobs |
 | `portal_image` | Portal image build inputs (`shifter/shifter_platform/**`, `cyberscript`, `installation`, `.dockerignore`); triggers the portal image build/deploy on environment branches without running Terraform |
 | `gcp` | GCP Terraform, GCP Kubernetes assets, GCP scripts, GCP cloud adapters |
+| `mcp` | MCP package changes, routed to Quality only |
+| `quality_only` | Non-deploy test-support and guardrail surfaces (`scripts/polaris-aws-range/**`, `scenario-dev/polaris/tests/**`, `_quality.yml`, ADR/guardrail checker paths), routed to Quality only |
 
 ## Quality Gate
 
@@ -120,7 +122,11 @@ a skipped Quality job only when `quality_relevant` is false.
 - **K8s security scanning**: Checkov with the `kubernetes` framework. Current
   soft-fail is scoped to Kubernetes manifest hardening and does not justify
   Terraform soft-fail.
-- **Tests**: `pytest` with PostgreSQL service container for `shifter_platform`
+- **Tests**: package-local Python, JavaScript, and harness suites, including
+  `shifter_platform`, `cyberscript`, `shifter/engine/provisioner`, `packer`,
+  `installation`, `scripts/bootstrap`, `scripts/gcp`, `scripts/polaris-aws-range`,
+  `scenario-dev/polaris/tests`, the Postgres migration proof, and MCP package
+  tests including `mcp/planner`.
 - **IaC scanning**: Checkov for Terraform is a **blocking gate** under
   ADR-004-R11. Pre-commit and CI share the same config at
   `platform/terraform/.checkov.yaml`; `--soft-fail` is off. Accepted-risk

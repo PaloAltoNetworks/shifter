@@ -55,6 +55,7 @@ jobs:
       quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}
       portal_image: ${{ steps.filter.outputs.portal_image }}
       mcp: ${{ steps.filter.outputs.mcp }}
+      quality_only: ${{ steps.filter.outputs.quality_only }}
       gcp: ${{ steps.filter.outputs.gcp }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
       aws_is_dev: ${{ steps.env.outputs.aws_is_dev }}
@@ -116,13 +117,18 @@ jobs:
               - 'shifter/.dockerignore'
             mcp:
               - 'mcp/**'
+            # Quality-only non-deploy support surfaces. These paths have
+            # test or guardrail jobs in _quality.yml, but they must not
+            # trigger Terraform plans, image builds, or environment deploys.
+            quality_only:
               - '.github/workflows/_quality.yml'
+              - 'scripts/polaris-aws-range/**'
+              - 'scenario-dev/polaris/tests/**'
               # Guardrail scripts that the Quality workflow invokes
               # directly (their CI steps live in _quality.yml's
               # terraform-lint job). A change to these scripts or their
               # tests must re-run Quality so the guardrail's enforcement
-              # is verified, but it shouldn't trigger any deploy — the
-              # `mcp` filter is the existing "Quality-only" route.
+              # is verified, but it shouldn't trigger any deploy.
               - 'scripts/check_tf_iam_ec2_scope/**'
               - 'scripts/check_tf_iam_elb_scope/**'
               - 'scripts/check_tf_sg_cidrs/**'

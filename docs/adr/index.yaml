@@ -68,8 +68,13 @@
       },
       {
         "id": "ADR-003-R4",
-        "description": "AWS portal deployment mode must have one authoritative source: the deploy workflow derives single-instance vs. ASG mode from Terraform outputs, not from a GitHub Actions variable. The single-instance path must fail unless exactly one running tagged portal instance matches Terraform state, and the ASG path must verify the deployed image tag on every in-service instance after refresh.",
+        "description": "AWS portal deployment mode must have one authoritative source: the deploy workflow derives single-instance vs. ASG mode from Terraform outputs, not from a GitHub Actions variable. The single-instance path must fail unless exactly one running tagged portal instance matches Terraform state, and the ASG path must verify the deployed image digest on every in-service instance after refresh.",
         "checks": ["portal-deploy-mode-source-of-truth"]
+      },
+      {
+        "id": "ADR-003-R5",
+        "description": "Deploy workflows must keep pull_request events on GitHub-hosted PR validation only. Jobs that can reach self-hosted deploy runners, assume deploy roles, push ECR images, mutate infrastructure, or restart runtime services must be gated to trusted push/workflow_dispatch runs and bind a separate GitHub Environment name such as aws-dev, aws-prod, or gcp-dev. AWS ECR repositories are immutable; AWS deploy consumers use repo@sha256 image digests instead of mutable latest/short-SHA image identity.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -83,6 +88,7 @@
       ".github/workflows/_shifter-platform.yml",
       "scripts/portal_deploy/portal_deploy.py",
       "scripts/portal-deploy/deploy_portal.sh",
+      "scripts/adr_guard/tests/test_deploy_workflow_security.py",
       "platform/terraform/environments/dev/portal/outputs.tf",
       "platform/terraform/environments/prod/portal/outputs.tf"
     ]

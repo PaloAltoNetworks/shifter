@@ -6,6 +6,9 @@ on:
       environment:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       is_dev:
         required: true
         type: boolean
@@ -25,6 +28,11 @@ on:
         description: Portal image source changed (or manual dispatch)
         required: true
         type: boolean
+      engine_image_digest:
+        description: Engine provisioner image digest from the upstream build job
+        required: false
+        type: string
+        default: ""
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -55,6 +63,7 @@ jobs:
     needs: push-guacamole-images
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       inputs.platform_changes &&
       (needs.push-guacamole-images.result == 'success' ||
        needs.push-guacamole-images.result == 'skipped')
@@ -80,6 +89,8 @@ jobs:
         # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
         env:
           IS_DEV: ${{ inputs.is_dev }}
+          ENGINE_IMAGE_DIGEST: ${{ inputs.engine_image_digest }}
+          ENGINE_TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
           TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
           TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
         run: |
@@ -100,6 +111,30 @@ jobs:
             exit 1
           fi
           printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
+          resolve_engine_image_digest() {
+            local digest="${ENGINE_IMAGE_DIGEST}"
+            if [ -n "${digest}" ]; then
+              if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::Engine build did not produce a valid ECR image digest"
+                exit 1
+              fi
+              printf '%s\n' "${digest}"
+              return
+            fi
+
+            local current_image
+            if ! current_image=$(aws ecs describe-task-definition --task-definition "${ENGINE_TASK_FAMILY}" --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null); then
+              echo "::error::No engine image digest was provided and ECS task definition ${ENGINE_TASK_FAMILY} could not be read. Run a deploy path that builds the engine image so Terraform receives the build digest."
+              exit 1
+            fi
+            if [[ "${current_image}" =~ @(sha256:[0-9a-f]{64})$ ]]; then
+              printf '%s\n' "${BASH_REMATCH[1]}"
+              return
+            fi
+            echo "::error::Existing ECS task definition ${ENGINE_TASK_FAMILY} is not digest-pinned (${current_image}). Run the engine image deploy first so platform Terraform can preserve a digest."
+            exit 1
+          }
+          printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
       - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
@@ -124,6 +159,7 @@ jobs:
       pull-requests: write
     name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     if: |
       inputs.apply_changes &&
       inputs.platform_changes &&
@@ -143,7 +179,16 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Check guacd image tag
+        id: guacd-image
+        run: |
+          if aws ecr describe-images --repository-name "$GUACD_REPO" --image-ids imageTag="$GUACAMOLE_VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push guacd image (with RDP file transfer support)
+        if: steps.guacd-image.outputs.exists != 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./shifter/engine/guacd
@@ -152,9 +197,17 @@ jobs:
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
           no-cache: true
+      - name: Check guacamole-client image tag
+        id: guacamole-client-image
+        run: |
+          if aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPO" --image-ids imageTag="$GUACAMOLE_VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push guacamole-client image (with OIDC extension)
+        if: steps.guacamole-client-image.outputs.exists != 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./shifter/engine/guacamole
@@ -163,7 +216,6 @@ jobs:
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
           no-cache: true
 
   apply:
@@ -173,6 +225,7 @@ jobs:
       pull-requests: write
     name: Apply (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: [plan, push-guacamole-images]
     if: |
       always() &&
@@ -201,6 +254,8 @@ jobs:
         # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
         env:
           IS_DEV: ${{ inputs.is_dev }}
+          ENGINE_IMAGE_DIGEST: ${{ inputs.engine_image_digest }}
+          ENGINE_TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
           TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
           TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
         run: |
@@ -221,6 +276,30 @@ jobs:
             exit 1
           fi
           printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
+          resolve_engine_image_digest() {
+            local digest="${ENGINE_IMAGE_DIGEST}"
+            if [ -n "${digest}" ]; then
+              if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::Engine build did not produce a valid ECR image digest"
+                exit 1
+              fi
+              printf '%s\n' "${digest}"
+              return
+            fi
+
+            local current_image
+            if ! current_image=$(aws ecs describe-task-definition --task-definition "${ENGINE_TASK_FAMILY}" --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null); then
+              echo "::error::No engine image digest was provided and ECS task definition ${ENGINE_TASK_FAMILY} could not be read. Run a deploy path that builds the engine image so Terraform receives the build digest."
+              exit 1
+            fi
+            if [[ "${current_image}" =~ @(sha256:[0-9a-f]{64})$ ]]; then
+              printf '%s\n' "${BASH_REMATCH[1]}"
+              return
+            fi
+            echo "::error::Existing ECS task definition ${ENGINE_TASK_FAMILY} is not digest-pinned (${current_image}). Run the engine image deploy first so platform Terraform can preserve a digest."
+            exit 1
+          }
+          printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - name: Handle Service Discovery replacement
         env:
@@ -374,6 +453,7 @@ jobs:
       pull-requests: write
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: apply
     # Runs for Terraform changes (after a successful apply) AND for
     # app-only changes (#913), where plan/apply are legitimately
@@ -389,7 +469,8 @@ jobs:
       (needs.apply.result == 'success' ||
        (needs.apply.result == 'skipped' && !inputs.platform_changes))
     outputs:
-      image_tag: ${{ steps.sha.outputs.short }}
+      image_tag: ${{ steps.image.outputs.tag }}
+      image_digest: ${{ steps.build.outputs.digest }}
     env:
       ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-portal' || 'shifter-portal' }}
     steps:
@@ -401,9 +482,11 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - name: Set short SHA
-        id: sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+      - name: Set image tag
+        id: image
+        run: |
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          echo "tag=${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and push
@@ -414,8 +497,7 @@ jobs:
           file: ./shifter/shifter_platform/Dockerfile
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
           no-cache: true
 
   deploy:
@@ -425,6 +507,7 @@ jobs:
       pull-requests: write
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: build
     if: inputs.apply_changes && github.event_name != 'pull_request'
     env:
@@ -456,11 +539,21 @@ jobs:
             --instance-tag "$INSTANCE_TAG" \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Update Parameter Store with new image tag
+      - name: Update Parameter Store with new image digest
         env:
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
         run: |
-          echo "Updating Parameter Store with image tag: ${IMAGE_TAG}"
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest"
+            exit 1
+          fi
+          echo "Updating Parameter Store with image digest: ${IMAGE_DIGEST}"
+          aws ssm put-parameter \
+            --name "${PS_PREFIX}/image-digest" \
+            --value "${IMAGE_DIGEST}" \
+            --type String \
+            --overwrite
           aws ssm put-parameter \
             --name "${PS_PREFIX}/image-tag" \
             --value "${IMAGE_TAG}" \
@@ -704,7 +797,7 @@ jobs:
             echo "Waiting for it to complete..."
           else
             # Start instance refresh
-            # New instances will read updated image tag from Parameter Store via user_data
+            # New instances read the updated image digest from Parameter Store via user_data.
             # Lifecycle hook ensures instance is ready before joining ALB
             REFRESH_ID=$(aws autoscaling start-instance-refresh \
               --auto-scaling-group-name "$ASG_NAME" \
@@ -750,12 +843,12 @@ jobs:
 
           echo "Platform ASG deployment successful!"
 
-      - name: Verify ASG image tag
+      - name: Verify ASG image digest
         if: steps.config.outputs.enable_autoscaling == 'true'
         env:
           ASG_NAME: ${{ steps.asg.outputs.asg_name }}
-          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
         run: |
           python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" verify-asg-image \
             --asg-name "$ASG_NAME" \
-            --image-tag "$IMAGE_TAG"
+            --image-digest "$IMAGE_DIGEST"

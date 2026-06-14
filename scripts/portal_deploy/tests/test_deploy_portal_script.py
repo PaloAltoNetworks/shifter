@@ -58,6 +58,13 @@ class DeployPortalScriptTests(unittest.TestCase):
               done
 
               case "$name" in
+                */image-digest)
+                  if [[ "${MISSING_OPTIONAL_PARAMS:-}" == "1" ]]; then
+                    printf '\\n'
+                  else
+                    printf 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'
+                  fi
+                  ;;
                 */image-tag) printf 'abc123\\n' ;;
                 */ecr-registry) printf '123456789012.dkr.ecr.us-east-2.amazonaws.com\\n' ;;
                 */ecr-repository) printf 'shifter-dev-portal\\n' ;;
@@ -352,7 +359,7 @@ class DeployPortalScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             log = (root / "calls.log").read_text(encoding="utf-8")
             self.assertIn(
-                "docker pull 123456789012.dkr.ecr.us-east-2.amazonaws.com/shifter-dev-portal:abc123",
+                "docker pull 123456789012.dkr.ecr.us-east-2.amazonaws.com/shifter-dev-portal@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 log,
             )
             self.assertIn("docker run --rm", log)
@@ -376,6 +383,10 @@ class DeployPortalScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             log = (root / "calls.log").read_text(encoding="utf-8")
+            self.assertIn(
+                "docker pull 123456789012.dkr.ecr.us-east-2.amazonaws.com/shifter-dev-portal:abc123",
+                log,
+            )
             for name in (
                 "GUACAMOLE_SECRET_ARN",
                 "GUACAMOLE_BASE_URL",

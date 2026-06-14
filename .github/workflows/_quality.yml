@@ -69,6 +69,30 @@ jobs:
       - uses: actions/checkout@v6
       - uses: devops-actions/actionlint@467e2ce19b2310e93c9ffa0b50fe31f86b5a7f23 # v0.1.10
 
+  # Reads deploy.yml and the reusable deploy workflows as data and asserts the
+  # deploy control plane's gating invariants that actionlint (syntax only) and
+  # adr_guard (narrow ADR checks) cannot infer: #781 upstream `success ||
+  # skipped` gating, #892 branch/event routing, #913 portal_image vs
+  # shifter_platform change-filter split, and the runner-exposure fix (no
+  # pull_request path to a self-hosted apply/deploy job). Pure stdlib + pinned
+  # PyYAML; no secrets, no cloud, no self-hosted runner. Runs on every PR (#921).
+  workflow-gating-tests:
+    permissions:
+      contents: read
+    name: Test (workflow gating)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # `uv` provides a pinned Python 3.11 + PyYAML, matching the ADR-guard
+      # runner pattern above; the suite itself parses workflow YAML only.
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run workflow-gating tests
+        run: |
+          uv run --python 3.11 --with 'pyyaml==6.0.2' \
+            python -m unittest scripts.workflow_gating.test_workflow_gating
+
   terraform-lint:
     permissions:
       contents: read

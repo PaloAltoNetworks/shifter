@@ -3141,26 +3141,6 @@
       "target": "mission_control.guacamole.sign_and_encrypt_payload"
     },
     {
-      "count": 9,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.async_to_sync"
-    },
-    {
-      "count": 4,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.logger"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.process_ngfw_event"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_handlers.py",
-      "target": "mission_control.handlers.process_range_event"
-    },
-    {
       "count": 1,
       "path": "shifter/shifter_platform/tests/mission_control/test_health.py",
       "target": "config.health_checks.ChannelLayerRedisHealthCheck._probe"

@@ -167,7 +167,9 @@ entries. Completed so far:
 - `mission_control`: core range API, agents, models, and page-view suites
   (`test_range_api*`, `test_agents`, `test_models`, `test_views`,
   `test_engine_models`); engine-service view suites (`test_engine_services`,
-  `test_engine_services_lifecycle`) and `test_asset_hierarchy`.
+  `test_engine_services_lifecycle`) and `test_asset_hierarchy`; the SNS->
+  WebSocket handler suite (`test_handlers`), driven against the real in-memory
+  Channels layer.
 
 Decomposition-owned suites are out of scope here and land with their own
 issues: provisioner (#946), `ctf/**` and `cms/experiments/test_orchestrator*`

@@ -3122,11 +3122,6 @@
     },
     {
       "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_readiness.py",
-      "target": "mission_control.guacamole.time.sleep"
-    },
-    {
-      "count": 7,
       "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_ssh.py",
       "target": "mission_control.guacamole.create_guacamole_auth_payload"
     },

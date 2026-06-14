@@ -28,7 +28,9 @@ That said, the current system is still easy to drift from:
 - Most architectural decisions are prose in docs, not machine-readable policy.
 - Claude has only two active hooks, and neither checks ADR conformance.
 - There is no Codex-specific repo policy file at all.
-- CI has bypasses like `[skip quality]` and `[skip tests]` on `dev`.
+- Historical CI bypasses like `[skip quality]` and `[skip tests]` on `dev`
+  have been removed from the deploy workflow; Quality now runs by default
+  unless the diff is classified as ordinary docs-only.
 - There is no `CODEOWNERS`, PR template, or ADR impact check.
 - The architecture check surface is narrow: layer imports and FK checks only.
 - There is no single source of truth that maps ADRs to concrete automated checks.
@@ -151,7 +153,8 @@ Change CI behavior:
 
 - Add a dedicated required job: `adr-conformance`.
 - Run it on every PR and on pushes to `dev` and `main`.
-- Remove `[skip quality]` and `[skip tests]` for architecture jobs.
+- Keep `[skip quality]` and `[skip tests]` style markers out of architecture
+  and test routing.
 - Keep test skips separate from architecture and policy skips.
 - Mark architecture jobs as required branch protection checks.
 

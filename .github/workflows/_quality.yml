@@ -1033,10 +1033,10 @@ jobs:
           retention-days: 1
 
   mcp-lint:
-    # Lint always runs, even when [skip tests] is set on the workflow
-    # input, because lint is a static check independent of the test
-    # gate. Matches the shifter-platform pattern (lint-js / js-tests
-    # are separate jobs).
+    # Lint always runs, even when a caller sets the workflow skip_tests
+    # input, because lint is a static check independent of the test gate.
+    # Matches the shifter-platform pattern (lint-js / js-tests are
+    # separate jobs).
     permissions:
       contents: read
     name: Lint JavaScript (mcp/${{ matrix.package }})

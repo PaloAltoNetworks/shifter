@@ -76,7 +76,14 @@ Current mechanisms:
   npm, github-actions, and pre-commit package root in the repo; every
   block targets the `dev` integration branch.
 - `.claude/hooks/adr_guard_hook.py`: Claude post-edit validation
-- `AGENTS.md`: Codex repo-local policy. Points at `.ground-control.yaml` and `.gc/plan-rules.md` for Ground Control workflow context (requirements and plan rules); enforcement of ADR rules still lives here.
+- `AGENTS.md`: Codex repo-local policy. Points at `.ground-control.yaml`
+  and `.gc/plan-rules.md` for Ground Control workflow context
+  (canonical GitHub repository, requirements, current MCP entrypoints,
+  and plan rules); enforcement of ADR rules still lives here.
+- `.ground-control.yaml` and `.gc/plan-rules.md`: Ground Control
+  workflow configuration and mandatory plan constraints. The
+  `github_repo` value is the canonical GitHub target for agent issue,
+  PR, CI, and traceability operations.
 - `.importlinter`: Python package-level architecture contracts
 - `.tflint.hcl`: Terraform lint configuration with `tflint-ruleset-google`
   plugin. The initial rule set is intentionally conservative so it can

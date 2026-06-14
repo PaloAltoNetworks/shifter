@@ -15,6 +15,17 @@ returns the full workflow config in a single call.
 The authoritative list of "plans MUST..." constraints for the
 `/implement` skill planning phase lives in `.gc/plan-rules.md`.
 
+## Canonical GitHub Repository
+
+The canonical GitHub repository for this checkout is
+`Brad-Edwards/shifter`, as configured by `.ground-control.yaml`
+(`github_repo`). Use that repository for all `gh`, GitHub API, PR, issue,
+CI, Ground Control, and traceability operations.
+
+Do not use `PaloAltoNetworks/shifter` unless the user explicitly requests
+that repository in the current turn. Extra remotes, fork history, or
+user-level skills do not override `.ground-control.yaml`.
+
 ## Required Checks
 
 Before declaring work complete for changes touching architecture, workflows, hooks, or `shifter/shifter_platform`, run:
@@ -56,7 +67,12 @@ Changes to these files are architecture work and must stay documented:
 - `.github/CODEOWNERS`
 - `.github/pull_request_template.md`
 - `.github/copilot-instructions.md`
+- `.github/dependabot.yml`
 - `.pre-commit-config.yaml`
+- `.ground-control.yaml`
+- `.gc/plan-rules.md`
+- `.shifter.yaml`
+- `AGENTS.md`
 - `.importlinter`
 - `.tflint.hcl`
 - `.gitleaks.toml`
@@ -76,9 +92,26 @@ All requirements management uses the Ground Control MCP server against the `shif
   - `GEN-*` — general / cross-cutting requirements
 - **Traceability link types**: `IMPLEMENTS` (requirement → code; only valid on `ACTIVE` requirements), `TESTS` (requirement → test), `DOCUMENTS` (requirement → tracking GH issue; works on `DRAFT`), `GITHUB_ISSUE` (alternative for issue references).
 - **Requirement statuses**: `DRAFT` → `ACTIVE` → `ARCHIVED` / `DEPRECATED`. Transition to `ACTIVE` once implementation starts; only `ACTIVE` requirements accept `IMPLEMENTS` links.
-- **MCP tools**: `gc_get_requirement`, `gc_get_traceability`, `gc_create_github_issue`, `gc_create_traceability_link`, `gc_transition_status`.
+- **Repo context**: `gc_get_repo_ground_control_context` reads
+  `.ground-control.yaml` and inlines `.gc/plan-rules.md`; start there
+  before issue workflows.
+- **Requirement tools**: `gc_requirement` handles
+  list/create/update/delete/archive/clone; `gc_transition_status` and
+  `gc_bulk_transition_status` handle status transitions.
+- **Traceability tools**: `gc_get_traceability`,
+  `gc_get_traceability_by_artifact`, `gc_assert_traceability_reconciled`,
+  and the current `link_create`/`link_delete` surfaces exposed by the
+  relevant Ground Control entity tools.
+- **Issue/PR workflow tools**: `gc_create_github_issue`,
+  `gc_render_pr_body`, `gc_post_final_report`,
+  `gc_close_issue_after_merge`, and `gc_integration_manager`.
 
-**Caveat** — `gc_create_github_issue`'s auto-link uses `IMPLEMENTS`, which the API rejects on `DRAFT` requirements. If you're filing a tracking issue against a `DRAFT` requirement, follow up with a manual `gc_create_traceability_link` of type `DOCUMENTS`.
+**Caveat** — `gc_create_github_issue`'s auto-link uses `IMPLEMENTS`,
+which the API rejects on `DRAFT` requirements. If you're filing a
+tracking issue against a `DRAFT` requirement, transition it to `ACTIVE`
+when implementation starts or create a `DOCUMENTS`/`GITHUB_ISSUE` link
+with the currently available traceability link tool before final
+reconciliation.
 
 ## Architectural Defaults
 

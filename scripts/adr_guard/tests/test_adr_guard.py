@@ -44,6 +44,15 @@ class AdrGuardTests(unittest.TestCase):
         self.assertEqual(len(violations), 1)
         self.assertEqual(violations[0].rule_id, "ADR-002-R1")
 
+    def test_ground_control_config_files_are_guardrails(self) -> None:
+        for path in (".ground-control.yaml", ".gc/plan-rules.md"):
+            with self.subTest(path=path):
+                violations = ADR_GUARD.check_guardrail_docs(ADR_GUARD.REPO_ROOT, [path])
+
+                self.assertEqual(len(violations), 1)
+                self.assertEqual(violations[0].rule_id, "ADR-002-R1")
+                self.assertEqual(violations[0].path, path)
+
     def test_adr_registry_rejects_unknown_exception_rule(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)

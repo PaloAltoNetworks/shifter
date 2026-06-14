@@ -3106,11 +3106,6 @@
       "target": "mission_control.guacamole.create_guacamole_ssh_url"
     },
     {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_asset_hierarchy.py",
-      "target": "cms.models.AgentConfig.objects.filter"
-    },
-    {
       "count": 20,
       "path": "shifter/shifter_platform/tests/mission_control/test_context_processors.py",
       "target": "mission_control.context_processors.get_active_range"
@@ -3124,56 +3119,6 @@
       "count": 4,
       "path": "shifter/shifter_platform/tests/mission_control/test_context_processors.py",
       "target": "mission_control.context_processors.logger"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.ecs.start_range_provisioning"
-    },
-    {
-      "count": 9,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.interpreter.interpret"
-    },
-    {
-      "count": 9,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Range.allocate_subnet_index"
-    },
-    {
-      "count": 8,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Range.objects.create"
-    },
-    {
-      "count": 15,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.models.Subnet"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services.py",
-      "target": "engine.services.transaction.atomic"
-    },
-    {
-      "count": 6,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
-      "target": "engine.ecs.start_teardown"
-    },
-    {
-      "count": 17,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_engine_services_lifecycle.py",
-      "target": "engine.services.transaction.atomic"
     },
     {
       "count": 7,

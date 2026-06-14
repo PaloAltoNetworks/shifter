@@ -36,9 +36,11 @@ Current mechanisms:
   on downloading a runtime during analysis.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
-  runs on push to `dev`, on pull requests against `dev`, and on a
-  weekly schedule. Least-privilege permissions (`contents: read`,
-  `security-events: write`, `actions: read`); no `pull_request_target`.
+  runs on push to `dev` and `main`, on pull requests against `dev` and
+  `main`, and on a weekly schedule. Its aggregate `CodeQL` job is the
+  branch-protection status context and depends on the language matrix.
+  Least-privilege permissions (`contents: read`, `security-events:
+  write`, `actions: read`); no `pull_request_target`.
 - `.github/workflows/pr-title-lint.yml`: pull-request title validation
   against the conventional-commit shape used by towncrier and the
   release-drafter conventions. PRs to or from the `dev` integration

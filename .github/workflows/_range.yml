@@ -6,6 +6,9 @@ on:
       environment:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       is_dev:
         required: true
         type: boolean
@@ -35,6 +38,7 @@ jobs:
       pull-requests: write
     name: Plan (${{ inputs.environment }})
     runs-on: self-hosted
+    if: github.event_name != 'pull_request'
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/range
@@ -95,6 +99,7 @@ jobs:
       pull-requests: write
     name: Apply (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: plan
     if: |
       always() &&

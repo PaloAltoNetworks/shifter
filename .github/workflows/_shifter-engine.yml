@@ -6,6 +6,9 @@ on:
       environment:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       is_dev:
         required: true
         type: boolean
@@ -22,6 +25,13 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      image_tag:
+        description: Run-scoped ECR tag pushed for the engine provisioner image
+        value: ${{ jobs.build.outputs.image_tag }}
+      image_digest:
+        description: Immutable ECR digest pushed for the engine provisioner image
+        value: ${{ jobs.build.outputs.image_digest }}
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -46,13 +56,15 @@ jobs:
   build:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: validate
     permissions:
       id-token: write
       contents: read
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     outputs:
-      image_tag: ${{ steps.sha.outputs.short }}
+      image_tag: ${{ steps.image.outputs.tag }}
+      image_digest: ${{ steps.build.outputs.digest }}
     env:
       ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
     steps:
@@ -67,26 +79,29 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set short SHA
-        id: sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+      - name: Set image tag
+        id: image
+        run: |
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          echo "tag=${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: ./shifter/engine/provisioner
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
           no-cache: true
 
   deploy:
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     permissions:
       id-token: write
     needs: build
@@ -101,13 +116,17 @@ jobs:
 
       - name: Update ECS task definition
         env:
-          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
           ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
           FIRST_DEPLOY: ${{ inputs.first_deploy }}
         run: |
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest"
+            exit 1
+          fi
           # Get AWS account ID
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          NEW_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          NEW_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
 
           # Get current task definition. A missing family must fail the deploy:
           # an unconditional skip means a typo'd family name silently skips every

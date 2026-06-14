@@ -59,7 +59,9 @@ jobs:
       gcp: ${{ steps.filter.outputs.gcp }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
       aws_is_dev: ${{ steps.env.outputs.aws_is_dev }}
+      aws_github_environment: ${{ steps.env.outputs.aws_github_environment }}
       gcp_environment: ${{ steps.env.outputs.gcp_environment }}
+      gcp_github_environment: ${{ steps.env.outputs.gcp_github_environment }}
       run_aws: ${{ steps.env.outputs.run_aws }}
       run_gcp: ${{ steps.env.outputs.run_gcp }}
       apply_aws: ${{ steps.env.outputs.apply_aws }}
@@ -197,7 +199,9 @@ jobs:
         run: |
           AWS_ENV="dev"
           AWS_IS_DEV="true"
+          AWS_GITHUB_ENV="aws-dev"
           GCP_ENV="gcp-dev"
+          GCP_GITHUB_ENV="gcp-dev"
           RUN_AWS="false"
           RUN_GCP="false"
           APPLY_AWS="false"
@@ -205,17 +209,16 @@ jobs:
           FAST_GCP_DEPLOY="false"
 
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            if [ "${{ github.base_ref }}" == "aws-dev" ]; then
-              RUN_AWS="true"
-            elif [ "${{ github.base_ref }}" == "gcp-dev" ]; then
-              RUN_GCP="true"
-            fi
+            # PR-triggered deploy workflow runs are hosted-only quality gates.
+            # Never route provider deploy jobs from untrusted PR code.
+            :
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             BRANCH="${GITHUB_REF#refs/heads/}"
             case "$BRANCH" in
               main)
                 AWS_ENV="prod"
                 AWS_IS_DEV="false"
+                AWS_GITHUB_ENV="aws-prod"
                 RUN_AWS="true"
                 APPLY_AWS="true"
                 ;;
@@ -250,7 +253,9 @@ jobs:
           {
             echo "aws_environment=$AWS_ENV"
             echo "aws_is_dev=$AWS_IS_DEV"
+            echo "aws_github_environment=$AWS_GITHUB_ENV"
             echo "gcp_environment=$GCP_ENV"
+            echo "gcp_github_environment=$GCP_GITHUB_ENV"
             echo "run_aws=$RUN_AWS"
             echo "run_gcp=$RUN_GCP"
             echo "apply_aws=$APPLY_AWS"
@@ -379,6 +384,7 @@ jobs:
       id-token: write
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_gcp == 'true' &&
       (
         needs.changes.outputs.gcp == 'true' ||
@@ -390,6 +396,7 @@ jobs:
     uses: ./.github/workflows/_gcp-dev.yml
     with:
       environment: ${{ needs.changes.outputs.gcp_environment }}
+      github_environment: ${{ needs.changes.outputs.gcp_github_environment }}
       deploy_changes: ${{ needs.changes.outputs.deploy_gcp == 'true' }}
       # Automatic deploys always require an active certificate; only a manual
       # workflow_dispatch may opt into the first-time-bootstrap bypass.
@@ -414,12 +421,14 @@ jobs:
       pull-requests: write
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_aws == 'true' &&
       (needs.changes.outputs.core == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_core.yml
     with:
       environment: ${{ needs.changes.outputs.aws_environment }}
+      github_environment: ${{ needs.changes.outputs.aws_github_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       apply_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
     secrets:
@@ -437,6 +446,7 @@ jobs:
       pull-requests: write
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_aws == 'true' &&
       (needs.changes.outputs.range == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
@@ -444,6 +454,7 @@ jobs:
     uses: ./.github/workflows/_range.yml
     with:
       environment: ${{ needs.changes.outputs.aws_environment }}
+      github_environment: ${{ needs.changes.outputs.aws_github_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       apply_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
     secrets:
@@ -462,6 +473,7 @@ jobs:
       id-token: write
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_aws == 'true' &&
       (needs.changes.outputs.shifter_engine == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
@@ -469,6 +481,7 @@ jobs:
     uses: ./.github/workflows/_shifter-engine.yml
     with:
       environment: ${{ needs.changes.outputs.aws_environment }}
+      github_environment: ${{ needs.changes.outputs.aws_github_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       deploy_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
       # Only a manual workflow_dispatch may opt into the first-deploy bootstrap
@@ -490,6 +503,7 @@ jobs:
       pull-requests: write
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_aws == 'true' &&
       (needs.changes.outputs.shifter_platform == 'true' ||
        needs.changes.outputs.portal_image == 'true' ||
@@ -501,8 +515,10 @@ jobs:
     uses: ./.github/workflows/_shifter-platform.yml
     with:
       environment: ${{ needs.changes.outputs.aws_environment }}
+      github_environment: ${{ needs.changes.outputs.aws_github_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       apply_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
+      engine_image_digest: ${{ needs.shifter-engine.outputs.image_digest }}
       # Split per concern (#913): Terraform plan/apply stays scoped to
       # Terraform-relevant changes, while app-only changes drive just
       # the portal image build/deploy. workflow_dispatch remains the

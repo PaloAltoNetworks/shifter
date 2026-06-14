@@ -641,8 +641,9 @@ module "engine_provisioner" {
   secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
 
   # ECR
-  ecr_repository_url  = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
-  container_image_tag = var.engine_container_tag
+  ecr_repository_url     = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
+  container_image_tag    = var.engine_container_tag
+  container_image_digest = var.engine_container_image_digest
 
   # Networking (Portal VPC for RDS access)
   vpc_id             = module.vpc.vpc_id

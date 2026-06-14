@@ -150,6 +150,24 @@ validate_bootstrap_email_list() {
   fi
 }
 
+image_ref() {
+  local registry="$1"
+  local repository="$2"
+  local digest="$3"
+  local tag="$4"
+
+  if [[ -n "$digest" ]]; then
+    if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      echo "Invalid image digest: expected sha256:<hex>" >&2
+      exit 1
+    fi
+    printf '%s/%s@%s\n' "$registry" "$repository" "$digest"
+    return
+  fi
+
+  printf '%s/%s:%s\n' "$registry" "$repository" "$tag"
+}
+
 append_env() {
   local name="$1"
   local value="$2"
@@ -253,7 +271,9 @@ main() {
   local ctf_from_email
   local platform_bootstrap_staff_emails
   local platform_bootstrap_superuser_emails
+  local image_digest
 
+  image_digest=$(get_optional_param "$PS_PREFIX/image-digest")
   image_tag=$(get_param "$PS_PREFIX/image-tag")
   ecr_registry=$(get_param "$PS_PREFIX/ecr-registry")
   ecr_repository=$(get_param "$PS_PREFIX/ecr-repository")
@@ -282,7 +302,8 @@ main() {
   validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_STAFF_EMAILS" "$platform_bootstrap_staff_emails"
   validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" "$platform_bootstrap_superuser_emails"
 
-  local image="${ecr_registry}/${ecr_repository}:${image_tag}"
+  local image
+  image=$(image_ref "$ecr_registry" "$ecr_repository" "$image_digest" "$image_tag")
   echo "Deploying image: $image"
 
   DOCKER_ENV=()

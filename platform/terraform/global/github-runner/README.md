@@ -6,7 +6,7 @@ let it deploy to both dev and prod.
 
 ## Architecture
 
-- `aws_instance.runner[count]` — Amazon Linux 2023, t3.large, no inbound
+- `aws_instance.runner[count]`: Amazon Linux 2023, t3.large, no inbound
   rules (egress to GitHub/ECR/SSM). Access via SSM Session Manager.
 - IAM instance profile with inline SSM Session Manager and ECR push/pull
   policies. Inline policies avoid `iam:AttachRolePolicy`, which may be
@@ -32,10 +32,15 @@ whichever runner frees up next. Standard GitHub-hosted labels such as
 Shifter splits work across both capacity pools instead:
 
 - Portable quality jobs run on `ubuntu-latest`, using the repository's
-  GitHub-hosted runner allotment.
+  GitHub-hosted runner allotment. Pull-request events are hosted-only;
+  `deploy.yml` must not route PR code into reusable jobs that target
+  `runs-on: self-hosted`.
 - Deployment, image build, Packer, and environment-mutating jobs remain
   on `self-hosted`, using the EC2 runner pool that has the expected
-  long-lived tooling and account access patterns.
+  long-lived tooling and account access patterns. Those jobs run only on
+  trusted `push` / `workflow_dispatch` paths and bind a GitHub
+  Environment such as `aws-dev`, `aws-prod`, or `gcp-dev` before assuming
+  deploy credentials.
 
 ## Deploying
 
@@ -76,8 +81,8 @@ aws ec2 describe-subnets \
 Each EC2 ships ready to register but not yet registered. `./config.sh`
 needs a single-use **registration token** from GitHub. The token is
 exchanged once for long-lived runner credentials stored in `.runner` /
-`.credentials` on the instance — after that, the runner stays
-authenticated indefinitely. You only mint a new token when adding,
+`.credentials` on the instance. After that, the runner stays authenticated
+indefinitely. You only mint a new token when adding,
 re-registering, or replacing a runner.
 
 ```bash
@@ -113,7 +118,7 @@ gh api repos/Brad-Edwards/shifter/actions/runners --jq '.runners[] | {name, stat
 
 The bundled dependency installer matches on `/etc/os-release`'s `ID`
 and aborts with `Can't detect current OS type` because AL2023 reports
-`ID="amzn"` (and `ID_LIKE="fedora"` only — not real fedora). The
+`ID="amzn"` (and `ID_LIKE="fedora"` only, not real Fedora). The
 runner binary still needs libicu / krb5-libs / zlib / lttng-ust /
 openssl-libs at startup or `./config.sh` exits with
 `Libicu's dependencies is missing for Dotnet Core 6.0`.
@@ -127,7 +132,7 @@ ever swap distros, drop the explicit `dnf install` line and let
 
 You cannot re-use a token across multiple runners; mint one per
 registration call. The runner itself does not need fresh tokens after
-registration — long-lived `.credentials` handle ongoing auth.
+registration because long-lived `.credentials` handle ongoing auth.
 
 ### `runner-deploy.sh` clobbered the lockfile
 

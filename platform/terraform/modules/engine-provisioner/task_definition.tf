@@ -13,7 +13,7 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
 
   container_definitions = jsonencode([{
     name      = "pulumi-provisioner"
-    image     = "${var.ecr_repository_url}:${var.container_image_tag}"
+    image     = var.container_image_digest != "" ? "${var.ecr_repository_url}@${var.container_image_digest}" : "${var.ecr_repository_url}:${var.container_image_tag}"
     essential = true
     # Keep the ECS task non-root. AWS Fargate task volumes are mounted
     # root-owned and do not expose a Kubernetes-style fsGroup / uid option,

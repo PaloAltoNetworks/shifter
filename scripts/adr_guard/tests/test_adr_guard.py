@@ -824,12 +824,12 @@ class PortalDeployModeSourceOfTruthTests(unittest.TestCase):
         "      - name: Trigger ASG instance refresh\n"
         "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
         "        run: echo refresh asg\n"
-        "      - name: Verify ASG image tag\n"
+        "      - name: Verify ASG image digest\n"
         "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
         "        run: |\n"
         "          python3 \"${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py\" verify-asg-image \\\n"
         "            --asg-name \"${ASG_NAME}\" \\\n"
-        "            --image-tag \"${IMAGE_TAG}\"\n"
+        "            --image-digest \"${IMAGE_DIGEST}\"\n"
     )
     _OUTPUTS = (
         'output "enable_autoscaling" {\n'
@@ -919,7 +919,7 @@ class PortalDeployModeSourceOfTruthTests(unittest.TestCase):
                     "terraform output -json\n"
                     "aws ec2 describe-instances --query Reservations[0].Instances[0].InstanceId\n"
                     "aws autoscaling describe-auto-scaling-groups\n"
-                    "aws ssm send-command\n"
+                    "aws ssm send-command --parameters --image-digest\n"
                     "docker inspect\n"
                     "aws ssm get-command-invocation\n"
                 ),
@@ -942,6 +942,19 @@ class PortalDeployModeSourceOfTruthTests(unittest.TestCase):
 
             self.assertTrue(violations)
             self.assertIn("verify-asg-image", violations[0].message)
+
+    def test_flags_workflow_without_digest_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                workflow=self._WORKFLOW.replace("--image-digest", "--image-tag"),
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn("--image-digest", violations[0].message)
 
     def test_clean_real_repo_passes(self) -> None:
         violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(

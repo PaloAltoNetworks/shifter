@@ -11,15 +11,6 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_51 (ECR image-tag mutability): the shifter deploy pattern uses a mixture of ':latest' (demo/dev) and ':<git-sha>' (prod) tags. The modules/ecr default stays MUTABLE; per-repo callers may pin IMMUTABLE in their tfvars. Forcing IMMUTABLE module-wide breaks demo deploy ergonomics. Revisit when every caller has been audited.",
-    "expires_on": "2027-05-26",
-    "paths": [
-      "platform/terraform/modules/ecr/"
-    ]
-  },
-  {
-    "rule_id": "ADR-004-R11",
-    "owner": "@Brad-Edwards",
     "reason": "CKV_AWS_46 (hard-coded EC2 user_data secret): false positive on Terraform templatefile interpolation. The relevant lines read SECRET_KEY=$${secret_key} where secret_key is generated at instance boot via openssl rand -hex 32. No hardcoded secret exists at the source level.",
     "expires_on": "2027-05-26",
     "paths": [

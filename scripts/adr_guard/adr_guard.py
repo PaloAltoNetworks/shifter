@@ -2962,12 +2962,16 @@ def _check_portal_deploy_mode_workflow(platform_text: str) -> list[Violation]:
                 "resolve-topology` so the deploy path is derived from Terraform state",
             )
         )
-    if not _active_line_contains(deploy_block, "verify-asg-image"):
+    if not (
+        _active_line_contains(deploy_block, "verify-asg-image")
+        and _active_line_contains(deploy_block, "--image-digest")
+    ):
         violations.append(
             _portal_deploy_mode_violation(
                 _PLATFORM_WORKFLOW_PATH,
                 "The ASG deploy path must call `verify-asg-image` after instance refresh "
-                "so every in-service instance is checked for the new portal image tag",
+                "with `--image-digest` so every in-service instance is checked for the "
+                "new portal image digest",
             )
         )
     return violations
@@ -3021,7 +3025,7 @@ def _check_portal_deploy_helper(helper_text: str) -> list[Violation]:
         ),
         (
             "send-command",
-            "The portal deploy helper must use SSM to verify the running portal image tag "
+            "The portal deploy helper must use SSM to verify the running portal image digest "
             "on ASG instances",
         ),
         (

@@ -71,7 +71,19 @@ Current mechanisms:
 - `.github/workflows/_shifter-engine.yml`: engine image validation and
   deployment. The validate job runs on GitHub-hosted runners because it
   only performs a local Docker build; self-hosted runners are reserved
-  for the credentialed build and deploy jobs.
+  for the credentialed build and deploy jobs. The credentialed jobs run
+  only on trusted push / manual-dispatch paths, bind a GitHub
+  Environment, and update ECS with `repo@sha256` image identity.
+- `.github/workflows/deploy.yml`: deploy router. Pull-request events are
+  hosted-only (`changes`, pre-commit, Quality, PR Gate) and never route
+  AWS/GCP reusable deploy jobs. Reusable deploy jobs receive a
+  `github_environment` input distinct from Terraform environment names so
+  prod applies can be protected by the `aws-prod` GitHub Environment.
+- AWS ECR image identity: first-party AWS ECR repositories are immutable.
+  Portal and engine deploy paths push run-scoped tags only as upload
+  handles, then consume the resulting ECR digest through SSM/ECS
+  `repo@sha256` references. Static Guacamole images are pushed only when
+  the version tag is absent, and Terraform resolves that tag to a digest.
 - `.github/dependabot.yml`: weekly dependency PRs across every uv,
   npm, github-actions, and pre-commit package root in the repo; every
   block targets the `dev` integration branch.

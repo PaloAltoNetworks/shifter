@@ -5,7 +5,7 @@ Status: pre-implementation guidance
 Date: 2026-06-11
 
 Issue: GitHub #913, "deploy: restore an application-code deploy trigger for
-the portal".
+the portal."
 
 This issue is requirement-free. The GitHub issue title, body, and acceptance
 criteria are the shipping contract. This note is intentionally not an
@@ -59,8 +59,8 @@ recreate the Terraform-plan spam #913 is trying to avoid.
 | AWS branch/event routing | `.github/workflows/deploy.yml` `changes` job and `run_aws` / `apply_aws` outputs | Keep deploy permission centralized in the orchestrator. Do not add branch parsing inside reusable jobs. |
 | Path filtering | `dorny/paths-filter` block in `.github/workflows/deploy.yml` | Add or refine named filters there; do not duplicate changed-file parsing in shell. |
 | Terraform platform plan/apply | `.github/workflows/_shifter-platform.yml` `plan`, `push-guacamole-images`, and `apply` jobs | Keep Terraform plan/apply gated on Terraform-relevant changes or manual dispatch, not app-only changes. |
-| Portal image build | `.github/workflows/_shifter-platform.yml` `build` job and `shifter/shifter_platform/Dockerfile` | Reuse the existing Buildx/ECR tag flow and short-SHA output. Do not create a parallel image publisher. |
-| Portal convergence | `.github/workflows/_shifter-platform.yml` `deploy` job | Reuse the existing SSM single-instance path, ASG instance-refresh path, SSM `/image-tag` contract, and fail-loud deploy checks. |
+| Portal image build | `.github/workflows/_shifter-platform.yml` `build` job and `shifter/shifter_platform/Dockerfile` | Reuse the existing Buildx/ECR flow and digest output. Do not create a parallel image publisher. |
+| Portal convergence | `.github/workflows/_shifter-platform.yml` `deploy` job | Reuse the existing SSM single-instance path, ASG instance-refresh path, SSM `/image-digest` contract, and fail-loud deploy checks. |
 | Image input surface | `shifter/shifter_platform/Dockerfile` and `shifter/.dockerignore` | The image copies `shifter_platform`, `cyberscript`, and `installation`; exclude local envs, caches, venvs, and node modules through the existing dockerignore. |
 | Architecture guardrails | `scripts/adr_guard/adr_guard.py`, `scripts/adr_guard/tests/test_adr_guard.py`, `docs/adr/index.yaml`, `shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md` | Existing ADR-003-R2 only protects plan scope and Quality routing; update it intentionally if the new deploy signal changes the contract. |
 | Operator docs | `shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md`, `shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/cicd.md` | Update stale path-filter docs after behavior changes; the platform-infrastructure doc currently still says `shifter_platform` includes `shifter/**`. |
@@ -75,7 +75,7 @@ Security layers the intended design must satisfy:
   comments require it). Do not introduce long-lived AWS keys, PATs, or broader
   token scopes for path routing.
 - Secret-handling surface: app-only deploy still writes a non-secret SSM
-  `/image-tag` value and may update optional bootstrap email SecureString
+  `/image-digest` value and may update optional bootstrap email SecureString
   parameters through the existing deploy job. Do not log rendered tfvars,
   SecureString values, Secrets Manager values, queue URLs, or container env
   dumps while adding diagnostics.
@@ -85,13 +85,13 @@ Security layers the intended design must satisfy:
 - Config and policy validators: workflow edits must pass `actionlint`; guardrail
   edits must update ADR docs and tests; architecture changes must pass
   `python3 scripts/adr_guard/adr_guard.py --all --level ci`.
-- OS/process exposure: path booleans, image tags, repository names, instance
+- OS/process exposure: path booleans, image digests, repository names, instance
   ids, ASG names, and command ids are acceptable in logs. Do not put secret
   bodies or rendered tfvars content into argv, GitHub step summaries, SSM command
   diagnostics, or PR comments.
 - Error and observability surface: keep GitHub Actions annotations and the
   existing SSM/ASG deploy failure handling. A green run must mean the selected
-  deploy path actually built the image, updated `/image-tag`, and converged the
+  deploy path actually built the image, updated `/image-digest`, and converged the
   single instance or ASG.
 
 Maintainability incumbents the implementation must build on:
@@ -117,7 +117,7 @@ The needed seam is a typed reusable-workflow input pair:
   into the portal image changed or the run is a deliberate full manual dispatch.
 
 This keeps the next reasonable variation, such as "dependency-only portal image
-deploy" or "portal docs are image content", as a path-filter update rather than
+deploy," or "portal docs are image content," as a path-filter update rather than
 a rewrite of job dependencies or Terraform gates.
 
 ## Whole-Repo Scope
@@ -155,8 +155,8 @@ Usually out of scope:
 - Do not let a skipped `apply` block app-only deploys purely because `build`
   has `needs: apply`; use the existing `needs.<job>.result` pattern so skipped
   and successful are distinguished from failed/cancelled.
-- Do not update `/image-tag` without building and pushing the same short-SHA
-  tag first.
+- Do not update `/image-digest` without building and pushing the referenced
+  image first.
 - Do not treat all docs as equivalent without a conscious decision. Top-level
   `docs/**` should not trigger a portal deploy; in-app documentation under
   `shifter/shifter_platform/documentation/**` is copied into the portal image,

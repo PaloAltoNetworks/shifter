@@ -323,6 +323,12 @@ variable "engine_container_tag" {
   default     = "latest"
 }
 
+variable "engine_container_image_digest" {
+  description = "Immutable Docker image digest for engine provisioner container"
+  type        = string
+  default     = ""
+}
+
 variable "dc_domain_name" {
   description = "Domain name for prebaked DC (e.g., internal.shifter)"
   type        = string

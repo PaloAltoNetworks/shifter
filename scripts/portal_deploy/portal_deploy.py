@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -243,37 +244,37 @@ def _in_service_asg_instance_ids(asg_name: str, *, runner: Runner) -> list[str]:
     return parse_text_ids(result.stdout)
 
 
-def _image_check_script(image_tag: str) -> str:
-    quoted_tag = shlex.quote(image_tag)
+def _image_check_script(image_digest: str) -> str:
+    quoted_digest = shlex.quote(image_digest)
     return "\n".join(
         [
             "set -euo pipefail",
-            f"EXPECTED_IMAGE_TAG={quoted_tag}",
+            f"EXPECTED_IMAGE_DIGEST={quoted_digest}",
             "IMAGE=$(docker inspect --format '{{.Config.Image}}' portal)",
             'case "$IMAGE" in',
-            '  *":${EXPECTED_IMAGE_TAG}") echo "portal image tag verified: ${IMAGE}" ;;',
-            '  *) echo "Expected portal image tag ${EXPECTED_IMAGE_TAG}, found ${IMAGE}" >&2; exit 1 ;;',
+            '  *"@${EXPECTED_IMAGE_DIGEST}") echo "portal image digest verified: ${IMAGE}" ;;',
+            '  *) echo "Expected portal image digest ${EXPECTED_IMAGE_DIGEST}, found ${IMAGE}" >&2; exit 1 ;;',
             "esac",
         ]
     )
 
 
-def verify_asg_image_tag(
+def verify_asg_image_digest(
     *,
     asg_name: str,
-    image_tag: str,
+    image_digest: str,
     runner: Runner = subprocess.run,
 ) -> list[str]:
     if not asg_name:
         raise PortalDeployError("ASG image verification requires a non-empty ASG name")
-    if not image_tag:
-        raise PortalDeployError("ASG image verification requires a non-empty image tag")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+        raise PortalDeployError("ASG image verification requires a sha256 image digest")
 
     instance_ids = _in_service_asg_instance_ids(asg_name, runner=runner)
     if not instance_ids:
         raise PortalDeployError(f"No in-service instances found in ASG {asg_name!r}")
 
-    parameters = "commands=" + json.dumps([_image_check_script(image_tag)])
+    parameters = "commands=" + json.dumps([_image_check_script(image_digest)])
     send_command = _run(
         [
             "aws",
@@ -350,7 +351,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     verify_parser = subparsers.add_parser("verify-asg-image")
     verify_parser.add_argument("--asg-name", required=True)
-    verify_parser.add_argument("--image-tag", required=True)
+    verify_parser.add_argument("--image-digest", required=True)
     return parser
 
 
@@ -366,11 +367,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"Resolved portal deploy mode: {resolved.mode}")
         elif args.command == "verify-asg-image":
-            instance_ids = verify_asg_image_tag(
+            instance_ids = verify_asg_image_digest(
                 asg_name=args.asg_name,
-                image_tag=args.image_tag,
+                image_digest=args.image_digest,
             )
-            print(f"Verified portal image tag on {len(instance_ids)} ASG instance(s)")
+            print(f"Verified portal image digest on {len(instance_ids)} ASG instance(s)")
         return 0
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()

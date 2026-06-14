@@ -150,7 +150,7 @@ class FakeRunner:
 
 
 class PortalDeployAsgVerificationTests(unittest.TestCase):
-    def test_verify_asg_image_tag_checks_every_in_service_instance(self) -> None:
+    def test_verify_asg_image_digest_checks_every_in_service_instance(self) -> None:
         runner = FakeRunner()
         runner.queue("i-1\ti-2\n")
         runner.queue("cmd-123\n")
@@ -159,9 +159,9 @@ class PortalDeployAsgVerificationTests(unittest.TestCase):
         runner.queue("")
         runner.queue("Success\n")
 
-        checked = portal_deploy.verify_asg_image_tag(
+        checked = portal_deploy.verify_asg_image_digest(
             asg_name="dev-portal-asg-abc123",
-            image_tag="abc1234",
+            image_digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             runner=runner,
         )
 
@@ -169,6 +169,10 @@ class PortalDeployAsgVerificationTests(unittest.TestCase):
         self.assertIn("send-command", runner.calls[1])
         self.assertIn("i-1", runner.calls[1])
         self.assertIn("i-2", runner.calls[1])
+        self.assertIn(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            " ".join(runner.calls[1]),
+        )
         wait_calls = [
             call
             for call in runner.calls
@@ -183,15 +187,22 @@ class PortalDeployAsgVerificationTests(unittest.TestCase):
         for call in [*wait_calls, *invocation_calls]:
             self.assertIn("cmd-123", call)
 
-    def test_verify_asg_image_tag_rejects_empty_asg(self) -> None:
+    def test_verify_asg_image_digest_rejects_empty_asg(self) -> None:
         runner = FakeRunner()
         runner.queue("\n")
 
         with self.assertRaisesRegex(portal_deploy.PortalDeployError, "No in-service"):
-            portal_deploy.verify_asg_image_tag(
+            portal_deploy.verify_asg_image_digest(
                 asg_name="dev-portal-asg-abc123",
-                image_tag="abc1234",
+                image_digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 runner=runner,
+            )
+
+    def test_verify_asg_image_digest_rejects_empty_digest(self) -> None:
+        with self.assertRaisesRegex(portal_deploy.PortalDeployError, "image digest"):
+            portal_deploy.verify_asg_image_digest(
+                asg_name="dev-portal-asg-abc123",
+                image_digest="",
             )
 
 

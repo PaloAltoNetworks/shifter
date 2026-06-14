@@ -73,8 +73,8 @@
       },
       {
         "id": "ADR-003-R5",
-        "description": "Deploy workflows must keep pull_request events on GitHub-hosted PR validation only. Jobs that can reach self-hosted deploy runners, assume deploy roles, push ECR images, mutate infrastructure, or restart runtime services must be gated to trusted push/workflow_dispatch runs and bind a separate GitHub Environment name such as aws-dev, aws-prod, or gcp-dev. AWS ECR repositories are immutable; AWS deploy consumers use repo@sha256 image digests instead of mutable latest/short-SHA image identity.",
-        "checks": []
+        "description": "Deploy workflows must keep pull_request events on GitHub-hosted PR validation only. Jobs that can reach self-hosted deploy runners, assume deploy roles, push ECR images, mutate infrastructure, or restart runtime services must be gated to trusted push/workflow_dispatch runs and bind a separate GitHub Environment name such as aws-dev, aws-prod, or gcp-dev. AWS ECR repositories are immutable; AWS deploy consumers use repo@sha256 image digests instead of mutable latest/short-SHA image identity. The deploy-workflow-runner-exposure check enforces the pull_request half by evaluating each reusable workflow's self-hosted job if-expression for a pull_request event and requiring it to fail closed (semantic evaluation, not substring matching).",
+        "checks": ["deploy-workflow-runner-exposure"]
       }
     ],
     "exceptions": [],
@@ -88,7 +88,7 @@
       ".github/workflows/_shifter-platform.yml",
       "scripts/portal_deploy/portal_deploy.py",
       "scripts/portal-deploy/deploy_portal.sh",
-      "scripts/adr_guard/tests/test_deploy_workflow_security.py",
+      "scripts/adr_guard/tests/test_deploy_workflow.py",
       "platform/terraform/environments/dev/portal/outputs.tf",
       "platform/terraform/environments/prod/portal/outputs.tf"
     ]

@@ -11,6 +11,28 @@ This issue is requirement-free. The GitHub issue title, body, and acceptance
 criteria are the shipping contract. This note is intentionally not an
 implementation plan.
 
+## Implementation outcome (post-consolidation)
+
+The first cut shipped a standalone `scripts/workflow_gating/` suite plus a
+dedicated Quality job. During the PR, `origin/dev` merged a sibling
+deploy-workflow-security suite (#935, `test_deploy_workflow_security.py`) that
+asserted the same runner-exposure and PR-routing invariants by substring. To
+avoid two homes and two parsers, the verification was consolidated onto **one
+workflow-as-data model living in `scripts/adr_guard/adr_guard.py`** (the `_dw_*`
+helpers: a YAML loader and a constrained `if:` expression evaluator). On that
+model:
+
+- The runner-exposure invariant is promoted to a **hard adr_guard check**,
+  `deploy-workflow-runner-exposure`, wired to **ADR-003-R5** (which already
+  mandated it but had no check). It runs in `adr-conformance` (CI) and the
+  `fast` pre-commit profile.
+- The remaining invariants (#781 upstream gating, #892 routing matrix, #913
+  change-filter split) plus #935's GitHub-Environment binding and ECR-digest
+  checks are a single consolidated suite,
+  `scripts/adr_guard/tests/test_deploy_workflow.py`, run by the existing
+  `Tests (adr_guard)` job. The standalone `scripts/workflow_gating/` package,
+  its Quality job, and `test_deploy_workflow_security.py` were removed.
+
 ## Scope Boundary
 
 Treat this as deploy-control-plane verification, not as a deploy behavior

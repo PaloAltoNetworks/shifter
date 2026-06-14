@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
+from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "adr_guard.py"
 SPEC = importlib.util.spec_from_file_location("adr_guard", MODULE_PATH)
@@ -136,19 +137,60 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         self,
         *,
         platform_globs: list[str] | None = None,
-        app_globs: list[str] | None = None,
+        quality_non_doc_globs: list[str] | None = None,
+        guardrail_doc_globs: list[str] | None = None,
         portal_image_globs: list[str] | None = None,
-        quality_condition: str = "needs.changes.outputs.shifter_app == 'true'",
+        quality_condition: str = "needs.changes.outputs.quality_relevant == 'true'",
+        quality_output: str = "quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}",
+        include_quality_non_docs_filter: bool = True,
+        include_guardrail_docs_filter: bool = True,
+        quality_predicate: str = "predicate-quantifier: every",
+        pr_gate_guard: str = 'if [ "$quality_result" = "skipped" ] && [ "$quality_relevant" != "false" ]; then',
         include_portal_image_filter: bool = True,
         portal_image_output: str = "portal_image: ${{ steps.filter.outputs.portal_image }}",
         platform_job_condition: str = "needs.changes.outputs.portal_image == 'true'",
         cancel_in_progress: str = "${{ github.event_name == 'pull_request' }}",
     ) -> str:
         platform_globs = platform_globs or ["platform/terraform/modules/portal/**"]
-        app_globs = app_globs or ["shifter/**"]
+        quality_non_doc_globs = quality_non_doc_globs or [
+            "**",
+            "!docs/**",
+            "!**/*.md",
+            "!shifter/shifter_platform/documentation/**",
+        ]
+        guardrail_doc_globs = guardrail_doc_globs or [
+            ".github/pull_request_template.md",
+            ".github/copilot-instructions.md",
+            "docs/adr/**",
+            "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
+        ]
         portal_image_globs = portal_image_globs or ["shifter/shifter_platform/**"]
         platform_lines = "".join(f"              - '{glob}'\n" for glob in platform_globs)
-        app_lines = "".join(f"              - '{glob}'\n" for glob in app_globs)
+        quality_non_docs_filter = ""
+        if include_quality_non_docs_filter:
+            quality_non_doc_lines = "".join(
+                f"              - '{glob}'\n" for glob in quality_non_doc_globs
+            )
+            quality_non_docs_filter = (
+                "      - id: quality_non_docs\n"
+                "        with:\n"
+                f"          {quality_predicate}\n"
+                "          filters: |\n"
+                "            non_docs:\n"
+                f"{quality_non_doc_lines}"
+            )
+        guardrail_docs_filter = ""
+        if include_guardrail_docs_filter:
+            guardrail_doc_lines = "".join(
+                f"              - '{glob}'\n" for glob in guardrail_doc_globs
+            )
+            guardrail_docs_filter = (
+                "      - id: quality_guardrails\n"
+                "        with:\n"
+                "          filters: |\n"
+                "            guardrail_docs:\n"
+                f"{guardrail_doc_lines}"
+            )
         portal_image_filter = ""
         if include_portal_image_filter:
             portal_image_lines = "".join(
@@ -162,7 +204,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             "jobs:\n"
             "  changes:\n"
             "    outputs:\n"
-            "      shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+            f"      {quality_output}\n"
             f"      {portal_image_output}\n"
             "    steps:\n"
             "      - id: filter\n"
@@ -170,12 +212,20 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             "          filters: |\n"
             "            shifter_platform:\n"
             f"{platform_lines}"
-            "            shifter_app:\n"
-            f"{app_lines}"
             f"{portal_image_filter}"
+            f"{quality_non_docs_filter}"
+            f"{guardrail_docs_filter}"
             "  quality:\n"
             "    if: |\n"
             f"      {quality_condition}\n"
+            "  pr-gate:\n"
+            "    steps:\n"
+            "      - run: |\n"
+            "          quality_result='${{ needs.quality.result }}'\n"
+            "          quality_relevant='${{ needs.changes.outputs.quality_relevant }}'\n"
+            f"          {pr_gate_guard}\n"
+            "            exit 1\n"
+            "          fi\n"
             "  shifter_platform:\n"
             "    if: |\n"
             f"      {platform_job_condition}\n"
@@ -377,7 +427,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             self.assertEqual(violations[0].rule_id, "ADR-003-R2")
             self.assertIn(app_glob, violations[0].message)
 
-    def test_flags_missing_app_quality_scope_after_platform_scope_split(self) -> None:
+    def test_flags_missing_quality_relevant_scope_after_platform_scope_split(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_workflows(
@@ -394,6 +444,14 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "              - 'platform/terraform/modules/portal/**'\n"
                 "            portal_image:\n"
                 "              - 'shifter/shifter_platform/**'\n"
+                "  pr-gate:\n"
+                "    steps:\n"
+                "      - run: |\n"
+                "          quality_result='${{ needs.quality.result }}'\n"
+                "          quality_relevant='${{ needs.changes.outputs.quality_relevant }}'\n"
+                "          if [ \"$quality_result\" = \"skipped\" ] && [ \"$quality_relevant\" != \"false\" ]; then\n"
+                "            exit 1\n"
+                "          fi\n"
                 "  shifter_platform:\n"
                 "    if: |\n"
                 "      needs.changes.outputs.portal_image == 'true'\n",
@@ -403,33 +461,94 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
-            self.assertIn("shifter_app", violations[0].message)
+            self.assertIn("quality_relevant", violations[0].message)
 
-    def test_flags_shifter_app_filter_without_app_source_glob(self) -> None:
+    def test_flags_non_docs_filter_without_docs_exclusion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_workflows(
                 repo_root,
-                self._deploy_text(app_globs=["docs/**"]),
+                self._deploy_text(quality_non_doc_globs=["**", "!**/*.md"]),
                 self._platform_text(),
             )
 
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
-            self.assertIn("shifter/**", violations[0].message)
+            self.assertIn("!docs/**", violations[0].message)
 
-    def test_flags_shifter_app_condition_outside_quality_job(self) -> None:
+    def test_flags_non_docs_filter_without_every_predicate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(quality_predicate="# predicate-quantifier: every"),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("predicate-quantifier: every", violations[0].message)
+
+    def test_flags_missing_guardrail_docs_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(include_guardrail_docs_filter=False),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("guardrail_docs", violations[0].message)
+
+    def test_flags_guardrail_docs_filter_without_github_markdown_guardrails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    guardrail_doc_globs=[
+                        "docs/adr/**",
+                        "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
+                    ]
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn(".github/pull_request_template.md", violations[0].message)
+
+    def test_flags_quality_relevant_condition_outside_quality_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             deploy = self._deploy_text(quality_condition="needs.changes.outputs.mcp == 'true'")
-            deploy += "  gcp-dev:\n    if: needs.changes.outputs.shifter_app == 'true'\n"
+            deploy += "  gcp-dev:\n    if: needs.changes.outputs.quality_relevant == 'true'\n"
             self._write_workflows(repo_root, deploy, self._platform_text())
 
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
             self.assertIn("Quality", violations[0].message)
+
+    def test_flags_pr_gate_that_accepts_skipped_quality_without_docs_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(pr_gate_guard='if [ "$quality_result" = "cancelled" ]; then'),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("skipped Quality", violations[0].message)
 
     def test_flags_missing_portal_image_filter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -533,14 +652,14 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             self.assertIn(".github/workflows/deploy.yml", flagged)
             self.assertIn(".github/workflows/_shifter-platform.yml", flagged)
 
-    def test_ignores_commented_shifter_app_output_and_quality_condition(self) -> None:
+    def test_ignores_commented_quality_relevant_output_and_condition(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             deploy = (
                 "jobs:\n"
                 "  changes:\n"
                 "    outputs:\n"
-                "      # shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+                "      # quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}\n"
                 "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
                 "    steps:\n"
                 "      - id: filter\n"
@@ -548,13 +667,36 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "          filters: |\n"
                 "            shifter_platform:\n"
                 "              - 'platform/terraform/modules/portal/**'\n"
-                "            shifter_app:\n"
-                "              - 'shifter/**'\n"
                 "            portal_image:\n"
                 "              - 'shifter/shifter_platform/**'\n"
+                "      - id: quality_non_docs\n"
+                "        with:\n"
+                "          predicate-quantifier: every\n"
+                "          filters: |\n"
+                "            non_docs:\n"
+                "              - '**'\n"
+                "              - '!docs/**'\n"
+                "              - '!**/*.md'\n"
+                "              - '!shifter/shifter_platform/documentation/**'\n"
+                "      - id: quality_guardrails\n"
+                "        with:\n"
+                "          filters: |\n"
+                "            guardrail_docs:\n"
+                "              - '.github/pull_request_template.md'\n"
+                "              - '.github/copilot-instructions.md'\n"
+                "              - 'docs/adr/**'\n"
+                "              - 'shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md'\n"
                 "  quality:\n"
                 "    if: |\n"
-                "      # needs.changes.outputs.shifter_app == 'true'\n"
+                "      # needs.changes.outputs.quality_relevant == 'true'\n"
+                "  pr-gate:\n"
+                "    steps:\n"
+                "      - run: |\n"
+                "          quality_result='${{ needs.quality.result }}'\n"
+                "          quality_relevant='${{ needs.changes.outputs.quality_relevant }}'\n"
+                "          if [ \"$quality_result\" = \"skipped\" ] && [ \"$quality_relevant\" != \"false\" ]; then\n"
+                "            exit 1\n"
+                "          fi\n"
                 "  shifter_platform:\n"
                 "    if: |\n"
                 "      needs.changes.outputs.portal_image == 'true'\n"
@@ -3366,22 +3508,6 @@ class BoundaryMockPolicyTests(unittest.TestCase):
             + "\n",
         )
 
-    def _git(self, repo_root: Path, *args: str) -> None:
-        subprocess.run(
-            ["git", *args],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-    def _commit_repo(self, repo_root: Path) -> None:
-        self._git(repo_root, "init")
-        self._git(repo_root, "config", "user.email", "adr-guard@example.invalid")
-        self._git(repo_root, "config", "user.name", "ADR Guard Test")
-        self._git(repo_root, "add", ".")
-        self._git(repo_root, "commit", "-m", "baseline")
-
     def test_flags_first_party_internal_patch_not_in_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
@@ -3483,7 +3609,6 @@ class BoundaryMockPolicyTests(unittest.TestCase):
                 "    with patch('cms.services.create_range'):\n"
                 "        pass\n",
             )
-            self._commit_repo(repo_root)
             self._write_baseline(
                 repo_root,
                 [
@@ -3495,7 +3620,15 @@ class BoundaryMockPolicyTests(unittest.TestCase):
                 ],
             )
 
-            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+            reference_baseline = Counter(
+                {("tests/test_ranges.py", "cms.services.create_range"): 1}
+            )
+            with patch.object(
+                ADR_GUARD,
+                "_load_boundary_mock_reference_baseline",
+                return_value=(reference_baseline, None),
+            ):
+                violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
 
             self.assertEqual(len(violations), 1)
             self.assertEqual(violations[0].path, self.BASELINE_REL)
@@ -3505,9 +3638,7 @@ class BoundaryMockPolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_first_party_module(repo_root)
-            self._write_baseline(repo_root, [])
             self._write_file(repo_root, "tests/test_ranges.py", "def test_range_creation():\n    pass\n")
-            self._commit_repo(repo_root)
             self._write_baseline(
                 repo_root,
                 [
@@ -3519,7 +3650,12 @@ class BoundaryMockPolicyTests(unittest.TestCase):
                 ],
             )
 
-            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+            with patch.object(
+                ADR_GUARD,
+                "_load_boundary_mock_reference_baseline",
+                return_value=(Counter(), None),
+            ):
+                violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
 
             self.assertEqual(len(violations), 1)
             self.assertEqual(violations[0].path, self.BASELINE_REL)

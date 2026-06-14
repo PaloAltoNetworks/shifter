@@ -124,12 +124,18 @@ The first slice intentionally stays small:
 - `deploy-workflow-plan-scope`
   Enforces ADR-003-R2 for the AWS deploy workflows. The `shifter_platform`
   change filter in `.github/workflows/deploy.yml` must stay scoped to
-  Terraform-consumed platform files, with application source changes routed
-  through the separate `shifter_app` filter so Quality still runs without
-  launching a platform Terraform plan. Portal application changes must also
-  keep reaching the portal image build/deploy path (#913): the check requires
-  a `portal_image` filter covering `shifter/shifter_platform/**`, exposed as
-  a `changes`-job output, included in the `shifter_platform` job's trigger
+  Terraform-consumed platform files. Quality routing is separate and runs by
+  exclusion: `.github/workflows/deploy.yml` must expose a `quality_relevant`
+  output that runs Quality unless the diff is ordinary docs-only. Guardrail
+  docs, including `.github/pull_request_template.md`,
+  `.github/copilot-instructions.md`, `docs/adr/**`, and this ADR enforcement
+  page, are explicitly quality-relevant so ADR guard validates them. PR Gate
+  must reject a skipped Quality job unless `quality_relevant` is false.
+  Commit-message or label-based test skips are not accepted. Portal application
+  changes must also keep
+  reaching the portal image build/deploy path (#913): the check requires a
+  `portal_image` filter covering `shifter/shifter_platform/**`, exposed as a
+  `changes`-job output, included in the `shifter_platform` job's trigger
   condition, and consumed by the platform `build` job through the
   `portal_image_changes` input so an app-only push to an environment branch
   builds and converges the portal image without running Terraform. The check

@@ -42,7 +42,7 @@ jobs:
         working-directory: platform/terraform
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
-      - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
+      - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -83,5 +83,6 @@ jobs:
         with:
           terraform_version: "1.13.3"
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
-      - run: terraform apply -auto-approve
+      - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan
+      - run: terraform apply -lock-timeout=5m tfplan
       - run: terraform output -json

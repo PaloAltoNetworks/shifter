@@ -148,6 +148,8 @@ Speaker notes for driving the deck at kickoff.
 *Six numbered steps for how to get a range. Read fast. The next slide repeats the URL.*
 
 > Your range opens through Mission Control. Open dev.shifter.keplerops.com, sign in, pick POLARIS, click ENTER RANGE. Provisioning takes about five minutes. When it's up, your Kali desktop opens right in the browser tab.
+>
+> The first local file to read on Kali is `/home/kali/START_HERE.txt`. That file is your recovery point if you lose the thread.
 
 ---
 
@@ -155,7 +157,7 @@ Speaker notes for driving the deck at kickoff.
 
 *Quick read-through. Make the cyan distinction land: CTFd and Mission Control are on your laptop browser; everything else opens from inside Kali.*
 
-> Two URLs you hit from your laptop browser: CTFd to submit flags, Mission Control for the range. Everything else (Boreas, intranet, mail, the DC) is only reachable from inside your Kali box. Don't try to load them from your laptop; they won't resolve.
+> Two URLs you hit from your laptop browser: CTFd for challenge briefs, hints, scoreboard, and flag submission; Mission Control for the range. Everything else (Boreas, intranet, mail, the DC) is only reachable from inside your Kali box. Don't try to load those targets from your laptop; they won't resolve.
 
 ---
 
@@ -163,7 +165,7 @@ Speaker notes for driving the deck at kickoff.
 
 *This is the literal handoff. Read it. Project it. Leave it on screen while people start moving.*
 
-> Five steps. Magic-link email lands you on Mission Control. Pick POLARIS, click ENTER RANGE. Five minutes to provision. Your Kali desktop opens in-browser; there's an orientation note in your home directory, find it. Open polaris.keplerops.com in a new tab, click Challenges, solve `Start Here — Kali Warm-Up`. That's your first flag on the board. Then start Mission One.
+> Six steps. Keep polaris.keplerops.com open; that's CTFd, where you submit flags. Open your magic-link email; it lands on Mission Control. Pick POLARIS, click ENTER RANGE, and wait for Kali. On Kali, read `/home/kali/START_HERE.txt`, then `/home/kali/.polaris/welcome.txt`. Back on CTFd, click Challenges and solve `Start Here — Kali Warm-Up`. That's your first flag on the board. Then start Mission One.
 >
 > Clock starts now. Good hunting, operator.
 
@@ -175,4 +177,5 @@ The First Clicks slide is the handoff. Leave it on screen. If anyone is still st
 
 - "Magic link is in your email. Check spam if you don't see it."
 - "Two browser tabs: CTFd on one, your Kali desktop on the other."
+- "Inside Kali, read `/home/kali/START_HERE.txt` first."
 - "Ask Claude on your Kali box. Ask the room. Try things."

@@ -15,15 +15,22 @@ on:
           always require an active certificate.
         type: boolean
         default: true
+      aws_first_deploy:
+        description: >-
+          Allow the AWS engine deploy to skip the ECS task-family existence
+          check. Set true only for the first-ever deploy to a fresh AWS
+          environment, before the platform Terraform apply has created the
+          provisioner task definition. Automatic (push) deploys always require
+          the family to exist, so a typo'd family name fails the run.
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-${{ github.ref }}
-  # Cancel an in-flight run when a newer push to the same ref arrives. Old
-  # behaviour (cancel-in-progress: false) queued every new push behind the
-  # previous run's full duration — fine if the older run was apply-bound to
-  # a different SHA, but for env-branch pushes the newer SHA always
-  # supersedes the old one (env branches never go backwards).
-  cancel-in-progress: true
+  # PR runs may be superseded safely, but env-branch deploys can be mid-apply.
+  # Queue branch/manual deploy runs so Terraform is not killed after mutating
+  # remote state or while holding the backend lock.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ============================================================================
@@ -45,8 +52,10 @@ jobs:
       range: ${{ steps.filter.outputs.range }}
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
-      shifter_app: ${{ steps.filter.outputs.shifter_app }}
+      quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}
+      portal_image: ${{ steps.filter.outputs.portal_image }}
       mcp: ${{ steps.filter.outputs.mcp }}
+      quality_only: ${{ steps.filter.outputs.quality_only }}
       gcp: ${{ steps.filter.outputs.gcp }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
       aws_is_dev: ${{ steps.env.outputs.aws_is_dev }}
@@ -56,7 +65,6 @@ jobs:
       apply_aws: ${{ steps.env.outputs.apply_aws }}
       deploy_gcp: ${{ steps.env.outputs.deploy_gcp }}
       fast_gcp_deploy: ${{ steps.env.outputs.fast_gcp_deploy }}
-      skip_tests: ${{ steps.skip.outputs.skip_tests }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -91,21 +99,41 @@ jobs:
               - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
               - '.github/workflows/_shifter-platform.yml'
-            shifter_app:
-              - 'shifter/**'
+            # Portal image build/deploy trigger (#913). Mirrors the
+            # portal image's build inputs: the Docker context controls
+            # plus every tree the Dockerfile COPYs
+            # (shifter_platform, cyberscript, installation). Kept
+            # separate from the Terraform-only `shifter_platform`
+            # filter (ADR-003-R2) and from the broad `quality_relevant`
+            # classifier so engine/packer-only changes do not redeploy
+            # the portal. In-app documentation under
+            # shifter/shifter_platform/documentation/** is image
+            # content, so it deploys with the image; top-level docs/**
+            # never does.
+            portal_image:
+              - 'shifter/shifter_platform/**'
+              - 'shifter/cyberscript/**'
+              - 'shifter/installation/**'
+              - 'shifter/.dockerignore'
             mcp:
               - 'mcp/**'
+            # Quality-only non-deploy support surfaces. These paths have
+            # test or guardrail jobs in _quality.yml, but they must not
+            # trigger Terraform plans, image builds, or environment deploys.
+            quality_only:
               - '.github/workflows/_quality.yml'
+              - 'scripts/polaris-aws-range/**'
+              - 'scenario-dev/polaris/tests/**'
               # Guardrail scripts that the Quality workflow invokes
               # directly (their CI steps live in _quality.yml's
               # terraform-lint job). A change to these scripts or their
               # tests must re-run Quality so the guardrail's enforcement
-              # is verified, but it shouldn't trigger any deploy — the
-              # `mcp` filter is the existing "Quality-only" route.
+              # is verified, but it shouldn't trigger any deploy.
               - 'scripts/check_tf_iam_ec2_scope/**'
               - 'scripts/check_tf_iam_elb_scope/**'
               - 'scripts/check_tf_sg_cidrs/**'
               - 'scripts/check_tf_kms_secrets_grant/**'
+              - 'scripts/check_tf_rds_security/**'
               # Guardrail / ADR-registry surfaces. A change to any of
               # these must re-run Quality so adr_guard catches a broken
               # registry, malformed exception entry, or pre-commit hook
@@ -137,6 +165,32 @@ jobs:
               - 'shifter/engine/provisioner/Dockerfile'
               - '.github/workflows/_gcp-dev.yml'
               - '.github/workflows/deploy.yml'
+
+      # Quality runs by exclusion: ordinary docs-only diffs are the only
+      # general PR/dev skip path. This classifier intentionally lives beside
+      # the deploy path filters so future path categories are added once.
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: quality_non_docs
+        with:
+          predicate-quantifier: every
+          filters: |
+            non_docs:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!shifter/shifter_platform/documentation/**'
+
+      # Guardrail docs are architecture inputs, not ordinary docs-only
+      # changes. They must still run Quality so ADR guard validates them.
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: quality_guardrails
+        with:
+          filters: |
+            guardrail_docs:
+              - '.github/pull_request_template.md'
+              - '.github/copilot-instructions.md'
+              - 'docs/adr/**'
+              - 'shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md'
 
       - name: Set environment
         id: env
@@ -204,35 +258,42 @@ jobs:
             echo "fast_gcp_deploy=$FAST_GCP_DEPLOY"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Check for skip flags
-        id: skip
+  # Always-present CI enforcement for the fast local pre-commit baseline that
+  # must not be bypassed by path filters: file hygiene and secret scanning.
+  precommit:
+    name: Pre-commit
+    if: |
+      github.event_name == 'pull_request' ||
+      github.ref == 'refs/heads/dev' ||
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run file hygiene and secret scan hooks
         run: |
-          # Check for [skip tests] in commit message
-          SKIP_TESTS="false"
-
-          # Only allow skip on dev (PRs to dev or pushes to dev)
-          if { [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; } || \
-             { [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/dev" ]; }; then
-
-            # Get commit message
-            if [ "${{ github.event_name }}" == "pull_request" ]; then
-              COMMIT_MSG=$(git log ${{ github.event.pull_request.head.sha }} -1 --pretty=%B)
-              echo "Checking PR commit: ${{ github.event.pull_request.head.sha }}"
-            else
-              COMMIT_MSG=$(git log HEAD -1 --pretty=%B)
-              echo "Checking push commit: $(git rev-parse HEAD)"
-            fi
-
-            echo "Commit message: $COMMIT_MSG"
-
-            # Check commit message for [skip tests]
-            if echo "$COMMIT_MSG" | grep -qi "\[skip tests\]"; then
-              SKIP_TESTS="true"
-              echo "::warning::Skipping tests (commit message contains [skip tests])"
-            fi
-          fi
-
-          echo "skip_tests=$SKIP_TESTS" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          export PRE_COMMIT_HOME="${RUNNER_TEMP}/pre-commit-cache"
+          python3 -m venv "${RUNNER_TEMP}/precommit-venv"
+          # shellcheck disable=SC1091
+          . "${RUNNER_TEMP}/precommit-venv/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install 'pre-commit==4.3.0'
+          hooks=(
+            trailing-whitespace
+            end-of-file-fixer
+            check-yaml
+            check-json
+            check-added-large-files
+            check-merge-conflict
+            detect-private-key
+            gitleaks
+          )
+          for hook in "${hooks[@]}"; do
+            pre-commit run "$hook" --all-files --show-diff-on-failure
+          done
 
   # ============================================================================
   # DEPENDENCY CHAIN: Core -> Range -> Platform
@@ -242,7 +303,9 @@ jobs:
   quality:
     name: Quality
     needs: changes
-    # Run Quality on PRs and direct pushes to `dev` only.
+    # Run Quality on PRs and direct pushes to `dev` unless the diff is
+    # provably ordinary docs-only. Manual dispatch remains a deliberate
+    # full-validation path, except for the existing fast GCP deploy route.
     # Pushes to deployment branches (aws-dev, gcp-dev) only happen via merge
     # from `dev` (per repo rule: deploy branches must never be ahead of dev),
     # so the same SHA already passed Quality on its dev push and re-running
@@ -253,17 +316,11 @@ jobs:
        github.event_name == 'workflow_dispatch' ||
        github.ref == 'refs/heads/dev') &&
       needs.changes.outputs.fast_gcp_deploy != 'true' &&
-      (needs.changes.outputs.core == 'true' ||
-       needs.changes.outputs.range == 'true' ||
-       needs.changes.outputs.shifter_engine == 'true' ||
-       needs.changes.outputs.shifter_platform == 'true' ||
-       needs.changes.outputs.shifter_app == 'true' ||
-       needs.changes.outputs.mcp == 'true' ||
-       needs.changes.outputs.gcp == 'true' ||
+      (needs.changes.outputs.quality_relevant == 'true' ||
        github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
     with:
-      skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
+      skip_tests: false
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -276,21 +333,32 @@ jobs:
   # it never runs on aws-dev / gcp-dev / main pushes.
   pr-gate:
     name: PR Gate
-    needs: [changes, quality]
+    needs: [changes, precommit, quality]
     if: ${{ always() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - name: Assert required PR jobs passed
         run: |
           changes_result='${{ needs.changes.result }}'
+          precommit_result='${{ needs.precommit.result }}'
           quality_result='${{ needs.quality.result }}'
-          echo "changes=$changes_result quality=$quality_result"
+          quality_relevant='${{ needs.changes.outputs.quality_relevant }}'
+          echo "changes=$changes_result precommit=$precommit_result quality=$quality_result quality_relevant=$quality_relevant"
           if [ "$changes_result" != "success" ]; then
             echo "::error::Detect Changes did not succeed (result=$changes_result)"
             exit 1
           fi
-          # `quality` is legitimately skipped when no quality-relevant
-          # paths changed; only a real failure or cancellation blocks.
+          if [ "$precommit_result" != "success" ]; then
+            echo "::error::Pre-commit did not pass (result=$precommit_result)"
+            exit 1
+          fi
+          # `quality` is legitimately skipped only for ordinary docs-only
+          # PRs. Bootstrap, k8s, workflow, ADR, and guardrail changes remain
+          # quality-relevant and must not disappear behind a skipped job.
+          if [ "$quality_result" = "skipped" ] && [ "$quality_relevant" != "false" ]; then
+            echo "::error::Quality was skipped even though quality_relevant=$quality_relevant"
+            exit 1
+          fi
           if [ "$quality_result" != "success" ] && [ "$quality_result" != "skipped" ]; then
             echo "::error::Quality did not pass (result=$quality_result)"
             exit 1
@@ -381,6 +449,8 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
+      TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
 
   shifter-engine:
     name: Shifter Engine
@@ -401,6 +471,9 @@ jobs:
       environment: ${{ needs.changes.outputs.aws_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       deploy_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
+      # Only a manual workflow_dispatch may opt into the first-deploy bootstrap
+      # bypass; automatic (push) deploys always require the task family to exist.
+      first_deploy: ${{ github.event_name == 'workflow_dispatch' && inputs.aws_first_deploy }}
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
@@ -418,16 +491,24 @@ jobs:
     if: |
       always() &&
       needs.changes.outputs.run_aws == 'true' &&
-      (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.changes.outputs.shifter_platform == 'true' ||
+       needs.changes.outputs.portal_image == 'true' ||
+       github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
-      needs.shifter-engine.result != 'cancelled' &&
+      (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
       (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_shifter-platform.yml
     with:
       environment: ${{ needs.changes.outputs.aws_environment }}
       is_dev: ${{ needs.changes.outputs.aws_is_dev == 'true' }}
       apply_changes: ${{ needs.changes.outputs.apply_aws == 'true' }}
+      # Split per concern (#913): Terraform plan/apply stays scoped to
+      # Terraform-relevant changes, while app-only changes drive just
+      # the portal image build/deploy. workflow_dispatch remains the
+      # deliberate full-deploy path for both concerns.
+      platform_changes: ${{ needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch' }}
+      portal_image_changes: ${{ needs.changes.outputs.portal_image == 'true' || github.event_name == 'workflow_dispatch' }}
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}

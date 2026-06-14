@@ -153,7 +153,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_157 (RDS Multi-AZ): controlled by var.db_multi_az / var.multi_az and set per-environment (dev false / prod true). The default is false in the module so Checkov sees the bare declaration as non-Multi-AZ; environments override.",
+    "reason": "CKV_AWS_157 (RDS Multi-AZ): controlled by var.db_multi_az / var.multi_az and set per-environment (dev false / prod true). The default is false in the module so Checkov sees the bare declaration as non-Multi-AZ; environments override. RDS IAM authentication is enabled separately and is no longer waived.",
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/portal/rds/main.tf",

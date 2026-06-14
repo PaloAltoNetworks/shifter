@@ -77,6 +77,11 @@ output "db_resource_id" {
 # EC2 / Autoscaling
 # ------------------------------------------------------------------------------
 
+output "enable_autoscaling" {
+  description = "Whether the portal EC2 tier is deployed as an Auto Scaling Group."
+  value       = var.enable_autoscaling
+}
+
 output "ec2_instance_id" {
   description = "ID of the EC2 instance (empty if ASG mode)"
   value       = module.ec2.instance_id

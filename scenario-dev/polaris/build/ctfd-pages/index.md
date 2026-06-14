@@ -75,17 +75,16 @@ auth_required: true
 
 <div class="polaris-page" markdown="1">
 
-<!-- vale Google.EmDash = NO -->
 <div class="first-click">
-<h2 class="first-click__h">🎯 <a href="/challenges">Open the board and solve <em>Start Here — Kali Warm-Up</em></a></h2>
+<h2 class="first-click__h"><a href="/challenges">Begin here: your first five minutes</a></h2>
 <ol>
-<li>Click your <strong>magic-link email</strong> → <strong>Mission Control</strong> → <strong>ENTER RANGE</strong>. ~5 min to provision; your Kali desktop opens in-browser.</li>
-<li>On the Kali desktop, find the orientation note in your home directory. Read it.</li>
-<li>Back in this browser tab, <a href="/challenges">open the challenges board</a>, click <strong>Start Here — Kali Warm-Up</strong>, and submit the flag from the note.</li>
-<li>Then start <strong>Mission 1 — Boreas</strong>.</li>
+<li>Keep this CTFd tab open. This is the flag-submission portal.</li>
+<li>Open your <strong>magic-link email</strong>. It lands on <strong>Mission Control</strong>.</li>
+<li>Choose <strong>POLARIS</strong>, click <strong>ENTER RANGE</strong>, and wait for the Kali desktop to open in-browser.</li>
+<li>On Kali, read <code>/home/kali/START_HERE.txt</code>. It points you to the warm-up note.</li>
+<li>Back on CTFd, open <a href="/challenges">Challenges</a>, solve <strong>Start Here — Kali Warm-Up</strong>, then start <strong>Mission 1 — Boreas</strong>.</li>
 </ol>
 </div>
-<!-- vale Google.EmDash = YES -->
 
 <div class="brief-tag">§ 00—ORIENTATION</div>
 
@@ -105,9 +104,11 @@ By participating in this CTF you acknowledge:
 
 ## First Moves
 
-1. Solve [**Start Here—Kali Warm-Up**](/challenges) for a quick first submit.
-2. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
-3. Start with Mission 1—recon the front company.
+1. Use two browser tabs: CTFd for flags, Mission Control for the Kali range.
+2. Read `/home/kali/START_HERE.txt` inside Kali.
+3. Solve [**Start Here—Kali Warm-Up**](/challenges) so you know Kali access and CTFd submission both work.
+4. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
+5. Start with Mission 1—recon the front company.
 
 ## Missions
 

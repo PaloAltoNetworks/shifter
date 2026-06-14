@@ -58,15 +58,33 @@
       },
       {
         "id": "ADR-003-R2",
-        "description": "AWS platform Terraform plan routing must stay scoped to Terraform-consumed files, while platform application changes still trigger Quality through a separate app-source filter. AWS platform Terraform plan commands must wait for the state lock before failing.",
+        "description": "AWS Terraform plan routing must stay scoped to Terraform-consumed files, while Quality routing must run by exclusion for pull requests and dev pushes: a dedicated quality_relevant output runs Quality unless the diff is ordinary docs-only, and guardrail docs such as .github/pull_request_template.md, .github/copilot-instructions.md, docs/adr/**, and adr-enforcement.md must remain quality-relevant. Non-deploy support/test paths such as scripts/polaris-aws-range/** and scenario-dev/polaris/tests/** must stay categorized through a dedicated quality_only filter/output without launching Terraform plans, image builds, or environment deploys. Commit-message or label-based test skips are not accepted. AWS deploy runs that can apply infrastructure must queue instead of cancelling an in-flight apply. Core, range, and platform Terraform plan and apply commands must wait for the backend state lock. Their apply jobs must create a local saved tfplan and apply that exact file instead of uploading raw binary plans as artifacts or running a fresh unplanned apply; platform Service Discovery replacement handling must inspect that same saved plan before apply. Portal application changes must keep reaching the portal image build/deploy path through the dedicated portal_image filter wired into the shifter_platform job trigger and the platform build job's portal_image_changes input, without widening the Terraform-scoped plan trigger.",
         "checks": ["deploy-workflow-plan-scope"]
+      },
+      {
+        "id": "ADR-003-R3",
+        "description": "Deploy-verification steps must fail the run when the thing they verify did not happen, instead of warning and exiting 0. The Guacamole stabilization wait in _shifter-platform.yml must exit 1 on timeout (raise the timeout if first boot needs longer rather than downgrading the result). The engine ECS task-definition update in _shifter-engine.yml must exit 1 when the task-definition family cannot be described, with the only skip gated on the explicit first_deploy bootstrap input (surfaced as the aws_first_deploy workflow_dispatch input in deploy.yml, strict by default and settable only on manual dispatch).",
+        "checks": ["deploy-verification-fail-loud"]
+      },
+      {
+        "id": "ADR-003-R4",
+        "description": "AWS portal deployment mode must have one authoritative source: the deploy workflow derives single-instance vs. ASG mode from Terraform outputs, not from a GitHub Actions variable. The single-instance path must fail unless exactly one running tagged portal instance matches Terraform state, and the ASG path must verify the deployed image tag on every in-service instance after refresh.",
+        "checks": ["portal-deploy-mode-source-of-truth"]
       }
     ],
     "exceptions": [],
     "enforcement": ["ci"],
     "evidence": [
       ".github/workflows/_quality.yml",
-      ".github/workflows/deploy.yml"
+      ".github/workflows/deploy.yml",
+      ".github/workflows/_core.yml",
+      ".github/workflows/_range.yml",
+      ".github/workflows/_shifter-engine.yml",
+      ".github/workflows/_shifter-platform.yml",
+      "scripts/portal_deploy/portal_deploy.py",
+      "scripts/portal-deploy/deploy_portal.sh",
+      "platform/terraform/environments/dev/portal/outputs.tf",
+      "platform/terraform/environments/prod/portal/outputs.tf"
     ]
   },
   {
@@ -130,6 +148,11 @@
         "id": "ADR-004-R11",
         "description": "Checkov is a blocking gate for first-party Terraform under `platform/terraform/`. The pre-commit hook (`.pre-commit-config.yaml` `checkov`) and the GitHub Actions security-iac job (`.github/workflows/_quality.yml`) both consume the same canonical config at `platform/terraform/.checkov.yaml`; `--soft-fail` is not set on either surface. Accepted-risk waivers (Checkov `skip-check` entries in `.checkov.yaml` or inline `# checkov:skip=CKV_X:...` comments on individual resources) MUST have a matching entry in `docs/adr/exceptions.yaml` with `rule_id: ADR-004-R11`, owner, reason (containing the Checkov policy ID), `expires_on`, and the affected `paths`. `adr_guard.py` rejects expired exceptions, forcing owner re-review. Terraform Checkov policy and Kubernetes Checkov policy are separate surfaces: the `security-k8s` job intentionally remains `soft_fail: true` while manifest hardening proceeds under a separate issue, and Kubernetes soft-fail debt does NOT justify Terraform soft-fail. If rule-level policy grows beyond a flat skip list, centralize it in `platform/terraform/.checkov.yaml` only — do NOT duplicate skip semantics across pre-commit args and workflow inputs.",
         "checks": []
+      },
+      {
+        "id": "ADR-004-R12",
+        "description": "First-party AWS RDS DB instances under `platform/terraform/modules/portal/rds/main.tf` and `platform/terraform/modules/guacamole/rds.tf` MUST keep `iam_database_authentication_enabled = true` and MUST explicitly set `ca_cert_identifier` to a non-empty expression. Checkov covers IAM authentication through CKV_AWS_161, but CKV_AWS_211 currently passes when the CA attribute is absent; the repo-native `scripts/check_tf_rds_security/check_tf_rds_security.py` checker closes that gap. The checker is wired as the `check-tf-rds-security` pre-commit hook and a CI step in `.github/workflows/_quality.yml`, and its unittest suite is included in the `check_tf_*` checker tests.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -143,6 +166,7 @@
       ".github/workflows/_quality.yml",
       "scripts/adr_guard/adr_guard.py",
       "scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py",
+      "scripts/check_tf_rds_security/check_tf_rds_security.py",
       "platform/terraform/.checkov.yaml",
       "docs/adr/exceptions.yaml",
       "docs/architecture/checkov-soft-fail-preflight-757.md",
@@ -654,7 +678,7 @@
     "title": "Django templates use native gettext for user-facing literals",
     "status": "accepted",
     "scope": "shifter_platform",
-    "decision": "Django-rendered user-facing template literals are routed through Django's native gettext template tags and the platform-owned English catalog. Shifter adopts the minimum i18n infrastructure needed for template analysis and future catalog growth: `LocaleMiddleware` sits between session and common middleware, `LOCALE_PATHS` points at `shifter/shifter_platform/locale`, templates use `{% trans %}` / `{% blocktrans %}`, and runtime startup compiles message catalogs before static collection. English remains the only catalog for now; URL locale prefixes, locale-switching UX, translator workflow, RTL support, and locale-aware formatting are explicitly out of scope until a separate requirement adopts them.",
+    "decision": "Django-rendered user-facing template literals are routed through Django's native gettext template tags and the platform-owned English catalog. Shifter adopts the minimum i18n infrastructure needed for template analysis and future catalog growth: `LocaleMiddleware` sits between session and common middleware, `LOCALE_PATHS` points at `shifter/shifter_platform/locale`, templates use `{% trans %}` / `{% blocktrans %}`, and portal image builds compile message catalogs before static collection so runtime container startup does not rebuild immutable artifacts. English remains the only catalog for now; URL locale prefixes, locale-switching UX, translator workflow, RTL support, and locale-aware formatting are explicitly out of scope until a separate requirement adopts them.",
     "rules": [
       {
         "id": "ADR-016-R1",
@@ -668,14 +692,15 @@
       },
       {
         "id": "ADR-016-R3",
-        "description": "Container startup compiles Django message catalogs before static collection or application startup so runtime `.mo` files are present without committing generated binaries.",
-        "checks": ["django-compilemessages-runtime"]
+        "description": "Portal image builds compile Django message catalogs before static collection so runtime `.mo` files and static assets are present without committing generated binaries or rebuilding them at container startup.",
+        "checks": ["django-compilemessages-build"]
       }
     ],
     "exceptions": [],
     "enforcement": ["tests", "sonarcloud", "agent-policy"],
     "evidence": [
       "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/Dockerfile",
       "shifter/shifter_platform/entrypoint.sh",
       "shifter/shifter_platform/locale/en/LC_MESSAGES/django.po",
       "shifter/shifter_platform/tests/config/test_i18n_configuration.py",
@@ -770,6 +795,29 @@
       ".github/workflows/_shifter-platform.yml",
       "docs/architecture/portal-channel-layer-backend.md",
       "docs/architecture/aws-portal-redis-channel-layer-preflight-849.md"
+    ]
+  },
+  {
+    "id": "ADR-019",
+    "title": "Tests mock external boundaries, not first-party topology",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "New tests shall patch only real process, network, cloud, or framework transport boundaries. First-party service functions, views, model helpers, render/logging/transaction aliases, and other internal callables are observable behavior dependencies and must not be patched as topology seams. Existing internal patch debt is tracked in a committed baseline that may shrink but not grow.",
+    "rules": [
+      {
+        "id": "ADR-019-R1",
+        "description": "Python tests must not introduce new first-party internal `patch()` or statically resolvable `patch.object()` targets. The `boundary-mock-policy` ADR guard check compares current internal patch counts against `scripts/adr_guard/boundary_mock_baseline.json` and rejects baseline allowance growth against the branch reference; process/network/cloud boundary patches remain allowed.",
+        "checks": ["boundary-mock-policy"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "agent-policy"],
+    "evidence": [
+      "scripts/adr_guard/adr_guard.py",
+      "scripts/adr_guard/boundary_mock_baseline.json",
+      "scripts/adr_guard/tests/test_adr_guard.py",
+      "docs/adr/README.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md"
     ]
   }
 ]

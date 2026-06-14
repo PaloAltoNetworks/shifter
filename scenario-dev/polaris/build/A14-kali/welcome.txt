@@ -16,6 +16,10 @@ Your first flag:
 Switch to your CTFd tab. Submit it. That's your first token
 on the board.
 
+If you lose the thread, run:
+
+  cat /home/kali/START_HERE.txt
+
 When you're done, start with Mission 1 — Boreas. Everything
 else you need lives on CTFd from here.
 

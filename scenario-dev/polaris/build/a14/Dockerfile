@@ -81,11 +81,13 @@ RUN touch /var/log/xrdp.log /var/log/xrdp-sesman.log && \
 RUN echo 'set -g mouse on' > /etc/tmux.conf
 
 # CTF content overlay — modbus scan helper is shared with A9-splice-landing/.
-# welcome.txt is the warm-up challenge target; lives hidden in /home/kali/.polaris/.
+# START_HERE.txt is the visible local onramp; welcome.txt is the warm-up
+# challenge target and lives hidden in /home/kali/.polaris/.
 # README, mission_brief, and flag_submit.sh were removed — they were stale
 # relative to the CTFd board and Kali has no route to CTFd anyway, so a
 # Kali-side submission helper is broken by design. CTFd is the reference.
 COPY A9-splice-landing/modbus_client.py /home/kali/tools/modbus_scan.py
+COPY A14-kali/START_HERE.txt /home/kali/START_HERE.txt
 COPY A14-kali/claude_system_prompt.txt /home/kali/.config/claude/system_prompt.txt
 COPY A14-kali/welcome.txt /home/kali/.polaris/welcome.txt
 RUN chmod +x /home/kali/tools/*.py && \

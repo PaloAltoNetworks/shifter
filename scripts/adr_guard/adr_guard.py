@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
 import tomllib
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from fnmatch import fnmatch
@@ -75,6 +78,15 @@ class Violation:
     rule_id: str
     path: str
     message: str
+
+
+@dataclass(frozen=True)
+class _BoundaryPatchSite:
+    """One statically discovered mock patch target."""
+
+    path: str
+    line: int
+    target: str
 
 
 def _parse_iso_date(value: str) -> date:
@@ -2279,19 +2291,65 @@ def check_no_tracked_generated_artifacts(
 
 
 _DEPLOY_WORKFLOW_PATH = ".github/workflows/deploy.yml"
+_CORE_WORKFLOW_PATH = ".github/workflows/_core.yml"
+_RANGE_WORKFLOW_PATH = ".github/workflows/_range.yml"
 _PLATFORM_WORKFLOW_PATH = ".github/workflows/_shifter-platform.yml"
 _ADR_GUARD_SCRIPT_PATH = "scripts/adr_guard/adr_guard.py"
 _PLAN_SCOPE_CHECK = "deploy-workflow-plan-scope"
 _PLAN_SCOPE_RULE = "ADR-003-R2"
-_SHIFTER_APP_OUTPUT = "shifter_app: ${{ steps.filter.outputs.shifter_app }}"
-_SHIFTER_APP_QUALITY_CONDITION = "needs.changes.outputs.shifter_app == 'true'"
+_TERRAFORM_PLAN_FILE = "tfplan"
+_QUALITY_RELEVANT_OUTPUT = (
+    "quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || "
+    "steps.quality_guardrails.outputs.guardrail_docs == 'true' }}"
+)
+_QUALITY_RELEVANT_CONDITION = "needs.changes.outputs.quality_relevant == 'true'"
+_QUALITY_PREDICATE = "predicate-quantifier: every"
+_QUALITY_NON_DOCS_REQUIRED_GLOBS = (
+    "**",
+    "!docs/**",
+    "!**/*.md",
+    "!shifter/shifter_platform/documentation/**",
+)
+_QUALITY_GUARDRAIL_DOCS_REQUIRED_GLOBS = (
+    ".github/pull_request_template.md",
+    ".github/copilot-instructions.md",
+    "docs/adr/**",
+    "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
+)
+_PR_GATE_SKIPPED_QUALITY_GUARD = (
+    '[ "$quality_result" = "skipped" ] && [ "$quality_relevant" != "false" ]'
+)
+_QUALITY_ONLY_OUTPUT = "quality_only: ${{ steps.filter.outputs.quality_only }}"
+_QUALITY_ONLY_REQUIRED_GLOBS = (
+    "scripts/polaris-aws-range/**",
+    "scenario-dev/polaris/tests/**",
+)
+_PORTAL_IMAGE_OUTPUT = "portal_image: ${{ steps.filter.outputs.portal_image }}"
+_PORTAL_IMAGE_DEPLOY_CONDITION = "needs.changes.outputs.portal_image == 'true'"
+_PORTAL_IMAGE_REQUIRED_GLOB = "shifter/shifter_platform/**"
+_PORTAL_IMAGE_BUILD_INPUT = "inputs.portal_image_changes"
+_PORTAL_DEPLOY_MODE_CHECK = "portal-deploy-mode-source-of-truth"
+_PORTAL_DEPLOY_MODE_RULE = "ADR-003-R4"
+_PORTAL_DEPLOY_HELPER_PATH = "scripts/portal_deploy/portal_deploy.py"
+_PORTAL_DEV_OUTPUTS_PATH = "platform/terraform/environments/dev/portal/outputs.tf"
+_PORTAL_PROD_OUTPUTS_PATH = "platform/terraform/environments/prod/portal/outputs.tf"
 
 
 def _deploy_plan_scope_relevant(files: list[str] | None) -> bool:
     if files is None:
         return True
-    relevant = {_DEPLOY_WORKFLOW_PATH, _PLATFORM_WORKFLOW_PATH, _ADR_GUARD_SCRIPT_PATH}
+    relevant = {
+        _DEPLOY_WORKFLOW_PATH,
+        _CORE_WORKFLOW_PATH,
+        _RANGE_WORKFLOW_PATH,
+        _PLATFORM_WORKFLOW_PATH,
+        _ADR_GUARD_SCRIPT_PATH,
+    }
     return any(path in relevant for path in files)
+
+
+def _should_check_plan_scope_file(files: list[str] | None, path: str) -> bool:
+    return files is None or path in files or _ADR_GUARD_SCRIPT_PATH in files
 
 
 def _paths_filter_block(deploy_text: str, filter_name: str) -> list[str]:
@@ -2359,7 +2417,79 @@ def _terraform_plan_has_lock_timeout(stripped_line: str) -> bool:
         tokens = shlex.split(command, comments=True)
     except ValueError:
         tokens = command.split()
-    return "-lock-timeout=5m" in tokens
+    for index, token in enumerate(tokens[:-1]):
+        if token != "terraform" or tokens[index + 1] != "plan":
+            continue
+        plan_tokens: list[str] = []
+        for plan_token in tokens[index + 2 :]:
+            if plan_token in {"&&", "||", ";", "|"}:
+                break
+            plan_tokens.append(plan_token)
+        return "-lock-timeout=5m" in plan_tokens
+    return False
+
+
+def _terraform_plan_writes_saved_plan(stripped_line: str) -> bool:
+    if stripped_line.startswith("- run:"):
+        command = stripped_line.split(":", 1)[1].strip()
+    else:
+        command = stripped_line
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    for index, token in enumerate(tokens[:-1]):
+        if token != "terraform" or tokens[index + 1] != "plan":
+            continue
+        plan_tokens: list[str] = []
+        for plan_token in tokens[index + 2 :]:
+            if plan_token in {"&&", "||", ";", "|"}:
+                break
+            plan_tokens.append(plan_token)
+        if f"-out={_TERRAFORM_PLAN_FILE}" in plan_tokens:
+            return True
+        return any(
+            plan_token == "-out"
+            and next_index + 1 < len(plan_tokens)
+            and plan_tokens[next_index + 1] == _TERRAFORM_PLAN_FILE
+            for next_index, plan_token in enumerate(plan_tokens)
+        )
+    return False
+
+
+def _terraform_apply_uses_saved_plan(stripped_line: str) -> bool:
+    if stripped_line.startswith("- run:"):
+        command = stripped_line.split(":", 1)[1].strip()
+    else:
+        command = stripped_line
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    for index, token in enumerate(tokens[:-1]):
+        if token != "terraform" or tokens[index + 1] != "apply":
+            continue
+        apply_tokens = tokens[index + 2 :]
+        return (
+            "-lock-timeout=5m" in apply_tokens
+            and _TERRAFORM_PLAN_FILE in apply_tokens
+            and "-auto-approve" not in apply_tokens
+        )
+    return False
+
+
+def _line_removes_tfplan(stripped_line: str) -> bool:
+    if _TERRAFORM_PLAN_FILE not in stripped_line:
+        return False
+    if stripped_line.startswith("- run:"):
+        command = stripped_line.split(":", 1)[1].strip()
+    else:
+        command = stripped_line
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    return "rm" in tokens and _TERRAFORM_PLAN_FILE in tokens
 
 
 def _plan_scope_violation(path: str, message: str) -> Violation:
@@ -2387,40 +2517,213 @@ def _check_deploy_workflow_plan_routing(deploy_text: str) -> list[Violation]:
             )
         )
 
-    app_block = _paths_filter_block(deploy_text, "shifter_app")
     changes_block = _workflow_job_block(deploy_text, "changes")
     quality_block = _workflow_job_block(deploy_text, "quality")
-    if not app_block or not _active_line_contains(changes_block, _SHIFTER_APP_OUTPUT):
+    pr_gate_block = _workflow_job_block(deploy_text, "pr-gate")
+    non_docs_block = _paths_filter_block(deploy_text, "non_docs")
+    guardrail_docs_block = _paths_filter_block(deploy_text, "guardrail_docs")
+
+    if not _active_line_contains(changes_block, _QUALITY_RELEVANT_OUTPUT):
         violations.append(
             _plan_scope_violation(
                 _DEPLOY_WORKFLOW_PATH,
-                "Platform app source changes must retain a `shifter_app` filter/output "
-                "wired into Quality after the Terraform-only `shifter_platform` split; "
-                "missing the filter or changes-job output",
+                "Quality routing must retain a `quality_relevant` changes-job output "
+                "that combines the non-docs and guardrail-docs classifiers",
             )
         )
-    elif not _block_contains_glob(app_block, "shifter/**"):
+    elif not non_docs_block:
         violations.append(
             _plan_scope_violation(
                 _DEPLOY_WORKFLOW_PATH,
-                "`shifter_app` must include `shifter/**` so Python application changes "
-                "continue to trigger Quality after the platform plan scope split",
+                "Quality routing must retain a `non_docs` filter so ordinary docs-only "
+                "diffs are the only general Quality skip path",
             )
         )
-    elif not _active_line_contains(quality_block, _SHIFTER_APP_QUALITY_CONDITION):
+    elif not _active_line_contains(changes_block, _QUALITY_PREDICATE):
         violations.append(
             _plan_scope_violation(
                 _DEPLOY_WORKFLOW_PATH,
-                "The Quality job must include `needs.changes.outputs.shifter_app == 'true'` "
-                "so Python application changes still run Quality",
+                "The `non_docs` Quality classifier must use "
+                f"`{_QUALITY_PREDICATE}` so exclusion globs are honored together",
+            )
+        )
+    elif missing_non_doc_globs := [
+        glob
+        for glob in _QUALITY_NON_DOCS_REQUIRED_GLOBS
+        if not _block_contains_glob(non_docs_block, glob)
+    ]:
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The `non_docs` Quality classifier is missing required docs-only "
+                f"exclusion globs: {', '.join(missing_non_doc_globs)}",
+            )
+        )
+    elif not guardrail_docs_block:
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "Quality routing must retain a `guardrail_docs` filter so ADR and "
+                "enforcement-doc changes still run Quality",
+            )
+        )
+    elif missing_guardrail_globs := [
+        glob
+        for glob in _QUALITY_GUARDRAIL_DOCS_REQUIRED_GLOBS
+        if not _block_contains_glob(guardrail_docs_block, glob)
+    ]:
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The `guardrail_docs` Quality classifier is missing required "
+                f"guardrail paths: {', '.join(missing_guardrail_globs)}",
+            )
+        )
+    elif not _active_line_contains(quality_block, _QUALITY_RELEVANT_CONDITION):
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The Quality job must include "
+                f"`{_QUALITY_RELEVANT_CONDITION}` so non-docs and guardrail-docs "
+                "changes run Quality",
+            )
+        )
+    elif not pr_gate_block or not _active_line_contains(
+        pr_gate_block, _PR_GATE_SKIPPED_QUALITY_GUARD
+    ):
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "PR Gate must reject skipped Quality unless `quality_relevant` is false, "
+                "so skipped Quality is accepted only for ordinary docs-only changes",
             )
         )
     return violations
 
 
-def _check_platform_plan_lock_timeout(platform_text: str) -> list[Violation]:
+def _check_deploy_workflow_quality_only_routing(deploy_text: str) -> list[Violation]:
+    """Require non-deploy test-support paths to remain categorized."""
+    quality_only_block = _paths_filter_block(deploy_text, "quality_only")
+    changes_block = _workflow_job_block(deploy_text, "changes")
+    if not quality_only_block or not _active_line_contains(changes_block, _QUALITY_ONLY_OUTPUT):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "Non-deploy test-support changes must retain a `quality_only` "
+                "filter/output; missing the filter or changes-job output",
+            )
+        ]
+
+    missing_globs = [
+        glob
+        for glob in _QUALITY_ONLY_REQUIRED_GLOBS
+        if not _block_contains_glob(quality_only_block, glob)
+    ]
+    if missing_globs:
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "`quality_only` must include "
+                f"{', '.join(missing_globs)} so orphaned support test suites stay "
+                "categorized without triggering deploy jobs",
+            )
+        ]
+    return []
+
+
+def _check_deploy_workflow_portal_image_routing(deploy_text: str) -> list[Violation]:
+    """Require the portal-image deploy trigger restored by #913.
+
+    Application-code changes must reach the portal build/deploy path through
+    a dedicated `portal_image` filter, without widening the Terraform-scoped
+    `shifter_platform` plan trigger.
+    """
+    portal_block = _paths_filter_block(deploy_text, "portal_image")
+    changes_block = _workflow_job_block(deploy_text, "changes")
+    platform_job_block = _workflow_job_block(deploy_text, "shifter_platform")
+    if not portal_block or not _active_line_contains(changes_block, _PORTAL_IMAGE_OUTPUT):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "Portal application changes must retain a `portal_image` filter/output "
+                "so app-only pushes still build and deploy the portal image (#913); "
+                "missing the filter or changes-job output",
+            )
+        ]
+    if not _block_contains_glob(portal_block, _PORTAL_IMAGE_REQUIRED_GLOB):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                f"`portal_image` must include `{_PORTAL_IMAGE_REQUIRED_GLOB}` so portal "
+                "application changes trigger the image build/deploy path",
+            )
+        ]
+    if not _active_line_contains(platform_job_block, _PORTAL_IMAGE_DEPLOY_CONDITION):
+        return [
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The `shifter_platform` job must include "
+                f"`{_PORTAL_IMAGE_DEPLOY_CONDITION}` so application-code pushes still "
+                "invoke the portal build/deploy workflow",
+            )
+        ]
+    return []
+
+
+def _check_platform_build_portal_image_gate(platform_text: str) -> list[Violation]:
+    """Require the platform build job to gate on the portal-image input (#913)."""
+    build_block = _workflow_job_block(platform_text, "build")
+    if not build_block or not _active_line_contains(build_block, _PORTAL_IMAGE_BUILD_INPUT):
+        return [
+            _plan_scope_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"The `build` job must gate on `{_PORTAL_IMAGE_BUILD_INPUT}` so app-only "
+                "changes build and deploy the portal image without running Terraform",
+            )
+        ]
+    return []
+
+
+def _check_deploy_concurrency_queues_apply_runs(deploy_text: str) -> list[Violation]:
+    """Require deploy runs that can apply infrastructure to queue, not cancel.
+
+    PR cancellation is still allowed because PR runs do not execute environment
+    branch applies. A global `true` cancellation policy can kill Terraform
+    mid-apply on `aws-dev` / `gcp-dev` pushes.
+    """
+    cancel_value: str | None = None
+    for line in deploy_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped.startswith("cancel-in-progress:"):
+            continue
+        cancel_value = stripped.split(":", 1)[1].strip()
+        break
+
+    if cancel_value is None:
+        return []
+
+    normalized = cancel_value.strip()
+    if normalized in {"false", "${{ false }}"}:
+        return []
+    if (
+        "github.event_name == 'pull_request'" in normalized
+        or 'github.event_name == "pull_request"' in normalized
+    ):
+        return []
+
+    return [
+        _plan_scope_violation(
+            _DEPLOY_WORKFLOW_PATH,
+            "Deploy workflow concurrency must queue env-branch apply runs instead "
+            "of cancelling an in-flight Terraform apply; restrict cancellation to "
+            "pull_request runs or set `cancel-in-progress: false`",
+        )
+    ]
+
+
+def _check_terraform_plan_lock_timeout(workflow_text: str, path: str) -> list[Violation]:
     violations: list[Violation] = []
-    for lineno, line in enumerate(platform_text.splitlines(), start=1):
+    for lineno, line in enumerate(workflow_text.splitlines(), start=1):
         stripped = line.strip()
         if "terraform plan" not in stripped:
             continue
@@ -2430,11 +2733,121 @@ def _check_platform_plan_lock_timeout(platform_text: str) -> list[Violation]:
             continue
         violations.append(
             _plan_scope_violation(
-                f"{_PLATFORM_WORKFLOW_PATH}:{lineno}",
-                "AWS platform Terraform plan commands must include `-lock-timeout=5m` "
+                f"{path}:{lineno}",
+                "AWS Terraform plan commands must include `-lock-timeout=5m` "
                 "so legitimate concurrent plans wait for the state lock instead of failing",
             )
         )
+    return violations
+
+
+def _check_saved_plan_apply_contract(workflow_text: str, path: str) -> list[Violation]:
+    """Require the apply job to create and consume a local saved Terraform plan."""
+    violations: list[Violation] = []
+    plan_block = _workflow_job_block(workflow_text, "plan")
+    apply_block = _workflow_job_block(workflow_text, "apply")
+
+    if not plan_block:
+        return [
+            _plan_scope_violation(
+                path,
+                "Terraform workflow is missing a `plan` job; ADR-003-R2 cannot verify "
+                "saved-plan apply integrity",
+            )
+        ]
+    if not apply_block:
+        return [
+            _plan_scope_violation(
+                path,
+                "Terraform workflow is missing an `apply` job; ADR-003-R2 cannot verify "
+                "saved-plan apply integrity",
+            )
+        ]
+
+    apply_plan_idx: int | None = None
+    apply_command_idx: int | None = None
+    for index, line in enumerate(apply_block):
+        stripped = line.strip()
+        if stripped.startswith(("#", "echo ")):
+            continue
+        if apply_plan_idx is None and "terraform plan" in stripped:
+            apply_plan_idx = index
+        if apply_command_idx is None and "terraform apply" in stripped:
+            apply_command_idx = index
+
+    if apply_plan_idx is None:
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job must create a local saved Terraform plan "
+                "(`terraform plan -lock-timeout=5m -out=tfplan`) immediately before "
+                "applying, avoiding raw binary plan artifacts while ensuring apply "
+                "executes a reviewed saved plan",
+            )
+        )
+    elif not _terraform_plan_writes_saved_plan(apply_block[apply_plan_idx]):
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job's local plan command must write `-out=tfplan` "
+                "so the subsequent apply consumes a saved plan file",
+            )
+        )
+
+    if apply_command_idx is None:
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job must run `terraform apply -lock-timeout=5m "
+                "tfplan` after creating the saved plan",
+            )
+        )
+    elif apply_plan_idx is not None and apply_plan_idx > apply_command_idx:
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "The Terraform `apply` job must create the saved `tfplan` before "
+                "running `terraform apply`",
+            )
+        )
+
+    for index, line in enumerate(apply_block):
+        stripped = line.strip()
+        if stripped.startswith(("#", "echo ")):
+            continue
+        if (
+            apply_plan_idx is not None
+            and apply_command_idx is not None
+            and apply_plan_idx < index < apply_command_idx
+            and _line_removes_tfplan(stripped)
+        ):
+            violations.append(
+                _plan_scope_violation(
+                    path,
+                    "The Terraform `apply` job must not remove `tfplan` before applying; "
+                    "Service Discovery checks and Terraform apply must consume the same "
+                    "saved plan file",
+                )
+            )
+        if "terraform apply" not in stripped:
+            continue
+        if _terraform_apply_uses_saved_plan(stripped):
+            continue
+        violations.append(
+            _plan_scope_violation(
+                path,
+                "Terraform apply commands must apply the saved Terraform plan with "
+                "`terraform apply -lock-timeout=5m tfplan`, not run a fresh "
+                "`terraform apply -auto-approve`",
+            )
+        )
+    return violations
+
+
+def _check_terraform_workflow_integrity(workflow_text: str, path: str) -> list[Violation]:
+    violations: list[Violation] = []
+    violations.extend(_check_terraform_plan_lock_timeout(workflow_text, path))
+    violations.extend(_check_saved_plan_apply_contract(workflow_text, path))
     return violations
 
 
@@ -2445,27 +2858,228 @@ def check_deploy_workflow_plan_scope(repo_root: Path, files: list[str] | None) -
 
     violations: list[Violation] = []
     deploy_path = repo_root / _DEPLOY_WORKFLOW_PATH
+    core_path = repo_root / _CORE_WORKFLOW_PATH
+    range_path = repo_root / _RANGE_WORKFLOW_PATH
     platform_path = repo_root / _PLATFORM_WORKFLOW_PATH
 
-    if not deploy_path.exists():
+    check_deploy_and_platform = files is None or any(
+        path in {_DEPLOY_WORKFLOW_PATH, _PLATFORM_WORKFLOW_PATH, _ADR_GUARD_SCRIPT_PATH}
+        for path in files
+    )
+
+    if check_deploy_and_platform and not deploy_path.exists():
         violations.append(
             _plan_scope_violation(
                 _DEPLOY_WORKFLOW_PATH,
                 "Required workflow is missing; ADR-003-R2 cannot verify platform plan routing",
             )
         )
-    else:
-        violations.extend(_check_deploy_workflow_plan_routing(deploy_path.read_text(encoding="utf-8")))
+    elif check_deploy_and_platform:
+        deploy_text = deploy_path.read_text(encoding="utf-8")
+        violations.extend(_check_deploy_concurrency_queues_apply_runs(deploy_text))
+        violations.extend(_check_deploy_workflow_plan_routing(deploy_text))
+        violations.extend(_check_deploy_workflow_quality_only_routing(deploy_text))
+        violations.extend(_check_deploy_workflow_portal_image_routing(deploy_text))
 
-    if not platform_path.exists():
+    for path, workflow_path in (
+        (_CORE_WORKFLOW_PATH, core_path),
+        (_RANGE_WORKFLOW_PATH, range_path),
+    ):
+        if not _should_check_plan_scope_file(files, path):
+            continue
+        if not workflow_path.exists():
+            violations.append(
+                _plan_scope_violation(
+                    path,
+                    "Required workflow is missing; ADR-003-R2 cannot verify Terraform "
+                    "lock-timeout and saved-plan apply integrity",
+                )
+            )
+            continue
+        violations.extend(
+            _check_terraform_workflow_integrity(workflow_path.read_text(encoding="utf-8"), path)
+        )
+
+    if check_deploy_and_platform and not platform_path.exists():
         violations.append(
             _plan_scope_violation(
                 _PLATFORM_WORKFLOW_PATH,
                 "Required workflow is missing; ADR-003-R2 cannot verify platform Terraform plan commands",
             )
         )
+    elif check_deploy_and_platform:
+        platform_text = platform_path.read_text(encoding="utf-8")
+        violations.extend(_check_terraform_workflow_integrity(platform_text, _PLATFORM_WORKFLOW_PATH))
+        violations.extend(_check_platform_build_portal_image_gate(platform_text))
+
+    return violations
+
+
+def _portal_deploy_mode_relevant(files: list[str] | None) -> bool:
+    if files is None:
+        return True
+    relevant = {
+        _PLATFORM_WORKFLOW_PATH,
+        _PORTAL_DEPLOY_HELPER_PATH,
+        _PORTAL_DEV_OUTPUTS_PATH,
+        _PORTAL_PROD_OUTPUTS_PATH,
+        _ADR_GUARD_SCRIPT_PATH,
+    }
+    return any(path in relevant for path in files)
+
+
+def _portal_deploy_mode_violation(path: str, message: str) -> Violation:
+    return Violation(_PORTAL_DEPLOY_MODE_CHECK, _PORTAL_DEPLOY_MODE_RULE, path, message)
+
+
+def _check_portal_deploy_mode_workflow(platform_text: str) -> list[Violation]:
+    violations: list[Violation] = []
+    deploy_block = _workflow_job_block(platform_text, "deploy")
+    if not deploy_block:
+        return [
+            _portal_deploy_mode_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "The platform deploy job is missing; ADR-003-R4 cannot verify portal "
+                "deployment-mode source-of-truth handling",
+            )
+        ]
+    if "AWS_PORTAL_ENABLE_AUTOSCALING" in platform_text:
+        violations.append(
+            _portal_deploy_mode_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "`AWS_PORTAL_ENABLE_AUTOSCALING` must not drive the AWS portal deploy "
+                "path; derive deployment mode from Terraform outputs instead",
+            )
+        )
+    if not (
+        _active_line_contains(deploy_block, _PORTAL_DEPLOY_HELPER_PATH)
+        and _active_line_contains(deploy_block, "resolve-topology")
+    ):
+        violations.append(
+            _portal_deploy_mode_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "The deploy job must call `scripts/portal_deploy/portal_deploy.py "
+                "resolve-topology` so the deploy path is derived from Terraform state",
+            )
+        )
+    if not _active_line_contains(deploy_block, "verify-asg-image"):
+        violations.append(
+            _portal_deploy_mode_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "The ASG deploy path must call `verify-asg-image` after instance refresh "
+                "so every in-service instance is checked for the new portal image tag",
+            )
+        )
+    return violations
+
+
+def _check_portal_deploy_mode_outputs(repo_root: Path) -> list[Violation]:
+    violations: list[Violation] = []
+    for outputs_path in (_PORTAL_DEV_OUTPUTS_PATH, _PORTAL_PROD_OUTPUTS_PATH):
+        path = repo_root / outputs_path
+        if not path.exists():
+            violations.append(
+                _portal_deploy_mode_violation(
+                    outputs_path,
+                    "Portal Terraform outputs are missing; ADR-003-R4 requires "
+                    '`output "enable_autoscaling"` in each AWS portal environment',
+                )
+            )
+            continue
+        text = path.read_text(encoding="utf-8")
+        if 'output "enable_autoscaling"' not in text:
+            violations.append(
+                _portal_deploy_mode_violation(
+                    outputs_path,
+                    'Portal Terraform outputs must expose `output "enable_autoscaling"` '
+                    "so the deploy workflow reads the same mode Terraform applied",
+                )
+            )
+    return violations
+
+
+def _check_portal_deploy_helper(helper_text: str) -> list[Violation]:
+    checks = (
+        (
+            "terraform output -json",
+            "The portal deploy helper must read Terraform outputs, not a GitHub variable",
+        ),
+        (
+            "len(running_instance_ids) != 1",
+            "The portal deploy helper must fail unless single-instance mode finds exactly one "
+            "running tagged instance",
+        ),
+        (
+            "Reservations[].Instances[].InstanceId",
+            "The portal deploy helper must query all matching running instances and must not "
+            "pick `Reservations[0].Instances[0]`",
+        ),
+        (
+            "describe-auto-scaling-groups",
+            "The portal deploy helper must verify the Terraform ASG exists before choosing "
+            "the ASG deploy path",
+        ),
+        (
+            "send-command",
+            "The portal deploy helper must use SSM to verify the running portal image tag "
+            "on ASG instances",
+        ),
+        (
+            "docker inspect",
+            "The portal deploy helper must inspect the running portal container image during "
+            "ASG verification",
+        ),
+        (
+            "get-command-invocation",
+            "The portal deploy helper must check each ASG instance's SSM verification result",
+        ),
+    )
+    violations: list[Violation] = []
+    for needle, message in checks:
+        if needle not in helper_text:
+            violations.append(
+                _portal_deploy_mode_violation(_PORTAL_DEPLOY_HELPER_PATH, message)
+            )
+            break
+    return violations
+
+
+def check_portal_deploy_mode_source_of_truth(
+    repo_root: Path, files: list[str] | None
+) -> list[Violation]:
+    """Ensure the AWS portal deploy path is derived from Terraform state."""
+    if not _portal_deploy_mode_relevant(files):
+        return []
+
+    violations: list[Violation] = []
+    platform_path = repo_root / _PLATFORM_WORKFLOW_PATH
+    helper_path = repo_root / _PORTAL_DEPLOY_HELPER_PATH
+
+    if not platform_path.exists():
+        violations.append(
+            _portal_deploy_mode_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "Required workflow is missing; ADR-003-R4 cannot verify portal "
+                "deployment-mode source-of-truth handling",
+            )
+        )
     else:
-        violations.extend(_check_platform_plan_lock_timeout(platform_path.read_text(encoding="utf-8")))
+        violations.extend(
+            _check_portal_deploy_mode_workflow(platform_path.read_text(encoding="utf-8"))
+        )
+
+    violations.extend(_check_portal_deploy_mode_outputs(repo_root))
+
+    if not helper_path.exists():
+        violations.append(
+            _portal_deploy_mode_violation(
+                _PORTAL_DEPLOY_HELPER_PATH,
+                "Portal deploy helper is missing; ADR-003-R4 requires a tested helper "
+                "for Terraform-derived mode resolution and ASG image verification",
+            )
+        )
+    else:
+        violations.extend(_check_portal_deploy_helper(helper_path.read_text(encoding="utf-8")))
 
     return violations
 
@@ -2572,6 +3186,641 @@ def check_platform_renders_deploy_tfvars(repo_root: Path, files: list[str] | Non
                     "command; the render must precede `terraform init/validate/plan/apply`",
                 )
             )
+    return violations
+
+
+_FAIL_LOUD_CHECK = "deploy-verification-fail-loud"
+_FAIL_LOUD_RULE = "ADR-003-R3"
+_ENGINE_WORKFLOW_PATH = ".github/workflows/_shifter-engine.yml"
+_GUAC_STABILIZE_STEP = "Wait for Guacamole ECS services to stabilize"
+_ENGINE_TASKDEF_STEP = "Update ECS task definition"
+# The engine ECS task-family skip is only acceptable behind this explicit
+# bootstrap input (mirrors gcp_require_active_certificate); its presence in the
+# step proves the skip is gated rather than unconditional.
+_ENGINE_BOOTSTRAP_INPUT = "first_deploy"
+
+
+def _fail_loud_relevant(files: list[str] | None) -> bool:
+    if files is None:
+        return True
+    relevant = {
+        _PLATFORM_WORKFLOW_PATH,
+        _ENGINE_WORKFLOW_PATH,
+        _DEPLOY_WORKFLOW_PATH,
+        _ADR_GUARD_SCRIPT_PATH,
+    }
+    return any(path in relevant for path in files)
+
+
+def _fail_loud_violation(path: str, message: str) -> Violation:
+    return Violation(_FAIL_LOUD_CHECK, _FAIL_LOUD_RULE, path, message)
+
+
+def _workflow_step_block(workflow_text: str, step_name: str) -> list[str]:
+    """Return the raw lines of the named step, including its `run:` script.
+
+    A step is the `- name: <step_name>` list item and every more-indented line
+    beneath it, up to the next list item at the same indent or a dedent out of
+    the step list. Returns [] when the step is not found.
+    """
+    block: list[str] = []
+    in_block = False
+    step_indent: int | None = None
+    target = f"- name: {step_name}"
+    for raw_line in workflow_text.splitlines():
+        stripped = raw_line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if not in_block:
+            if stripped == target:
+                in_block = True
+                step_indent = indent
+            continue
+        # End the step at the next sibling list item or any dedent to/under it.
+        if stripped and step_indent is not None and indent <= step_indent:
+            break
+        block.append(raw_line)
+    return block
+
+
+def _noncomment_contains(lines: list[str], needle: str) -> bool:
+    return any(needle in line for line in lines if not line.lstrip().startswith("#"))
+
+
+def _check_guacamole_timeout_fails(platform_text: str) -> list[Violation]:
+    block = _workflow_step_block(platform_text, _GUAC_STABILIZE_STEP)
+    if not block:
+        return [
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"`{_GUAC_STABILIZE_STEP}` step is missing; ADR-003-R3 cannot verify "
+                "the Guacamole stabilization timeout fails the deploy",
+            )
+        ]
+    # The stabilization poll is the last `while ... done` loop in the step; its
+    # closing `done` separates the loop body from the timeout handler tail.
+    done_idx = max(
+        (i for i, line in enumerate(block) if line.strip() == "done"),
+        default=None,
+    )
+    if done_idx is None:
+        return [
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"`{_GUAC_STABILIZE_STEP}` step has no polling loop; ADR-003-R3 expects "
+                "a stabilization wait whose timeout fails the deploy",
+            )
+        ]
+    tail = block[done_idx + 1 :]
+    if not _noncomment_contains(tail, "exit 1") or _noncomment_contains(tail, "exit 0"):
+        return [
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                f"`{_GUAC_STABILIZE_STEP}` step must fail the deploy on stabilization "
+                "timeout: the handler after the polling loop must `exit 1` (not warn and "
+                "exit 0). Raise the timeout if first boot needs longer, but do not "
+                "downgrade a timeout to a warning",
+            )
+        ]
+    return []
+
+
+def _check_engine_task_family_fails(engine_text: str) -> list[Violation]:
+    block = _workflow_step_block(engine_text, _ENGINE_TASKDEF_STEP)
+    if not block:
+        return [
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                f"`{_ENGINE_TASKDEF_STEP}` step is missing; ADR-003-R3 cannot verify "
+                "a missing engine task family fails the deploy",
+            )
+        ]
+    violations: list[Violation] = []
+    if not _noncomment_contains(block, "exit 1"):
+        violations.append(
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                f"`{_ENGINE_TASKDEF_STEP}` step must `exit 1` when the ECS task "
+                "definition family cannot be described, so a missing/typo'd family "
+                "fails the deploy instead of skipping silently",
+            )
+        )
+    if not _noncomment_contains(block, _ENGINE_BOOTSTRAP_INPUT):
+        violations.append(
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                f"`{_ENGINE_TASKDEF_STEP}` step must gate any missing-family skip on the "
+                f"explicit `{_ENGINE_BOOTSTRAP_INPUT}` bootstrap input; an unconditional "
+                "`exit 0` skip lets a typo'd family skip every deploy forever",
+            )
+        )
+    return violations
+
+
+def check_deploy_verification_fail_loud(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Require deploy-verification steps to fail loud (ADR-003-R3).
+
+    Two deploy steps must fail the run when the thing they verify did not
+    happen, rather than warning and exiting 0:
+
+    - `_shifter-platform.yml`'s Guacamole stabilization wait must `exit 1` on
+      timeout (the FAILED circuit-breaker branch already does).
+    - `_shifter-engine.yml`'s task-definition update must `exit 1` when the ECS
+      task family cannot be described, with the only skip gated behind the
+      explicit `first_deploy` bootstrap input.
+    """
+    if not _fail_loud_relevant(files):
+        return []
+
+    violations: list[Violation] = []
+    platform_path = repo_root / _PLATFORM_WORKFLOW_PATH
+    engine_path = repo_root / _ENGINE_WORKFLOW_PATH
+
+    if not platform_path.exists():
+        violations.append(
+            _fail_loud_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "Required workflow is missing; ADR-003-R3 cannot verify the Guacamole "
+                "stabilization timeout fails the deploy",
+            )
+        )
+    else:
+        violations.extend(_check_guacamole_timeout_fails(platform_path.read_text(encoding="utf-8")))
+
+    if not engine_path.exists():
+        violations.append(
+            _fail_loud_violation(
+                _ENGINE_WORKFLOW_PATH,
+                "Required workflow is missing; ADR-003-R3 cannot verify a missing engine "
+                "task family fails the deploy",
+            )
+        )
+    else:
+        violations.extend(_check_engine_task_family_fails(engine_path.read_text(encoding="utf-8")))
+
+    return violations
+
+
+_BOUNDARY_MOCK_BASELINE_PATH = "scripts/adr_guard/boundary_mock_baseline.json"
+_BOUNDARY_MOCK_CHECK_NAME = "boundary-mock-policy"
+_BOUNDARY_MOCK_RULE = "ADR-019-R1"
+_BOUNDARY_MOCK_BASE_REF_ENVS = ("ADR_GUARD_BASE_REF", "GITHUB_BASE_REF")
+_BOUNDARY_MOCK_SKIP_PARTS = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        "staticfiles",
+        "venv",
+    }
+)
+_BOUNDARY_MOCK_BOUNDARY_SEGMENTS = frozenset(
+    {
+        "boto3",
+        "botocore",
+        "channels",
+        "httpx",
+        "requests",
+        "smtplib",
+        "socket",
+        "ssl",
+        "subprocess",
+        "urllib",
+    }
+)
+
+
+def _boundary_mock_violation(path: str, message: str) -> Violation:
+    """Shorthand for ADR-019-R1 violations."""
+    return Violation(_BOUNDARY_MOCK_CHECK_NAME, _BOUNDARY_MOCK_RULE, path, message)
+
+
+def _has_boundary_mock_skip_part(rel_path: str) -> bool:
+    """Return True for files under local caches, virtualenvs, or generated trees."""
+    return any(part in _BOUNDARY_MOCK_SKIP_PARTS for part in Path(rel_path).parts)
+
+
+def _is_boundary_mock_test_path(rel_path: str) -> bool:
+    """Return True for Python test files scanned by the boundary-mock policy."""
+    if not rel_path.endswith(".py") or _has_boundary_mock_skip_part(rel_path):
+        return False
+    path = Path(rel_path)
+    return "tests" in path.parts or path.name.startswith("test_") or path.name.endswith("_test.py")
+
+
+def _git_tracked_python_files(repo_root: Path) -> list[str] | None:
+    """Return tracked + non-ignored Python files, or None outside a git worktree."""
+    if not (repo_root / ".git").exists():
+        return None
+    cmd = [
+        "git",
+        "-C",
+        str(repo_root),
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        "*.py",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [entry.decode("utf-8") for entry in result.stdout.split(b"\0") if entry]
+
+
+def _walk_python_files(repo_root: Path) -> list[str]:
+    """Filesystem fallback for synthetic tests without a git index."""
+    files: list[str] = []
+    for path in repo_root.rglob("*.py"):
+        rel = _repo_relative(path, repo_root)
+        if _has_boundary_mock_skip_part(rel):
+            continue
+        files.append(rel)
+    return sorted(files)
+
+
+def _iter_repo_python_files(repo_root: Path) -> list[str]:
+    """Return repo-relative Python files from git when available."""
+    tracked = _git_tracked_python_files(repo_root)
+    if tracked is not None:
+        return sorted({p for p in tracked if not _has_boundary_mock_skip_part(p)})
+    return _walk_python_files(repo_root)
+
+
+def _first_party_python_roots(repo_root: Path) -> set[str]:
+    """Infer first-party import roots from tracked Python modules and packages."""
+    roots: set[str] = set()
+    for rel in _iter_repo_python_files(repo_root):
+        if _is_boundary_mock_test_path(rel):
+            continue
+        path = Path(rel)
+        if path.name == "__init__.py":
+            root = path.parent.name
+        else:
+            root = path.stem
+        if not root.isidentifier() or root in {"conftest", "tests"} or root.startswith("test_"):
+            continue
+        roots.add(root)
+    return roots
+
+
+def _boundary_mock_scope(repo_root: Path, files: list[str] | None) -> list[str]:
+    """Select test files to scan for this invocation."""
+    if files is None:
+        return [p for p in _iter_repo_python_files(repo_root) if _is_boundary_mock_test_path(p)]
+
+    touched = set(files)
+    if _ADR_GUARD_PATH in touched or _BOUNDARY_MOCK_BASELINE_PATH in touched:
+        return [p for p in _iter_repo_python_files(repo_root) if _is_boundary_mock_test_path(p)]
+
+    return sorted({p for p in files if _is_boundary_mock_test_path(p)})
+
+
+def _name_chain(node: ast.AST) -> str | None:
+    """Return a dotted name for simple Name/Attribute AST nodes."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _name_chain(node.value)
+        if parent:
+            return f"{parent}.{node.attr}"
+    return None
+
+
+def _resolve_imported_name(name: str, imported_modules: dict[str, str]) -> str | None:
+    """Resolve the leading segment of a dotted name through import aliases."""
+    head, sep, tail = name.partition(".")
+    resolved = imported_modules.get(head)
+    if resolved is None:
+        return name
+    return f"{resolved}.{tail}" if sep else resolved
+
+
+def _collect_mock_aliases(tree: ast.AST) -> tuple[set[str], set[str], dict[str, str]]:
+    """Collect unittest.mock aliases and imported module aliases from a file."""
+    patch_names: set[str] = set()
+    mock_modules: set[str] = set()
+    imported_modules: dict[str, str] = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".", 1)[0]
+                imported_modules[local] = alias.name
+                if alias.name == "unittest":
+                    mock_modules.add(f"{local}.mock")
+                elif alias.name == "unittest.mock":
+                    mock_modules.add(local if alias.asname else "unittest.mock")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                local = alias.asname or alias.name
+                imported_modules[local] = f"{module}.{alias.name}" if module else alias.name
+                if module == "unittest.mock" and alias.name == "patch":
+                    patch_names.add(local)
+                elif module == "unittest" and alias.name == "mock":
+                    mock_modules.add(local)
+
+    return patch_names, mock_modules, imported_modules
+
+
+def _is_mock_patch_func(func: ast.AST, patch_names: set[str], mock_modules: set[str]) -> bool:
+    """Return True for patch(...) or mock/mocker.patch(...)."""
+    if isinstance(func, ast.Name):
+        return func.id in patch_names
+    if isinstance(func, ast.Attribute) and func.attr == "patch":
+        base = _name_chain(func.value)
+        return base in mock_modules or base == "mocker"
+    return False
+
+
+def _is_mock_patch_object_func(func: ast.AST, patch_names: set[str], mock_modules: set[str]) -> bool:
+    """Return True for patch.object(...) or mock/mocker.patch.object(...)."""
+    return isinstance(func, ast.Attribute) and func.attr == "object" and _is_mock_patch_func(
+        func.value, patch_names, mock_modules
+    )
+
+
+def _patch_object_target(call: ast.Call, imported_modules: dict[str, str]) -> str | None:
+    """Resolve patch.object(module_or_class, "name") into a dotted target when static."""
+    if len(call.args) < 2:
+        return None
+    attr_arg = call.args[1]
+    if not (isinstance(attr_arg, ast.Constant) and isinstance(attr_arg.value, str)):
+        return None
+    base = _name_chain(call.args[0])
+    if base is None:
+        return None
+    resolved = _resolve_imported_name(base, imported_modules)
+    if resolved is None:
+        return None
+    return f"{resolved}.{attr_arg.value}"
+
+
+def _iter_boundary_patch_sites(repo_root: Path, rel_paths: list[str]) -> list[_BoundaryPatchSite]:
+    """Statically discover string patch targets in selected test files."""
+    sites: list[_BoundaryPatchSite] = []
+    for rel in rel_paths:
+        path = repo_root / rel
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+
+        patch_names, mock_modules, imported_modules = _collect_mock_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            target: str | None = None
+            if (
+                _is_mock_patch_func(node.func, patch_names, mock_modules)
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                target = node.args[0].value
+            elif _is_mock_patch_object_func(node.func, patch_names, mock_modules):
+                target = _patch_object_target(node, imported_modules)
+
+            if target:
+                sites.append(_BoundaryPatchSite(rel, node.lineno, target))
+    return sites
+
+
+def _is_allowed_boundary_patch_target(target: str) -> bool:
+    """Return True for patch targets aimed at process/network/cloud boundaries."""
+    parts = target.split(".")
+    return any(part in _BOUNDARY_MOCK_BOUNDARY_SEGMENTS for part in parts[1:])
+
+
+def _is_first_party_internal_patch_target(target: str, first_party_roots: set[str]) -> bool:
+    """Return True for first-party targets that are not explicit boundary adapters."""
+    root = target.split(".", 1)[0]
+    return root in first_party_roots and not _is_allowed_boundary_patch_target(target)
+
+
+def _parse_boundary_mock_baseline(raw: str, source: str) -> tuple[Counter[tuple[str, str]], Violation | None]:
+    """Parse a boundary mock baseline payload into counts keyed by (path, target)."""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return Counter(), _boundary_mock_violation(
+            _BOUNDARY_MOCK_BASELINE_PATH,
+            f"invalid baseline JSON in {source}: {exc}",
+        )
+
+    records = payload.get("allowed_internal_patch_counts") if isinstance(payload, dict) else None
+    if not isinstance(records, list):
+        return Counter(), _boundary_mock_violation(
+            _BOUNDARY_MOCK_BASELINE_PATH,
+            f"baseline in {source} must contain an allowed_internal_patch_counts list",
+        )
+
+    counts: Counter[tuple[str, str]] = Counter()
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            return Counter(), _boundary_mock_violation(
+                _BOUNDARY_MOCK_BASELINE_PATH,
+                f"baseline entry {index} in {source} must be an object",
+            )
+        rel = record.get("path")
+        target = record.get("target")
+        count = record.get("count")
+        if not isinstance(rel, str) or not isinstance(target, str) or not isinstance(count, int) or count < 0:
+            return Counter(), _boundary_mock_violation(
+                _BOUNDARY_MOCK_BASELINE_PATH,
+                f"baseline entry {index} in {source} must have string path/target "
+                "and non-negative integer count",
+            )
+        counts[(rel, target)] += count
+    return counts, None
+
+
+def _load_boundary_mock_baseline(repo_root: Path) -> tuple[Counter[tuple[str, str]], Violation | None]:
+    """Load the working-tree legacy internal patch baseline."""
+    path = repo_root / _BOUNDARY_MOCK_BASELINE_PATH
+    if not path.exists():
+        return Counter(), _boundary_mock_violation(
+            _BOUNDARY_MOCK_BASELINE_PATH,
+            "boundary mock baseline is missing; generate it from current legacy internal patch counts",
+        )
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return Counter(), _boundary_mock_violation(
+            _BOUNDARY_MOCK_BASELINE_PATH,
+            f"could not read baseline: {exc}",
+        )
+
+    return _parse_boundary_mock_baseline(raw, "working tree")
+
+
+def _git_text(repo_root: Path, args: list[str]) -> str | None:
+    """Run a read-only git command and return stdout when it succeeds."""
+    if not (repo_root / ".git").exists():
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _boundary_mock_base_reference_candidates(repo_root: Path) -> list[str]:
+    """Return base-branch commit-ish candidates for the baseline ratchet reference."""
+    candidates: list[str] = []
+    for env_name in _BOUNDARY_MOCK_BASE_REF_ENVS:
+        base_ref = os.environ.get(env_name, "").strip()
+        if not base_ref:
+            continue
+        candidates.append(base_ref)
+        if base_ref.startswith("refs/heads/"):
+            short = base_ref.removeprefix("refs/heads/")
+            candidates.extend([f"origin/{short}", short])
+        elif not base_ref.startswith("origin/") and not base_ref.startswith("refs/"):
+            candidates.extend([f"origin/{base_ref}", base_ref])
+
+    candidates.extend(["origin/dev", "dev", "origin/main", "main"])
+
+    refs: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        merge_base = _git_text(repo_root, ["merge-base", "HEAD", candidate])
+        if merge_base is None:
+            continue
+        ref = merge_base.strip()
+        if ref and ref not in seen:
+            refs.append(ref)
+            seen.add(ref)
+
+    return refs
+
+
+def _boundary_mock_fallback_reference_candidates(repo_root: Path) -> list[str]:
+    """Return fallback commit-ish candidates for shallow/synthetic repositories."""
+    refs: list[str] = []
+    seen: set[str] = set()
+    for fallback in ("HEAD^1", "HEAD"):
+        ref = _git_text(repo_root, ["rev-parse", "--verify", f"{fallback}^{{commit}}"])
+        if ref is None:
+            continue
+        commit = ref.strip()
+        if commit and commit not in seen:
+            refs.append(commit)
+            seen.add(commit)
+
+    return refs
+
+
+def _load_boundary_mock_reference_baseline(
+    repo_root: Path,
+) -> tuple[Counter[tuple[str, str]] | None, Violation | None]:
+    """Load the baseline from the branch reference point, when one exists."""
+    base_refs = _boundary_mock_base_reference_candidates(repo_root)
+    for ref in base_refs:
+        raw = _git_text(repo_root, ["show", f"{ref}:{_BOUNDARY_MOCK_BASELINE_PATH}"])
+        if raw is None:
+            continue
+        return _parse_boundary_mock_baseline(raw, f"git reference {ref}")
+    if base_refs:
+        return None, None
+
+    for ref in _boundary_mock_fallback_reference_candidates(repo_root):
+        raw = _git_text(repo_root, ["show", f"{ref}:{_BOUNDARY_MOCK_BASELINE_PATH}"])
+        if raw is None:
+            continue
+        return _parse_boundary_mock_baseline(raw, f"git reference {ref}")
+    return None, None
+
+
+def _check_boundary_mock_baseline_non_growth(
+    repo_root: Path,
+    current_baseline: Counter[tuple[str, str]],
+) -> list[Violation]:
+    """Fail any committed baseline allowance that grows against the reference baseline."""
+    reference_baseline, reference_error = _load_boundary_mock_reference_baseline(repo_root)
+    if reference_error is not None:
+        return [reference_error]
+    if reference_baseline is None:
+        return []
+
+    violations: list[Violation] = []
+    for key, allowed in sorted(current_baseline.items()):
+        reference_allowed = reference_baseline.get(key, 0)
+        if allowed <= reference_allowed:
+            continue
+        rel, target = key
+        violations.append(
+            _boundary_mock_violation(
+                _BOUNDARY_MOCK_BASELINE_PATH,
+                f"baseline allowance for first-party internal patch target {target!r} in {rel} "
+                f"grew from {reference_allowed} to {allowed}; baseline counts may only shrink "
+                "without a dated ADR exception",
+            )
+        )
+    return violations
+
+
+def check_boundary_mock_policy(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Prevent net-new first-party internal mock patch targets in tests.
+
+    Existing topology-coupled tests are represented by a committed baseline of
+    ``(test file, patch target) -> count``. The check allows the baseline to
+    shrink but fails any new internal target or count increase. Process,
+    network, cloud SDK, and channel-layer transport patch targets remain
+    allowed because they are real boundaries rather than first-party topology.
+    """
+    scan_files = _boundary_mock_scope(repo_root, files)
+    if not scan_files:
+        return []
+
+    baseline, baseline_error = _load_boundary_mock_baseline(repo_root)
+    if baseline_error is not None:
+        return [baseline_error]
+
+    violations = _check_boundary_mock_baseline_non_growth(repo_root, baseline)
+    first_party_roots = _first_party_python_roots(repo_root)
+    current: Counter[tuple[str, str]] = Counter()
+    first_line: dict[tuple[str, str], int] = {}
+    for site in _iter_boundary_patch_sites(repo_root, scan_files):
+        if not _is_first_party_internal_patch_target(site.target, first_party_roots):
+            continue
+        key = (site.path, site.target)
+        current[key] += 1
+        first_line.setdefault(key, site.line)
+
+    for key, found in sorted(current.items()):
+        allowed = baseline.get(key, 0)
+        if found <= allowed:
+            continue
+        rel, target = key
+        violations.append(
+            _boundary_mock_violation(
+                f"{rel}:{first_line[key]}",
+                f"first-party internal patch target {target!r} exceeds the legacy baseline "
+                f"(allowed {allowed}, found {found}); patch a process/network/cloud boundary "
+                "or assert observable behavior instead",
+            )
+        )
     return violations
 
 
@@ -3055,9 +4304,12 @@ CHECKS = {
     "no-tracked-generated-artifacts": check_no_tracked_generated_artifacts,
     "no-populated-secret-env-files": check_no_populated_secret_env_files,
     "mcp-ops-tls-strict": check_mcp_ops_tls_strict,
+    "boundary-mock-policy": check_boundary_mock_policy,
     "python-complexity-gate": check_python_complexity_gate,
     "deploy-workflow-plan-scope": check_deploy_workflow_plan_scope,
+    "portal-deploy-mode-source-of-truth": check_portal_deploy_mode_source_of_truth,
     "aws-platform-renders-deploy-tfvars": check_platform_renders_deploy_tfvars,
+    "deploy-verification-fail-loud": check_deploy_verification_fail_loud,
 }
 CHECK_LEVELS = {
     "fast": [
@@ -3071,9 +4323,12 @@ CHECK_LEVELS = {
         "no-tracked-generated-artifacts",
         "no-populated-secret-env-files",
         "mcp-ops-tls-strict",
+        "boundary-mock-policy",
         "python-complexity-gate",
         "deploy-workflow-plan-scope",
+        "portal-deploy-mode-source-of-truth",
         "aws-platform-renders-deploy-tfvars",
+        "deploy-verification-fail-loud",
     ],
     "ci": [
         "adr-registry",
@@ -3087,9 +4342,12 @@ CHECK_LEVELS = {
         "no-tracked-generated-artifacts",
         "no-populated-secret-env-files",
         "mcp-ops-tls-strict",
+        "boundary-mock-policy",
         "python-complexity-gate",
         "deploy-workflow-plan-scope",
+        "portal-deploy-mode-source-of-truth",
         "aws-platform-renders-deploy-tfvars",
+        "deploy-verification-fail-loud",
     ],
     "all": list(CHECKS),
 }

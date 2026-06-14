@@ -26,17 +26,38 @@ python3 scripts/adr_guard/adr_guard.py --checks layer-imports guardrail-docs --a
 Current mechanisms:
 
 - `scripts/adr_guard/adr_guard.py`: repo-native policy runner
+- `scripts/adr_guard/boundary_mock_baseline.json`: current legacy
+  first-party internal mock-patch counts for ADR-019. Counts may shrink
+  as tests move to behavioral assertions, but new or increased internal
+  patch counts, including baseline allowance increases against the branch
+  reference, fail the `boundary-mock-policy` check.
 - `.pre-commit-config.yaml`: local fast checks
+  - The `Deploy` workflow's always-present `Pre-commit` job runs the
+    file-hygiene and secret-scan subset (`trailing-whitespace`,
+    `end-of-file-fixer`, YAML/JSON checks, large-file and merge-conflict
+    checks, private-key detection, and gitleaks) and feeds `PR Gate`, so
+    protected-branch PRs cannot bypass that baseline through path filters.
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
     Shifter-owned, Terraform-managed instances.
+  - `check-tf-rds-security`: local Terraform RDS hardening check that
+    keeps the portal and Guacamole RDS instances on IAM DB auth and an
+    explicit CA certificate identifier.
 - `.github/workflows/_quality.yml`: CI architecture gate. Its SonarCloud
   job restores coverage artifacts, sets up Temurin Java 21, and disables
   SonarScanner JRE auto-provisioning so the quality gate does not depend
-  on downloading a runtime during analysis.
+  on downloading a runtime during analysis. The job uses Node 24-backed
+  action majors for checkout, artifact restore, Java setup, and the
+  SonarQube Cloud scan so runner deprecation warnings do not mask real
+  SonarCloud quality findings.
+  - Repository branch protection for `main` and `dev` requires the
+    aggregate `PR Gate`, CodeQL, and pull-request title lint with strict
+    up-to-date status checks. Admin bypass remains enabled for emergency
+    override; normal changes land through PRs.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
-  runs on push to `dev`, on pull requests against `dev`, and on a
+  runs on pushes to `main` and `dev`, on pull requests against either
+  protected branch, and on a
   weekly schedule. Least-privilege permissions (`contents: read`,
   `security-events: write`, `actions: read`); no `pull_request_target`.
 - `.github/workflows/pr-title-lint.yml`: pull-request title validation
@@ -82,16 +103,20 @@ Current mechanisms:
   soft-fail while manifest hardening proceeds as a separate workstream.
   Accepted-risk waivers MUST have an entry in `docs/adr/exceptions.yaml`
   with owner, reason, expiry, affected paths, and the Checkov policy ID.
+- `scripts/check_tf_rds_security/check_tf_rds_security.py`: ADR-004-R12
+  RDS hardening check for the two first-party AWS RDS instances. It
+  requires literal IAM DB auth enablement and an explicit non-empty CA
+  certificate identifier, complementing Checkov's RDS policies.
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
   flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
-  `child_process` (any shape — named, default, namespace, CommonJS
+  `child_process` (any shape: named, default, namespace, CommonJS
   destructure, or bare-`require` property access, with or without
   the `node:` prefix) AND uses one of the shell-string call shapes:
   `execSync(...)`, `exec(...)`, an `execSync as <alias>` rename
   used as `<alias>(`, or `spawn`/`spawnSync`/`execFile`/
   `execFileSync` invoked with `{ shell: true }`. String literals
   and comments are flattened to whitespace by a small per-state
-  consumer (one helper per state — code / line-comment /
+  consumer (one helper per state: code / line-comment /
   block-comment / string, preserving newlines), so
   `"https://..."` URLs do not accidentally erase a real call site,
   and so commented-out call sites or strings containing
@@ -103,6 +128,21 @@ Current mechanisms:
   `mcp/ngfw/*` migrated to argv-array helpers via the shared
   `mcp/shared/aws-helpers.js` module in #759, alongside the
   original `mcp/ops/*` migration in #763.
+- `scripts/adr_guard/adr_guard.py` `boundary-mock-policy` check:
+  enforces ADR-019-R1 for Python tests. The checker statically parses
+  tracked test files for `patch()` / mock `.patch()` string targets and
+  statically resolvable `patch.object(imported_module_or_class, ...)`
+  calls. Targets rooted in first-party Python modules are rejected unless
+  their `(test file, target)` count is already present in
+  `scripts/adr_guard/boundary_mock_baseline.json`. Patches against real
+  process/network/cloud/framework transport boundaries, such as
+  `subprocess`, `boto3`, HTTP clients, SMTP/socket/SSL, and channel-layer
+  transports, remain allowed. The baseline is a ratchet: lower counts
+  when legacy mock-coupled tests are rewritten; the check compares the
+  committed baseline to the branch reference so authors cannot raise
+  counts to land new topology-coupled tests without a dated ADR
+  exception. During initial adoption, a base branch without the baseline
+  file starts the ratchet from the first merged baseline.
 
 ## Adding A Rule
 

@@ -114,6 +114,16 @@ jobs:
           python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py \
             platform/terraform/modules/engine-provisioner/iam.tf
 
+      # ADR-004-R12 / issue #140: first-party RDS instances must keep
+      # IAM DB auth enabled and explicitly pin a CA identifier. Checkov
+      # enforces IAM auth, but CKV_AWS_211 currently passes when the CA
+      # attribute is absent, so this repo-native guard closes that gap.
+      - name: Run check-tf-rds-security
+        run: |
+          python3 scripts/check_tf_rds_security/check_tf_rds_security.py \
+            platform/terraform/modules/portal/rds/main.tf \
+            platform/terraform/modules/guacamole/rds.tf
+
       # Pin the behavior of the check_tf_* IAM/security checkers
       # themselves. The live-file invocations above only exercise the
       # happy-path shape; the test suites cover wildcards, list
@@ -130,6 +140,7 @@ jobs:
           python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs
           python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
+          python3 -m unittest scripts.check_tf_rds_security.test_check_tf_rds_security
 
   # Pin the behavior of the Polaris CTFd workshop sync helpers. Issue #702
   # shipped 38/39 challenges unsubmittable because flag-row reconciliation
@@ -761,6 +772,24 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  cyberscript-tests:
+    permissions:
+      contents: read
+    name: Tests (cyberscript)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run tests
+        working-directory: shifter/cyberscript
+        env:
+          PYTHONPATH: ../shifter_platform
+        run: uv run --with pytest pytest tests/
+
   bootstrap-tests:
     permissions:
       contents: read
@@ -810,6 +839,24 @@ jobs:
       - name: Run tests
         working-directory: scripts/gcp
         run: uv run pytest tests/
+
+  polaris-aws-range-tests:
+    permissions:
+      contents: read
+    name: Tests (polaris-aws-range)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run tests
+        working-directory: scripts/polaris-aws-range
+        run: |
+          uv run --with boto3 python -m unittest \
+            test_common test_provisioning_state test_range_health -v
 
   check-layer-imports-tests:
     permissions:
@@ -890,6 +937,44 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  migration-proof-tests:
+    permissions:
+      contents: read
+    name: Tests (migration proof)
+    if: ${{ !inputs.skip_tests }}
+    needs: [shifter-platform-lint, shifter-platform-sast]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Run migration proof
+        working-directory: shifter/shifter_platform
+        run: uv run pytest engine/tests/test_subnet_allocation_migrations_postgres.py
+
+  scenario-smoketest-tests:
+    permissions:
+      contents: read
+    name: Tests (scenario smoketest)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run tests
+        env:
+          PYTHONPATH: scenario-dev/polaris/tests
+        run: uv run --with pytest pytest scenario-dev/polaris/tests/test_scenario_smoketest.py
+
   adr-guard-tests:
     permissions:
       contents: read
@@ -948,10 +1033,10 @@ jobs:
           retention-days: 1
 
   mcp-lint:
-    # Lint always runs, even when [skip tests] is set on the workflow
-    # input, because lint is a static check independent of the test
-    # gate. Matches the shifter-platform pattern (lint-js / js-tests
-    # are separate jobs).
+    # Lint always runs, even when a caller sets the workflow skip_tests
+    # input, because lint is a static check independent of the test gate.
+    # Matches the shifter-platform pattern (lint-js / js-tests are
+    # separate jobs).
     permissions:
       contents: read
     name: Lint JavaScript (mcp/${{ matrix.package }})
@@ -959,7 +1044,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [ngfw, ops, shared]
+        package: [ngfw, ops, planner, shared]
     steps:
       - uses: actions/checkout@v6
 
@@ -988,7 +1073,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [ngfw, ops]
+        package: [ngfw, ops, planner]
     steps:
       - uses: actions/checkout@v6
 
@@ -1164,7 +1249,7 @@ jobs:
       - installation-tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Full history so SonarCloud attributes new code accurately for
           # pull-request (new-code) quality-gate analysis.
@@ -1174,49 +1259,49 @@ jobs:
       # artifacts; restore each at the repo-relative path that
       # sonar-project.properties references.
       - name: Download shifter_platform coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-shifter-platform
           path: shifter/shifter_platform
       - name: Download shifter_platform JS coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-shifter-platform-js
           path: shifter/shifter_platform/coverage
       - name: Download provisioner coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-provisioner
           path: shifter/engine/provisioner
       - name: Download packer coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-packer
           path: shifter/packer
       - name: Download bootstrap coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-bootstrap
           path: scripts/bootstrap
       - name: Download check_layer_imports coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-check-layer-imports
           path: scripts/check_layer_imports
       - name: Download installation coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-installation
           path: shifter/installation
 
       - name: Setup Java for SonarScanner
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
       - name: SonarQube Cloud scan
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:

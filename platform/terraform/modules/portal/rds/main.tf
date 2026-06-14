@@ -117,6 +117,7 @@ resource "aws_db_instance" "this" {
   engine_version       = var.engine_version
   instance_class       = var.instance_class
   parameter_group_name = aws_db_parameter_group.this.name
+  ca_cert_identifier   = var.ca_cert_identifier
 
   # Storage
   allocated_storage     = var.allocated_storage

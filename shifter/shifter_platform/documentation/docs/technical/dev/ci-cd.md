@@ -59,14 +59,20 @@ Quality (must pass first)
     ▼
   Core (ECR)
     │
-    ├──────────────┬─────────────────┐
-    ▼              ▼                 ▼
-  Range    Shifter Engine    Portal Plan
-                   │                 │
-                   └────────┬────────┘
-                            ▼
-                      Portal Deploy
+    ├──────────────┐
+    ▼              ▼
+  Range    Shifter Engine
+    │              │
+    └──────────────┘
+            │
+            ▼
+  Shifter Platform Plan/Deploy
 ```
+
+Downstream AWS jobs use explicit `needs.<job>.result` gates. A skipped upstream
+is acceptable when its path filter did not select it, but a failed or cancelled
+upstream must stop dependent infrastructure work. In particular, Shifter Platform
+must not plan or apply on top of a failed Shifter Engine deploy.
 
 ## Change Detection
 
@@ -77,12 +83,25 @@ The orchestrator uses path filters to run only relevant jobs:
 | `core` | ECR module, environment root, deploy workflow |
 | `range` | Range Terraform, engine state module |
 | `shifter_engine` | Shifter Engine code, ECR module |
-| `shifter_platform` | Shifter Django code, portal/Guacamole Terraform |
+| `shifter_platform` | Portal/Guacamole Terraform and platform deploy workflow |
+| `quality_relevant` | Any non-docs change, plus guardrail docs; controls whether Quality runs without launching deploy or Terraform plan jobs |
+| `portal_image` | Portal image build inputs (`shifter/shifter_platform/**`, `cyberscript`, `installation`, `.dockerignore`); triggers the portal image build/deploy on environment branches without running Terraform |
 | `gcp` | GCP Terraform, GCP Kubernetes assets, GCP scripts, GCP cloud adapters |
+| `mcp` | MCP package changes, routed to Quality only |
+| `quality_only` | Non-deploy test-support and guardrail surfaces (`scripts/polaris-aws-range/**`, `scenario-dev/polaris/tests/**`, `_quality.yml`, ADR/guardrail checker paths), routed to Quality only |
 
 ## Quality Gate
 
-Runs on every PR and direct push to `dev`:
+Runs on every PR and direct push to `dev` unless the diff is ordinary
+docs-only. Guardrail docs such as `.github/pull_request_template.md`,
+`.github/copilot-instructions.md`, `docs/adr/**`, and the ADR enforcement
+guide are quality-relevant and still run Quality. Manual dispatch is a
+deliberate full-validation path, except for the existing fast GCP deploy route.
+
+The deploy workflow exposes one `quality_relevant` output for this decision:
+non-docs changes make it true, ordinary docs-only changes make it false, and
+guardrail docs make it true even though they are documentation. PR Gate accepts
+a skipped Quality job only when `quality_relevant` is false.
 
 - **ADR conformance**: `python3 scripts/adr_guard/adr_guard.py --all --level ci`
   Includes `adr-registry`, `layer-imports`, `cross-layer-model-imports`, and
@@ -103,7 +122,11 @@ Runs on every PR and direct push to `dev`:
 - **K8s security scanning**: Checkov with the `kubernetes` framework. Current
   soft-fail is scoped to Kubernetes manifest hardening and does not justify
   Terraform soft-fail.
-- **Tests**: `pytest` with PostgreSQL service container for `shifter_platform`
+- **Tests**: package-local Python, JavaScript, and harness suites, including
+  `shifter_platform`, `cyberscript`, `shifter/engine/provisioner`, `packer`,
+  `installation`, `scripts/bootstrap`, `scripts/gcp`, `scripts/polaris-aws-range`,
+  `scenario-dev/polaris/tests`, the Postgres migration proof, and MCP package
+  tests including `mcp/planner`.
 - **IaC scanning**: Checkov for Terraform is a **blocking gate** under
   ADR-004-R11. Pre-commit and CI share the same config at
   `platform/terraform/.checkov.yaml`; `--soft-fail` is off. Accepted-risk
@@ -113,7 +136,7 @@ Runs on every PR and direct push to `dev`:
 - **Secret scanning**: gitleaks on newly introduced commits
 - **Coverage**: `shifter_platform` emits terminal and XML coverage reports
 
-Architecture checks are not skipped by the normal test-skip path. `[skip tests]` may skip slow test jobs on `dev`, but it does not bypass ADR or architecture enforcement.
+Commit-message or label-based test skips are not accepted by `deploy.yml`.
 
 ## Terraform Flow
 
@@ -123,12 +146,26 @@ Each component follows the same pattern:
    - Checkout repo (tfvars are committed)
    - `terraform init`
    - `terraform validate`
-   - `terraform plan -out=tfplan`
+   - `terraform plan -lock-timeout=5m -out=tfplan`
    - Comment plan on PR (if PR)
 
 2. **Apply job** (if plan succeeds):
-   - Skip on PRs to prod
-   - `terraform apply -auto-approve`
+   - Skip on PRs
+   - Create a local saved `tfplan` with `terraform plan -lock-timeout=5m -out=tfplan`
+   - `terraform apply -lock-timeout=5m tfplan`
+
+Branch and manual deploy runs are queued by the Deploy workflow's concurrency
+group so a newer push cannot cancel a Terraform process after it has started
+mutating remote infrastructure or while it holds the backend lock. Pull request
+runs may still be cancelled by newer commits because they do not execute apply
+jobs.
+
+The saved plan file created inside the apply job is the apply contract. If state
+moves after that local plan, Terraform should fail the saved-plan apply instead
+of silently executing a fresh unplanned apply. Raw binary plans are not uploaded
+as workflow artifacts because they can include unredacted plan/state data. The
+platform Service Discovery replacement check reads the same saved `tfplan` that
+the apply step consumes.
 
 **Note**: The committed `terraform.tfvars` files ship an `example.com`
 baseline. Deployment-specific values (domains, alarm emails, allow-list
@@ -144,7 +181,7 @@ After Terraform apply, AWS platform deployment:
 
 1. Build Docker image
 2. Push to ECR with tags: `latest`, `{git-sha}`
-3. Find target EC2 instance(s) via tags
+3. Find target EC2 instances via tags
 4. SSM send-command to pull and run new container
 
 **Single Instance Mode**: Deploys to `{env}-portal-ec2` tagged instance.
@@ -178,6 +215,13 @@ Dispatch on main  → AWS prod deploy
 - The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults.
 - The GCP portal auth contract is FirebaseUI/browser-side Identity Platform auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
 - Multi-cloud work enters through the shared cloud adapter layers rather than provider-specific calls in domain services.
+
+## Manual Deploy Bootstrap Inputs
+
+`deploy.yml` exposes `workflow_dispatch` inputs for rare first-time-bootstrap deploys. They are strict by default and only take effect on a manual dispatch; automatic (push) deploys always fail closed.
+
+- `aws_first_deploy` (default `false`): allow the AWS engine deploy to skip the ECS task-family existence check. Set `true` only for the first-ever deploy to a fresh AWS environment, before the platform Terraform apply has created the provisioner task definition. On any normal deploy a missing or typo'd task family fails the run instead of skipping silently. Clear it (re-run without the flag) once the platform stack has been applied.
+- `gcp_require_active_certificate` (default `true`): require the GKE ManagedCertificate to be Active for the public hostname. Set `false` only for first-time GCP bootstrap, before DNS for the hostname has been pointed at the ingress IP.
 
 ## Self-Hosted Runner
 

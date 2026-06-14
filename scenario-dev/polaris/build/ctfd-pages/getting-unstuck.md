@@ -76,6 +76,18 @@ auth_required: true
 
 Four hours. Nine missions. Getting stuck is the default state — the question is whether you get stuck productively or unproductively. This page is triage.
 
+## Lost In The First Five Minutes
+
+If you are not solving yet, reset to this exact path:
+
+<ol class="step-list">
+<li>Open <code>https://polaris.keplerops.com</code> on your laptop. This is CTFd, where flags are submitted.</li>
+<li>Open your magic-link email, land in Mission Control, choose <strong>POLARIS</strong>, and click <strong>ENTER RANGE</strong>.</li>
+<li>Wait for the Kali desktop to open in-browser. If the desktop does not open cleanly, retry the range connection once, then flag a runner.</li>
+<li>Inside Kali, run <code>cat /home/kali/START_HERE.txt</code>.</li>
+<li>Run <code>cat /home/kali/.polaris/welcome.txt</code>, copy the flag, and submit it on the <strong>Start Here — Kali Warm-Up</strong> challenge in CTFd.</li>
+</ol>
+
 ## Submitting Flags
 
 Flag format: <code>FLAG{hex_string}</code>. Submit on the challenge page in CTFd — always from your laptop browser. The Kali box has no path to the scoreboard.

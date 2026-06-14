@@ -8,6 +8,14 @@ on:
         required: false
         type: boolean
         default: false
+      run_stack_smoke:
+        description: >-
+          Run the built-image stack-smoke job. Driven by the caller from the
+          portal_image / shifter_platform path filters so it only builds and
+          boots the portal image when the image's inputs change.
+        required: false
+        type: boolean
+        default: false
     secrets:
       SONAR_TOKEN:
         description: 'SonarCloud analysis token (sonarcloud job)'
@@ -679,6 +687,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # Redis backs the real-stack ASGI/Channels integration evidence (#924).
+      # It is consumed only by the dedicated redis-posture step below; the main
+      # test step stays on the in-memory channel layer (no REDIS_HOST), so the
+      # default test ergonomics are unchanged.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v6
 
@@ -702,7 +723,29 @@ jobs:
           DB_PASSWORD: test
         run: |
           uv run python manage.py collectstatic --noinput
-          uv run pytest tests/ --ignore=tests/documentation --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml
+          uv run pytest tests/ --ignore=tests/documentation -m "not redis" --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml
+
+      # Real-stack Redis channel-layer evidence (#924). Runs only the
+      # redis-marked integration tests against the Redis service, with xdist
+      # disabled (-n0) for deterministic stateful isolation. CHANNEL_LAYER_BACKEND
+      # / REDIS_HOST are scoped to this step, so the main suite above stays
+      # in-memory.
+      - name: Run Redis channel-layer integration tests
+        working-directory: shifter/shifter_platform
+        env:
+          TESTING: "1"
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: shifter
+          DB_USER: test
+          DB_PASSWORD: test
+          CHANNEL_LAYER_BACKEND: redis
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+        run: |
+          uv run pytest tests/integration/asgi -m redis -n0 -p no:cacheprovider
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -1226,6 +1269,34 @@ jobs:
           DB_USER: test
           DB_PASSWORD: test
         run: uv run python manage.py check_model_fks
+
+  # ===========================================================================
+  # Built-image stack smoke (#922)
+  #
+  # Boots the *production* portal image under its real entrypoint.sh against
+  # local Postgres / Redis / ElasticMQ doubles and asserts /health readiness,
+  # an authenticated websocket handshake, and worker/scheduler heartbeats. This
+  # catches container-runtime regressions (the June-7 /home/appuser and worker
+  # healthcheck failures) that the source-tree pytest estate cannot see. Gated
+  # on `run_stack_smoke`, which the caller drives from the portal_image /
+  # shifter_platform path filters, so it only builds the image when the image's
+  # inputs change. Hosted runner, no cloud credentials.
+  # ===========================================================================
+
+  stack-smoke:
+    permissions:
+      contents: read
+    name: Stack smoke (built image)
+    if: ${{ inputs.run_stack_smoke && !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Boot built portal image and assert health/WS/workers
+        run: bash scripts/stack-smoke/stack_smoke.sh
 
   # ===========================================================================
   # Static analysis — SonarCloud

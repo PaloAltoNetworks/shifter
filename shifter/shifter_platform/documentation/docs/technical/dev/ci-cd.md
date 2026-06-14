@@ -84,13 +84,24 @@ The orchestrator uses path filters to run only relevant jobs:
 | `range` | Range Terraform, engine state module |
 | `shifter_engine` | Shifter Engine code, ECR module |
 | `shifter_platform` | Portal/Guacamole Terraform and platform deploy workflow |
-| `shifter_app` | Shifter Django application source, routed to Quality without launching a platform Terraform plan |
+| `quality_relevant` | Any non-docs change, plus guardrail docs; controls whether Quality runs without launching deploy or Terraform plan jobs |
 | `portal_image` | Portal image build inputs (`shifter/shifter_platform/**`, `cyberscript`, `installation`, `.dockerignore`); triggers the portal image build/deploy on environment branches without running Terraform |
 | `gcp` | GCP Terraform, GCP Kubernetes assets, GCP scripts, GCP cloud adapters |
+| `mcp` | MCP package changes, routed to Quality only |
+| `quality_only` | Non-deploy test-support and guardrail surfaces (`scripts/polaris-aws-range/**`, `scenario-dev/polaris/tests/**`, `_quality.yml`, ADR/guardrail checker paths), routed to Quality only |
 
 ## Quality Gate
 
-Runs on every PR and direct push to `dev`:
+Runs on every PR and direct push to `dev` unless the diff is ordinary
+docs-only. Guardrail docs such as `.github/pull_request_template.md`,
+`.github/copilot-instructions.md`, `docs/adr/**`, and the ADR enforcement
+guide are quality-relevant and still run Quality. Manual dispatch is a
+deliberate full-validation path, except for the existing fast GCP deploy route.
+
+The deploy workflow exposes one `quality_relevant` output for this decision:
+non-docs changes make it true, ordinary docs-only changes make it false, and
+guardrail docs make it true even though they are documentation. PR Gate accepts
+a skipped Quality job only when `quality_relevant` is false.
 
 - **ADR conformance**: `python3 scripts/adr_guard/adr_guard.py --all --level ci`
   Includes `adr-registry`, `layer-imports`, `cross-layer-model-imports`, and
@@ -111,7 +122,11 @@ Runs on every PR and direct push to `dev`:
 - **K8s security scanning**: Checkov with the `kubernetes` framework. Current
   soft-fail is scoped to Kubernetes manifest hardening and does not justify
   Terraform soft-fail.
-- **Tests**: `pytest` with PostgreSQL service container for `shifter_platform`
+- **Tests**: package-local Python, JavaScript, and harness suites, including
+  `shifter_platform`, `cyberscript`, `shifter/engine/provisioner`, `packer`,
+  `installation`, `scripts/bootstrap`, `scripts/gcp`, `scripts/polaris-aws-range`,
+  `scenario-dev/polaris/tests`, the Postgres migration proof, and MCP package
+  tests including `mcp/planner`.
 - **IaC scanning**: Checkov for Terraform is a **blocking gate** under
   ADR-004-R11. Pre-commit and CI share the same config at
   `platform/terraform/.checkov.yaml`; `--soft-fail` is off. Accepted-risk
@@ -121,7 +136,7 @@ Runs on every PR and direct push to `dev`:
 - **Secret scanning**: gitleaks on newly introduced commits
 - **Coverage**: `shifter_platform` emits terminal and XML coverage reports
 
-Architecture checks are not skipped by the normal test-skip path. `[skip tests]` may skip slow test jobs on `dev`, but it does not bypass ADR or architecture enforcement.
+Commit-message or label-based test skips are not accepted by `deploy.yml`.
 
 ## Terraform Flow
 

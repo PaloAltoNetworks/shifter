@@ -54,6 +54,7 @@ jobs:
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}
       portal_image: ${{ steps.filter.outputs.portal_image }}
+      stack_smoke: ${{ steps.filter.outputs.stack_smoke }}
       mcp: ${{ steps.filter.outputs.mcp }}
       quality_only: ${{ steps.filter.outputs.quality_only }}
       gcp: ${{ steps.filter.outputs.gcp }}
@@ -117,6 +118,16 @@ jobs:
               - 'shifter/cyberscript/**'
               - 'shifter/installation/**'
               - 'shifter/.dockerignore'
+            # The built-image stack smoke must re-run when its own
+            # implementation changes, not only when the portal image does -
+            # otherwise the CI guardrail can be edited (harness, ElasticMQ
+            # config, websocket probe, or the _quality.yml job that owns it)
+            # and merged without ever booting the built image through the
+            # changed harness. Feeds `run_stack_smoke` alongside the
+            # portal_image / shifter_platform deploy signals.
+            stack_smoke:
+              - 'scripts/stack-smoke/**'
+              - '.github/workflows/_quality.yml'
             mcp:
               - 'mcp/**'
             # Quality-only non-deploy support surfaces. These paths have
@@ -326,6 +337,13 @@ jobs:
     uses: ./.github/workflows/_quality.yml
     with:
       skip_tests: false
+      # Build + boot the production portal image when the image's own inputs
+      # change (portal_image), the portal platform Terraform changes
+      # (shifter_platform), or the smoke's own implementation changes
+      # (stack_smoke - so a CI guardrail re-runs when it is edited);
+      # workflow_dispatch is the deliberate full-validation path. Engine-only /
+      # docs-only PRs never pay the image build.
+      run_stack_smoke: ${{ needs.changes.outputs.portal_image == 'true' || needs.changes.outputs.shifter_platform == 'true' || needs.changes.outputs.stack_smoke == 'true' || github.event_name == 'workflow_dispatch' }}
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

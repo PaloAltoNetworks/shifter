@@ -26,6 +26,14 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "requests",
     "uvicorn-worker",
+    # uvicorn's WebSocket protocol backend. Not imported directly: the
+    # Gunicorn/Uvicorn ASGI workers (entrypoint.sh) need websockets (or wsproto)
+    # installed to accept WebSocket upgrades. Without it the built image's
+    # uvicorn logs "No supported WebSocket library detected" and the portal's
+    # terminal / range-status / notification sockets fail at runtime while
+    # /health still passes - the exact container-only regression class the #922
+    # stack smoke exists to catch.
+    "websockets",
     "whitenoise",
 ]
 

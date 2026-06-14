@@ -289,9 +289,8 @@ class TestNgfwTerraformOrchestrationHelpers:
         from ngfw_terraform import _cleanup_failed_ngfw_provision
 
         fake_state = {"vm_name": "vmseries"}
-        fake_main = SimpleNamespace(get_ngfw_data_by_request_id=MagicMock(return_value={"state": fake_state}))
         fake_gdc = SimpleNamespace(destroy_ngfw=MagicMock())
-        monkeypatch.setitem(sys.modules, "main", fake_main)
+        monkeypatch.setattr("ngfw_terraform.get_ngfw_data_by_request_id", MagicMock(return_value={"state": fake_state}))
         monkeypatch.setitem(sys.modules, "gdc_vmseries_ngfw", fake_gdc)
 
         _cleanup_failed_ngfw_provision("req-1", "inst-1", {})
@@ -303,17 +302,16 @@ class TestNgfwTerraformOrchestrationHelpers:
         """run_ngfw_terraform should load DB data and pass the normalized app spec to dispatch."""
         from ngfw_terraform import run_ngfw_terraform
 
-        fake_main = SimpleNamespace(
-            get_ngfw_data_by_request_id=MagicMock(
+        monkeypatch.setattr(
+            "ngfw_terraform.get_ngfw_data_by_request_id",
+            MagicMock(
                 return_value={
                     "instance_id": "inst-1",
                     "app_id": "app-1",
                     "app_spec": {"sls_region": "americas", "user_id": 7},
                 }
             ),
-            update_instance_state=MagicMock(),
         )
-        monkeypatch.setitem(sys.modules, "main", fake_main)
 
         run_ngfw_terraform("up", "req-1")
 
@@ -340,19 +338,18 @@ class TestNgfwTerraformOrchestrationHelpers:
         from ngfw_terraform import run_ngfw_terraform
 
         app_spec = {"sls_region": "americas", "user_id": 7}
-        fake_main = SimpleNamespace(
-            get_ngfw_data_by_request_id=MagicMock(
-                return_value={"instance_id": "inst-1", "app_id": "app-1", "app_spec": app_spec}
-            ),
-            update_instance_state=MagicMock(),
+        monkeypatch.setattr(
+            "ngfw_terraform.get_ngfw_data_by_request_id",
+            MagicMock(return_value={"instance_id": "inst-1", "app_id": "app-1", "app_spec": app_spec}),
         )
-        monkeypatch.setitem(sys.modules, "main", fake_main)
+        mock_update_instance_state = MagicMock()
+        monkeypatch.setattr("ngfw_terraform.update_instance_state", mock_update_instance_state)
 
         with pytest.raises(RuntimeError, match="apply failed"):
             run_ngfw_terraform("up", "req-1")
 
         mock_cleanup.assert_called_once_with("req-1", "inst-1", app_spec)
-        fake_main.update_instance_state.assert_called_once_with(
+        mock_update_instance_state.assert_called_once_with(
             "req-1",
             "failed",
             error_message="apply failed",
@@ -408,8 +405,8 @@ class TestNgfwTerraformOrchestrationHelpers:
         """AWS provision should not log full Terraform output dictionaries."""
         from ngfw_terraform import _run_provision
 
-        fake_main = SimpleNamespace(update_instance_state=MagicMock())
-        monkeypatch.setitem(sys.modules, "main", fake_main)
+        mock_update_instance_state = MagicMock()
+        monkeypatch.setattr("ngfw_terraform.update_instance_state", mock_update_instance_state)
         monkeypatch.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
         mock_apply_ngfw.return_value = {
             "management_ip": "10.1.1.10",
@@ -418,7 +415,7 @@ class TestNgfwTerraformOrchestrationHelpers:
 
         _run_provision("req-1", "inst-1", "app-1", {"user_id": 7}, "americas")
 
-        fake_main.update_instance_state.assert_called_once_with("req-1", "provisioning")
+        mock_update_instance_state.assert_called_once_with("req-1", "provisioning")
         mock_publish_ngfw_event.assert_called_once_with(
             request_id="req-1",
             instance_id="inst-1",
@@ -450,15 +447,15 @@ class TestNgfwTerraformOrchestrationHelpers:
             "attachment_mode": "gdc-vmruntime-palo-alto-vmseries",
             "data_attachment_id": "ngfw-user-42/vmseries:eth1",
         }
-        fake_main = SimpleNamespace(update_instance_state=MagicMock())
         fake_gdc = SimpleNamespace(apply_ngfw=MagicMock(return_value=output_data))
-        monkeypatch.setitem(sys.modules, "main", fake_main)
+        mock_update_instance_state = MagicMock()
+        monkeypatch.setattr("ngfw_terraform.update_instance_state", mock_update_instance_state)
         monkeypatch.setitem(sys.modules, "gdc_vmseries_ngfw", fake_gdc)
 
         _run_gdc_provision("req-1", "inst-1", "app-1", {"user_id": 7}, "americas")
 
-        assert fake_main.update_instance_state.call_count == 2
-        persisted_state = fake_main.update_instance_state.call_args_list[1].kwargs
+        assert mock_update_instance_state.call_count == 2
+        persisted_state = mock_update_instance_state.call_args_list[1].kwargs
         assert persisted_state["route_next_hop_ip"] == "10.200.1.1"
         assert persisted_state["data_attachment_id"] == "ngfw-user-42/vmseries:eth1"
         assert mock_publish_ngfw_event.call_count == 1
@@ -556,20 +553,21 @@ class TestNgfwTerraformCleanupHelpers:
             "management_ip": "10.200.1.10",
             "ssh_key_secret_arn": "projects/demo/secrets/ngfw-key",
         }
-        fake_main = SimpleNamespace(
-            get_ngfw_data_by_request_id=MagicMock(return_value={"state": fake_state}),
-            update_instance_state=MagicMock(),
-        )
         fake_gdc = SimpleNamespace(
             run_power_operation=MagicMock(),
             destroy_ngfw=MagicMock(),
         )
-        monkeypatch.setitem(sys.modules, "main", fake_main)
+        monkeypatch.setattr(
+            "ngfw_terraform_cleanup.get_ngfw_data_by_request_id",
+            MagicMock(return_value={"state": fake_state}),
+        )
+        mock_update_instance_state = MagicMock()
+        monkeypatch.setattr("ngfw_terraform_cleanup.update_instance_state", mock_update_instance_state)
         monkeypatch.setitem(sys.modules, "gdc_vmseries_ngfw", fake_gdc)
 
         _run_gdc_deprovision("req-1", "inst-1", "app-1")
 
-        fake_main.update_instance_state.assert_has_calls([call("req-1", "destroying"), call("req-1", "destroyed")])
+        mock_update_instance_state.assert_has_calls([call("req-1", "destroying"), call("req-1", "destroyed")])
         fake_gdc.run_power_operation.assert_called_once_with("start", fake_state)
         mock_deactivate_license.assert_called_once_with(
             management_ip="10.200.1.10",
@@ -603,13 +601,12 @@ class TestNgfwTerraformCleanupHelpers:
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
             "ec2_instance_id": "i-123",
         }
-        fake_main = SimpleNamespace(
-            get_ngfw_data_by_request_id=MagicMock(
-                return_value={"state": current_state, "app_spec": {"user_id": 7, "authcode": "auth-1"}}
-            ),
-            update_instance_state=MagicMock(),
+        monkeypatch.setattr(
+            "ngfw_terraform_cleanup.get_ngfw_data_by_request_id",
+            MagicMock(return_value={"state": current_state, "app_spec": {"user_id": 7, "authcode": "auth-1"}}),
         )
-        monkeypatch.setitem(sys.modules, "main", fake_main)
+        mock_update_instance_state = MagicMock()
+        monkeypatch.setattr("ngfw_terraform_cleanup.update_instance_state", mock_update_instance_state)
 
         _run_deprovision("req-1", "inst-1", "app-1")
 
@@ -618,7 +615,7 @@ class TestNgfwTerraformCleanupHelpers:
         assert destroy_variables["name_prefix"] == "ngfw-user-7"
         assert destroy_variables["authcode"] == "auth-1"
         mock_cleanup_state.assert_called_once_with("req-1")
-        fake_main.update_instance_state.assert_has_calls([call("req-1", "destroying"), call("req-1", "destroyed")])
+        mock_update_instance_state.assert_has_calls([call("req-1", "destroying"), call("req-1", "destroyed")])
         assert mock_publish_ngfw_event.call_count == 2
 
 
@@ -653,14 +650,12 @@ class TestRunPanOsPostProvision:
         """Bootstrap cleanup failures should surface only after auto-stop is attempted."""
         from ngfw_terraform import _run_pan_os_post_provision
 
-        fake_main = SimpleNamespace(
-            NGFW_SSH_WAIT_TIMEOUT_DEFAULT=1,
-            poll_for_serial_number=MagicMock(return_value="serial-1"),
-            poll_for_serial_and_cert=MagicMock(return_value="serial-2"),
-            run_ngfw_operation=MagicMock(),
-            update_instance_state=MagicMock(),
-        )
-        monkeypatch.setitem(sys.modules, "main", fake_main)
+        mock_update_instance_state = MagicMock()
+        mock_run_ngfw_operation = MagicMock()
+        monkeypatch.setattr("ngfw_terraform.poll_for_serial_number", MagicMock(return_value="serial-1"))
+        monkeypatch.setattr("ngfw_terraform.poll_for_serial_and_cert", MagicMock(return_value="serial-2"))
+        monkeypatch.setattr("ngfw_terraform.run_ngfw_operation", mock_run_ngfw_operation)
+        monkeypatch.setattr("ngfw_terraform.update_instance_state", mock_update_instance_state)
         mock_get_secrets_store.return_value.get_secret.return_value = "private-key"
         mock_ngfw_executor = mock_ngfw_executor_class.return_value
         mock_ngfw_executor.run_command.return_value = MagicMock(success=True, stdout="", stderr="")
@@ -680,7 +675,7 @@ class TestRunPanOsPostProvision:
                 sls_region="americas",
             )
 
-        fake_main.run_ngfw_operation.assert_called_once_with("stop", "req-1")
+        mock_run_ngfw_operation.assert_called_once_with("stop", "req-1")
 
 
 class TestBuildProviderState:

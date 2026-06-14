@@ -13,7 +13,9 @@ from events import (
     publish_ngfw_event,
 )
 from executors.ngfw_executor import NGFWExecutor
+from ngfw_runtime import update_instance_state
 from ngfw_terraform_state import _build_tf_variables
+from provisioner_db_ngfw import get_ngfw_data_by_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,6 @@ def _run_gdc_deprovision(
 ) -> None:
     """Deactivate and destroy a Palo Alto VM-Series firewall on GDC VM Runtime."""
     import gdc_vmseries_ngfw
-    from main import get_ngfw_data_by_request_id, update_instance_state
 
     update_instance_state(request_id, STATUS_DESTROYING)
     publish_ngfw_event(
@@ -164,8 +165,6 @@ def _run_deprovision(
     app_id: str,
 ) -> None:
     """Run license deactivation then Terraform destroy for NGFW."""
-    from main import get_ngfw_data_by_request_id, update_instance_state
-
     update_instance_state(request_id, STATUS_DESTROYING)
     publish_ngfw_event(
         request_id=request_id,

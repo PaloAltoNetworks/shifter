@@ -5,10 +5,6 @@ range spec into the inputs the Terraform range module expects:
 per-instance dicts, per-subnet nested config, NGFW attachment
 resolution, AWS-only AMI / instance-profile / Secrets Manager CMK
 variables, and the top-level ``_build_range_terraform_variables``.
-
-Cross-module callees that are patched in tests via
-``patch("main.X")`` go through ``main.X(...)`` lazy lookups so the
-existing mocks intercept the same call sites.
 """
 
 from __future__ import annotations
@@ -17,7 +13,20 @@ import logging
 import os
 from typing import Any
 
-from config import resolve_ngfw_attachment_config
+from catalog.instances import (
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
+)
+from config import (
+    generate_presigned_url,
+    get_range_availability_zone,
+    load_range_network_config,
+    resolve_ngfw_attachment_config,
+)
+from provisioner_ami import get_ami_id
+from provisioner_db_ngfw import get_user_ngfw_data
 from state_helpers import _get_cloud_provider
 
 logger = logging.getLogger(__name__)
@@ -36,30 +45,26 @@ def _resolve_tf_os_type(role: str, os_type: str) -> str:
 
 def _resolve_instance_type(role: str, tf_os_type: str, override: str | None) -> str:
     """Pick the EC2 instance type: per-instance override wins; otherwise role/OS defaults."""
-    import main
-
     if override:
         resolved = override
     elif role == "attacker":
-        resolved = main._get_kali_instance_type()
+        resolved = _get_kali_instance_type()
     elif role == "dc":
-        resolved = main._get_dc_instance_type()
+        resolved = _get_dc_instance_type()
     elif tf_os_type == "windows":
-        resolved = main._get_windows_instance_type()
+        resolved = _get_windows_instance_type()
     else:
-        resolved = main._get_victim_instance_type()
+        resolved = _get_victim_instance_type()
     return resolved
 
 
 def _resolve_agent_presigned_url(inst: dict[str, Any]) -> str:
     """Generate a presigned URL for the instance's XDR agent S3 object, if any."""
-    import main
-
     agent_data = inst.get("agent") or {}
     agent_s3_key = agent_data.get("s3_key")
     if not agent_s3_key:
         return ""
-    return main.generate_presigned_url(
+    return generate_presigned_url(
         bucket=os.environ.get("AGENT_STORAGE_BUCKET") or os.environ.get("AGENT_S3_BUCKET", ""),
         key=agent_s3_key,
     )
@@ -72,8 +77,6 @@ def _resolve_agent_presigned_url_from_inst(inst: dict[str, Any]) -> str:
 
 def _build_tf_instance(inst: dict[str, Any]) -> dict[str, Any]:
     """Map one spec instance into the dict shape the terraform module expects."""
-    import main
-
     os_type = inst.get("os_type", "ubuntu")
     role = inst.get("role", "victim")
     tf_os_type = _resolve_tf_os_type(role, os_type)
@@ -88,7 +91,7 @@ def _build_tf_instance(inst: dict[str, Any]) -> dict[str, Any]:
         "instance_type": instance_type,
         "agent_presigned_url": _resolve_agent_presigned_url(inst),
         "join_domain": inst.get("join_domain", False),
-        "ami_id": main.get_ami_id(ami_key) if ami_key else "",
+        "ami_id": get_ami_id(ami_key) if ami_key else "",
     }
 
 
@@ -114,9 +117,7 @@ def _resolve_ngfw_for_range(user_id: int, range_id: int) -> tuple[str, dict[str,
     GCP-specific NGFW config or ``None`` for AWS. Raises ``ValueError`` if the
     user has no provisioned/attachable NGFW.
     """
-    import main
-
-    ngfw_data = main.get_user_ngfw_data(user_id)
+    ngfw_data = get_user_ngfw_data(user_id)
     if not ngfw_data:
         raise ValueError(
             f"Range requires NGFW (ngfw: true in spec) but user {user_id} has no provisioned NGFW. "
@@ -148,13 +149,11 @@ def _resolve_ngfw_for_range(user_id: int, range_id: int) -> tuple[str, dict[str,
 
 def _build_aws_extra_tf_variables() -> dict[str, Any]:
     """AWS-only Terraform variables: per-OS AMI IDs + instance profile + Secrets Manager CMK."""
-    import main
-
     return {
-        "kali_ami_id": main.get_ami_id("kali"),
-        "victim_ami_id": main.get_ami_id("victim"),
-        "windows_ami_id": main.get_ami_id("windows"),
-        "dc_ami_id": main.get_ami_id("dc"),
+        "kali_ami_id": get_ami_id("kali"),
+        "victim_ami_id": get_ami_id("victim"),
+        "windows_ami_id": get_ami_id("windows"),
+        "dc_ami_id": get_ami_id("dc"),
         "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
         "secrets_kms_key_arn": os.environ["SECRETS_KMS_KEY_ARN"],
     }
@@ -167,8 +166,6 @@ def _build_range_terraform_variables(
     range_spec: dict[str, Any],
 ) -> dict[str, Any]:
     """Build Terraform variables dict from range spec and environment."""
-    import main
-
     tf_subnets = _build_tf_subnets(range_spec.get("subnets", []))
 
     ngfw_data_eni_id = ""
@@ -176,7 +173,7 @@ def _build_range_terraform_variables(
     if range_spec.get("ngfw", False):
         ngfw_data_eni_id, ngfw_attachment = _resolve_ngfw_for_range(user_id, range_id)
 
-    range_network = main.load_range_network_config()
+    range_network = load_range_network_config()
     variables = {
         "range_id": range_id,
         "user_id": user_id,
@@ -184,7 +181,7 @@ def _build_range_terraform_variables(
         "environment": os.environ.get("ENVIRONMENT", "dev"),
         "vpc_id": range_network.network_id,
         "vpc_cidr": range_network.network_cidr,
-        "availability_zone": main.get_range_availability_zone(),
+        "availability_zone": get_range_availability_zone(),
         "s3_endpoint_id": os.environ.get("S3_ENDPOINT_ID", ""),
         "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
         "portal_vpc_cidr": range_network.primary_portal_cidr,

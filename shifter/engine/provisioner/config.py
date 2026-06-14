@@ -698,7 +698,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
     """
     logger.debug("Loading range %d from database", range_id)
 
-    from main import get_db_connection
+    from provisioner_db import get_db_connection
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(

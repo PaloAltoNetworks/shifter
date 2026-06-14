@@ -5,9 +5,6 @@ template-context shims, the bootstrap / SSH-access / verification /
 XDR-install helpers, and the ``_run_dc_setup`` entry point that the
 parallel orchestrator runs against each Domain Controller in a range.
 
-Cross-module callees patched in tests via ``patch("main.X")`` go
-through lazy ``import main; main.X(...)`` lookups so the existing
-mocks intercept the same call sites without per-test edits.
 """
 
 from __future__ import annotations
@@ -18,10 +15,12 @@ from typing import Any
 
 from components.instance import sanitize_hostname
 from executors.base import Executor
-from executors.factory import GuestExecutionContext
+from executors.factory import GuestExecutionContext, build_guest_execution_context
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
+from plans.bootstrap import BootstrapPlan
+from plans.dc_setup import DCSetupPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
-from state_helpers import _get_cloud_provider
+from state_helpers import _get_cloud_provider, _should_promote_dc_at_runtime, _should_run_dc_bootstrap_plan
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +53,11 @@ def _run_dc_bootstrap_plan(
     execution: GuestExecutionContext,
 ) -> None:
     """Run BootstrapPlan against a DC instance when the provider requires it."""
-    import main
-
-    if not main._should_run_dc_bootstrap_plan(provider):
+    if not _should_run_dc_bootstrap_plan(provider):
         return
 
     logger.info("Running DC bootstrap plan via %s setup path", provider)
-    bootstrap_plan = main.BootstrapPlan()
+    bootstrap_plan = BootstrapPlan()
     bootstrap_source = instance_data.get("hostname", "") or instance_data.get("name", "")
     bootstrap_hostname = sanitize_hostname(bootstrap_source) or f"dc-{instance_id[-8:]}"
     bootstrap_context = bootstrap_plan.get_context(
@@ -133,16 +130,14 @@ def _verify_dc_setup(
     execution: GuestExecutionContext,
 ) -> None:
     """Run DCSetupPlan against the DC and raise SetupError on verification failure."""
-    import main
-
     logger.info("Verifying Domain Controller (%s)...", domain_name)
-    runtime_promotion = main._should_promote_dc_at_runtime(provider)
+    runtime_promotion = _should_promote_dc_at_runtime(provider)
     logger.info(
         "Using %s DC verification path for provider=%s",
         "runtime" if runtime_promotion else "prebaked",
         provider,
     )
-    dc_plan = main.DCSetupPlan(runtime_promotion=runtime_promotion)
+    dc_plan = DCSetupPlan(runtime_promotion=runtime_promotion)
     domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
     config_obj = _DCPromoteConfig(domain_name, netbios_name, domain_admin_password, domain_admin_password)
     dc_context = dc_plan.get_context(config_obj)
@@ -195,17 +190,15 @@ def _run_dc_setup(
     xdr_required: bool = False,
 ) -> bool:
     """Run setup for a DC instance."""
-    import main
-
     logger.info("DC instance %s starting setup...", instance_id)
     domain_name = dc_config.get("domain_name", "")
     netbios_name = dc_config.get("netbios_name", "")
     logger.info("Domain: %s, NetBIOS: %s", domain_name, netbios_name)
 
     provider = _get_cloud_provider()
-    execution = main.build_guest_execution_context(instance_data, os_type="windows", role="dc")
+    execution = build_guest_execution_context(instance_data, os_type="windows", role="dc")
     executor = execution.executor
-    orchestrator = main.SetupOrchestrator(executor=executor)
+    orchestrator = SetupOrchestrator(executor=executor)
 
     # Wait up to 30 min for the DC AMI's sysprep reboot cycles to settle.
     logger.info("Waiting for %s connectivity on DC %s...", execution.transport_name, execution.target)

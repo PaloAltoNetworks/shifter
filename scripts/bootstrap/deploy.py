@@ -1917,13 +1917,13 @@ def resolve_gcp_control_plane_image_tag() -> str:
     if github_sha:
         return validate_image_tag(github_sha[:7])
 
-    result = subprocess.run(
+    result = run_cmd(
         ["git", "-C", str(get_repo_root()), "rev-parse", "--short=7", "HEAD"],
-        capture_output=True,
         check=False,
-        text=True,
-        timeout=30,
+        capture=True,
     )
+    if result is None:
+        raise RuntimeError("Unable to resolve image tag from git")
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
         raise RuntimeError(f"Unable to resolve image tag from git: {stderr}")

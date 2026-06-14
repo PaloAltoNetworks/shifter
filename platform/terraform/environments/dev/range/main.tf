@@ -43,6 +43,9 @@ module "vpc" {
 
   # Network Firewall IP Allowlist
   victim_allowed_cidrs = var.victim_allowed_cidrs
+
+  # Network Firewall lifecycle (mirrors db_deletion_protection root-var / tfvars convention)
+  network_firewall_delete_protection = var.network_firewall_delete_protection
 }
 
 # ------------------------------------------------------------------------------

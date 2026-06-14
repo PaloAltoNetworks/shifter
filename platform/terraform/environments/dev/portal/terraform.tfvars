@@ -167,6 +167,9 @@ enable_waf_logging     = true
 enable_portal_inspection    = true
 firewall_log_retention_days = 365
 
+# dev: allow intentional teardown; apply once with this false before destroying
+portal_inspection_delete_protection = false
+
 # ------------------------------------------------------------------------------
 # Engine Provisioner
 # ------------------------------------------------------------------------------

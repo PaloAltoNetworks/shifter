@@ -238,6 +238,9 @@ module "vpc" {
   enable_portal_inspection    = var.enable_portal_inspection
   enable_log_aggregation      = var.enable_log_aggregation
   firewall_log_retention_days = var.firewall_log_retention_days
+
+  # Network Firewall lifecycle (mirrors db_deletion_protection root-var / tfvars convention)
+  portal_inspection_delete_protection = var.portal_inspection_delete_protection
 }
 
 # ------------------------------------------------------------------------------

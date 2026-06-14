@@ -17,15 +17,20 @@ def get_agent_presigned_url(inst_config: dict[str, Any]) -> str | None:
         return None
 
     bucket = os.environ.get("AGENT_STORAGE_BUCKET") or os.environ.get("AGENT_S3_BUCKET", "")
-    if not bucket:
+    presigned_url: str | None = None
+    if bucket:
+        try:
+            from cloud import get_object_storage
+
+            storage = get_object_storage()
+            presigned_url = storage.generate_presigned_download_url(
+                bucket=bucket,
+                key=s3_key,
+                expires_in=3600,
+            )
+        except Exception:
+            logger.exception("Failed to generate presigned URL for %s", s3_key)
+    else:
         logger.warning("AGENT_STORAGE_BUCKET/AGENT_S3_BUCKET not set, cannot generate presigned URL")
-        return None
 
-    try:
-        from cloud import get_object_storage
-
-        storage = get_object_storage()
-        return storage.generate_presigned_download_url(bucket=bucket, key=s3_key, expires_in=3600)
-    except Exception as e:
-        logger.error("Failed to generate presigned URL for %s: %s", s3_key, e)
-        return None
+    return presigned_url

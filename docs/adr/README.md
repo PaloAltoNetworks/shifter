@@ -169,7 +169,10 @@ entries. Completed so far:
   `test_engine_models`); engine-service view suites (`test_engine_services`,
   `test_engine_services_lifecycle`) and `test_asset_hierarchy`; the SNS->
   WebSocket handler suite (`test_handlers`), driven against the real in-memory
-  Channels layer.
+  Channels layer; the agent-upload and experiment-script view suites
+  (`test_views_uploads`, `test_views_files`), with S3 mocked only at the `boto3`
+  boundary and the validation / error-sanitization / authorization paths driven
+  for real.
 
 Decomposition-owned suites are out of scope here and land with their own
 issues: provisioner (#946), `ctf/**` and `cms/experiments/test_orchestrator*`

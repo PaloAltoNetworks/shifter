@@ -38,8 +38,8 @@ recreate the Terraform-plan spam #913 is trying to avoid.
   It should continue to cover portal/Guacamole Terraform, environment portal
   roots, and the reusable platform workflow itself.
 - Introduce or repurpose a separate portal-image signal for build/deploy. It
-  must not be confused with the existing broad `shifter_app` Quality signal
-  unless the implementation deliberately narrows or renames that signal.
+  must not be confused with the broad `quality_relevant` validation classifier;
+  deploy routing and Quality routing intentionally answer different questions.
 - Split reusable workflow inputs by concern. `apply_changes` is deployment
   permission for environment branches/manual dispatch; it is not enough to tell
   `_shifter-platform.yml` whether Terraform should run or whether only the
@@ -144,9 +144,9 @@ Usually out of scope:
 
 ## Gotchas And Anti-Patterns
 
-- Do not gate portal deploys directly on the current broad `shifter_app:
-  shifter/**` signal without deciding whether engine, packer, installation,
-  cyberscript, and in-app docs changes should deploy the AWS portal.
+- Do not gate portal deploys directly on the broad `quality_relevant`
+  classifier without deciding whether engine, packer, installation, cyberscript,
+  and in-app docs changes should deploy the AWS portal.
 - Do not make app-only changes run portal Terraform `plan` or `apply`. The fix
   is to split plan/apply from image build/deploy, not to undo the May path-filter
   split.

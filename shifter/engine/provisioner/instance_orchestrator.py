@@ -12,7 +12,14 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from instance_setup import _DomainJoinSpec, _InstanceSetupSpec
+from agent_assets import get_agent_presigned_url
+from dc_setup import _run_dc_setup
+from instance_setup import (
+    _DomainJoinSpec,
+    _InstanceSetupSpec,
+    _run_single_instance_setup,
+    _set_attacker_container_password_after_bootstrap,
+)
 from orchestrators.setup_orchestrator import SetupError
 from polaris_bootstrap import _run_polaris_range_bootstrap
 
@@ -59,14 +66,12 @@ def _setup_dc_instances_blocking(
     uuid_to_config: dict[str, dict[str, Any]],
 ) -> None:
     """Run DC setup for every DC instance synchronously (domain joins depend on it)."""
-    import main
-
     for dc_inst in dc_instances:
         inst_uuid = dc_inst.get("uuid", "")
         inst_config = uuid_to_config.get(inst_uuid, {})
         dc_config = inst_config.get("dc_config", {})
-        agent_url = main.get_agent_presigned_url(inst_config)
-        main._run_dc_setup(
+        agent_url = get_agent_presigned_url(inst_config)
+        _run_dc_setup(
             instance_data=dc_inst,
             instance_id=dc_inst["instance_id"],
             dc_config=dc_config,
@@ -99,8 +104,6 @@ def _setup_one_other_instance(
     range_id: int,
 ) -> tuple[str, bool, str | None]:
     """Run setup for a single non-DC VM. Returns (instance_id, success, error)."""
-    import main
-
     inst_id = inst["instance_id"]
     inst_uuid = inst.get("uuid", "")
     inst_config = uuid_to_config.get(inst_uuid, {})
@@ -109,7 +112,7 @@ def _setup_one_other_instance(
         role=inst.get("role", "victim"),
         os_type=inst.get("os", "ubuntu"),
         public_key=inst.get("public_key", ""),
-        agent_presigned_url=main.get_agent_presigned_url(inst_config) or "",
+        agent_presigned_url=get_agent_presigned_url(inst_config) or "",
         xdr_required=bool(inst_config.get("agent")),
         instance_name=inst.get("hostname", "") or inst.get("name", ""),
         range_id=range_id,
@@ -121,7 +124,7 @@ def _setup_one_other_instance(
         set_local_password=not is_polaris_vm,
     )
     try:
-        main._run_single_instance_setup(instance_data=inst, instance_id=inst_id, spec=spec)
+        _run_single_instance_setup(instance_data=inst, instance_id=inst_id, spec=spec)
         # Per-scenario post-bootstrap: the polaris VM AMI is pre-baked with
         # a docker compose stack hardcoded to range 0's DC IP and the
         # bake-time kali pubkey. After LinuxBootstrapPlan finishes, rewrite
@@ -134,7 +137,7 @@ def _setup_one_other_instance(
                 dc_ip=actual_dc_ip or "",
                 public_key=inst.get("public_key", ""),
             )
-            main._set_attacker_container_password_after_bootstrap(
+            _set_attacker_container_password_after_bootstrap(
                 instance_data=inst,
                 instance_id=inst_id,
                 container_name="a14-kali",

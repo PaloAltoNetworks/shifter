@@ -311,7 +311,7 @@ exit 0
 # Credential delivery: the polaris-vm EC2's instance profile carries the
 # bedrock-claude-code policy. Containers reach IMDS through the host's
 # bridge network, which requires HttpPutResponseHopLimit >= 2 on the
-# instance — set by main.py before this step runs.
+# instance, set by the instance setup caller before this step runs.
 #
 # Smoke test: invoke `claude -p "reply ok"` from inside a14-kali. If
 # Bedrock isn't reachable or creds aren't flowing, the smoke test fails
@@ -347,7 +347,7 @@ echo "polaris kali bedrock shard: bedrock VPCE IP = $BEDROCK_IP"
 # 2. Write /etc/profile.d/claude-bedrock.sh inside a14-kali. Same-account
 # mode: no static AWS creds; claude inherits the EC2 instance profile via
 # IMDSv2 through the docker bridge (requires hop limit >= 2 on the
-# instance, set in main.py).
+# instance, set by the instance setup caller).
 PROFILE_FILE="$(mktemp)"
 chmod 600 "$PROFILE_FILE"
 cat > "$PROFILE_FILE" <<PROFILE_EOF

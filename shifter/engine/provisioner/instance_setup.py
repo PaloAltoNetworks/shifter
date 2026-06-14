@@ -6,11 +6,6 @@ push the bootstrap / RDP-password / XDR-install / domain-join plans
 through ``SetupOrchestrator``, the Polaris range bootstrap path, the
 DC setup pipeline, and the parallel run_instance_setup entry point
 that the orchestrator container calls after Terraform completes.
-
-Cross-module callees that historically came from ``main.X`` (and are
-patched in tests via ``patch("main.X")``) go through lazy
-``import main; main.X(...)`` lookups so the existing test mocks keep
-intercepting the same call sites without per-test edits.
 """
 
 from __future__ import annotations
@@ -21,9 +16,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from components.instance import sanitize_hostname
-from executors.factory import GuestExecutionContext, get_ssh_username
+from executors.factory import GuestExecutionContext, build_guest_execution_context, get_ssh_username
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import SetupPlan
+from plans.bootstrap import BootstrapPlan
 from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
@@ -207,10 +203,8 @@ def _set_attacker_container_password_after_bootstrap(
     ssh_user: str = "kali",
 ) -> None:
     """Set the per-instance password inside a container-backed Kali endpoint."""
-    import main
-
-    execution = main.build_guest_execution_context(instance_data, os_type="kali", role="attacker")
-    orchestrator = main.SetupOrchestrator(executor=execution.executor)
+    execution = build_guest_execution_context(instance_data, os_type="kali", role="attacker")
+    orchestrator = SetupOrchestrator(executor=execution.executor)
     try:
         logger.info("Waiting for %s connectivity on %s...", execution.transport_name, execution.target)
         execution.wait_for_ready(timeout_seconds=120)
@@ -347,10 +341,8 @@ def _setup_windows_victim(
     dj: _DomainJoinSpec,
 ) -> None:
     """Run the windows victim path: bootstrap, per-instance Admin password, XDR install, optional domain join."""
-    import main
-
     instance_id = execution.target
-    plan = main.BootstrapPlan()
+    plan = BootstrapPlan()
     _run_setup_plan(
         orchestrator,
         execution,
@@ -436,12 +428,10 @@ def _run_single_instance_setup(
     spec: _InstanceSetupSpec,
 ) -> bool:
     """Run setup for a single non-DC instance."""
-    import main
-
     logger.info("Starting setup for %s instance %s...", spec.role, instance_id)
 
-    execution = main.build_guest_execution_context(instance_data, os_type=spec.os_type, role=spec.role)
-    orchestrator = main.SetupOrchestrator(executor=execution.executor)
+    execution = build_guest_execution_context(instance_data, os_type=spec.os_type, role=spec.role)
+    orchestrator = SetupOrchestrator(executor=execution.executor)
 
     logger.info("Waiting for %s connectivity on %s...", execution.transport_name, execution.target)
     execution.wait_for_ready(timeout_seconds=300)

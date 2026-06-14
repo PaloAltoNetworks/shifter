@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -49,9 +49,9 @@ _RANGE_ROW_NO_NGFW = (
 class TestGetRangeDataNGFWLookup:
     """NGFW instance ID lookup in get_range_data_by_request_id."""
 
-    def test_finds_ngfw_using_provider_neutral_attachment_state(self):
+    def test_finds_ngfw_using_provider_neutral_attachment_state(self, monkeypatch):
         """NGFW with attachable routing state should be linked to the range."""
-        from main import get_range_data_by_request_id
+        from provisioner_db import get_range_data_by_request_id
 
         ngfw_state = {
             "management_ip": "10.1.5.10",
@@ -60,18 +60,18 @@ class TestGetRangeDataNGFWLookup:
         }
         mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
-        with patch("main.get_db_connection", return_value=mock_conn):
-            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         assert result["ngfw_instance_id"] == 597
 
-    def test_finds_ngfw_in_paused_state(self):
+    def test_finds_ngfw_in_paused_state(self, monkeypatch):
         """NGFW in 'paused' state should still be found.
 
         When an NGFW is paused, subsequent range operations
         need its instance ID to manage resume/cascade correctly.
         """
-        from main import get_range_data_by_request_id
+        from provisioner_db import get_range_data_by_request_id
 
         ngfw_state = {
             "management_ip": "10.1.5.10",
@@ -80,17 +80,17 @@ class TestGetRangeDataNGFWLookup:
         }
         mock_conn, mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
-        with patch("main.get_db_connection", return_value=mock_conn):
-            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         # Verify the SQL includes paused/pausing statuses
         sql_executed = mock_cursor.execute.call_args_list[1][0][0]
         assert "paused" in sql_executed.lower()
         assert result["ngfw_instance_id"] == 597
 
-    def test_ngfw_query_does_not_require_aws_only_fields(self):
+    def test_ngfw_query_does_not_require_aws_only_fields(self, monkeypatch):
         """NGFW lookup should not hardcode data_eni_id or service_name in SQL."""
-        from main import get_range_data_by_request_id
+        from provisioner_db import get_range_data_by_request_id
 
         ngfw_state = {
             "cloud_provider": "gcp",
@@ -100,17 +100,18 @@ class TestGetRangeDataNGFWLookup:
         }
         mock_conn, mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
-        with patch("main.get_db_connection", return_value=mock_conn):
-            get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         # The second execute call is the NGFW lookup
         sql_executed = mock_cursor.execute.call_args_list[1][0][0]
         assert "service_name" not in sql_executed
         assert "data_eni_id" not in sql_executed
+        assert result["ngfw_instance_id"] == 597
 
-    def test_gcp_ngfw_route_next_hop_state_is_attachable(self):
+    def test_gcp_ngfw_route_next_hop_state_is_attachable(self, monkeypatch):
         """GCP/GDC NGFW route-next-hop state should count as attachable."""
-        from main import get_range_data_by_request_id
+        from provisioner_db import get_range_data_by_request_id
 
         ngfw_state = {
             "cloud_provider": "gcp",
@@ -125,14 +126,14 @@ class TestGetRangeDataNGFWLookup:
         }
         mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (812, ngfw_state))
 
-        with patch("main.get_db_connection", return_value=mock_conn):
-            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         assert result["ngfw_instance_id"] == 812
 
-    def test_no_ngfw_when_config_disabled(self):
+    def test_no_ngfw_when_config_disabled(self, monkeypatch):
         """ngfw_instance_id should be None when ngfw not in range_config."""
-        from main import get_range_data_by_request_id
+        from provisioner_db import get_range_data_by_request_id
 
         # Only one fetchone call needed (no NGFW lookup)
         mock_cursor = MagicMock()
@@ -144,26 +145,26 @@ class TestGetRangeDataNGFWLookup:
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
 
-        with patch("main.get_db_connection", return_value=mock_conn):
-            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         assert result["ngfw_instance_id"] is None
 
-    def test_ngfw_not_found_returns_none(self):
+    def test_ngfw_not_found_returns_none(self, monkeypatch):
         """ngfw_instance_id should be None when no matching NGFW exists."""
-        from main import get_range_data_by_request_id
+        from provisioner_db import get_range_data_by_request_id
 
         # NGFW lookup returns None (no match)
         mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, None)
 
-        with patch("main.get_db_connection", return_value=mock_conn):
-            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         assert result["ngfw_instance_id"] is None
 
-    def test_ngfw_without_attachment_state_returns_none(self):
+    def test_ngfw_without_attachment_state_returns_none(self, monkeypatch):
         """NGFW without routable attachment state should not be linked."""
-        from main import get_range_data_by_request_id
+        from provisioner_db import get_range_data_by_request_id
 
         ngfw_state = {
             "management_ip": "10.1.5.10",
@@ -171,7 +172,7 @@ class TestGetRangeDataNGFWLookup:
         }
         mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
-        with patch("main.get_db_connection", return_value=mock_conn):
-            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         assert result["ngfw_instance_id"] is None

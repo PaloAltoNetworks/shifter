@@ -1,12 +1,7 @@
 """NGFW-specific database access helpers for the Shifter Engine provisioner.
 
 Extracted from ``provisioner_db.py`` (Sonar S104) to keep the NGFW
-range-attachment read/write helpers in a focused module. These functions
-reach the psycopg connection factory and the instance-state writer back
-through ``main`` (``main.get_db_connection`` / ``main.update_instance_state``)
-so ``patch("main.X")`` continues to intercept the same call sites, exactly as
-they did when this code lived in ``provisioner_db``. ``main`` re-exports these
-names, so ``main.get_user_ngfw_data`` (etc.) remain the public surface.
+range-attachment read/write helpers in a focused module.
 """
 
 from __future__ import annotations
@@ -14,14 +9,13 @@ from __future__ import annotations
 from typing import Any
 
 from config import resolve_ngfw_attachment_config
+from provisioner_db import get_db_connection
 from state_helpers import _get_cloud_provider
 
 
 def get_user_ngfw_data(user_id: int) -> dict[str, Any] | None:
     """Get NGFW data for a user (if they have one provisioned)."""
-    import main
-
-    with main.get_db_connection() as conn, conn.cursor() as cur:
+    with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
             SELECT
@@ -99,9 +93,9 @@ def _record_ngfw_range_attachment(
     attachment_record: dict[str, Any],
 ) -> None:
     """Merge the current range attachment into the NGFW instance state."""
-    import main
+    from ngfw_runtime import update_instance_state
 
-    ngfw_data = main.get_ngfw_data_by_request_id(ngfw_request_id)
+    ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
     current_state = ngfw_data.get("state") or {}
     current_attachments = list(current_state.get("attached_ranges") or [])
     current_attachments = [
@@ -110,7 +104,7 @@ def _record_ngfw_range_attachment(
         if attachment.get("range_id") != attachment_record.get("range_id")
     ]
     current_attachments.append(attachment_record)
-    main.update_instance_state(
+    update_instance_state(
         ngfw_request_id,
         ngfw_status,
         attached_ranges=current_attachments,
@@ -124,13 +118,13 @@ def _remove_ngfw_range_attachment(
     range_id: int,
 ) -> None:
     """Remove a range attachment from the NGFW instance state."""
-    import main
+    from ngfw_runtime import update_instance_state
 
-    ngfw_data = main.get_ngfw_data_by_request_id(ngfw_request_id)
+    ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
     current_state = ngfw_data.get("state") or {}
     current_attachments = list(current_state.get("attached_ranges") or [])
     remaining_attachments = [attachment for attachment in current_attachments if attachment.get("range_id") != range_id]
-    main.update_instance_state(
+    update_instance_state(
         ngfw_request_id,
         ngfw_status,
         attached_ranges=remaining_attachments,
@@ -139,9 +133,7 @@ def _remove_ngfw_range_attachment(
 
 def get_ngfw_data_by_request_id(request_id: str) -> dict[str, Any]:
     """Read NGFW request and instance data from Engine database."""
-    import main
-
-    with main.get_db_connection() as conn, conn.cursor() as cur:
+    with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
             SELECT

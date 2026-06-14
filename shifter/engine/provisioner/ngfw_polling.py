@@ -15,6 +15,10 @@ from executors.ngfw_executor import NGFWExecutor
 
 logger = logging.getLogger(__name__)
 
+# Default timeout for waiting for NGFW SSH to become available. PAN-OS boot time
+# is typically 15-25 minutes, but can take longer on first boot.
+NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500
+
 
 def parse_serial_number(system_info_output: str) -> str | None:
     """Extract serial number from PAN-OS 'show system info' output."""

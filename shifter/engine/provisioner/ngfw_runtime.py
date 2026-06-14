@@ -5,11 +5,6 @@ info`` parsers, the post-boot serial/cert/autocommit poll loops, the
 DB-write helper that backs NGFW lifecycle state, the configure /
 remove subnet pipelines, the stale-route cleanup paths, and
 ``user_has_active_ranges``.
-
-Cross-module callees that historically came from ``main.X`` (and are
-patched in tests via ``patch("main.X")``) go through lazy
-``import main; main.X(...)`` lookups so the existing test mocks keep
-intercepting the same call sites without per-test edits.
 """
 
 from __future__ import annotations
@@ -27,17 +22,17 @@ from events import STATUS_DESTROYED
 from executors.ngfw_executor import NGFWExecutor
 from ngfw_polling import poll_for_serial_number, wait_for_autocommit
 from orchestrators.setup_orchestrator import SetupOrchestrator
-from plans.base import SetupPlan
+from plans.base import DynamicPlan, SetupPlan
 from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan, NGFWRemoveSubnetsPlan
+from provisioner_db import get_db_connection
+from provisioner_db_ngfw import get_user_ngfw_data
 
 logger = logging.getLogger(__name__)
 
 
 def update_instance_state(request_id: str, status: str, **state_updates: Any) -> None:
     """Update NGFW Instance and App status/state in Engine database."""
-    import main
-
-    with main.get_db_connection() as conn:
+    with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -147,8 +142,6 @@ def find_stale_routes_by_db(
     current_range_id: int,
 ) -> list[str]:
     """Find NGFW routes belonging to destroyed/failed ranges via DB lookup."""
-    import main
-
     query_cmd = "set cli pager off\nconfigure\nshow network virtual-router default routing-table ip static-route\nexit"
     try:
         result = ssh_executor.run_command(
@@ -182,7 +175,7 @@ def find_stale_routes_by_db(
     stale_routes: list[str] = []
 
     try:
-        with main.get_db_connection() as conn, conn.cursor() as cur:
+        with get_db_connection() as conn, conn.cursor() as cur:
             query = sql.SQL("""
                 SELECT id FROM mission_control_range
                 WHERE id IN ({})
@@ -216,8 +209,6 @@ def configure_ngfw_subnets(
     ssm_endpoints_subnet_cidr: str = "",
 ) -> None:
     """Configure NGFW with routes for range subnets."""
-    import main
-
     logger.info(
         "Configuring NGFW: %d subnets, next_hop=%s",
         len(subnets),
@@ -272,7 +263,7 @@ def configure_ngfw_subnets(
         stale_routes,
         ssm_endpoints_subnet_cidr,
     )
-    plan: SetupPlan = main.DynamicPlan(name="ngfw_configure_subnets", steps=steps)
+    plan: SetupPlan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
     logger.info("Running NGFW subnet configuration via SetupOrchestrator...")
@@ -294,9 +285,7 @@ def configure_ngfw_subnets(
 
 def remove_ngfw_subnets(user_id: int, subnets: list[dict[str, Any]], range_id: int) -> None:
     """Remove subnet addresses and security rules from user's NGFW."""
-    import main
-
-    ngfw_data = main.get_user_ngfw_data(user_id)
+    ngfw_data = get_user_ngfw_data(user_id)
     if not ngfw_data:
         logger.warning("User %s has no NGFW, skipping subnet removal", user_id)
         return
@@ -340,7 +329,7 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict[str, Any]], range_id: i
 
     has_endpoints = bool(os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR"))
     steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id, has_endpoints)
-    plan: SetupPlan = main.DynamicPlan(name="ngfw_remove_subnets", steps=steps)
+    plan: SetupPlan = DynamicPlan(name="ngfw_remove_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
     logger.info("Running NGFW subnet removal via SetupOrchestrator...")
@@ -358,10 +347,8 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict[str, Any]], range_id: i
 
 def user_has_active_ranges(user_id: int, exclude_range_id: int) -> bool:
     """Check if user has any active ranges besides the one being destroyed."""
-    import main
-
     logger.debug("user_has_active_ranges: user_id=%s exclude_range_id=%s", user_id, exclude_range_id)
-    with main.get_db_connection() as conn, conn.cursor() as cur:
+    with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
             SELECT COUNT(*)

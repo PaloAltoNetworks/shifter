@@ -156,6 +156,25 @@ Current mechanisms:
   exception. During initial adoption, a base branch without the baseline
   file starts the ratchet from the first merged baseline.
 
+### ADR-019 baseline reduction (#957)
+
+Issue #957 rewrites the remaining non-decomposed mock-coupled test suites
+to behavior tests (drive a public entry point; assert outputs / ORM state /
+responses) and shrinks `boundary_mock_baseline.json` accordingly. Each group
+of suites lands as its own commit that removes the corresponding baseline
+entries. Completed so far:
+
+- `mission_control`: core range API, agents, models, and page-view suites
+  (`test_range_api*`, `test_agents`, `test_models`, `test_views`,
+  `test_engine_models`); engine-service view suites (`test_engine_services`,
+  `test_engine_services_lifecycle`) and `test_asset_hierarchy`; the SNS->
+  WebSocket handler suite (`test_handlers`), driven against the real in-memory
+  Channels layer.
+
+Decomposition-owned suites are out of scope here and land with their own
+issues: provisioner (#946), `ctf/**` and `cms/experiments/test_orchestrator*`
+(#885, #886, #889-#891), and `cms/scenario_editor/**` (#887, #888).
+
 ## Adding A Rule
 
 1. Add or update the ADR in `index.yaml`.

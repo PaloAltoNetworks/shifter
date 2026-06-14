@@ -66,6 +66,9 @@ pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
 # end-to-end runtime on representative slices while keeping full-suite
 # parallelism enabled.
 addopts = "-n auto --maxprocesses=4 --dist loadscope --reuse-db"
+markers = [
+    "redis: integration tests requiring a real Redis channel layer (run with -m redis -n0; needs a Redis service)",
+]
 
 [tool.coverage.run]
 # ``source = ["."]`` makes coverage record paths from the

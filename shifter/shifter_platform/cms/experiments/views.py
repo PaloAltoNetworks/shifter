@@ -25,6 +25,7 @@ from cms.experiments.exceptions import (
 )
 from cms.experiments.schemas import ExperimentCreateInput
 from shared.auth import threat_research_required
+from shared.errors import classify_user_message
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
@@ -85,7 +86,10 @@ def _initiate_script_upload_post(request: HttpRequest) -> HttpResponse:
     try:
         result = services.initiate_script_upload(cast("User", request.user), name, filename, file_size_int)
     except ScriptUploadError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        logger.exception("script_upload: initiation failed for user_id=%s", request.user.id)
+        return JsonResponse(
+            {"error": classify_user_message(str(e), default="Upload could not be initiated")}, status=400
+        )
     return JsonResponse(result)
 
 
@@ -385,7 +389,8 @@ def scenario_instances(request: HttpRequest, scenario_id: str) -> JsonResponse:
         instances = services.get_scenario_instances(scenario_id, user=cast("User", request.user))
         return JsonResponse({"instances": instances})
     except ExperimentValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        logger.exception("scenario_instances: validation error for scenario_id=%s", safe_log_value(scenario_id))
+        return JsonResponse({"error": classify_user_message(str(e), default="Invalid scenario request")}, status=400)
     except Exception:
         logger.exception("scenario_instances: unexpected error")
         return JsonResponse({"error": "An unexpected error occurred."}, status=500)

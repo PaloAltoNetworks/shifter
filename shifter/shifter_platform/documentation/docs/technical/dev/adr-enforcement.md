@@ -85,8 +85,25 @@ The first slice intentionally stays small:
   `fast` and `ci` levels.
   Test coverage in `scripts/adr_guard/tests/test_adr_guard.py` drives
   the silent-bypass and prefix-selector cases through `subTest()` loops
-  so adding a new bypass shape (e.g., `extend-select`-side variants) is
+  so adding a new bypass shape (for example, `extend-select`-side variants) is
   one row in the cases tuple, not a new test method.
+
+- `boundary-mock-policy`
+  Enforces ADR-019-R1: new Python tests may patch real process, network,
+  cloud, and framework transport boundaries, but must not add new
+  first-party internal callable patch targets. The check statically parses
+  tracked test files for `patch()` / mock `.patch()` string targets and
+  statically resolvable `patch.object(imported_module_or_class, ...)`
+  calls, then compares `(test file, target)` counts against
+  `scripts/adr_guard/boundary_mock_baseline.json`. The baseline records
+  current legacy topology-coupled tests so adoption does not require
+  rewriting the whole suite in one PR; the allowed counts may shrink but
+  must not grow. The check also compares the baseline file against the
+  branch reference so raising an allowance is a policy violation unless it
+  has a dated ADR exception. Prefer behavioral assertions, in-memory fakes
+  at service boundaries, or real framework test clients over patching
+  first-party service functions, views, render/logging/transaction aliases,
+  or model helpers.
 
 - `import-linter`
   Adds package-level forbidden-import contracts across the main Django app layers.
@@ -114,7 +131,7 @@ The first slice intentionally stays small:
   a `portal_image` filter covering `shifter/shifter_platform/**`, exposed as
   a `changes`-job output, included in the `shifter_platform` job's trigger
   condition, and consumed by the platform `build` job through the
-  `portal_image_changes` input — so an app-only push to an environment branch
+  `portal_image_changes` input so an app-only push to an environment branch
   builds and converges the portal image without running Terraform. The check
   requires deploy concurrency to queue branch/manual runs rather than cancel
   in-flight applies; PR cancellation may remain enabled. It also requires every
@@ -221,7 +238,7 @@ The first slice intentionally stays small:
   base manifests are supporting snapshots. Validating both sources
   catches regressions where a chart template or values file removes
   a required securityContext field even when the base snapshots
-  remain compliant. Kind-based filtering, not filename-based — a
+  remain compliant. Kind-based filtering, not filename-based, means a
   Deployment shipped under any filename or extension is scanned.
   Multi-document files (`---` separator) and indentless YAML
   sequences are supported.
@@ -357,7 +374,7 @@ The first slice intentionally stays small:
   guardrail fails closed: violations name only the repo-relative
   path and a remediation hint, never echoing plan content, license
   material, or binary payloads. Backstops `.gitignore`, which does
-  not retroactively un-track files that were already added (e.g.
+  not retroactively un-track files that were already added (for example,
   through `git add -f`), and complements
   `no-plaintext-secrets-in-tfvars`. Enforces ADR-004-R8.
 
@@ -372,7 +389,7 @@ The first slice intentionally stays small:
   `<placeholder>`, `<example>`) are allowed; anything else is
   flagged. The bracket allowlist is an explicit fixed set rather
   than a `<...>` pattern so a committer cannot hide a real credential
-  inside angle brackets (e.g. `DB_PASSWORD=<attacker-known-password>`).
+  inside angle brackets (for example, `DB_PASSWORD=<attacker-known-password>`).
   The parser splits on the first `=` so non-identifier key shapes
   (`db.password=...`, `api-token=...`, `export DB_PASSWORD=...`) are
   still subject to the value check; inline `# ...` is **not**
@@ -380,11 +397,11 @@ The first slice intentionally stays small:
   comment only when it is the first non-whitespace character on a
   line); non-comment, non-blank lines without `=` are flagged as
   malformed. Containment uses `git ls-files` so gitignored local-dev
-  files (e.g. `platform-runtime-secrets.local.env`) are intentionally
+  files (for example, `platform-runtime-secrets.local.env`) are intentionally
   not scanned; a synthetic-tree test-mode fallback walks the
   filesystem for unit tests. The roots and the synthetic-placeholder
   allowlist are centralized in `scripts/adr_guard/adr_guard.py` so
-  adding a future overlay (e.g. `gcp-prod`) is automatic and adding
+  adding a future overlay (for example, `gcp-prod`) is automatic and adding
   a new cluster tree is one entry. Failure reporting names the
   repo-relative path and the variable name only; the rejected value
   is never echoed. Real runtime secrets must flow in at deploy time
@@ -412,21 +429,21 @@ The first slice intentionally stays small:
   Pre-commit hook AND CI step (`.github/workflows/_quality.yml`'s
   `terraform-lint` job) that fails when an IAM role whose attached
   `aws_iam_role_policy` grants `secretsmanager:GetSecretValue` (or
-  any wildcard covering it — `secretsmanager:*`,
-  `secretsmanager:Get*`, `*`) lacks an attached IAM Statement
+  any wildcard covering it, such as `secretsmanager:*`,
+  `secretsmanager:Get*`, or `*`) lacks an attached IAM Statement
   granting `kms:Decrypt` on the portal Secrets Manager CMK. The grant
   must satisfy all three predicates in the SAME Statement: Action
   covers `kms:Decrypt` (action wildcard matching is done with
   `fnmatch`, so `kms:*` and `kms:De*` also satisfy); Resource is
   `var.secrets_manager_kms_key_arn` or `var.secrets_kms_key_arn`
   (both module-input names refer to the same physical portal CMK in
-  the environment modules — engine-provisioner and portal/ec2 use
+  the environment modules: engine-provisioner and portal/ec2 use
   the first, guacamole uses the second) or `"*"` / `["*"]` (accepted
   when the same statement carries the service condition); Condition
   `StringEquals` or `StringLike` with
   `"kms:ViaService" = "secretsmanager.<region>.amazonaws.com"`. The
   per-statement coexistence check matters because IAM evaluates each
-  Statement in isolation — spreading the predicates across separate
+  Statement in isolation; spreading the predicates across separate
   statements does not satisfy a single Decrypt call. Independently,
   any IAM Statement granting `kms:Decrypt` on `Resource="*"` (or
   `["*"]`) must carry a `kms:ViaService` condition pinning to some

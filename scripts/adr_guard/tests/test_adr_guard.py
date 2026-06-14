@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -3333,6 +3335,301 @@ class McpOpsTlsStrictTests(unittest.TestCase):
         self.assertIn("mcp-ops-tls-strict", ADR_GUARD.CHECKS)
         self.assertIn("mcp-ops-tls-strict", ADR_GUARD.CHECK_LEVELS["ci"])
         self.assertIn("mcp-ops-tls-strict", ADR_GUARD.CHECK_LEVELS["fast"])
+
+
+class BoundaryMockPolicyTests(unittest.TestCase):
+    """Tests for ADR-019-R1: new tests mock boundaries, not internal topology."""
+
+    BASELINE_REL = "scripts/adr_guard/boundary_mock_baseline.json"
+
+    def _write_file(self, repo_root: Path, rel: str, text: str = "") -> None:
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _write_first_party_module(self, repo_root: Path) -> None:
+        self._write_file(repo_root, "cms/__init__.py")
+        self._write_file(repo_root, "cms/services.py", "def create_range():\n    return None\n")
+
+    def _write_baseline(self, repo_root: Path, records: list[dict]) -> None:
+        self._write_file(
+            repo_root,
+            self.BASELINE_REL,
+            json.dumps(
+                {
+                    "version": 1,
+                    "allowed_internal_patch_counts": records,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        )
+
+    def _git(self, repo_root: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    def _commit_repo(self, repo_root: Path) -> None:
+        self._git(repo_root, "init")
+        self._git(repo_root, "config", "user.email", "adr-guard@example.invalid")
+        self._git(repo_root, "config", "user.name", "ADR Guard Test")
+        self._git(repo_root, "add", ".")
+        self._git(repo_root, "commit", "-m", "baseline")
+
+    def test_flags_first_party_internal_patch_not_in_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-019-R1")
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_allows_existing_internal_patch_count_from_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_flags_internal_patch_count_growth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_one():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n\n"
+                "def test_two():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("allowed 1", violations[0].message)
+            self.assertIn("found 2", violations[0].message)
+
+    def test_flags_baseline_count_growth_against_git_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+            self._commit_repo(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 2,
+                    }
+                ],
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].path, self.BASELINE_REL)
+            self.assertIn("grew from 1 to 2", violations[0].message)
+
+    def test_flags_new_baseline_entry_against_git_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(repo_root, "tests/test_ranges.py", "def test_range_creation():\n    pass\n")
+            self._commit_repo(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].path, self.BASELINE_REL)
+            self.assertIn("grew from 0 to 1", violations[0].message)
+
+    def test_allows_process_and_cloud_boundary_patches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_file(repo_root, "deploy.py", "import subprocess\n")
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_boundaries.py",
+                "from unittest.mock import patch\n\n"
+                "def test_boundaries(mocker):\n"
+                "    with patch('subprocess.Popen'):\n"
+                "        pass\n"
+                "    mocker.patch('boto3.Session')\n"
+                "    mocker.patch('deploy.subprocess.run')\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_flags_resolvable_patch_object_internal_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from cms import services\n"
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch.object(services, 'create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_targeted_mode_skips_unrelated_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, ["docs/unrelated.md"])
+
+            self.assertEqual(violations, [])
+
+    def test_targeted_mode_baseline_change_triggers_full_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, [self.BASELINE_REL])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_targeted_mode_guard_change_triggers_full_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, ["scripts/adr_guard/adr_guard.py"])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_boundary_mock_policy(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected boundary-mock-policy violations: {violations}")
+
+    def test_check_registered_at_ci_and_fast_levels(self) -> None:
+        self.assertIn("boundary-mock-policy", ADR_GUARD.CHECKS)
+        self.assertIn("boundary-mock-policy", ADR_GUARD.CHECK_LEVELS["ci"])
+        self.assertIn("boundary-mock-policy", ADR_GUARD.CHECK_LEVELS["fast"])
 
 
 class NoTrackedGeneratedArtifactsTests(unittest.TestCase):

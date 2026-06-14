@@ -229,35 +229,47 @@ jobs:
             echo "fast_gcp_deploy=$FAST_GCP_DEPLOY"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Check for skip flags
+      - name: Disable test skip flags for protected-branch CI
         id: skip
         run: |
-          # Check for [skip tests] in commit message
-          SKIP_TESTS="false"
+          echo "skip_tests=false" >> "$GITHUB_OUTPUT"
 
-          # Only allow skip on dev (PRs to dev or pushes to dev)
-          if { [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; } || \
-             { [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/dev" ]; }; then
+  # Always-present CI enforcement for the fast local pre-commit baseline that
+  # must not be bypassed by path filters: file hygiene and secret scanning.
+  precommit:
+    name: Pre-commit
+    if: |
+      github.event_name == 'pull_request' ||
+      github.ref == 'refs/heads/dev' ||
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
 
-            # Get commit message
-            if [ "${{ github.event_name }}" == "pull_request" ]; then
-              COMMIT_MSG=$(git log ${{ github.event.pull_request.head.sha }} -1 --pretty=%B)
-              echo "Checking PR commit: ${{ github.event.pull_request.head.sha }}"
-            else
-              COMMIT_MSG=$(git log HEAD -1 --pretty=%B)
-              echo "Checking push commit: $(git rev-parse HEAD)"
-            fi
-
-            echo "Commit message: $COMMIT_MSG"
-
-            # Check commit message for [skip tests]
-            if echo "$COMMIT_MSG" | grep -qi "\[skip tests\]"; then
-              SKIP_TESTS="true"
-              echo "::warning::Skipping tests (commit message contains [skip tests])"
-            fi
-          fi
-
-          echo "skip_tests=$SKIP_TESTS" >> "$GITHUB_OUTPUT"
+      - name: Run file hygiene and secret scan hooks
+        run: |
+          set -euo pipefail
+          export PRE_COMMIT_HOME="${RUNNER_TEMP}/pre-commit-cache"
+          python3 -m venv "${RUNNER_TEMP}/precommit-venv"
+          # shellcheck disable=SC1091
+          . "${RUNNER_TEMP}/precommit-venv/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install 'pre-commit==4.3.0'
+          hooks=(
+            trailing-whitespace
+            end-of-file-fixer
+            check-yaml
+            check-json
+            check-added-large-files
+            check-merge-conflict
+            detect-private-key
+            gitleaks
+          )
+          for hook in "${hooks[@]}"; do
+            pre-commit run "$hook" --all-files --show-diff-on-failure
+          done
 
   # ============================================================================
   # DEPENDENCY CHAIN: Core -> Range -> Platform
@@ -301,17 +313,22 @@ jobs:
   # it never runs on aws-dev / gcp-dev / main pushes.
   pr-gate:
     name: PR Gate
-    needs: [changes, quality]
+    needs: [changes, precommit, quality]
     if: ${{ always() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - name: Assert required PR jobs passed
         run: |
           changes_result='${{ needs.changes.result }}'
+          precommit_result='${{ needs.precommit.result }}'
           quality_result='${{ needs.quality.result }}'
-          echo "changes=$changes_result quality=$quality_result"
+          echo "changes=$changes_result precommit=$precommit_result quality=$quality_result"
           if [ "$changes_result" != "success" ]; then
             echo "::error::Detect Changes did not succeed (result=$changes_result)"
+            exit 1
+          fi
+          if [ "$precommit_result" != "success" ]; then
+            echo "::error::Pre-commit did not pass (result=$precommit_result)"
             exit 1
           fi
           # `quality` is legitimately skipped when no quality-relevant

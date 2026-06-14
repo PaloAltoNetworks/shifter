@@ -1175,7 +1175,7 @@ jobs:
       - installation-tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Full history so SonarCloud attributes new code accurately for
           # pull-request (new-code) quality-gate analysis.
@@ -1185,49 +1185,49 @@ jobs:
       # artifacts; restore each at the repo-relative path that
       # sonar-project.properties references.
       - name: Download shifter_platform coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-shifter-platform
           path: shifter/shifter_platform
       - name: Download shifter_platform JS coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-shifter-platform-js
           path: shifter/shifter_platform/coverage
       - name: Download provisioner coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-provisioner
           path: shifter/engine/provisioner
       - name: Download packer coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-packer
           path: shifter/packer
       - name: Download bootstrap coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-bootstrap
           path: scripts/bootstrap
       - name: Download check_layer_imports coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-check-layer-imports
           path: scripts/check_layer_imports
       - name: Download installation coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-installation
           path: shifter/installation
 
       - name: Setup Java for SonarScanner
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
       - name: SonarQube Cloud scan
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:

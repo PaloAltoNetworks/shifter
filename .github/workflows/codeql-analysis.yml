@@ -3,9 +3,11 @@ name: CodeQL
 on:
   push:
     branches:
+      - main
       - dev
   pull_request:
     branches:
+      - main
       - dev
   schedule:
     # Weekly Sunday 06:00 UTC re-scan to catch any drift between PR runs.

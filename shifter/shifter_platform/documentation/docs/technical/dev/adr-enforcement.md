@@ -139,7 +139,12 @@ The first slice intentionally stays small:
   command to include `-lock-timeout=5m`, and requires each apply job to create
   and execute a local saved `tfplan` instead of uploading raw binary plans as
   artifacts or running a fresh unplanned apply. The platform Service Discovery
-  replacement check must inspect that same saved plan. On apply workflows,
+  replacement check must inspect that same saved plan. Non-deploy support/test
+  surfaces that are not under `shifter/**` or `mcp/**` must use the
+  `quality_only` filter/output rather than being hidden in a deploy bucket:
+  `scripts/polaris-aws-range/**` and `scenario-dev/polaris/tests/**` are
+  required entries so the orphaned support suites run Quality without launching
+  Terraform plans, image builds, or environment deploys. On apply workflows,
   `_shifter-platform.yml` still pushes the Guacamole ECR images before the
   platform Terraform plan because the Guacamole module resolves current image
   digests with `aws_ecr_image` data sources during plan. This ordering is

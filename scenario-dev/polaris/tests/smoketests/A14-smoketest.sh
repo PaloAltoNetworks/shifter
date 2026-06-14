@@ -27,14 +27,20 @@ echo "--- Content files ---"
 # in 2026-04 (see scenario-dev/polaris/build/a14/Dockerfile:85): they were
 # stale relative to the CTFd board and Kali has no route to CTFd, so a
 # Kali-side submission helper is broken by design. CTFd is the reference.
-# The remaining content drops are modbus_scan.py (Mission 4 helper), the
-# Claude POLARIS system prompt, and the warm-up challenge target.
+# The remaining content drops are START_HERE.txt (visible participant
+# onramp), modbus_scan.py (Mission 4 helper), the Claude POLARIS system
+# prompt, and the warm-up challenge target.
 for f in /home/kali/tools/modbus_scan.py \
+         /home/kali/START_HERE.txt \
          /home/kali/.config/claude/system_prompt.txt \
          /home/kali/.polaris/welcome.txt; do
     [[ -f "$f" ]] && pass "$f present" || fail "$f missing"
 done
 [[ -x /home/kali/tools/modbus_scan.py ]] && pass "modbus_scan.py executable" || fail "modbus_scan.py not exec"
+grep -q 'polaris.keplerops.com' /home/kali/START_HERE.txt \
+    && pass "START_HERE names CTFd" || fail "START_HERE missing CTFd URL"
+grep -q 'cannot submit flags to CTFd' /home/kali/START_HERE.txt \
+    && pass "START_HERE explains CTFd is browser-only" || fail "START_HERE missing browser-only guidance"
 
 echo
 echo "--- Kali user and services ---"

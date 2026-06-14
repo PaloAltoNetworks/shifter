@@ -143,6 +143,25 @@ validate_bootstrap_email_list() {
   fi
 }
 
+image_ref() {
+  local registry="$1"
+  local repository="$2"
+  local digest="$3"
+  local tag="$4"
+
+  if [[ -n "$digest" ]]; then
+    if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      echo "Invalid image digest: expected sha256:<hex>"
+      exit 1
+    fi
+    printf '%s/%s@%s\n' "$registry" "$repository" "$digest"
+    return
+  fi
+
+  printf '%s/%s:%s\n' "$registry" "$repository" "$tag"
+}
+
+IMAGE_DIGEST=$(get_param "$PS_PREFIX/image-digest" 2>/dev/null || echo "")
 IMAGE_TAG=$(get_param "$PS_PREFIX/image-tag")
 ECR_REGISTRY=$(get_param "$PS_PREFIX/ecr-registry")
 ECR_REPOSITORY=$(get_param "$PS_PREFIX/ecr-repository")
@@ -173,7 +192,7 @@ PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-s
 validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_STAFF_EMAILS" "$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
 validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
 
-IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+IMAGE=$(image_ref "$ECR_REGISTRY" "$ECR_REPOSITORY" "$IMAGE_DIGEST" "$IMAGE_TAG")
 echo "Deploying image: $IMAGE"
 
 # ------------------------------------------------------------------------------
@@ -248,6 +267,10 @@ if [[ -n "$CTFD_PLATFORM_URL" ]]; then
   COMMON_ENV="$COMMON_ENV -e CTFD_PLATFORM_URL=$CTFD_PLATFORM_URL"
 fi
 
+# Migrations are deploy-owned. Runtime containers skip boot-time migration so
+# ASG refreshes and warm-pool reuse cannot race the same RDS schema.
+COMMON_ENV="$COMMON_ENV -e SKIP_MIGRATIONS=1"
+
 # ------------------------------------------------------------------------------
 # Deploy containers
 # ------------------------------------------------------------------------------
@@ -274,6 +297,26 @@ eval docker run -d --name ctf-scheduler --restart unless-stopped $WORKER_HEALTH_
 
 echo "All containers started:"
 docker ps
+
+# ------------------------------------------------------------------------------
+# Worker-container health supervisor (#953)
+# ------------------------------------------------------------------------------
+# Docker --restart unless-stopped does not act on `unhealthy`, so a wedged
+# worker would stall silently. Install a systemd-timer agent that restarts
+# unhealthy worker/scheduler containers and emits a CloudWatch metric. The
+# artifacts are single-sourced under modules/portal/ec2/worker-health/ and
+# injected base64-encoded so this fresh-boot path and the SSM redeploy path
+# install byte-identical files. Installed before completing the lifecycle hook
+# so a fresh instance only reports healthy once supervision is live.
+echo "Installing worker-container health supervisor..."
+echo "${worker_health_monitor_b64}" | base64 -d > /usr/local/bin/shifter-worker-health.sh
+chmod 0755 /usr/local/bin/shifter-worker-health.sh
+echo "${worker_health_service_b64}" | base64 -d > /etc/systemd/system/shifter-worker-health.service
+echo "${worker_health_timer_b64}" | base64 -d > /etc/systemd/system/shifter-worker-health.timer
+# Per-environment metric dimension so dev and prod alarms stay independent.
+echo "WH_NAME_PREFIX=${name_prefix}" > /etc/shifter-worker-health.env
+systemctl daemon-reload
+systemctl enable --now shifter-worker-health.timer
 
 # ------------------------------------------------------------------------------
 # Complete lifecycle action on success

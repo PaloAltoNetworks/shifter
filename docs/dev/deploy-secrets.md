@@ -1,12 +1,12 @@
 # Deploy secrets and repository variables
 
-The committed `terraform.tfvars` files in `platform/terraform/.../portal/`
-and `platform/terraform/gcp/environments/...` ship an `example.com`
-baseline that's intentionally broken-on-deploy. Each environment provides
-its real deployment values via GitHub secrets and repository variables;
-the deploy workflows write them into a gitignored `local.auto.tfvars`
-that Terraform auto-loads alongside the baseline (the `.local`/`.auto`
-overrides win).
+The committed `terraform.tfvars` files in `platform/terraform/environments/...`
+and `platform/terraform/gcp/environments/...` ship account-neutral baselines
+that are intentionally broken-on-deploy where real account values are
+required. Each environment provides its real deployment values via GitHub
+secrets, repository variables, or a local operator overlay; deploy workflows
+write them into a gitignored `local.auto.tfvars` that Terraform auto-loads
+alongside the baseline (the `.local`/`.auto` overrides win).
 
 This file lists values that must be configured before a fresh deploy. Set values
 under **Settings → Secrets and variables → Actions**, separated by:
@@ -58,7 +58,6 @@ loud (`::error::`) when the active environment's secret is empty.
 | `AWS_ROLE_ARN_DEV` / `AWS_ROLE_ARN` | secret | yes | OIDC role assumed by the deploy job. |
 | `TF_VARS_DEV_PORTAL` | secret | yes (dev) | Whole-file `local.auto.tfvars` payload for the dev portal root, rendered verbatim over the committed baseline before `terraform plan` / `apply`. |
 | `TF_VARS_PROD_PORTAL` | secret | yes (prod) | As above, for the prod portal root. |
-| `AWS_PORTAL_ENABLE_AUTOSCALING` | variable | no | Default `false`. Enables ASG scaling steps in the deploy job. |
 
 The `TF_VARS_<ENV>_PORTAL` secret holds plain Terraform HCL — the same
 content you would put in a `local.auto.tfvars`. At minimum it must set the
@@ -97,7 +96,11 @@ to use the `aws-dev` deploy branch:
    the target account to accept the free AWS Marketplace terms for product
    code `7lgvy7mt78lgoi4lant0znp5h`.
 4. Review `TF_VARS_DEV_PORTAL` for account-specific values such as domain
-   names, alarm email, SSH allowlists, and bucket names.
+   names, alarm email, SSH allowlists, and bucket names. Review
+   `TF_VARS_DEV_RANGE` for range deployment values such as the agent S3 bucket
+   and the regional PAN-OS VM-Series AMI. Bootstrap configures the AWS role
+   secret and backend files; the deploy workflows fail loud when the active
+   portal or range tfvars secret is missing.
 5. For the first deploy in a moved or fresh account, run the `Deploy`
    workflow manually with `workflow_dispatch` on `aws-dev`. Manual dispatch
    forces the full AWS chain (Core -> Range -> Engine -> Platform). A plain
@@ -134,7 +137,15 @@ publish the runtime DNS records:
   `alb_dns_name` as CNAME records. In Cloudflare, keep them DNS-only unless
   the deployment explicitly validates proxied Cloudflare behavior.
 - `ctfd_domain` points to the Terraform output `ctfd_elastic_ip` as an A
-  record.
+  record. In Cloudflare, publish the record as DNS-only until the CTFd host
+  has completed certbot and `https://<ctfd_domain>/login` works against the
+  origin. After that validation, the CTFd `A` record may be switched to
+  proxied with SSL/TLS mode `Full (strict)`. The DNS target is the bare
+  Elastic IP address, never an `http://` or `https://` URL. Cloudflare
+  challenge actions must be disabled or explicitly skipped for the CTFd
+  hostname before event smoke testing; the CTFd sync scripts and automated
+  checks expect the CTFd app to answer directly instead of a Cloudflare
+  `cf-mitigated: challenge` page.
 
 ALB access logs use a dedicated S3 bucket with SSE-S3 because Elastic Load
 Balancing does not support SSE-KMS for Application Load Balancer access-log
@@ -169,12 +180,40 @@ VPC-local and is required for the routed middlebox path.
 
 ## AWS range (`dev` / `prod`)
 
-Range Terraform (under `platform/terraform/environments/<env>/range/`) is
-applied locally by operators today, not by GitHub Actions, so there is no
-CI secret to render — the operator writes the deployment-specific values
-into a gitignored `local.auto.tfvars` alongside `terraform.tfvars`. The
-committed `terraform.tfvars` ships an empty `victim_allowed_cidrs` baseline
-so the repo never carries a deployment's allowlist (PLAT-220 / #775).
+Consumed by `.github/workflows/_range.yml`. The committed
+`platform/terraform/environments/<env>/range/terraform.tfvars` is an
+account-neutral baseline. The workflow's `Render local.auto.tfvars from
+deployment secret` step is present in both the `plan` and `apply` jobs; it
+selects the active environment strictly from `inputs.is_dev`, writes the
+matching whole-file secret into `local.auto.tfvars`, and fails loud
+(`::error::`) when the active secret is empty.
+
+| Name | Kind | Required | Notes |
+|---|---|---|---|
+| `TF_VARS_DEV_RANGE` | secret | yes (dev) | Whole-file `local.auto.tfvars` payload for the dev range root, rendered verbatim over the committed baseline before `terraform plan` / `apply`. |
+| `TF_VARS_PROD_RANGE` | secret | yes (prod) | As above, for the prod range root. |
+
+At minimum, each `TF_VARS_<ENV>_RANGE` payload must set the deployment-specific
+values stripped from the committed baseline:
+
+- `agent_s3_bucket` — the account-specific user-storage bucket read by range
+  instance roles
+- `vm_series_ami_id` — the regional PAN-OS Marketplace AMI to use. This is
+  deployment configuration, not a credential; keep it in the overlay so the
+  shared repo does not prescribe a marketplace version/region for every
+  deployment.
+
+Local operators use the same model: write those values to a gitignored
+`local.auto.tfvars` alongside the range `terraform.tfvars`. In this repo's
+worktree workflow, `scripts/setup-worktree.sh` symlinks existing
+`local.auto.tfvars` overlays from the main checkout into worktrees so local
+plans do not lose the per-account values when branches change.
+
+The committed `terraform.tfvars` also ships an empty `victim_allowed_cidrs`
+baseline so the repo never carries a deployment's allowlist (PLAT-220 / #775).
+This completes the `_core.yml` / `_range.yml` deploy-tfvars audit from #784:
+the AWS core tfvars remain generic repository-name defaults, while account-bound
+and deployment-specific range values are supplied by secret or local overlay.
 
 For the PLAT-220 range egress allowlist:
 
@@ -182,7 +221,7 @@ For the PLAT-220 range egress allowlist:
 | ------------------------------------------------------------------------------------ | ----------------------------------------------------- |
 | `platform/terraform/environments/{dev,prod}/range/terraform.tfvars`                  | committed; empty `victim_allowed_cidrs` baseline      |
 | `platform/terraform/environments/{dev,prod}/range/local.auto.tfvars.example`         | committed; shape reference                            |
-| `platform/terraform/environments/{dev,prod}/range/local.auto.tfvars`                 | gitignored; operator writes `victim_allowed_cidrs`    |
+| `platform/terraform/environments/{dev,prod}/range/local.auto.tfvars`                 | gitignored; operator writes account values and `victim_allowed_cidrs` |
 
 Source for the PANW Cortex XSIAM/XDR allowlist:
 <https://docs-cortex.paloaltonetworks.com/r/Cortex-XSIAM/Cortex-XSIAM-Administrator-Guide/Resources-Required-to-Enable-Access>.
@@ -239,6 +278,63 @@ EOF
 cd platform/terraform/environments/dev/portal
 terraform init -backend-config=dev.s3.tfbackend
 terraform plan
+```
+
+```sh
+# AWS dev range
+cat > platform/terraform/environments/dev/range/local.auto.tfvars <<EOF
+agent_s3_bucket = "shifter-dev-user-storage-<your-account-id>"
+vm_series_ami_id = "ami-xxxxxxxxxxxxxxxxx"
+victim_allowed_cidrs = [
+  "<your-required-egress-cidr>/32",
+]
+EOF
+
+cd platform/terraform/environments/dev/range
+terraform init -backend-config=dev.s3.tfbackend
+terraform plan
+```
+
+For event-sized AWS dev runs, put the full capacity overlay in
+`TF_VARS_DEV_PORTAL`. The deploy workflow reads `terraform output -json` from
+the applied portal state and derives its single-instance vs. ASG path from the
+Terraform `enable_autoscaling` output; there is no separate GitHub variable to
+keep in sync. The committed `terraform.tfvars` is a modest OSS default, while
+the secret payload below is the event-sized overlay for ASG, warm pool, Redis
+channel layer, and larger Guacamole/Postgres capacity:
+
+```hcl
+enable_autoscaling     = true
+asg_min_size           = 2
+asg_max_size           = 8
+asg_desired_capacity   = 2
+asg_warm_pool_min_size = 2
+asg_warm_pool_state    = "Stopped"
+enable_redis           = true
+
+db_instance_class        = "db.m6i.xlarge"
+db_allocated_storage     = 100
+db_max_allocated_storage = 500
+db_backup_retention_days = 7
+
+redis_node_type = "cache.m6g.xlarge"
+
+guacd_cpu                      = 2048
+guacd_memory                   = 4096
+guacamole_client_cpu           = 2048
+guacamole_client_memory        = 4096
+guacd_desired_count            = 6
+guacamole_client_desired_count = 4
+
+guacamole_db_instance_class        = "db.m6i.xlarge"
+guacamole_db_allocated_storage     = 100
+guacamole_db_max_allocated_storage = 500
+guacamole_db_multi_az              = true
+
+guacamole_enable_autoscaling       = true
+guacamole_autoscaling_min_capacity = 4
+guacamole_autoscaling_max_capacity = 10
+guacamole_autoscaling_cpu_target   = 60
 ```
 
 ```sh

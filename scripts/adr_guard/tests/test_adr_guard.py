@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
+from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "adr_guard.py"
 SPEC = importlib.util.spec_from_file_location("adr_guard", MODULE_PATH)
@@ -40,6 +43,15 @@ class AdrGuardTests(unittest.TestCase):
 
         self.assertEqual(len(violations), 1)
         self.assertEqual(violations[0].rule_id, "ADR-002-R1")
+
+    def test_ground_control_config_files_are_guardrails(self) -> None:
+        for path in (".ground-control.yaml", ".gc/plan-rules.md"):
+            with self.subTest(path=path):
+                violations = ADR_GUARD.check_guardrail_docs(ADR_GUARD.REPO_ROOT, [path])
+
+                self.assertEqual(len(violations), 1)
+                self.assertEqual(violations[0].rule_id, "ADR-002-R1")
+                self.assertEqual(violations[0].path, path)
 
     def test_adr_registry_rejects_unknown_exception_rule(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,48 +123,283 @@ class AdrGuardTests(unittest.TestCase):
 class DeployWorkflowPlanScopeTests(unittest.TestCase):
     """Tests for the AWS platform plan trigger and lock-timeout guardrail."""
 
-    def _write_workflows(self, repo_root: Path, deploy: str, platform: str) -> None:
+    def _write_workflows(
+        self,
+        repo_root: Path,
+        deploy: str,
+        platform: str,
+        core: str | None = None,
+        range_workflow: str | None = None,
+    ) -> None:
         workflow_dir = repo_root / ".github" / "workflows"
         workflow_dir.mkdir(parents=True)
         (workflow_dir / "deploy.yml").write_text(deploy, encoding="utf-8")
         (workflow_dir / "_shifter-platform.yml").write_text(platform, encoding="utf-8")
+        (workflow_dir / "_core.yml").write_text(
+            core or self._terraform_workflow_text("core"), encoding="utf-8"
+        )
+        (workflow_dir / "_range.yml").write_text(
+            range_workflow or self._terraform_workflow_text("range"), encoding="utf-8"
+        )
 
     def _deploy_text(
         self,
         *,
         platform_globs: list[str] | None = None,
-        app_globs: list[str] | None = None,
-        quality_condition: str = "needs.changes.outputs.shifter_app == 'true'",
+        quality_non_doc_globs: list[str] | None = None,
+        guardrail_doc_globs: list[str] | None = None,
+        portal_image_globs: list[str] | None = None,
+        quality_only_globs: list[str] | None = None,
+        quality_condition: str = "needs.changes.outputs.quality_relevant == 'true'",
+        quality_output: str = "quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}",
+        include_quality_non_docs_filter: bool = True,
+        include_guardrail_docs_filter: bool = True,
+        quality_predicate: str = "predicate-quantifier: every",
+        pr_gate_guard: str = 'if [ "$quality_result" = "skipped" ] && [ "$quality_relevant" != "false" ]; then',
+        include_portal_image_filter: bool = True,
+        include_quality_only_filter: bool = True,
+        portal_image_output: str = "portal_image: ${{ steps.filter.outputs.portal_image }}",
+        quality_only_output: str = "quality_only: ${{ steps.filter.outputs.quality_only }}",
+        platform_job_condition: str = "needs.changes.outputs.portal_image == 'true'",
+        cancel_in_progress: str = "${{ github.event_name == 'pull_request' }}",
     ) -> str:
         platform_globs = platform_globs or ["platform/terraform/modules/portal/**"]
-        app_globs = app_globs or ["shifter/**"]
+        quality_non_doc_globs = quality_non_doc_globs or [
+            "**",
+            "!docs/**",
+            "!**/*.md",
+            "!shifter/shifter_platform/documentation/**",
+        ]
+        guardrail_doc_globs = guardrail_doc_globs or [
+            ".github/pull_request_template.md",
+            ".github/copilot-instructions.md",
+            "docs/adr/**",
+            "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
+        ]
+        portal_image_globs = portal_image_globs or ["shifter/shifter_platform/**"]
+        quality_only_globs = quality_only_globs or [
+            "scripts/polaris-aws-range/**",
+            "scenario-dev/polaris/tests/**",
+        ]
         platform_lines = "".join(f"              - '{glob}'\n" for glob in platform_globs)
-        app_lines = "".join(f"              - '{glob}'\n" for glob in app_globs)
+        quality_non_docs_filter = ""
+        if include_quality_non_docs_filter:
+            quality_non_doc_lines = "".join(
+                f"              - '{glob}'\n" for glob in quality_non_doc_globs
+            )
+            quality_non_docs_filter = (
+                "      - id: quality_non_docs\n"
+                "        with:\n"
+                f"          {quality_predicate}\n"
+                "          filters: |\n"
+                "            non_docs:\n"
+                f"{quality_non_doc_lines}"
+            )
+        guardrail_docs_filter = ""
+        if include_guardrail_docs_filter:
+            guardrail_doc_lines = "".join(
+                f"              - '{glob}'\n" for glob in guardrail_doc_globs
+            )
+            guardrail_docs_filter = (
+                "      - id: quality_guardrails\n"
+                "        with:\n"
+                "          filters: |\n"
+                "            guardrail_docs:\n"
+                f"{guardrail_doc_lines}"
+            )
+        portal_image_filter = ""
+        if include_portal_image_filter:
+            portal_image_lines = "".join(
+                f"              - '{glob}'\n" for glob in portal_image_globs
+            )
+            portal_image_filter = f"            portal_image:\n{portal_image_lines}"
+        quality_only_filter = ""
+        if include_quality_only_filter:
+            quality_only_lines = "".join(
+                f"              - '{glob}'\n" for glob in quality_only_globs
+            )
+            quality_only_filter = f"            quality_only:\n{quality_only_lines}"
         return (
+            "concurrency:\n"
+            "  group: deploy-${{ github.ref }}\n"
+            f"  cancel-in-progress: {cancel_in_progress}\n"
             "jobs:\n"
             "  changes:\n"
             "    outputs:\n"
-            "      shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+            f"      {quality_output}\n"
+            f"      {portal_image_output}\n"
+            f"      {quality_only_output}\n"
             "    steps:\n"
             "      - id: filter\n"
             "        with:\n"
             "          filters: |\n"
             "            shifter_platform:\n"
             f"{platform_lines}"
-            "            shifter_app:\n"
-            f"{app_lines}"
+            f"{portal_image_filter}"
+            f"{quality_only_filter}"
+            f"{quality_non_docs_filter}"
+            f"{guardrail_docs_filter}"
             "  quality:\n"
             "    if: |\n"
             f"      {quality_condition}\n"
+            "  pr-gate:\n"
+            "    steps:\n"
+            "      - run: |\n"
+            "          quality_result='${{ needs.quality.result }}'\n"
+            "          quality_relevant='${{ needs.changes.outputs.quality_relevant }}'\n"
+            f"          {pr_gate_guard}\n"
+            "            exit 1\n"
+            "          fi\n"
+            "  shifter_platform:\n"
+            "    if: |\n"
+            f"      {platform_job_condition}\n"
         )
 
-    def _platform_text(self, plan_args: str = "-no-color -lock-timeout=5m -out=tfplan") -> str:
+    def _platform_text(
+        self,
+        plan_args: str = "-no-color -lock-timeout=5m -out=tfplan",
+        build_condition: str = "inputs.portal_image_changes",
+        apply_plan_command: str | None = "terraform plan -lock-timeout=5m -out=tfplan",
+        before_apply_command: str | None = None,
+        apply_command: str = "terraform apply -lock-timeout=5m tfplan",
+    ) -> str:
+        apply_plan_step = f"      - run: {apply_plan_command}\n" if apply_plan_command else ""
+        before_apply_step = f"      - run: {before_apply_command}\n" if before_apply_command else ""
         return (
             "jobs:\n"
             "  plan:\n"
             "    steps:\n"
             f"      - run: terraform plan {plan_args}\n"
+            "  apply:\n"
+            "    steps:\n"
+            f"{apply_plan_step}"
+            f"{before_apply_step}"
+            f"      - run: {apply_command}\n"
+            "  build:\n"
+            "    if: |\n"
+            f"      {build_condition}\n"
         )
+
+    def _terraform_workflow_text(
+        self,
+        component: str,
+        *,
+        plan_args: str = "-no-color -lock-timeout=5m -out=tfplan",
+        apply_plan_command: str | None = "terraform plan -lock-timeout=5m -out=tfplan",
+        apply_command: str = "terraform apply -lock-timeout=5m tfplan",
+    ) -> str:
+        apply_plan_step = f"      - run: {apply_plan_command}\n" if apply_plan_command else ""
+        return (
+            "jobs:\n"
+            "  plan:\n"
+            "    steps:\n"
+            f"      - run: terraform plan {plan_args}\n"
+            "  apply:\n"
+            "    steps:\n"
+            f"{apply_plan_step}"
+            f"      - run: {apply_command}\n"
+        )
+
+    def test_flags_deploy_workflow_that_cancels_env_branch_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(cancel_in_progress="true"),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+            self.assertIn("queue", violations[0].message)
+
+    def test_flags_core_and_range_plan_without_lock_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(),
+                core=self._terraform_workflow_text("core", plan_args="-no-color -out=tfplan"),
+                range_workflow=self._terraform_workflow_text(
+                    "range", plan_args="-no-color -out=tfplan"
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            flagged = {violation.path.split(":", 1)[0] for violation in violations}
+            self.assertIn(".github/workflows/_core.yml", flagged)
+            self.assertIn(".github/workflows/_range.yml", flagged)
+            self.assertTrue(all(violation.rule_id == "ADR-003-R2" for violation in violations))
+
+    def test_flags_core_apply_without_local_saved_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(),
+                core=self._terraform_workflow_text(
+                    "core",
+                    apply_plan_command=None,
+                    apply_command="terraform apply -auto-approve",
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            core_violations = [
+                violation
+                for violation in violations
+                if violation.path.startswith(".github/workflows/_core.yml")
+            ]
+            self.assertGreaterEqual(len(core_violations), 1)
+            self.assertTrue(
+                all(violation.rule_id == "ADR-003-R2" for violation in core_violations)
+            )
+            self.assertTrue(
+                any(
+                    "local saved Terraform plan" in violation.message
+                    for violation in core_violations
+                )
+            )
+
+    def test_flags_apply_without_local_saved_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(
+                    apply_plan_command=None,
+                    apply_command="terraform apply -auto-approve",
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            messages = "\n".join(violation.message for violation in violations)
+            self.assertIn("local saved Terraform plan", messages)
+            self.assertIn("saved Terraform plan", messages)
+
+    def test_flags_apply_job_that_removes_saved_plan_before_applying(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(
+                    before_apply_command="rm -f tfplan",
+                ),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("must not remove `tfplan`", violations[0].message)
 
     def test_flags_python_glob_in_platform_plan_scope(self) -> None:
         cases = ("shifter/**", "shifter/shifter_platform/**", "shifter/**/*.py")
@@ -189,9 +436,10 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
     def test_targeted_mode_runs_for_relevant_workflow_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
+            app_glob = "shifter/**"
             self._write_workflows(
                 repo_root,
-                self._deploy_text(platform_globs=["shifter/**"]),
+                self._deploy_text(platform_globs=[app_glob]),
                 self._platform_text(),
             )
 
@@ -200,53 +448,268 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             )
 
             self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+            self.assertIn(app_glob, violations[0].message)
 
-    def test_flags_missing_app_quality_scope_after_platform_scope_split(self) -> None:
+    def test_flags_missing_quality_relevant_scope_after_platform_scope_split(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_workflows(
                 repo_root,
                 "jobs:\n"
                 "  changes:\n"
+                "    outputs:\n"
+                "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
+                "      quality_only: ${{ steps.filter.outputs.quality_only }}\n"
                 "    steps:\n"
                 "      - id: filter\n"
                 "        with:\n"
                 "          filters: |\n"
                 "            shifter_platform:\n"
-                "              - 'platform/terraform/modules/portal/**'\n",
+                "              - 'platform/terraform/modules/portal/**'\n"
+                "            portal_image:\n"
+                "              - 'shifter/shifter_platform/**'\n"
+                "            quality_only:\n"
+                "              - 'scripts/polaris-aws-range/**'\n"
+                "              - 'scenario-dev/polaris/tests/**'\n"
+                "  pr-gate:\n"
+                "    steps:\n"
+                "      - run: |\n"
+                "          quality_result='${{ needs.quality.result }}'\n"
+                "          quality_relevant='${{ needs.changes.outputs.quality_relevant }}'\n"
+                "          if [ \"$quality_result\" = \"skipped\" ] && [ \"$quality_relevant\" != \"false\" ]; then\n"
+                "            exit 1\n"
+                "          fi\n"
+                "  shifter_platform:\n"
+                "    if: |\n"
+                "      needs.changes.outputs.portal_image == 'true'\n",
                 self._platform_text(),
             )
 
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
-            self.assertIn("shifter_app", violations[0].message)
+            self.assertIn("quality_relevant", violations[0].message)
 
-    def test_flags_shifter_app_filter_without_app_source_glob(self) -> None:
+    def test_flags_non_docs_filter_without_docs_exclusion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_workflows(
                 repo_root,
-                self._deploy_text(app_globs=["docs/**"]),
+                self._deploy_text(quality_non_doc_globs=["**", "!**/*.md"]),
                 self._platform_text(),
             )
 
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
-            self.assertIn("shifter/**", violations[0].message)
+            self.assertIn("!docs/**", violations[0].message)
 
-    def test_flags_shifter_app_condition_outside_quality_job(self) -> None:
+    def test_flags_non_docs_filter_without_every_predicate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(quality_predicate="# predicate-quantifier: every"),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("predicate-quantifier: every", violations[0].message)
+
+    def test_flags_missing_guardrail_docs_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(include_guardrail_docs_filter=False),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("guardrail_docs", violations[0].message)
+
+    def test_flags_guardrail_docs_filter_without_github_markdown_guardrails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    guardrail_doc_globs=[
+                        "docs/adr/**",
+                        "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
+                    ]
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn(".github/pull_request_template.md", violations[0].message)
+
+    def test_flags_quality_relevant_condition_outside_quality_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             deploy = self._deploy_text(quality_condition="needs.changes.outputs.mcp == 'true'")
-            deploy += "  gcp-dev:\n    if: needs.changes.outputs.shifter_app == 'true'\n"
+            deploy += "  gcp-dev:\n    if: needs.changes.outputs.quality_relevant == 'true'\n"
             self._write_workflows(repo_root, deploy, self._platform_text())
 
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
             self.assertIn("Quality", violations[0].message)
+
+    def test_flags_pr_gate_that_accepts_skipped_quality_without_docs_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(pr_gate_guard='if [ "$quality_result" = "cancelled" ]; then'),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("skipped Quality", violations[0].message)
+
+    def test_flags_missing_quality_only_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(include_quality_only_filter=False),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("quality_only", violations[0].message)
+
+    def test_flags_quality_only_filter_without_polaris_range_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(quality_only_globs=["scenario-dev/polaris/tests/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("scripts/polaris-aws-range/**", violations[0].message)
+
+    def test_flags_quality_only_filter_without_scenario_smoketest_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(quality_only_globs=["scripts/polaris-aws-range/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("scenario-dev/polaris/tests/**", violations[0].message)
+
+    def test_flags_missing_portal_image_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(include_portal_image_filter=False),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+            self.assertIn("portal_image", violations[0].message)
+
+    def test_flags_portal_image_filter_without_platform_source_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(portal_image_globs=["shifter/cyberscript/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("shifter/shifter_platform/**", violations[0].message)
+
+    def test_flags_missing_portal_image_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    portal_image_output="# portal_image: ${{ steps.filter.outputs.portal_image }}"
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("output", violations[0].message)
+
+    def test_flags_platform_job_without_portal_image_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    platform_job_condition="needs.changes.outputs.shifter_platform == 'true'"
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("needs.changes.outputs.portal_image == 'true'", violations[0].message)
+
+    def test_flags_commented_portal_image_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(
+                    platform_job_condition="# needs.changes.outputs.portal_image == 'true'"
+                ),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("needs.changes.outputs.portal_image == 'true'", violations[0].message)
+
+    def test_flags_platform_build_without_portal_image_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text(build_condition="inputs.apply_changes"),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("inputs.portal_image_changes", violations[0].message)
 
     def test_flags_missing_required_workflow_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -259,25 +722,58 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             self.assertIn(".github/workflows/deploy.yml", flagged)
             self.assertIn(".github/workflows/_shifter-platform.yml", flagged)
 
-    def test_ignores_commented_shifter_app_output_and_quality_condition(self) -> None:
+    def test_ignores_commented_quality_relevant_output_and_condition(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             deploy = (
                 "jobs:\n"
                 "  changes:\n"
                 "    outputs:\n"
-                "      # shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+                "      # quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}\n"
+                "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
+                "      quality_only: ${{ steps.filter.outputs.quality_only }}\n"
                 "    steps:\n"
                 "      - id: filter\n"
                 "        with:\n"
                 "          filters: |\n"
                 "            shifter_platform:\n"
                 "              - 'platform/terraform/modules/portal/**'\n"
-                "            shifter_app:\n"
-                "              - 'shifter/**'\n"
+                "            portal_image:\n"
+                "              - 'shifter/shifter_platform/**'\n"
+                "            quality_only:\n"
+                "              - 'scripts/polaris-aws-range/**'\n"
+                "              - 'scenario-dev/polaris/tests/**'\n"
+                "      - id: quality_non_docs\n"
+                "        with:\n"
+                "          predicate-quantifier: every\n"
+                "          filters: |\n"
+                "            non_docs:\n"
+                "              - '**'\n"
+                "              - '!docs/**'\n"
+                "              - '!**/*.md'\n"
+                "              - '!shifter/shifter_platform/documentation/**'\n"
+                "      - id: quality_guardrails\n"
+                "        with:\n"
+                "          filters: |\n"
+                "            guardrail_docs:\n"
+                "              - '.github/pull_request_template.md'\n"
+                "              - '.github/copilot-instructions.md'\n"
+                "              - 'docs/adr/**'\n"
+                "              - 'shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md'\n"
                 "  quality:\n"
                 "    if: |\n"
-                "      # needs.changes.outputs.shifter_app == 'true'\n"
+                "      # needs.changes.outputs.quality_relevant == 'true'\n"
+                "  pr-gate:\n"
+                "    steps:\n"
+                "      - run: |\n"
+                "          quality_result='${{ needs.quality.result }}'\n"
+                "          quality_relevant='${{ needs.changes.outputs.quality_relevant }}'\n"
+                "          if [ \"$quality_result\" = \"skipped\" ] && [ \"$quality_relevant\" != \"false\" ]; then\n"
+                "            exit 1\n"
+                "          fi\n"
+                "  shifter_platform:\n"
+                "    if: |\n"
+                "      needs.changes.outputs.portal_image == 'true'\n"
             )
             self._write_workflows(repo_root, deploy, self._platform_text())
 
@@ -303,6 +799,168 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
     def test_clean_real_repo_passes(self) -> None:
         violations = ADR_GUARD.check_deploy_workflow_plan_scope(ADR_GUARD.REPO_ROOT, None)
         self.assertEqual(violations, [], msg=f"Unexpected deploy workflow violations: {violations}")
+
+
+class PortalDeployModeSourceOfTruthTests(unittest.TestCase):
+    """Tests for the AWS portal deployment-mode source-of-truth guardrail."""
+
+    _WORKFLOW = (
+        "name: Platform\n"
+        "jobs:\n"
+        "  deploy:\n"
+        "    runs-on: self-hosted\n"
+        "    steps:\n"
+        "      - uses: hashicorp/setup-terraform@v3\n"
+        "      - name: Get deployment config\n"
+        "        run: |\n"
+        "          python3 \"${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py\" resolve-topology \\\n"
+        "            --terraform-dir \"platform/terraform/environments/${ENV}/portal\" \\\n"
+        "            --backend-config \"${ENV}.s3.tfbackend\" \\\n"
+        "            --instance-tag \"$INSTANCE_TAG\" \\\n"
+        "            --github-output \"$GITHUB_OUTPUT\"\n"
+        "      - name: Deploy via SSM (single instance mode)\n"
+        "        if: steps.config.outputs.enable_autoscaling != 'true'\n"
+        "        run: echo deploy single\n"
+        "      - name: Trigger ASG instance refresh\n"
+        "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
+        "        run: echo refresh asg\n"
+        "      - name: Verify ASG image digest\n"
+        "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
+        "        run: |\n"
+        "          python3 \"${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py\" verify-asg-image \\\n"
+        "            --asg-name \"${ASG_NAME}\" \\\n"
+        "            --image-digest \"${IMAGE_DIGEST}\"\n"
+    )
+    _OUTPUTS = (
+        'output "enable_autoscaling" {\n'
+        '  description = "Whether the portal EC2 tier is deployed as an Auto Scaling Group."\n'
+        "  value       = var.enable_autoscaling\n"
+        "}\n"
+    )
+    _HELPER = (
+        "terraform output -json\n"
+        "aws ec2 describe-instances --query Reservations[].Instances[].InstanceId\n"
+        "if len(running_instance_ids) != 1: raise PortalDeployError('exactly one')\n"
+        "aws autoscaling describe-auto-scaling-groups\n"
+        "aws ssm send-command\n"
+        "docker inspect\n"
+        "aws ssm get-command-invocation\n"
+    )
+
+    def _write_repo(
+        self,
+        repo_root: Path,
+        *,
+        workflow: str | None = None,
+        outputs: str | None = None,
+        helper: str | None = None,
+    ) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "_shifter-platform.yml").write_text(
+            self._WORKFLOW if workflow is None else workflow,
+            encoding="utf-8",
+        )
+        for environment in ("dev", "prod"):
+            output_dir = repo_root / "platform" / "terraform" / "environments" / environment / "portal"
+            output_dir.mkdir(parents=True)
+            (output_dir / "outputs.tf").write_text(
+                self._OUTPUTS if outputs is None else outputs,
+                encoding="utf-8",
+            )
+        helper_dir = repo_root / "scripts" / "portal_deploy"
+        helper_dir.mkdir(parents=True)
+        (helper_dir / "portal_deploy.py").write_text(
+            self._HELPER if helper is None else helper,
+            encoding="utf-8",
+        )
+
+    def test_clean_fixture_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(repo_root)
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_flags_github_variable_as_deployment_mode_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                workflow=self._WORKFLOW
+                + "      - name: Legacy mode\n"
+                + "        env:\n"
+                + "          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}\n",
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("AWS_PORTAL_ENABLE_AUTOSCALING", violations[0].message)
+
+    def test_flags_missing_terraform_mode_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(repo_root, outputs='output "asg_name" { value = module.ec2.asg_name }\n')
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn('output "enable_autoscaling"', violations[0].message)
+
+    def test_flags_helper_without_single_instance_cardinality_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                helper=(
+                    "terraform output -json\n"
+                    "aws ec2 describe-instances --query Reservations[0].Instances[0].InstanceId\n"
+                    "aws autoscaling describe-auto-scaling-groups\n"
+                    "aws ssm send-command --parameters --image-digest\n"
+                    "docker inspect\n"
+                    "aws ssm get-command-invocation\n"
+                ),
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn("exactly one", violations[0].message)
+
+    def test_flags_workflow_without_asg_image_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                workflow=self._WORKFLOW.replace("verify-asg-image", "echo-no-verification"),
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn("verify-asg-image", violations[0].message)
+
+    def test_flags_workflow_without_digest_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_repo(
+                repo_root,
+                workflow=self._WORKFLOW.replace("--image-digest", "--image-tag"),
+            )
+
+            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertIn("--image-digest", violations[0].message)
+
+    def test_clean_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(
+            ADR_GUARD.REPO_ROOT, None
+        )
+        self.assertEqual(violations, [], msg=f"Unexpected portal deploy mode violations: {violations}")
 
 
 class PlatformRendersDeployTfvarsTests(unittest.TestCase):
@@ -2908,6 +3566,295 @@ class McpOpsTlsStrictTests(unittest.TestCase):
         self.assertIn("mcp-ops-tls-strict", ADR_GUARD.CHECK_LEVELS["fast"])
 
 
+class BoundaryMockPolicyTests(unittest.TestCase):
+    """Tests for ADR-019-R1: new tests mock boundaries, not internal topology."""
+
+    BASELINE_REL = "scripts/adr_guard/boundary_mock_baseline.json"
+
+    def _write_file(self, repo_root: Path, rel: str, text: str = "") -> None:
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _write_first_party_module(self, repo_root: Path) -> None:
+        self._write_file(repo_root, "cms/__init__.py")
+        self._write_file(repo_root, "cms/services.py", "def create_range():\n    return None\n")
+
+    def _write_baseline(self, repo_root: Path, records: list[dict]) -> None:
+        self._write_file(
+            repo_root,
+            self.BASELINE_REL,
+            json.dumps(
+                {
+                    "version": 1,
+                    "allowed_internal_patch_counts": records,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        )
+
+    def test_flags_first_party_internal_patch_not_in_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-019-R1")
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_allows_existing_internal_patch_count_from_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_flags_internal_patch_count_growth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_one():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n\n"
+                "def test_two():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("allowed 1", violations[0].message)
+            self.assertIn("found 2", violations[0].message)
+
+    def test_flags_baseline_count_growth_against_git_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 2,
+                    }
+                ],
+            )
+
+            reference_baseline = Counter(
+                {("tests/test_ranges.py", "cms.services.create_range"): 1}
+            )
+            with patch.object(
+                ADR_GUARD,
+                "_load_boundary_mock_reference_baseline",
+                return_value=(reference_baseline, None),
+            ):
+                violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].path, self.BASELINE_REL)
+            self.assertIn("grew from 1 to 2", violations[0].message)
+
+    def test_flags_new_baseline_entry_against_git_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_file(repo_root, "tests/test_ranges.py", "def test_range_creation():\n    pass\n")
+            self._write_baseline(
+                repo_root,
+                [
+                    {
+                        "path": "tests/test_ranges.py",
+                        "target": "cms.services.create_range",
+                        "count": 1,
+                    }
+                ],
+            )
+
+            with patch.object(
+                ADR_GUARD,
+                "_load_boundary_mock_reference_baseline",
+                return_value=(Counter(), None),
+            ):
+                violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].path, self.BASELINE_REL)
+            self.assertIn("grew from 0 to 1", violations[0].message)
+
+    def test_allows_process_and_cloud_boundary_patches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_file(repo_root, "deploy.py", "import subprocess\n")
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_boundaries.py",
+                "from unittest.mock import patch\n\n"
+                "def test_boundaries(mocker):\n"
+                "    with patch('subprocess.Popen'):\n"
+                "        pass\n"
+                "    mocker.patch('boto3.Session')\n"
+                "    mocker.patch('deploy.subprocess.run')\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_flags_resolvable_patch_object_internal_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from cms import services\n"
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch.object(services, 'create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_targeted_mode_skips_unrelated_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, ["docs/unrelated.md"])
+
+            self.assertEqual(violations, [])
+
+    def test_targeted_mode_baseline_change_triggers_full_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, [self.BASELINE_REL])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_targeted_mode_guard_change_triggers_full_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_first_party_module(repo_root)
+            self._write_baseline(repo_root, [])
+            self._write_file(
+                repo_root,
+                "tests/test_ranges.py",
+                "from unittest.mock import patch\n\n"
+                "def test_range_creation():\n"
+                "    with patch('cms.services.create_range'):\n"
+                "        pass\n",
+            )
+
+            violations = ADR_GUARD.check_boundary_mock_policy(repo_root, ["scripts/adr_guard/adr_guard.py"])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("cms.services.create_range", violations[0].message)
+
+    def test_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_boundary_mock_policy(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected boundary-mock-policy violations: {violations}")
+
+    def test_check_registered_at_ci_and_fast_levels(self) -> None:
+        self.assertIn("boundary-mock-policy", ADR_GUARD.CHECKS)
+        self.assertIn("boundary-mock-policy", ADR_GUARD.CHECK_LEVELS["ci"])
+        self.assertIn("boundary-mock-policy", ADR_GUARD.CHECK_LEVELS["fast"])
+
+
 class NoTrackedGeneratedArtifactsTests(unittest.TestCase):
     """Tests for ADR-004-R8: forbid tracked generated/sensitive artifacts.
 
@@ -3455,6 +4402,250 @@ class NoPopulatedSecretEnvFilesTests(unittest.TestCase):
             "no-populated-secret-env-files",
             ADR_GUARD.CHECK_LEVELS["fast"],
         )
+
+
+class DeployVerificationFailLoudTests(unittest.TestCase):
+    """Tests for the deploy-verification fail-loud guardrail (ADR-003-R3).
+
+    The Guacamole stabilization timeout in `_shifter-platform.yml` and the
+    engine ECS task-family check in `_shifter-engine.yml` must fail the deploy
+    when verification fails, instead of warning and exiting 0. The engine skip
+    is allowed only behind the explicit `first_deploy` bootstrap input.
+    """
+
+    _PLATFORM_PROLOGUE = (
+        "name: Platform\n"
+        "jobs:\n"
+        "  apply:\n"
+        "    runs-on: self-hosted\n"
+        "    steps:\n"
+        "      - run: terraform apply -auto-approve\n"
+        "      - name: Wait for Guacamole ECS services to stabilize\n"
+        "        run: |\n"
+        "          CLUSTER_NAME=\"${ENV}-portal-guacamole\"\n"
+        "          for SVC in a b; do\n"
+        "            echo \"$SVC\"\n"
+        "          done\n"
+        "          ATTEMPTS=0\n"
+        "          while [ $ATTEMPTS -lt 40 ]; do\n"
+        "            if [ \"$S\" = \"COMPLETED\" ]; then exit 0; fi\n"
+        "            ATTEMPTS=$((ATTEMPTS + 1))\n"
+        "            sleep 30\n"
+        "          done\n"
+    )
+    _PLATFORM_EPILOGUE = "      - name: Build\n        run: echo build\n"
+
+    _ENGINE_PROLOGUE = (
+        "name: Shifter Engine\n"
+        "on:\n"
+        "  workflow_call:\n"
+        "    inputs:\n"
+        "      first_deploy:\n"
+        "        type: boolean\n"
+        "        default: false\n"
+        "jobs:\n"
+        "  deploy:\n"
+        "    runs-on: self-hosted\n"
+        "    env:\n"
+        "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
+        "    steps:\n"
+        "      - name: Update ECS task definition\n"
+        "        env:\n"
+        "          FIRST_DEPLOY: ${{ inputs.first_deploy }}\n"
+        "        run: |\n"
+        "          TASK_DEF=$(aws ecs describe-task-definition "
+        "--task-definition \"${TASK_FAMILY}\" --query 'taskDefinition' 2>/dev/null) || {\n"
+    )
+
+    def _write_platform(self, repo_root: Path, timeout_tail: str) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        (workflow_dir / "_shifter-platform.yml").write_text(
+            self._PLATFORM_PROLOGUE + timeout_tail + self._PLATFORM_EPILOGUE,
+            encoding="utf-8",
+        )
+
+    def _write_engine(self, repo_root: Path, failure_branch: str) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        (workflow_dir / "_shifter-engine.yml").write_text(
+            self._ENGINE_PROLOGUE + failure_branch,
+            encoding="utf-8",
+        )
+
+    def test_platform_timeout_warning_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::warning::Guacamole services did not stabilize'
+                ' — continuing (services may still be starting)"\n',
+            )
+            self._write_engine(
+                repo_root,
+                '            if [ "${FIRST_DEPLOY}" = "true" ]; then echo skip; exit 0; fi\n'
+                '            echo "::error::missing"; exit 1\n'
+                "          }\n",
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R3")
+            self.assertTrue(
+                any(".github/workflows/_shifter-platform.yml" in v.path for v in violations)
+            )
+
+    def test_platform_timeout_exit_1_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::error::Guacamole services did not stabilize"\n'
+                "          exit 1\n",
+            )
+            self._write_engine(
+                repo_root,
+                '            if [ "${FIRST_DEPLOY}" = "true" ]; then echo skip; exit 0; fi\n'
+                '            echo "::error::missing"; exit 1\n'
+                "          }\n",
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_engine_unconditional_skip_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::error::timeout"\n          exit 1\n',
+            )
+            # Unconditional warn + exit 0, no first_deploy gate, no exit 1.
+            engine = (
+                "name: Shifter Engine\n"
+                "jobs:\n"
+                "  deploy:\n"
+                "    runs-on: self-hosted\n"
+                "    env:\n"
+                "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
+                "    steps:\n"
+                "      - name: Update ECS task definition\n"
+                "        run: |\n"
+                "          TASK_DEF=$(aws ecs describe-task-definition "
+                "--task-definition \"${TASK_FAMILY}\" 2>/dev/null) || {\n"
+                '            echo "::warning::does not exist yet. Skipping deploy."\n'
+                "            exit 0\n"
+                "          }\n"
+            )
+            (repo_root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+            (repo_root / ".github" / "workflows" / "_shifter-engine.yml").write_text(
+                engine, encoding="utf-8"
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertTrue(violations)
+            self.assertTrue(
+                any(".github/workflows/_shifter-engine.yml" in v.path for v in violations)
+            )
+
+    def test_engine_gated_fail_closed_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                '          echo "::error::timeout"\n          exit 1\n',
+            )
+            self._write_engine(
+                repo_root,
+                '            if [ "${FIRST_DEPLOY}" = "true" ]; then\n'
+                '              echo "::warning::bootstrap skip"; exit 0\n'
+                "            fi\n"
+                '            echo "::error::task family ${TASK_FAMILY} does not exist"\n'
+                "            exit 1\n"
+                "          }\n",
+            )
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_missing_workflow_files_are_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            (repo_root / ".github" / "workflows").mkdir(parents=True)
+
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
+
+            flagged = {v.path for v in violations}
+            self.assertIn(".github/workflows/_shifter-platform.yml", flagged)
+            self.assertIn(".github/workflows/_shifter-engine.yml", flagged)
+
+    def _write_noncompliant_pair(self, repo_root: Path) -> None:
+        """Write workflows that both violate the rule (warn-and-continue +
+        unconditional skip), so any run of the check yields violations."""
+        self._write_platform(
+            repo_root,
+            '          echo "::warning::Guacamole services did not stabilize'
+            ' — continuing (services may still be starting)"\n',
+        )
+        engine = (
+            "name: Shifter Engine\n"
+            "jobs:\n"
+            "  deploy:\n"
+            "    runs-on: self-hosted\n"
+            "    env:\n"
+            "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
+            "    steps:\n"
+            "      - name: Update ECS task definition\n"
+            "        run: |\n"
+            "          TASK_DEF=$(aws ecs describe-task-definition "
+            "--task-definition \"${TASK_FAMILY}\" 2>/dev/null) || {\n"
+            '            echo "::warning::does not exist yet. Skipping deploy."\n'
+            "            exit 0\n"
+            "          }\n"
+        )
+        (repo_root / ".github" / "workflows" / "_shifter-engine.yml").write_text(
+            engine, encoding="utf-8"
+        )
+
+    def test_targeted_mode_skips_unrelated_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_noncompliant_pair(repo_root)
+
+            # Even with non-compliant workflows on disk, a changed-file set that
+            # touches none of the relevant paths must skip the check entirely.
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(
+                repo_root, ["shifter/shifter_platform/config/settings.py"]
+            )
+
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_targeted_mode_runs_for_relevant_workflow_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_noncompliant_pair(repo_root)
+
+            # A changed-file set that includes a relevant workflow must run the
+            # check and surface the non-compliant workflows' violations.
+            violations = ADR_GUARD.check_deploy_verification_fail_loud(
+                repo_root, [".github/workflows/_shifter-engine.yml"]
+            )
+
+            self.assertTrue(violations)
+            self.assertTrue(all(v.rule_id == "ADR-003-R3" for v in violations))
+
+    def test_clean_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_deploy_verification_fail_loud(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_check_registered_at_ci_and_fast_levels(self) -> None:
+        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECKS)
+        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECK_LEVELS["ci"])
+        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECK_LEVELS["fast"])
 
 
 if __name__ == "__main__":

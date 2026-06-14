@@ -3,10 +3,6 @@
 Extracted from ``main.py`` (Sonar S104). Public entry point is
 ``run_ngfw_operation``; the AWS/GCP-specific helpers and the shared
 status-publication helpers live here too.
-
-Cross-module calls that historically came from ``main.X`` go through
-``main.<symbol>`` lookups so existing ``patch("main.<symbol>")`` test
-mocks keep working without test changes.
 """
 
 from __future__ import annotations
@@ -15,8 +11,12 @@ import logging
 from typing import Any
 
 from config import resolve_ngfw_attachment_config
-from events import STATUS_FAILED
+from events import STATUS_FAILED, publish_ngfw_event
+from executors.aws_executor import AWSExecutor
+from ngfw_runtime import update_instance_state
+from orchestrators.ops_orchestrator import OpsOrchestrator
 from plans.base import SetupPlan
+from provisioner_db_ngfw import get_ngfw_data_by_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +34,8 @@ def _validate_ngfw_operation(operation: str) -> tuple[str, str]:
 
 def _publish_ngfw_runtime_status(request_id: str, instance_uuid: str, app_id: str, status: str) -> None:
     """Persist the new NGFW runtime status and emit the corresponding lifecycle event."""
-    import main
-
-    main.update_instance_state(request_id, status)
-    main.publish_ngfw_event(
+    update_instance_state(request_id, status)
+    publish_ngfw_event(
         request_id=request_id,
         instance_id=instance_uuid,
         app_id=app_id,
@@ -54,7 +52,6 @@ def _run_gcp_ngfw_operation(
 ) -> None:
     """Drive a start/stop power operation against a GCP VM-Series NGFW."""
     import gdc_vmseries_ngfw
-    import main
 
     in_progress_status, success_status = _validate_ngfw_operation(operation)
     _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
@@ -62,8 +59,8 @@ def _run_gcp_ngfw_operation(
         gdc_vmseries_ngfw.run_power_operation(operation, state)
     except Exception as e:
         logger.exception("GDC VM-Series NGFW operation failed")
-        main.update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
-        main.publish_ngfw_event(
+        update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
+        publish_ngfw_event(
             request_id=request_id,
             instance_id=instance_uuid,
             app_id=app_id,
@@ -95,14 +92,12 @@ def _run_aws_ngfw_operation(
     **kwargs: str,
 ) -> None:
     """Drive a start/stop power operation against an AWS-attached NGFW EC2 instance."""
-    import main
-
     in_progress_status, success_status = _validate_ngfw_operation(operation)
     _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
 
     try:
-        executor = main.AWSExecutor()
-        orchestrator = main.OpsOrchestrator(executor)
+        executor = AWSExecutor()
+        orchestrator = OpsOrchestrator(executor)
         plan = _load_ngfw_ops_plan(operation)
         context = {"instance_id": ec2_instance_id, **kwargs}
         result = orchestrator.orchestrate(ec2_instance_id, plan, context)
@@ -118,8 +113,8 @@ def _run_aws_ngfw_operation(
             raise RuntimeError(f"Operation {operation} failed")
     except Exception as e:
         error_msg = str(e)[:1000]
-        main.update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
-        main.publish_ngfw_event(
+        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
+        publish_ngfw_event(
             request_id=request_id,
             instance_id=instance_uuid,
             app_id=app_id,
@@ -146,8 +141,6 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
         ValueError: If unknown operation or EC2 instance ID not found.
         Exception: If operation fails.
     """
-    import main
-
     logger.info("run_ngfw_operation: starting operation=%s request_id=%s", operation, request_id)
     if kwargs:
         logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
@@ -155,7 +148,7 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     _validate_ngfw_operation(operation)
 
     # Get NGFW data from database including state with EC2 instance ID
-    ngfw_data = main.get_ngfw_data_by_request_id(request_id)
+    ngfw_data = get_ngfw_data_by_request_id(request_id)
     # Our UUID, not AWS instance ID
     instance_uuid = ngfw_data["instance_id"]
     app_id = ngfw_data["app_id"]

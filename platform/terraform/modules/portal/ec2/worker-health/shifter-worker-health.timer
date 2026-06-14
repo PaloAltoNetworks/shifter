@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the Shifter worker-container health supervisor on the health interval (#953)
+
+[Timer]
+# OnBootSec matches the docker --health-start-period so we do not restart a
+# container that is still in its startup grace window. OnUnitActiveSec matches
+# the 30s docker --health-interval so a wedged worker is caught within the
+# health window rather than stalling silently.
+OnBootSec=90s
+OnUnitActiveSec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

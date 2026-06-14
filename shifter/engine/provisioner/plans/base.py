@@ -66,3 +66,27 @@ class SetupPlan(Protocol):
             Dictionary of template variables
         """
         ...
+
+
+class DynamicPlan:
+    """Runtime-built setup plan backed by an explicit list of steps."""
+
+    def __init__(self, name: str, steps: list[SetupStep], context: dict[str, Any] | None = None) -> None:
+        self.name = name
+        self._steps = steps
+        self._context = context or {}
+        self._verify_step: SetupStep | None = None
+
+    @property
+    def steps(self) -> list[SetupStep]:
+        """Pre-built steps to execute in order."""
+        return self._steps
+
+    @property
+    def verify_step(self) -> SetupStep | None:
+        """Dynamically-built plans carry no dedicated verification step."""
+        return self._verify_step
+
+    def get_context(self, _instance: object) -> dict[str, Any]:
+        """No template variables are needed for runtime-built plans."""
+        return dict(self._context)

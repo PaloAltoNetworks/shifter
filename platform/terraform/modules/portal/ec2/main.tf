@@ -30,6 +30,39 @@ resource "aws_cloudwatch_log_group" "portal" {
   })
 }
 
+# Alarm on the aggregate UnhealthyWorkers metric emitted by the worker-container
+# health supervisor (#953). The host agent restarts unhealthy workers and emits
+# this metric every health interval; the alarm makes a persistently-unhealthy
+# worker (one that keeps failing its restart) visible to operators. Shape mirrors
+# the portal redis / messaging alarm convention; actions are wired from the
+# per-environment SNS alerts topic via var.worker_health_alarm_actions.
+resource "aws_cloudwatch_metric_alarm" "unhealthy_workers" {
+  alarm_name          = "${var.name_prefix}-unhealthy-workers"
+  alarm_description   = "One or more Shifter worker/scheduler containers are unhealthy and not recovering on ${var.name_prefix}"
+  namespace           = "Shifter/WorkerHealth"
+  metric_name         = "UnhealthyWorkers"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  evaluation_periods  = 2
+  period              = 60
+  statistic           = "Maximum"
+  treat_missing_data  = "notBreaching"
+
+  # Scope the alarm to this environment's metric series; the supervisor emits the
+  # matching NamePrefix dimension. CloudWatch metrics are account/region scoped,
+  # so without this dev and prod would share one series and cross-trip.
+  dimensions = {
+    NamePrefix = var.name_prefix
+  }
+
+  alarm_actions = var.worker_health_alarm_actions
+  ok_actions    = var.worker_health_alarm_actions
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-unhealthy-workers"
+  })
+}
+
 # ------------------------------------------------------------------------------
 # IAM Role for EC2
 # ------------------------------------------------------------------------------
@@ -144,6 +177,31 @@ resource "aws_iam_role_policy" "cloudwatch_logs" {
           "logs:PutLogEvents"
         ]
         Resource = "${aws_cloudwatch_log_group.portal.arn}:*"
+      }
+    ]
+  })
+}
+
+# IAM policy for the worker-container health supervisor (#953) to publish
+# CloudWatch metrics. cloudwatch:PutMetricData has no resource-level scoping, so
+# least privilege is expressed through the cloudwatch:namespace condition,
+# constraining it to the Shifter/WorkerHealth namespace.
+resource "aws_iam_role_policy" "cloudwatch_metrics" {
+  name = "cloudwatch-metrics"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "Shifter/WorkerHealth"
+          }
+        }
       }
     ]
   })
@@ -479,6 +537,10 @@ resource "aws_launch_template" "this" {
     log_group_name             = local.log_group_name
     ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
     lifecycle_hook_name        = "${var.name_prefix}-launch-hook"
+    name_prefix                = var.name_prefix
+    worker_health_monitor_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.sh"))
+    worker_health_service_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.service"))
+    worker_health_timer_b64    = base64encode(file("${path.module}/worker-health/shifter-worker-health.timer"))
   }))
 
   block_device_mappings {
@@ -536,7 +598,7 @@ resource "aws_autoscaling_group" "this" {
   name_prefix               = "${var.name_prefix}-asg-"
   vpc_zone_identifier       = var.subnet_ids
   target_group_arns         = [var.target_group_arn]
-  health_check_type         = "ELB"
+  health_check_type         = "EC2"
   health_check_grace_period = 900
 
   min_size         = var.asg_min_size
@@ -552,6 +614,19 @@ resource "aws_autoscaling_group" "this" {
     strategy = "Rolling"
     preferences {
       min_healthy_percentage = 50
+    }
+  }
+
+  dynamic "warm_pool" {
+    for_each = var.asg_warm_pool_min_size > 0 ? [1] : []
+
+    content {
+      min_size   = var.asg_warm_pool_min_size
+      pool_state = var.asg_warm_pool_state
+
+      instance_reuse_policy {
+        reuse_on_scale_in = true
+      }
     }
   }
 
@@ -660,6 +735,10 @@ resource "aws_instance" "this" {
     log_group_name             = local.log_group_name
     ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
     lifecycle_hook_name        = ""
+    name_prefix                = var.name_prefix
+    worker_health_monitor_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.sh"))
+    worker_health_service_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.service"))
+    worker_health_timer_b64    = base64encode(file("${path.module}/worker-health/shifter-worker-health.timer"))
   }))
 
   root_block_device {

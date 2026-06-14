@@ -26,7 +26,7 @@ containers.
 
 This plan runs AFTER LinuxBootstrapPlan in the orchestrator dispatch
 for any attacker instance whose ami_key is polaris-vm, gated by the
-caller in main.py (no scenario_id plumbing needed).
+instance setup caller (no scenario_id plumbing needed).
 """
 
 import os

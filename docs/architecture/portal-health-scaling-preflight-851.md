@@ -45,10 +45,12 @@ Adjacent contracts this preflight respects but does not pre-empt:
 
 - Portal capacity has two distinct decision surfaces: a health/readiness
   surface that gates traffic admission (the ALB target-group health probe)
-  and a scaling surface that drives ASG capacity. The current configuration
-  conflates them: both use a single binary `/health` for admission and a
-  single EC2-average `CPUUtilization` for scaling. Future work must treat
-  them as independently parameterized.
+  and a scaling surface that drives ASG capacity. Issue #919 keeps ALB target
+  routing on dependency-aware `/health` while moving ASG instance replacement
+  health to EC2 status checks, so transient shared dependency failures stop
+  causing instance churn. Autoscaling policy decisions still use the existing
+  EC2-average `CPUUtilization` alarms until a later evidence-backed issue
+  changes them.
 - The health surface stays coarse and public. Verbose dependency state and
   per-process saturation diagnostics go to logs, CloudWatch metrics, or an
   internal/admin surface, not to a public probe.
@@ -76,10 +78,11 @@ Adjacent contracts this preflight respects but does not pre-empt:
 - ASG sizing: `asg_min_size`, `asg_max_size`, `asg_desired_capacity` set
   per environment. dev: 1/1/1, prod: 2/5/2
   (`platform/terraform/environments/{dev,prod}/portal/terraform.tfvars`).
-- ASG health probe source: `health_check_type = "ELB"`,
+- ASG health probe source: `health_check_type = "EC2"`,
   `health_check_grace_period = 900` at
-  `platform/terraform/modules/portal/ec2/main.tf:514-515`. Termination
-  decisions chain off the ALB target-group health check.
+  `platform/terraform/modules/portal/ec2/main.tf`. Termination decisions use
+  EC2 instance status checks; the ASG still attaches instances to the ALB
+  target group so `/health` remains the traffic-routing readiness signal.
 - Scaling policies: `aws_autoscaling_policy.scale_up` /
   `scale_down`, simple `ChangeInCapacity` of +/-1 with a 300 s cooldown
   (`platform/terraform/modules/portal/ec2/main.tf:553-571`). No
@@ -93,14 +96,13 @@ Adjacent contracts this preflight respects but does not pre-empt:
   HTTP, matcher `200`, `interval = 30`, `healthy_threshold = 2`,
   `unhealthy_threshold = 3`, `timeout = 5`. Stickiness conditional on
   `var.enable_stickiness`.
-- App middleware: `HealthCheckMiddleware` at
-  `shifter/shifter_platform/config/middleware.py:36-51`
-  short-circuits `/health` and `/health/` to a plain-text `OK` response,
-  bypassing `django-health-check`. The DB/cache/storage probes from
-  `django-health-check` are installed
-  (`shifter/shifter_platform/config/settings.py`) but never reached on
-  these paths. The same `/health` path is reused as the container-level
-  `HEALTHCHECK` in `shifter/shifter_platform/Dockerfile:62`.
+- App health: `/health` and `/health/` reach the coarse
+  `django-health-check` wrapper in `shifter/shifter_platform/config/health.py`.
+  The registered probes include DB/cache/default-storage checks plus the #919
+  conditional channel-layer Redis probe when `CHANNEL_LAYERS` resolves to
+  `channels_redis.core.RedisChannelLayer`. The same `/health` path is reused
+  as the container-level `HEALTHCHECK` in
+  `shifter/shifter_platform/Dockerfile:62`.
 - This behavior is fully tracked by #477 and
   `portal-health-readiness-preflight-477.md`; it is not redesigned here.
 

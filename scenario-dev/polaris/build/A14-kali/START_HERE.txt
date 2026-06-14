@@ -1,0 +1,56 @@
+==========================================
+  JOINT TASK FORCE POLARIS
+  OPERATION NORTHSTORM - START HERE
+==========================================
+
+You use two browser tabs during this event:
+
+  1. CTFd: https://polaris.keplerops.com
+     Challenge briefs, hints, scoreboard, and flag submission.
+
+  2. Mission Control: https://dev.shifter.keplerops.com
+     Range launch and this Kali desktop.
+
+This Kali box is for investigation work. It can reach Boreas targets.
+It cannot submit flags to CTFd. Submit flags from your laptop browser.
+
+FIRST FIVE MINUTES
+
+  1. Keep CTFd open on your laptop.
+  2. In Mission Control, choose POLARIS and click ENTER RANGE.
+  3. When Kali opens, you are here.
+  4. Read the warm-up note:
+
+       cat /home/kali/.polaris/welcome.txt
+
+  5. Copy the flag from that note.
+  6. Go back to CTFd > Challenges > Start Here - Kali Warm-Up.
+  7. Submit the flag.
+  8. Start Mission 1 - Boreas.
+
+GOOD FIRST TARGET
+
+Open this from Kali, not from your laptop:
+
+  http://boreas-systems.ctf
+
+AFTER LIGHTS OUT
+
+If a Bunker objective tells you the local splice is open, connect from Kali:
+
+  ssh root@splice-relay
+
+No password is required. The range stages a per-range key at:
+
+  /home/kali/.ssh/splice_relay
+
+If SSH asks for a password, flag a runner.
+
+IF YOU ARE LOST
+
+  - Reopen the CTFd Start Here page and Kali Quickstart.
+  - Buy Hint 1 before guessing.
+  - Ask Claude on this box: claude
+  - Flag a runner if the range desktop or networking looks broken.
+
+Good hunting.

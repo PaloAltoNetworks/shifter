@@ -8,9 +8,7 @@ Range metadata.
 The NGFW-specific read/write helpers (``get_user_ngfw_data``,
 ``get_ngfw_data_by_request_id``, and the range-attachment record helpers)
 were split out into ``provisioner_db_ngfw.py`` to keep this module under the
-Sonar S104 line budget; ``main`` re-exports both modules' surfaces so the
-``main.<name>`` call sites and ``patch("main.update_instance_state")`` test
-seams are unchanged.
+Sonar S104 line budget.
 """
 
 from __future__ import annotations
@@ -117,10 +115,8 @@ def _append_kwarg_assignment(assignments: list[Any], values: list[Any], key: str
 
 def update_range_status(range_id: int, status: str, **kwargs: str | int | None) -> None:
     """Update range status in database."""
-    import main
-
     logger.debug("update_range_status: range_id=%s status=%s kwargs=%s", range_id, status, list(kwargs.keys()))
-    with main.get_db_connection() as conn:
+    with get_db_connection() as conn:
         with conn.cursor() as cur:
             assignments = [
                 sql.SQL("{} = %s").format(sql.Identifier("status")),
@@ -146,10 +142,8 @@ def write_provisioned_state(
     ngfw_instance_id: int | None = None,
 ) -> None:
     """Write provisioned infrastructure state directly to database."""
-    import main
-
     provider = _get_cloud_provider()
-    with main.get_db_connection() as conn:
+    with get_db_connection() as conn:
         with conn.cursor() as cur:
             for subnet_name, subnet_data in subnets.items():
                 subnet_uuid = subnet_data.get("uuid")
@@ -224,9 +218,7 @@ def write_provisioned_state(
 
 def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
     """Mark all engine_instance and engine_subnet records for a range as destroyed."""
-    import main
-
-    with main.get_db_connection() as conn:
+    with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -276,9 +268,7 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
 
 def _update_range_config(range_id: int, range_spec: dict[str, Any]) -> None:
     """Write updated range_config back to mission_control_range."""
-    import main
-
-    with main.get_db_connection() as conn, conn.cursor() as cur:
+    with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE mission_control_range SET range_config = %s WHERE id = %s",
             (json.dumps(range_spec), range_id),
@@ -289,9 +279,7 @@ def _update_range_config(range_id: int, range_spec: dict[str, Any]) -> None:
 
 def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
     """Read Range request data from Engine database."""
-    import main
-
-    with main.get_db_connection() as conn, conn.cursor() as cur:
+    with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
             SELECT

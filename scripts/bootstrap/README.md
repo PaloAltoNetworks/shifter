@@ -66,20 +66,26 @@ runners are provisioned and registered.
    parameters required by portal Terraform. The Kali build requires the target
    account to accept the free AWS Marketplace terms for product code
    `7lgvy7mt78lgoi4lant0znp5h`.
-5. For the first deploy in the moved account, run the `Deploy` GitHub Actions
+5. Configure the deployment tfvars secrets documented in
+   `docs/dev/deploy-secrets.md`, including `TF_VARS_DEV_PORTAL` and
+   `TF_VARS_DEV_RANGE`. Bootstrap configures the AWS role secret and backend
+   files; deploy-time portal/range values live in those tfvars secrets for
+   GitHub Actions, or in gitignored `local.auto.tfvars` files for local
+   Terraform runs.
+6. For the first deploy in the moved account, run the `Deploy` GitHub Actions
    workflow manually with `workflow_dispatch` on `aws-dev`. Manual dispatch
    forces the full AWS chain (Core -> Range -> Engine -> Platform). A plain
    branch push still obeys path filters, so it can skip Core or image
    publishing when the pushed commit only touched bootstrap/backend files.
    After the first full run succeeds, normal filtered `aws-dev` pushes are
    appropriate.
-6. During that first platform apply, publish DNS records for ACM and SES
+7. During that first platform apply, publish DNS records for ACM and SES
    validation in the authoritative DNS zone. ACM records come from the root
    Terraform output `acm_validation_records`. SES records come from
    `aws ses get-identity-verification-attributes` for the `_amazonses` TXT
    value and `aws ses get-identity-dkim-attributes` for the three DKIM CNAME
    tokens. In Cloudflare, keep ACM and DKIM CNAMEs DNS-only.
-7. After platform apply creates runtime endpoints, publish routing records:
+8. After platform apply creates runtime endpoints, publish routing records:
    `domain_name` and `chat.<domain_name>` CNAME to the root Terraform output
    `alb_dns_name`; `ctfd_domain` A-records to `ctfd_elastic_ip`.
 

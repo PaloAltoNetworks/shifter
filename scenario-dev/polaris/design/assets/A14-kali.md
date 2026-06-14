@@ -46,11 +46,11 @@ The participant's attack box. Pre-configured with standard offensive tooling plu
 
 ```
 /home/kali/
-  README.md          -- Mission brief, getting started guide
-  mission_brief.pdf  -- Full POLARIS operation brief (narrative setup)
+  START_HERE.txt     -- Visible first-five-minutes guide and local recovery path
   tools/
     modbus_scan.py   -- Helper for OT phase
-    flag_submit.sh   -- Quick flag submission to CTFd
+  .polaris/
+    welcome.txt      -- Warm-up challenge note and first flag
   .config/
     claude/          -- AI agent configuration
 ```
@@ -89,21 +89,19 @@ None. This is the attack platform, not a target.
    - API key / runtime model config injected by Shifter at deploy time
 
 4. **Create kali user home directory**
-   - `/home/kali/README.md` — mission brief, getting started guide
-   - `/home/kali/mission_brief.pdf` — full POLARIS operation brief (narrative setup)
+   - `/home/kali/START_HERE.txt` — visible first-five-minutes guide; explains the two-tab workflow and points to the warm-up note
+   - `/home/kali/.polaris/welcome.txt` — hidden warm-up challenge note containing the first flag
    - `/home/kali/tools/modbus_scan.py` — OT helper script
-   - `/home/kali/tools/flag_submit.sh` — quick CTFd flag submission script
 
-5. **Write the mission brief PDF**
-   - POLARIS operation narrative context
-   - High-level objectives (Mission 1-5 descriptions)
-   - Getting started hints (scan the network, look at the website first)
-   - CTFd URL and how to submit flags
+5. **Keep mission reference on CTFd**
+   - POLARIS narrative, mission objectives, challenge briefs, hints, and flag submission live on CTFd.
+   - Kali local content is only the first-five-minutes guide plus tooling notes.
+   - Avoid stale local copies of the full mission brief.
 
-6. **Write the flag submission helper**
-   - Shell script that POSTs to CTFd API
-   - Usage: `flag_submit.sh FLAG{...}`
-   - Pre-configured with CTFd URL and participant API token (injected at deploy time)
+6. **Keep flag submission browser-only**
+   - CTFd is reachable from the participant's laptop browser, not from Kali.
+   - Do not ship a required Kali-side flag submission helper.
+   - Local copy must say to submit flags in CTFd at `https://polaris.keplerops.com`.
 
 7. **Write the modbus_scan.py helper**
    - Scans a subnet for Modbus devices

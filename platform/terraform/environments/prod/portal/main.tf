@@ -256,6 +256,7 @@ module "rds" {
   db_name               = var.db_name
   db_username           = var.db_username
   engine_version        = var.db_engine_version
+  ca_cert_identifier    = var.db_ca_cert_identifier
   instance_class        = var.db_instance_class
   allocated_storage     = var.db_allocated_storage
   max_allocated_storage = var.db_max_allocated_storage
@@ -448,6 +449,9 @@ module "ssm" {
 module "ec2" {
   source = "../../../modules/portal/ec2"
 
+  # Worker-container health alarm (#953) notifies the shared alerts topic.
+  worker_health_alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
+
   aws_region            = var.aws_region
   ec2_ami_id            = var.ec2_ami_id
   name_prefix           = local.name_prefix
@@ -637,8 +641,9 @@ module "engine_provisioner" {
   secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
 
   # ECR
-  ecr_repository_url  = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
-  container_image_tag = var.engine_container_tag
+  ecr_repository_url     = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
+  container_image_tag    = var.engine_container_tag
+  container_image_digest = var.engine_container_image_digest
 
   # Networking (Portal VPC for RDS access)
   vpc_id             = module.vpc.vpc_id
@@ -769,6 +774,7 @@ module "guacamole" {
   db_allocated_storage     = var.guacamole_db_allocated_storage
   db_max_allocated_storage = var.guacamole_db_max_allocated_storage
   db_engine_version        = var.guacamole_db_engine_version
+  db_ca_cert_identifier    = var.guacamole_db_ca_cert_identifier
   db_multi_az              = var.guacamole_db_multi_az
   db_backup_retention_days = var.guacamole_db_backup_retention_days
   db_deletion_protection   = var.guacamole_db_deletion_protection

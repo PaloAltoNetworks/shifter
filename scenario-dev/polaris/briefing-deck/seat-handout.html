@@ -203,10 +203,11 @@
     <div class="handout__cta">
       <div class="handout__cta-h">▶ FIRST CLICKS — YOUR FIRST FIVE MINUTES</div>
       <ol class="handout__steps">
+        <li>Keep <strong>polaris.keplerops.com</strong> open. This is CTFd, where flags are submitted.</li>
         <li>Open your <strong>magic-link email</strong>. It lands on <strong>Mission Control</strong>.</li>
         <li>Pick <strong>POLARIS</strong> → click <strong>ENTER RANGE</strong>. ~5 min to provision.</li>
-        <li>Your <strong>Kali desktop</strong> opens in-browser. Find the orientation note in your home directory.</li>
-        <li>Open <strong>polaris.keplerops.com</strong> in a new tab → <strong>Challenges</strong> → solve <strong>Start Here — Kali Warm-Up</strong>.</li>
+        <li>On Kali, read <strong>/home/kali/START_HERE.txt</strong>, then <strong>/home/kali/.polaris/welcome.txt</strong>.</li>
+        <li>Back on CTFd → <strong>Challenges</strong> → solve <strong>Start Here — Kali Warm-Up</strong>.</li>
         <li>First flag on the board. Start <strong>Mission 1 — Boreas</strong>.</li>
       </ol>
     </div>
@@ -218,7 +219,7 @@
         <div class="handout__row"><dt>Username</dt><dd>your registered email</dd></div>
         <div class="handout__row"><dt>Password</dt><dd>vancity</dd></div>
       </dl>
-      <div class="handout__hint">Same password for everyone. Submit flags from your laptop browser — your Kali box can't reach the board.</div>
+      <div class="handout__hint">Same password for everyone. Submit flags from your laptop browser — your Kali box can't reach CTFd.</div>
     </div>
 
     <div class="handout__section-title">Range access</div>
@@ -232,7 +233,7 @@
 
     <div class="handout__section-title">If you get stuck on the warm-up</div>
     <div class="handout__card">
-      <div class="handout__hint">There's an orientation note hidden somewhere in your home directory on the Kali box. Standard Linux tricks will find it — or ask Claude Code on the box to find hidden files in your home directory. The flag is printed inline in the note.</div>
+      <div class="handout__hint">Run <strong>cat /home/kali/START_HERE.txt</strong>, then <strong>cat /home/kali/.polaris/welcome.txt</strong>. The warm-up flag is printed inline in the note. Submit it in CTFd, not from Kali.</div>
     </div>
 
     <div class="handout__footer">FLAG FORMAT · FLAG{hex} · 4-HOUR CLOCK · GOOD HUNTING</div>

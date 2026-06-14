@@ -7,96 +7,77 @@ Covers:
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+def _install_destroy_fakes(monkeypatch, *, status="ready", variables=None):
+    mock_get_data = MagicMock(return_value={"status": status})
+    mock_tf_runner = MagicMock()
+    mock_build_vars = MagicMock(return_value=variables or {})
+    mock_publish = MagicMock()
+    mock_mark = MagicMock()
+    monkeypatch.setattr("terraform_ops.get_range_data_by_request_id", mock_get_data)
+    monkeypatch.setattr("terraform_ops.range_terraform_runner", mock_tf_runner)
+    monkeypatch.setattr("terraform_ops._build_range_terraform_variables", mock_build_vars)
+    monkeypatch.setattr("terraform_ops.publish_destroyed", mock_publish)
+    monkeypatch.setattr("terraform_ops.mark_range_instances_destroyed", mock_mark)
+    monkeypatch.setattr("terraform_ops.remove_ngfw_subnets", MagicMock())
+    return mock_get_data, mock_tf_runner, mock_build_vars, mock_publish, mock_mark
+
+
 class TestRunTerraformDestroySkipsOnlyDestroyed:
     """_run_terraform_destroy should only skip 'destroyed' ranges, not 'failed'."""
 
-    @patch("main.publish_destroyed")
-    @patch("main.range_terraform_runner")
-    @patch("main.get_range_data_by_request_id")
-    def test_skips_destroyed_status(self, mock_get_data, mock_tf_runner, mock_publish):
+    def test_skips_destroyed_status(self, monkeypatch):
         """Destroyed ranges should be skipped."""
-        from main import _run_terraform_destroy
+        from terraform_ops import _run_terraform_destroy
 
-        mock_get_data.return_value = {"status": "destroyed"}
+        _mock_get_data, mock_tf_runner, _mock_build_vars, mock_publish, _mock_mark = _install_destroy_fakes(
+            monkeypatch, status="destroyed"
+        )
 
         _run_terraform_destroy("req-1", 80, 20, {})
 
         mock_tf_runner.destroy_range.assert_not_called()
         mock_publish.assert_not_called()
 
-    @patch("main.mark_range_instances_destroyed")
-    @patch("main.publish_destroyed")
-    @patch("main._build_range_terraform_variables")
-    @patch("main.range_terraform_runner")
-    @patch("main.remove_ngfw_subnets")
-    @patch("main.get_range_data_by_request_id")
-    def test_does_not_skip_failed_status(
-        self, mock_get_data, mock_remove_ngfw, mock_tf_runner, mock_build_vars, mock_publish, mock_mark
-    ):
+    def test_does_not_skip_failed_status(self, monkeypatch):
         """Failed ranges should NOT be skipped - they may have orphaned resources."""
-        from main import _run_terraform_destroy
+        from terraform_ops import _run_terraform_destroy
 
-        mock_get_data.return_value = {"status": "failed"}
-        mock_build_vars.return_value = {}
+        _mock_get_data, mock_tf_runner, _mock_build_vars, mock_publish, _mock_mark = _install_destroy_fakes(
+            monkeypatch, status="failed"
+        )
 
         _run_terraform_destroy("req-1", 80, 20, {})
 
         mock_tf_runner.destroy_range.assert_called_once()
         mock_publish.assert_called_once()
 
-    @patch("main.mark_range_instances_destroyed")
-    @patch("main.publish_destroyed")
-    @patch("main._build_range_terraform_variables")
-    @patch("main.range_terraform_runner")
-    @patch("main.remove_ngfw_subnets")
-    @patch("main.get_range_data_by_request_id")
-    def test_proceeds_for_ready_status(
-        self,
-        mock_get_data,
-        mock_remove_ngfw,
-        mock_tf_runner,
-        mock_build_vars,
-        mock_publish,
-        mock_mark,
-    ):
+    def test_proceeds_for_ready_status(self, monkeypatch):
         """Ready (active) ranges should proceed with destroy."""
-        from main import _run_terraform_destroy
+        from terraform_ops import _run_terraform_destroy
 
-        mock_get_data.return_value = {"status": "ready"}
-        mock_build_vars.return_value = {}
+        _mock_get_data, mock_tf_runner, _mock_build_vars, _mock_publish, _mock_mark = _install_destroy_fakes(
+            monkeypatch, status="ready"
+        )
 
         _run_terraform_destroy("req-1", 80, 20, {})
 
         mock_tf_runner.destroy_range.assert_called_once()
 
-    @patch("main.publish_destroyed")
-    @patch("main._build_range_terraform_variables")
-    @patch("main.mark_range_instances_destroyed")
-    @patch("main.range_terraform_runner")
-    @patch("main.remove_ngfw_subnets")
-    @patch("main.get_range_data_by_request_id")
-    def test_destroy_passes_variables_to_destroy_range(
-        self,
-        mock_get_data,
-        mock_remove_ngfw,
-        mock_tf_runner,
-        mock_mark,
-        mock_build_vars,
-        mock_publish,
-    ):
+    def test_destroy_passes_variables_to_destroy_range(self, monkeypatch):
         """_run_terraform_destroy must pass variables to destroy_range."""
-        from main import _run_terraform_destroy
+        from terraform_ops import _run_terraform_destroy
 
-        mock_get_data.return_value = {"status": "ready"}
         fake_vars = {"range_id": 80, "user_id": 20, "request_uuid": "req-1", "vpc_id": "vpc-123"}
-        mock_build_vars.return_value = fake_vars
+        _mock_get_data, mock_tf_runner, _mock_build_vars, _mock_publish, _mock_mark = _install_destroy_fakes(
+            monkeypatch, status="ready", variables=fake_vars
+        )
         range_spec = {"subnets": []}
 
         _run_terraform_destroy("req-1", 80, 20, range_spec)
@@ -107,24 +88,27 @@ class TestRunTerraformDestroySkipsOnlyDestroyed:
 class TestAutoCleanupPassesVariables:
     """run_range_terraform auto-cleanup should pass tf variables on provision failure."""
 
-    @patch("main.publish_failed")
-    @patch("main._build_range_terraform_variables")
-    @patch("main.range_terraform_runner")
-    @patch("main._run_terraform_provision", side_effect=RuntimeError("NGFW config failed"))
-    @patch("main.get_range_data_by_request_id")
-    def test_cleanup_passes_variables_to_destroy(
-        self, mock_get_data, mock_provision, mock_tf_runner, mock_build_vars, mock_publish
-    ):
+    def test_cleanup_passes_variables_to_destroy(self, monkeypatch):
         """Auto-cleanup should rebuild variables and pass them to destroy_range."""
-        from main import run_range_terraform
+        from terraform_ops import run_range_terraform
 
-        mock_get_data.return_value = {
-            "range_id": 80,
-            "user_id": 20,
-            "spec": {"ngfw": False, "subnets": []},
-        }
+        mock_get_data = MagicMock(
+            return_value={
+                "range_id": 80,
+                "user_id": 20,
+                "spec": {"ngfw": False, "subnets": []},
+            }
+        )
+        mock_tf_runner = MagicMock()
         fake_vars = {"range_id": 80, "user_id": 20, "request_uuid": "req-1"}
-        mock_build_vars.return_value = fake_vars
+        mock_build_vars = MagicMock(return_value=fake_vars)
+        monkeypatch.setattr("terraform_ops.get_range_data_by_request_id", mock_get_data)
+        monkeypatch.setattr(
+            "terraform_ops._run_terraform_provision", MagicMock(side_effect=RuntimeError("NGFW config failed"))
+        )
+        monkeypatch.setattr("terraform_ops.range_terraform_runner", mock_tf_runner)
+        monkeypatch.setattr("terraform_ops._build_range_terraform_variables", mock_build_vars)
+        monkeypatch.setattr("terraform_ops.publish_failed", MagicMock())
 
         with pytest.raises(RuntimeError, match="NGFW config failed"):
             run_range_terraform("up", "req-1")
@@ -132,24 +116,32 @@ class TestAutoCleanupPassesVariables:
         mock_build_vars.assert_called_once_with("req-1", 80, 20, {"ngfw": False, "subnets": []})
         mock_tf_runner.destroy_range.assert_called_once_with("req-1", variables=fake_vars)
 
-    @patch("main.publish_failed")
-    @patch("main._build_range_terraform_variables", side_effect=ValueError("NGFW missing"))
-    @patch("main.range_terraform_runner")
-    @patch("main._run_terraform_provision", side_effect=RuntimeError("provision failed"))
-    @patch("main.get_range_data_by_request_id")
-    def test_cleanup_failure_logged_not_swallowed(
-        self, mock_get_data, mock_provision, mock_tf_runner, mock_build_vars, mock_publish, caplog
-    ):
+    def test_cleanup_failure_logged_not_swallowed(self, monkeypatch, caplog):
         """When auto-cleanup fails, error should be logged (not just warned)."""
         import logging
 
-        from main import run_range_terraform
+        from terraform_ops import run_range_terraform
 
-        mock_get_data.return_value = {
-            "range_id": 80,
-            "user_id": 20,
-            "spec": {"ngfw": False, "subnets": []},
-        }
+        monkeypatch.setattr(
+            "terraform_ops.get_range_data_by_request_id",
+            MagicMock(
+                return_value={
+                    "range_id": 80,
+                    "user_id": 20,
+                    "spec": {"ngfw": False, "subnets": []},
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            "terraform_ops._run_terraform_provision",
+            MagicMock(side_effect=RuntimeError("provision failed")),
+        )
+        monkeypatch.setattr("terraform_ops.range_terraform_runner", MagicMock())
+        monkeypatch.setattr(
+            "terraform_ops._build_range_terraform_variables",
+            MagicMock(side_effect=ValueError("NGFW missing")),
+        )
+        monkeypatch.setattr("terraform_ops.publish_failed", MagicMock())
 
         with pytest.raises(RuntimeError, match="provision failed"), caplog.at_level(logging.ERROR):
             run_range_terraform("up", "req-1")
@@ -157,19 +149,23 @@ class TestAutoCleanupPassesVariables:
         assert any("Auto-cleanup FAILED" in record.message for record in caplog.records)
         assert any("Orphaned cloud resources" in record.message for record in caplog.records)
 
-    @patch("main.publish_failed")
-    @patch("main.range_terraform_runner")
-    @patch("main._run_terraform_destroy")
-    @patch("main.get_range_data_by_request_id")
-    def test_no_cleanup_on_destroy_failure(self, mock_get_data, mock_destroy, mock_tf_runner, mock_publish):
+    def test_no_cleanup_on_destroy_failure(self, monkeypatch):
         """Auto-cleanup should only run for 'up' operations, not 'destroy'."""
-        from main import run_range_terraform
+        from terraform_ops import run_range_terraform
 
-        mock_get_data.return_value = {
-            "range_id": 80,
-            "user_id": 20,
-            "spec": {},
-        }
+        mock_get_data = MagicMock(
+            return_value={
+                "range_id": 80,
+                "user_id": 20,
+                "spec": {},
+            }
+        )
+        mock_tf_runner = MagicMock()
+        monkeypatch.setattr("terraform_ops.get_range_data_by_request_id", mock_get_data)
+        monkeypatch.setattr("terraform_ops.range_terraform_runner", mock_tf_runner)
+        mock_destroy = MagicMock()
+        monkeypatch.setattr("terraform_ops._run_terraform_destroy", mock_destroy)
+        monkeypatch.setattr("terraform_ops.publish_failed", MagicMock())
         mock_destroy.side_effect = RuntimeError("destroy failed")
 
         with pytest.raises(RuntimeError, match="destroy failed"):

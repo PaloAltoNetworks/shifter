@@ -19,6 +19,13 @@ from events import (
 )
 from executors.ngfw_executor import NGFWExecutor
 from log_redact import safe_log_fingerprint, safe_log_value
+from ngfw_polling import (
+    NGFW_SSH_WAIT_TIMEOUT_DEFAULT,
+    poll_for_serial_and_cert,
+    poll_for_serial_number,
+)
+from ngfw_runtime import update_instance_state
+from ngfw_runtime_ops import run_ngfw_operation
 from ngfw_terraform_cleanup import (
     _cleanup_ngfw_bootstrap_objects,
     _run_deprovision,
@@ -28,6 +35,7 @@ from ngfw_terraform_state import _build_provider_state, _build_tf_variables
 from orchestrators.setup_orchestrator import SetupOrchestrator
 from plans.base import SetupPlan
 from plans.ngfw_provision import NGFWProvisionPlan
+from provisioner_db_ngfw import get_ngfw_data_by_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +68,6 @@ def _cleanup_failed_ngfw_provision(request_id: str, instance_id: str, app_spec: 
     """Best-effort cleanup for a failed NGFW provision operation."""
     logger.info("NGFW provision failed - attempting auto-cleanup...")
     if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
-        from main import get_ngfw_data_by_request_id
-
         gdc_state = get_ngfw_data_by_request_id(request_id).get("state", {})
         if gdc_state:
             import gdc_vmseries_ngfw
@@ -92,12 +98,6 @@ def run_ngfw_terraform(operation: str, request_id: str) -> None:
         ValueError: If unknown operation or Request not found.
         Exception: If the Terraform operation fails.
     """
-    # Import here to avoid circular imports
-    from main import (
-        get_ngfw_data_by_request_id,
-        update_instance_state,
-    )
-
     logger.info(
         "run_ngfw_terraform: starting operation=%s request_id=%s",
         operation,
@@ -205,8 +205,6 @@ def _short_circuit_local_dev_post_provision(
 
 def _wait_for_ngfw_management_plane(output_data: dict[str, Any]) -> tuple[str, NGFWExecutor, str]:
     """Wait until PAN-OS management is reachable and returns its serial number."""
-    from main import NGFW_SSH_WAIT_TIMEOUT_DEFAULT, poll_for_serial_number
-
     management_ip, ssh_executor = _build_ngfw_ssh_executor_from_output(output_data)
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
     # management_ip is read from the same terraform output dict that carries the
@@ -269,8 +267,6 @@ def _fetch_ngfw_license_and_certificate_serial(
     serial_number: str,
 ) -> str:
     """Fetch license data and return the latest certificate-backed serial."""
-    from main import poll_for_serial_and_cert
-
     logger.info("Fetching NGFW license: request_id=%s", request_id)
     license_result = ssh_executor.run_command(
         instance_id=management_ip,
@@ -297,8 +293,6 @@ def _fetch_ngfw_license_and_certificate_serial(
 
 def _auto_stop_ngfw(request_id: str) -> None:
     """Auto-stop the NGFW after readiness, without failing provisioning."""
-    from main import run_ngfw_operation
-
     logger.info("Auto-stopping NGFW: request_id=%s", request_id)
     try:
         run_ngfw_operation("stop", request_id)
@@ -319,8 +313,6 @@ def _run_pan_os_post_provision(
     sls_region: str,
 ) -> None:
     """Run shared PAN-OS VM-Series post-boot configuration for any provider."""
-    from main import update_instance_state
-
     if os.environ.get("DB_PASSWORD"):
         _short_circuit_local_dev_post_provision(
             request_id=request_id,
@@ -387,8 +379,6 @@ def _run_provision(
     sls_region: str,
 ) -> None:
     """Run Terraform apply for NGFW, then run post-Terraform configuration."""
-    from main import update_instance_state
-
     # Update local DB and emit provisioning status event
     update_instance_state(request_id, STATUS_PROVISIONING)
     publish_ngfw_event(
@@ -434,7 +424,6 @@ def _run_gdc_provision(
 ) -> None:
     """Create a Palo Alto VM-Series firewall on GDC VM Runtime, then configure PAN-OS."""
     import gdc_vmseries_ngfw
-    from main import update_instance_state
 
     update_instance_state(request_id, STATUS_PROVISIONING)
     publish_ngfw_event(

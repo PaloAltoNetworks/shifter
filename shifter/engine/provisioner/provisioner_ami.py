@@ -1,10 +1,7 @@
 """AMI ID resolution for the Shifter Engine provisioner.
 
-Extracted from ``main.py`` (Sonar S104). Resolves AMI IDs from SSM Parameter
-Store at runtime, with a per-invocation cache so repeated lookups for the same
-type do not re-hit the API. ``main`` re-exports ``get_ami_id`` so the
-``main.get_ami_id`` call sites (``terraform_vars``) and the
-``patch("main.get_ami_id")`` test seam are unchanged.
+Resolves AMI IDs from SSM Parameter Store at runtime, with a per-invocation
+cache so repeated lookups for the same type do not re-hit the API.
 """
 
 from __future__ import annotations

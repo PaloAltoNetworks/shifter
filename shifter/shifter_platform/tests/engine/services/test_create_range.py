@@ -1,248 +1,95 @@
-"""Tests for create_range() in engine/services.py."""
+"""Behavior tests for create_range() in engine/services.
+
+Drives the real service against a real database: a RequestSpec is interpreted
+into Request/Instance rows, a Range row is persisted with an allocated subnet
+index, and ECS provisioning is dispatched. ECS is unconfigured under the test
+settings, so provisioning is a no-op and needs no boundary mock. Assertions are
+on persisted state and return values, not on mocked ORM/interpreter/ECS calls.
+"""
 
 import logging
-from unittest.mock import Mock, patch
 from uuid import UUID, uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 
+from engine import create_range
+from engine.models import Range
 from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
 
+pytestmark = pytest.mark.django_db
 
-def make_request_spec(
-    scenario_id: str = "basic-attack",
-    user_id: int = 1,
-    subnets: list | None = None,
-) -> RequestSpec:
-    """Create a RequestSpec containing a RangeSpec for testing."""
-    default_subnets = [
-        SubnetSpec(
-            name="default",
-            uuid=str(uuid4()),
-            instances=[InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4()))],
-            connected_to=[],
-        )
-    ]
+User = get_user_model()
+
+
+def make_request_spec(*, user_id: int, scenario_id: str = "basic-attack") -> RequestSpec:
     range_spec = RangeSpec(
         uuid=str(uuid4()),
         scenario_id=scenario_id,
         user_id=user_id,
-        subnets=subnets or default_subnets,
+        subnets=[
+            SubnetSpec(
+                name="default",
+                uuid=str(uuid4()),
+                instances=[InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4()))],
+                connected_to=[],
+            )
+        ],
     )
-    return RequestSpec(
-        request_id=uuid4(),
-        user_id=user_id,
-        items=[range_spec],
-    )
+    return RequestSpec(request_id=uuid4(), user_id=user_id, items=[range_spec])
 
 
-class _TestCreateRangeHelpers:
-    """Shared helpers for split TestCreateRange scenarios."""
-
-    @pytest.fixture(autouse=True)
-    def _mock_transaction(self):
-        """Mock transaction.atomic — unit tests don't need real DB transactions."""
-        with patch("engine.services.transaction"):
-            yield
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(username="engine-create@example.com", email="engine-create@example.com")
 
 
-class TestCreateRangePersistence(_TestCreateRangeHelpers):
-    """Persistence and provisioning tests for create_range()."""
+class TestCreateRangePersistence:
+    def test_returns_request_id_as_uuid(self, user):
+        spec = make_request_spec(user_id=user.id)
+        result = create_range(spec)
+        assert isinstance(result, UUID)
+        assert result == spec.request_id
 
-    def test_returns_request_id_as_uuid(self):
-        """Service returns UUID request_id from the RequestSpec."""
-        from engine import create_range
-        from engine.models import Range
+    def test_persists_range_for_the_looked_up_user(self, user):
+        create_range(make_request_spec(user_id=user.id))
+        range_obj = Range.objects.get()
+        assert range_obj.user == user
+        assert range_obj.cms_user_id == user.id
 
-        User = get_user_model()
+    def test_allocates_a_subnet_index(self, user):
+        create_range(make_request_spec(user_id=user.id))
+        assert Range.objects.get().subnet_index is not None
 
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=42)
-        mock_request = Mock(request_id=request_spec.request_id)
+    def test_creates_range_with_provisioning_status_and_request(self, user):
+        spec = make_request_spec(user_id=user.id)
+        create_range(spec)
+        range_obj = Range.objects.get()
+        assert range_obj.status == Range.Status.PROVISIONING
+        assert range_obj.subnet_index >= Range.SUBNET_INDEX_MIN
+        # The interpreted Request was linked to the Range.
+        assert range_obj.request is not None
+        assert str(range_obj.request.request_id) == str(spec.request_id)
 
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),
-        ):
-            result = create_range(request_spec)
-
-            assert isinstance(result, UUID)
-            assert result == request_spec.request_id
-
-    def test_looks_up_user_by_range_spec_user_id(self):
-        """Service retrieves User by RangeSpec.user_id."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=42)
-        mock_user = Mock(id=42)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user) as mock_get,
-            patch.object(Range, "allocate_subnet_index", return_value=1),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            mock_get.assert_called_once_with(id=42)
-
-    def test_allocates_subnet_index(self):
-        """Service calls Range.allocate_subnet_index() to get subnet."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=15) as mock_allocate,
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            mock_allocate.assert_called_once()
-
-    def test_creates_range_with_correct_kwargs(self):
-        """Service creates Range with correct user, cms_user_id, status, subnet_index, and request."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=123)
-        mock_user = Mock(id=123)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=87),
-            patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),
-        ):
-            create_range(request_spec)
-
-            mock_create.assert_called_once()
-            call_kwargs = mock_create.call_args[1]
-            assert call_kwargs["user"] == mock_user
-            assert call_kwargs["cms_user_id"] == 123
-            assert call_kwargs["status"] == Range.Status.PROVISIONING
-            assert call_kwargs["subnet_index"] == 87
-            assert call_kwargs["request"] == mock_request
-
-    def test_triggers_ecs_provisioning_with_request_id(self):
-        """Service calls start_range_provisioning with request_id."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=99)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning") as mock_start,
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            mock_start.return_value = None
-
-            create_range(request_spec)
-
-            mock_start.assert_called_once_with(request_spec.request_id)
-
-    def test_stores_task_arn_when_provisioning_returns_one(self):
-        """Service stores ECS task ARN when start_provisioning returns one."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/provisioner-task-123"
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=task_arn),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            assert mock_range.step_function_execution_arn == task_arn
-            mock_range.save.assert_called_once_with(update_fields=["step_function_execution_arn"])
-
-    def test_does_not_store_task_arn_when_provisioning_returns_none(self):
-        """Service does not save ARN field when start_provisioning returns None."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            mock_range.save.assert_not_called()
+    @override_settings(LOCAL_PROVISIONER=None, ENGINE_TASK_CLUSTER="", ENGINE_ECS_CLUSTER_ARN="")
+    def test_no_task_arn_stored_when_ecs_unconfigured(self, user):
+        # With no local provisioner and no ECS cluster configured,
+        # start_range_provisioning returns None, so no Step Functions ARN is
+        # recorded. Pinned via override_settings so the precondition holds
+        # regardless of settings leaked by other tests under xdist. (The
+        # ARN-present path is covered by the engine.ecs suites.)
+        create_range(make_request_spec(user_id=user.id))
+        assert Range.objects.get().step_function_execution_arn == ""
 
 
-class TestCreateRangeErrorValidation(_TestCreateRangeHelpers):
-    """Error and input validation tests for create_range()."""
-
+class TestCreateRangeErrorValidation:
     def test_validates_request_spec_type(self):
-        """Service raises TypeError for invalid request_spec types."""
-        from engine import create_range
-
-        # None, dict, string
-        for invalid in [None, {"scenario_id": "test", "user_id": 1}, "not-a-request"]:
+        for invalid in (None, {"scenario_id": "test", "user_id": 1}, "not-a-request"):
             with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
                 create_range(invalid)
 
-        # RangeSpec directly (old API)
+    def test_rejects_rangespec_passed_directly(self):
         range_spec = RangeSpec(
             scenario_id="basic-attack",
             user_id=1,
@@ -257,154 +104,36 @@ class TestCreateRangeErrorValidation(_TestCreateRangeHelpers):
         with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
             create_range(range_spec)
 
-    def test_raises_on_request_spec_without_range_spec(self):
-        """Service raises ValueError when RequestSpec has no RangeSpec item."""
-        from engine import create_range
-
-        request_spec = RequestSpec(
-            request_id=uuid4(),
-            user_id=1,
-            items=[],  # No RangeSpec
-        )
-
+    def test_raises_when_no_range_spec_item(self):
+        spec = RequestSpec(request_id=uuid4(), user_id=1, items=[])
         with pytest.raises(ValueError, match="must contain a RangeSpec"):
-            create_range(request_spec)
+            create_range(spec)
 
-    def test_propagates_user_does_not_exist(self):
-        """Service propagates User.DoesNotExist when user_id invalid."""
-        from engine import create_range
+    def test_propagates_user_does_not_exist(self, db):
+        spec = make_request_spec(user_id=9_999_999)  # no such user
+        with pytest.raises(User.DoesNotExist):
+            create_range(spec)
 
-        User = get_user_model()
+    def test_propagates_and_rolls_back_on_subnet_exhaustion(self, user, monkeypatch):
+        monkeypatch.setattr(Range, "SUBNET_INDEX_MAX", 1)
+        Range.objects.create(user=user, subnet_index=1, status=Range.Status.READY)  # consume the only index
 
-        request_spec = make_request_spec(user_id=9999)
-        mock_request = Mock(request_id=request_spec.request_id)
+        with pytest.raises(ValueError, match="No subnet indices available"):
+            create_range(make_request_spec(user_id=user.id))
 
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", side_effect=User.DoesNotExist),
-            pytest.raises(User.DoesNotExist),
-        ):
-            create_range(request_spec)
-
-    def test_propagates_subnet_allocation_error(self):
-        """Service propagates ValueError when subnet allocation fails."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", side_effect=ValueError("No subnet indices available")),
-            pytest.raises(ValueError, match="No subnet indices available"),
-        ):
-            create_range(request_spec)
-
-    def test_does_not_create_range_when_allocation_fails(self):
-        """Service does not create Range when subnet allocation fails."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", side_effect=ValueError("No subnet indices available")),
-            patch.object(Range.objects, "create") as mock_create,
-            pytest.raises(ValueError),
-        ):
-            create_range(request_spec)
-
-            mock_create.assert_not_called()
+        # No new Range row was created (allocation fails before persistence).
+        assert Range.objects.count() == 1
 
 
-class TestCreateRangeLogging(_TestCreateRangeHelpers):
-    """Logging tests for create_range()."""
-
-    def test_logs_debug_on_entry(self, caplog):
-        """Service logs debug on entry with scenario_id and user_id."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(scenario_id="advanced-persistent-threat", user_id=777)
-        mock_user = Mock(id=777)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),
-            caplog.at_level(logging.DEBUG, logger="engine"),
-        ):
-            create_range(request_spec)
-
+class TestCreateRangeLogging:
+    def test_logs_scenario_and_user_on_entry(self, user, caplog):
+        with caplog.at_level(logging.DEBUG, logger="engine"):
+            create_range(make_request_spec(user_id=user.id, scenario_id="advanced-persistent-threat"))
         assert "advanced-persistent-threat" in caplog.text
-        assert "777" in caplog.text
+        assert str(user.id) in caplog.text
 
-    def test_logs_info_when_range_created(self, caplog):
-        """Service logs info with range_id and subnet_index when Range is created."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=999)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=123),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),
-            caplog.at_level(logging.INFO, logger="engine"),
-        ):
-            create_range(request_spec)
-
-        assert "999" in caplog.text
-        assert "123" in caplog.text
-
-    def test_logs_info_when_ecs_task_started(self, caplog):
-        """Service logs info when ECS task is started."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-abc123"
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=task_arn),
-            patch("engine.models.Subnet"),
-            caplog.at_level(logging.INFO, logger="engine"),
-        ):
-            create_range(request_spec)
-
-        assert task_arn in caplog.text or "task" in caplog.text.lower()
+    def test_logs_range_creation(self, user, caplog):
+        with caplog.at_level(logging.INFO, logger="engine"):
+            create_range(make_request_spec(user_id=user.id))
+        range_obj = Range.objects.get()
+        assert str(range_obj.id) in caplog.text

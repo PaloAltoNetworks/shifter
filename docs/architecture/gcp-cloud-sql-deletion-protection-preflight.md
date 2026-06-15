@@ -134,7 +134,7 @@ Run the repo-required checks for the touched surfaces:
 
 ```bash
 python3 scripts/adr_guard/adr_guard.py --all --level ci
-cd platform/terraform && tflint --recursive --config ../../.tflint.hcl
+TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"
 cd platform/terraform/gcp/environments/gcp-dev && terraform init -backend=false && terraform validate
 ```
 

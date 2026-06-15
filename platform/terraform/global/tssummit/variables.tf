@@ -67,23 +67,6 @@ variable "ngfw_server_subnet_id" {
   type        = string
 }
 
-variable "ngfw_scm_pin_id" {
-  description = "SCM auto-registration PIN ID (certid)"
-  type        = string
-}
-
-variable "ngfw_scm_pin_value" {
-  description = "SCM auto-registration PIN value (certsecret)"
-  type        = string
-  sensitive   = true
-}
-
-variable "ngfw_authcode" {
-  description = "VM-Series license authcode"
-  type        = string
-  sensitive   = true
-}
-
 # ------------------------------------------------------------------------------
 # Workstation Variables
 # ------------------------------------------------------------------------------

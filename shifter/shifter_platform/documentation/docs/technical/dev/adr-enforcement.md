@@ -87,6 +87,9 @@ The first slice intentionally stays small:
   the silent-bypass and prefix-selector cases through `subTest()` loops
   so adding a new bypass shape (for example, `extend-select`-side variants) is
   one row in the cases tuple, not a new test method.
+  The `uat/event-load-harness` UAT load harness (#926) is a registered
+  package under this gate, with matching `Lint`/`SAST`/`Tests
+  (event-load-harness)` jobs in `.github/workflows/_quality.yml`.
 
 - `boundary-mock-policy`
   Enforces ADR-019-R1: new Python tests may patch real process, network,
@@ -317,10 +320,12 @@ The first slice intentionally stays small:
 
 - `no-plaintext-secrets-in-tfvars`
   Architecture check that scans `*.tfvars` files committed under
-  `platform/terraform/environments/` and flags any line that assigns a
-  quoted string literal to a variable whose name ends in `_password`,
-  `_passwords`, `_secret`, `_secrets`, `_token`, `_tokens`, `_key`,
-  `_keys`, `_credential`, or `_credentials`. Heredoc string literals
+  `platform/terraform/environments/` and `platform/terraform/global/`
+  and flags any line that assigns a quoted string literal to a variable
+  whose name ends in a secret-bearing term: `password`, `passwords`,
+  `secret`, `secrets`, `token`, `tokens`, `key`, `keys`, `credential`,
+  `credentials`, `authcode`, `authcodes`, `pin_value`, or `pin_values`.
+  Bare `authcode` and `pin_value` names are also blocked. Heredoc string literals
   (`name = <<EOF` / `<<-EOF`) are flagged equivalently. Object/array
   assignments to a secret-bearing variable are walked forward to the
   matching brace/bracket and flagged when any string literal appears
@@ -369,14 +374,15 @@ The first slice intentionally stays small:
 
 - `no-tracked-generated-artifacts`
   Architecture check that fails the build when generated or pre-staging
-  sensitive artifacts are tracked in source under narrow roots. Two
+  sensitive artifacts are tracked in source under narrow roots. Three
   artifact families are blocked, each scoped to its own root:
   Terraform plan outputs (`tfplan`, `tfplan.binary`, `plan.out`,
   `*.tfplan`, `*.tfplan.binary`) under
   `platform/terraform/environments/` and
-  `platform/terraform/gcp/environments/`; and license / authcode
-  bootstrap material (`authcodes`, `*.authcodes`) under
-  `temp/bootstrap/`. Enumeration uses `git ls-files` (tracked +
+  `platform/terraform/gcp/environments/`; Polaris range build output
+  under `scenario-dev/polaris/build/`; and license / authcode bootstrap
+  material (`authcodes`, `*.authcodes`) under `temp/bootstrap/`.
+  Enumeration uses `git ls-files` (tracked +
   staged + untracked-but-not-ignored) so ignored ephemeral
   workspace artifacts are intentionally allowed; a synthetic-tree
   test-mode fallback walks the filesystem. The blocked path/name

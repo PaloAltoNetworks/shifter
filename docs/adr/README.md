@@ -176,6 +176,13 @@ entries. Completed so far:
   (`test_guacamole_readiness`), mocking the HTTP exchange at the real `urllib`
   boundary and recording backoff sleeps via `monkeypatch` instead of a
   first-party `time.sleep` patch.
+- `engine`: range-lifecycle service suites (`engine/services/test_create_range`,
+  `test_cancel_range`, `test_destroy_range`, `test_pause_range`,
+  `test_resume_range`), driven against real `Range`/`Request` rows. ECS is a
+  no-op for create/destroy; pause/resume require a successful dispatch, so they
+  configure ECS via `override_settings` and mock the AWS task runner at the
+  `boto3` boundary. Range-query suites (`test_get_range_status`,
+  `test_get_instance_ips_by_uuid`) read real rows' `provisioned_instances`.
 
 Decomposition-owned suites are out of scope here and land with their own
 issues: provisioner (#946), `ctf/**` and `cms/experiments/test_orchestrator*`

@@ -1511,10 +1511,14 @@ def check_k8s_network_policy_coverage(repo_root: Path, files: list[str] | None) 
     return violations
 
 
-_TFVARS_SCOPE = ("platform/terraform/environments",)
+_TFVARS_SCOPE = (
+    "platform/terraform/environments",
+    "platform/terraform/global",
+)
 _SECRET_NAME_GROUP = (
-    r"([A-Za-z_][A-Za-z0-9_]*"
-    r"(?:_passwords?|_secrets?|_tokens?|_keys?|_credentials?))"
+    r"((?:[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:_passwords?|_secrets?|_tokens?|_keys?|_credentials?|_authcodes?|_pin_values?))"
+    r"|(?:authcodes?|pin_values?))"
 )
 _SECRET_VAR_PATTERN = re.compile(
     r"^\s*" + _SECRET_NAME_GROUP + r'\s*=\s*"[^"]+"',
@@ -1724,7 +1728,7 @@ def _collect_tfvars_candidates(repo_root: Path, files: list[str] | None) -> list
         base = repo_root / scope
         if not base.exists():
             continue
-        candidates.extend(p for p in base.rglob("*.tfvars") if p.is_file())
+        candidates.extend(p for p in base.rglob("*.tfvars") if p.is_file() and not p.is_symlink())
     return candidates
 
 
@@ -1837,10 +1841,12 @@ def _scan_tfvars_file(path: Path, repo_root: Path) -> list[Violation]:
 def check_no_plaintext_secrets_in_tfvars(repo_root: Path, files: list[str] | None) -> list[Violation]:
     """Forbid string literals on secret-bearing tfvars assignments (ADR-004-R7).
 
-    Scans ``*.tfvars`` files committed under ``platform/terraform/environments/``
-    and flags any line that assigns a quoted string to a variable whose name
-    ends in ``_password``, ``_secret``, ``_token``, ``_key``, ``_credentials``,
-    or ``_credential``. Var/local/data references and empty strings are allowed
+    Scans ``*.tfvars`` files committed under the Terraform environment and
+    global trees and flags any line that assigns a quoted string to a variable
+    whose name ends in ``password``, ``secret``, ``token``, ``key``,
+    ``credentials``, ``credential``, ``authcode``, ``authcodes``, or
+    ``pin_value``. Bare ``authcode`` / ``pin_value`` names are also flagged.
+    Var/local/data references and empty strings are allowed
     (they don't materialize a credential in source). ``*.tfvars.example`` files
     and full-line comments are skipped.
 
@@ -1871,9 +1877,15 @@ def check_no_plaintext_secrets_in_tfvars(repo_root: Path, files: list[str] | Non
 # Bootstrap license/authcode material: `authcodes` (and `*.authcodes`)
 # under `temp/bootstrap/`. These are pre-staging outputs from local
 # bootstrap workflows and must not be committed.
+#
+# Polaris range build output: every tracked file under
+# `scenario-dev/polaris/build/`. That tree is generated/runtime material and
+# can carry challenge-local keys, tokens, database access files, and baked
+# runtime payloads. Source inputs live outside `build/`.
 _GENERATED_ARTIFACT_ROOTS: tuple[str, ...] = (
     "platform/terraform/environments/",
     "platform/terraform/gcp/environments/",
+    "scenario-dev/polaris/build/",
     "temp/bootstrap/",
 )
 
@@ -1907,6 +1919,8 @@ def _generated_artifact_match(rel_path: str) -> bool:
     basename = rel_path.rsplit("/", 1)[-1]
     if rel_path.startswith("platform/terraform/"):
         return _is_terraform_plan_artifact(basename)
+    if rel_path.startswith("scenario-dev/polaris/build/"):
+        return True
     if rel_path.startswith("temp/bootstrap/"):
         return _is_bootstrap_authcode_artifact(basename)
     return False
@@ -2253,7 +2267,7 @@ def check_no_tracked_generated_artifacts(
 ) -> list[Violation]:
     """Forbid tracked generated/sensitive artifacts (ADR-004-R8).
 
-    Two artifact families are blocked, each scoped narrowly:
+    Three artifact families are blocked, each scoped narrowly:
 
     - Terraform plan outputs (`tfplan`, `plan.out`, `*.tfplan`,
       `*.tfplan.binary`) under `platform/terraform/environments/` and
@@ -2264,6 +2278,8 @@ def check_no_tracked_generated_artifacts(
     - License / authcode bootstrap material (`authcodes`,
       `*.authcodes`) under `temp/bootstrap/`. These pre-staging
       outputs must not be tracked.
+    - Polaris range build output under `scenario-dev/polaris/build/`.
+      This is generated/runtime material, not source.
 
     The check fails closed at the staged-source boundary. It does NOT
     parse plan binaries or echo file content — the violation message
@@ -3840,6 +3856,7 @@ PYTHON_COMPLEXITY_GATE_PYPROJECTS = (
     "scripts/gcp",
     "scripts/check_layer_imports",
     "scripts/check_rds_pending_modifications",
+    "uat/event-load-harness",
 )
 
 # Single repo-wide threshold for ruff's McCabe (C901) check. Equality, not <=.

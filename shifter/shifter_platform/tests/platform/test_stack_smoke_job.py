@@ -120,6 +120,20 @@ def test_harness_runs_migrations_exactly_once(smoke_script: str) -> None:
     assert "SKIP_MIGRATIONS=1" in smoke_script
 
 
+def test_harness_skip_migrations_assertion_is_retry_bounded(smoke_script: str) -> None:
+    # A single-shot `docker logs | grep "Skipping migrations"` raced docker
+    # log-delivery behind the readiness probe and flaked (#922). The assertion
+    # must poll with a bounded deadline (like wait_for) so a genuine
+    # SKIP_MIGRATIONS contract break still fails (the entrypoint logs "Running
+    # migrations" instead) while a pure delivery race is absorbed.
+    assert "SMOKE_LOG_ASSERT_TIMEOUT" in smoke_script
+    start = smoke_script.index("assert_skipped_migrations()")
+    body = smoke_script[start : smoke_script.index("\n}", start)]
+    assert "while" in body, "skip-migrations assertion must poll, not check exactly once"
+    assert "SMOKE_LOG_ASSERT_TIMEOUT" in body
+    assert "SKIP_MIGRATIONS contract broken" in body
+
+
 def test_harness_uses_production_posture_not_test_settings(smoke_script: str) -> None:
     # The validators that historically failed only in the built artifact must run:
     # no TESTING=1, no DJANGO_DEBUG=true, no /dev-login bypass.

@@ -1,1 +1,0 @@
-Hardened `mcp/planner` plan file access so `plan_id` must match the generated 8-character lowercase hex ID format, with path resolution containment checks that block traversal-based reads/deletes outside the planner directory.

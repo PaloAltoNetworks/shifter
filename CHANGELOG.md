@@ -15,7 +15,578 @@ the marker is the historical hand-written record and stays as-is.
 
 <!-- towncrier release notes start -->
 
-## [3.101.5] - 2026-05-10
+## [3.102.0] - 2026-06-07
+
+### Security
+
+- Scope the engine-provisioner ECS task role's ELBv2 (Gateway Load Balancer)
+  permissions. The `aws_iam_role_policy.gwlb` policy in
+  `platform/terraform/modules/engine-provisioner/iam.tf` no longer grants
+  mutable `elasticloadbalancing:*` actions on `Resource = "*"`; create,
+  delete, modify, register/deregister-targets, and tag-mutation actions are
+  restricted to Gateway Load Balancer resource ARNs
+  (`loadbalancer/gwy/*`, `listener/gwy/*/*/*`, `targetgroup/*`) and gated on
+  Shifter ownership request/resource tags. `Describe*` is enumerated and
+  retains `Resource = "*"` per AWS service authorization requirements. A new
+  `scripts/check_tf_iam_elb_scope` static checker (wired through pre-commit
+  and the Quality workflow) prevents regression. (#46)- **Scoped the engine provisioner EC2 lifecycle IAM permissions to Shifter-owned
+  instances.** Mutable instance actions now require the existing runtime ownership
+  tags instead of allowing the task role to manage every EC2 instance in the
+  account. (#55)- Add a portal-VPC east-west inspection boundary on AWS. An AWS Network
+  Firewall sits between the public ALB tier and the private services
+  tier, with route-backed steering through a dedicated firewall subnet
+  and a baseline stateful rule group that ALERTs on protocols that have
+  no legitimate east-west use (SSH/RDP/ICMP). FLOW + ALERT logs go to a
+  CMK-encrypted CloudWatch log group and feed the existing
+  `log-aggregation` pipeline; `enable_portal_inspection = true`
+  fails closed when `enable_log_aggregation = false`. Portal RDS and
+  Redis ingress tighten from a broad VPC-CIDR allowlist to SG-to-SG
+  references from the portal EC2 / Django security group. Gated by the
+  new `enable_portal_inspection` environment variable. (#122)- Portal and Guacamole RDS instances now explicitly pin the AWS RDS CA certificate and keep IAM database authentication enabled, with a repo-native Terraform guardrail preventing either setting from regressing. (#140)- **Portal Secrets Manager secrets are now encrypted with customer-managed KMS keys** (CKV_AWS_149). A per-environment `aws_kms_key.secrets_manager` (alias `alias/shifter-<env>-secrets-manager`) with annual rotation is created in the portal env root and plumbed into the `portal/rds`, `portal/cognito`, `guacamole`, and `engine-provisioner` modules, plus the env-root `app` (Django) secret. The CMK ARN is also exposed to the engine-provisioner ECS task as `SECRETS_KMS_KEY_ARN`, so the runtime range and NGFW Terraform modules (`shifter/engine/provisioner/terraform/modules/{range,ngfw}`) encrypt their per-instance SSH-key secrets with the same CMK. The key policy is bound to the `shifter-<env>-*` / `shifter/<env>/*` secret namespace via `kms:EncryptionContext:SecretARN`, so a principal with `kms:Decrypt` on this key cannot use it to decrypt unrelated Secrets Manager secrets in the account. Six `#checkov:skip=CKV_AWS_149` comments on portal-runtime secrets are removed. (#213)- **Portal ALB now has deletion protection enabled** (CKV_AWS_150). `aws_lb.this` reads from a new `enable_deletion_protection` module input (defaulting to `true`) and the corresponding `#checkov:skip=CKV_AWS_150` waiver is removed. Dev pins to `false` for intentional teardown; prod pins to `true`. Mirrors the existing `db_deletion_protection` convention so future destroys remain an explicit configuration change rather than a source patch. (#214)- **Portal user-uploads S3 bucket is now encrypted with a customer-managed KMS key** (CKV_AWS_145). A per-environment `aws_kms_key.portal_s3` (alias `alias/shifter-<env>-portal-s3`) is created in the portal env root and wired into the `portal/s3` module via a new `kms_key_arn` input. The bucket encryption switches from AES256 to `aws:kms` with `bucket_key_enabled = true` to keep KMS API call volume (and cost) bounded. The key policy is bound to the bucket via `kms:EncryptionContext:aws:s3:arn`, so a principal with `kms:Decrypt` on this key cannot use it to decrypt unrelated S3 objects in the account. Access-logging is handled separately by #310 (unified logging strategy); event notifications remain deferred because no real consumer exists. (#218)- **The AWS default security group is now locked down to deny-all on both VPCs** (CKV2_AWS_12). The `portal/vpc` and `range/vpc` modules each adopt the AWS-created default SG via `aws_default_security_group.this` with no `ingress` or `egress` rules, replacing the permissive AWS defaults (open intra-SG ingress, open egress). All real traffic continues to flow through named security groups; the default SG must never be attached to any workload. The two `#checkov:skip=CKV2_AWS_12` waivers are removed. (#221)- **`Instance.data` now encrypts NGFW secret values at rest, completing the
+  field-level encryption story started for `Credential.data` in PR #1168.**
+  `cms.services.create_ngfw` persists the *hydrated* `NGFWAppSpec` directly into
+  `instance.data`, which carries the deployment-profile `authcode`, the SCM
+  `scm_pin_value`, and the OTP-registration `otp_value`. Those three keys are
+  now encrypted by `EncryptedInstanceDataField` (Fernet — AES-128-CBC +
+  HMAC-SHA256, keyed by `FIELD_ENCRYPTION_KEY`); operational fields (`name`,
+  `role`, `os_type`, `dc_config`, `agent`, `instance_type`) stay plaintext so
+  admin views, log diagnostics, and JSON queries on operational metadata keep
+  working. A new data migration (`0029_encrypt_sensitive_instance_data`)
+  re-saves existing `Instance` rows so on-disk values move from plaintext to
+  `enc:v1:`-prefixed ciphertext; the encrypt path is idempotent so the migration
+  is safe to re-run. The underlying field machinery was generalised into an
+  `EncryptedJSONField` base; the credential-data field and the new
+  instance-data field bind their own `sensitive_keys` frozensets that mirror
+  the secret-flagged fields on `SCMCredentialSpec`, `DeploymentProfileSpec`,
+  and `NGFWAppSpec`. A contract test pins those key sets to the spec classes
+  so any new credential type or NGFW field with a secret-shaped value forces
+  explicit registration. (#693)- **Mission Control range lifecycle endpoints now write to the platform `AuditLog`
+  with full HTTP request context.** `mission_control.views.launch_range`,
+  `cancel_range`, `destroy_range`, `pause_range`, and `resume_range` each call
+  `risk_register.services.audit_log_from_request` on success, capturing the
+  acting user, source IP (including `X-Forwarded-For` from the ALB), user agent,
+  and HTTP `X-Request-ID`. Entries record `AuditLog.EntityType.RANGE` with the
+  matching action (`PROVISION` / `CANCEL` / `DEPROVISION` / `PAUSE` / `RESUME`)
+  and stash the legacy `range_id` and/or the request UUID in `new_state` so
+  either identifier is queryable. `cms.services.cancel_range` and
+  `cancel_range_by_request_id` also gain a service-layer `AuditLog.Action.CANCEL`
+  entry, filling the one range-lifecycle action that previously had no audit
+  coverage. Failed requests (CMS errors, missing identifiers) are not audited,
+  so the trail reflects state changes the platform actually performed. (#694)- **Server-side magic-byte inspection now runs before every S3 upload is
+  finalized.** Three upload paths previously trusted only the client-side
+  extension / magic-byte checks: CTF challenge attachments
+  (`ctf.services.attachment.add_challenge_file`), agent installer uploads
+  (`cms.services.complete_upload`), and experiment script uploads
+  (`cms.experiments.services.complete_script_upload`). Each path now reads a
+  bounded prefix of the uploaded content — inline from the file object for the
+  Django-mediated CTF flow, and via a new `ObjectStorage.read_object_header`
+  range-GET for the presigned-URL agent and script flows — and rejects the
+  upload before tagging the object as completed or creating the database
+  record. CTF attachments pick one of three policies per extension (positive
+  magic-byte match, UTF-8 text with no binary signature, or OPAQUE for raw-byte
+  containers like `.bin` / `.raw` / `.dd`). Agent installers reuse the existing
+  `cms.assets.validation.ALLOWED_FORMATS` registry. Scripts must be UTF-8
+  without a binary signature. The header byte budget is provider-neutral and
+  configurable via `UPLOAD_INSPECTION_MAX_HEADER_BYTES` (default 512). (#696)- **Experiment script execution now passes every variable through a Pydantic-validated context.** `cms.experiments.orchestrator` previously interpolated `instance_name` and `s3_key` directly into shell text and only single-quote-escaped resolved Claude prompts — relying on staff-only access as the primary control. The new `cyberscript.script_context.ScriptExecutionContext` validates each value at the type boundary (EC2 instance ID `i-[0-9a-f]{8,17}`, S3 key whitelist with no `..` / leading `/`, IPv4 dotted-quad, prompt body free of null/control bytes) and exposes deterministic `render_command()` helpers. The orchestrator's `_build_python_command` / `_build_claude_command` are removed; the path identifier for `/tmp/script_*.py` is now the instance ID rather than the display name, which also fixes Python scripts targeting instances whose names contain spaces (`Workstation 1`, `Domain Controller`). Script upload key generation is tightened end-to-end so newly uploaded scripts always satisfy the execution validator, and a data migration (`experiments.0002`) renames any legacy `ScriptAsset.s3_key` rows whose characters fall outside the new whitelist (with a server-side S3 copy) so existing scripts continue to execute after the upgrade. (#700)- **Polaris A9 splice-relay no longer accepts password authentication.** The May
+  2026 cohort lost the entire Bunker chain (1300 pts) because `root:splice2025`
+  existed only in `scenario-dev/polaris/build/a9/Dockerfile` and was not
+  discoverable from any in-range artifact. The range bootstrap now generates a
+  per-range Ed25519 keypair, stages the private half on a14-kali at
+  `/home/kali/.ssh/splice_relay` (mode `0600`) — the participant-discoverable
+  artifact — and installs the public half into A9's
+  `/root/.ssh/authorized_keys`. A9's `sshd_config` is `PasswordAuthentication no`,
+  `PermitRootLogin prohibit-password`. The `scenario_smoketest` harness gained a
+  challenge-31 adapter that proves the credential gate end-to-end (evidence
+  present + mode 0600, ssh opens, Modbus device-id round-trip). (#707)- Terraform Checkov IaC scanning is now a blocking gate under ADR-004-R11.
+  Pre-commit (`.pre-commit-config.yaml`) and CI (`security-iac` workflow)
+  share `platform/terraform/.checkov.yaml`; `--soft-fail` is off. 141 of
+  321 baseline first-party Terraform findings were fixed in-place
+  (encryption-at-rest CMKs across CloudWatch / SQS / SNS / Firehose / ECR /
+  Network Firewall / RDS / DynamoDB / EventBridge / Artifact Registry; EC2
+  detailed monitoring + IMDSv2 + EBS optimization; CloudWatch retention
+  ≥365 days; RDS force_ssl, query logging, enhanced monitoring, PI CMK;
+  GKE auto-repair/auto-upgrade/workload-metadata-config; SG descriptions).
+  The remaining principled exceptions live in `docs/adr/exceptions.yaml`
+  with owner, reason, expiry, and affected paths; `adr_guard.py` rejects
+  expired entries. Kubernetes Checkov stays soft-fail as a separately
+  tracked workstream. (#757)- **`settings.ENVIRONMENT` now defaults to `"production"` (fail-closed) when the
+  `ENVIRONMENT` env var is unset.** The previous `"development"` default meant
+  a deployment that omitted or misset the env var silently activated
+  `/dev-login/`. Source-IP/host gating in `config/dev_auth.py` already
+  prevented public-ingress reachability, but the permissive default still
+  turned configuration drift into a dev-auth surface. Deployed dev
+  environments must now opt in explicitly by setting `ENVIRONMENT=development`. (#761)- Replace shared static guest passwords (`kali:kali`, `ubuntu:ubuntu`, `CortexSavesTheDay!`, the shared `GDC_*_PASSWORD` env vars) with per-instance random passwords generated at provisioning time and pushed onto each guest by the engine provisioner via `SetLocalPasswordPlan` (SSM Run Command on AWS / SSH on GDC VM Runtime). Values are stored in AWS Secrets Manager / GCP Secret Manager; the portal resolves them through `shared.cloud` at RDP-access time and fails closed when no reference is recorded. Packer scripts no longer bake credentials into AMIs and user_data never carries the password value. (#762)- **Defense-in-depth ownership checks added to organizer-scoped CTF challenge services.** `create_challenge`, `update_challenge`, `delete_challenge`, and `list_challenges_for_event` now require an `actor_id` keyword argument and raise `CTFPermissionError` when the actor does not own the event. This is a backstop for the existing view-layer `_check_event_ownership` check, so a future internal caller that bypasses the views still cannot mutate another organizer's event content. Cross-organizer regression tests added for the JSON challenge APIs. (#765)- **`api_scoreboard` now refuses to return rankings unless the caller owns the event (organizer) or is a registered participant of it.** Previously any user with any CTF role could read any event's scoreboard — including participant identifiers, names, team names, scores, solve counts, and last-solve timestamps — just by knowing the event UUID. The 404-before-403 ordering for unknown events is preserved so probe traffic does not gain an enumeration signal. (#768)- **Hint unlocks now enforce the same availability policy as flag submission and reject route/body challenge mismatches.** `ctf.services.hint.use_hint` now applies a shared `assert_challenge_available_for_participant` helper (event match, ACTIVE event, competition window, challenge visibility, release state, prerequisites) so participants cannot retrieve hint text for hidden, locked, unreleased, or out-of-window challenges, or for challenges in other events. `api_use_hint` additionally verifies that the URL's `challenge_id` and the optional body `hint_id` refer to the same challenge, closing a path where a participant could unlock a different challenge's hint by supplying its UUID. (#769)- **Experiment creation now enforces `ScenarioMetadata.enabled` and `staff_only`
+  as authorization constraints, not presentation hints.** The GET form
+  (`cms.experiments.views.experiment_create`) lists scenarios via
+  `cms.scenarios.registry.list_all_scenarios(user=request.user)`, so disabled and
+  staff-only scenarios are hidden from non-staff Threat Research users. The POST
+  path (and the underlying `cms.experiments.services.create_experiment`) routes
+  through `cms.scenarios.registry.check_scenario_access`, which rejects disabled
+  or staff-only scenarios for non-staff users with `ExperimentValidationError`
+  — closing the path where a non-staff Threat Research user could enumerate raw
+  YAML IDs and POST one directly. Adds a view-layer regression test in
+  `tests/cms/experiments/test_views.py` that drives the full POST flow as a
+  Threat Research user against a hidden `scenario_id` and asserts it is
+  rejected without reaching experiment creation. (#771)- **Production Django settings now enforce HTTPS and HSTS at the application layer.** `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS` (default 1 year), and `SECURE_HSTS_INCLUDE_SUBDOMAINS` default to on when `DEBUG=False`; each is overridable via the matching environment variable. `SECURE_HSTS_PRELOAD` stays off by default — preload-list submission is near-irreversible, so it must be opted into via `SECURE_HSTS_PRELOAD=true` only once the domain is ready for chrome://net-internals submission. Combined with the existing `SECURE_PROXY_SSL_HEADER` config, the redirect is loop-safe behind a TLS-terminating load balancer. (#776)- **Established the policy-layer foundation on the `shifter-ops` MCP server.** Introduced `.shifter.yaml` at the repo root (`mcp_ops:` namespace) declaring capability classes, session profiles, environment policy, class defaults, and an audit log; added `mcp/ops/policy.js` with `parsePolicy`, `loadPolicy`, `profileFromEnv`, the `Policy` class, and a `registerTool` wrapper that gates tool registration by capability class and active session profile. ADR-014 reframed: R1 narrowed to general-purpose MCP servers, new R5 declares the operator-agent surface model and the structured-policy-gate requirement, new R6 prohibits bypass-procedure language in MCP tool descriptions. `mcp/ops/SECURITY.md` and the preflight architecture note rewritten to match. The actual defense gates (env confirm, dry-run, redaction, idempotency, audit, secret handles, two-phase plan→execute, rate caps, untrusted-input fencing, apex out-of-band approval, per-tool wiring, surface tests) land in follow-up issues #1198, #1199, #1200, #1201, #1202. (#777)- Constrained `shifter_platform` to `asyncssh>=2.23.0` and refreshed the lockfile to remove vulnerable `asyncssh` 2.22.0. (#868)- Bump the transitive `idna` dependency 3.13 → 3.18 in both
+  `shifter/shifter_platform` and `shifter/engine/provisioner` (pulled in via
+  the requests/httpx chain). Clears [GHSA-65pc-fj4g-8rjx][advisory]
+  (CVE-2026-45409, moderate): specially crafted inputs to `idna.encode()`
+  bypass length validation in `valid_contexto` and trigger excessive
+  resource consumption (denial of service), an incomplete-remediation
+  follow-up to CVE-2024-3651. First patched in idna 3.15.
+
+  [advisory]: https://github.com/advisories/GHSA-65pc-fj4g-8rjx (#869)- Bump `hono` 4.12.18 → 4.12.23 in the `mcp/ngfw`, `mcp/ops`, and
+  `mcp/planner` lockfiles (transitive via `@modelcontextprotocol/sdk`),
+  clearing advisories GHSA-2gcr-mfcq-wcc3, GHSA-3hrh-pfw6-9m5x,
+  GHSA-f577-qrjj-4474, and GHSA-xrhx-7g5j-rcj5 (all patched in 4.12.21). (#870)- **Patched transitive `qs` dependency copies in MCP packages and the GCP identity-platform function.** The affected lockfiles now resolve `qs` to the non-vulnerable 6.15.2 release, including the Express/body-parser tree used by the identity-platform blocking functions. (#871)- Harden the portal image dependency install to clear SonarCloud Security
+  Rating C (`docker:S8541`, `docker:S8544`). Third-party dependencies are now
+  installed wheel-only (`--only-binary :all:`) with versions pinned and hashes
+  enforced (`--require-hashes`): the frozen `uv` lock is exported with hashes,
+  and GCP extras resolve from a new pinned + hashed `requirements-gcp.lock`
+  (compiled from `requirements-gcp.txt`). The first-party `cyberscript` and
+  `installation` packages now ride on `PYTHONPATH` rather than a pip install,
+  since first-party source has no external resolution to lock or hash. Only
+  `py-ubjson` (sdist-only, no wheel) keeps a scoped, hash-verified source build. (#876)- Break the CodeQL `py/clear-text-logging-sensitive-data` dataflow at six log
+  sites that CodeQL flagged as emitting secrets/passwords in clear text
+  (`ngfw_terraform`, `gdc_vmruntime_assets`, the Guacamole RDP/SSH views, and the
+  risk-register audit log). Each flagged value now routes through a
+  `safe_log_fingerprint` helper — a per-process random nonce with no data
+  dependency on the input (and deliberately not a hash, so it does not trip
+  `py/weak-sensitive-data-hashing`) — which preserves cross-line correlation while
+  removing the value from the log. The platform `shared.log_sanitize` module gains
+  `safe_log_fingerprint`/`safe_log_id` to mirror the provisioner's `log_redact`,
+  giving both layers one logging-redaction vocabulary. (#878)- **Baselined Django and PyJWT advisories are remediated.** The platform now
+  requires Django 6.0.6 or newer and constrains transitive PyJWT resolution to
+  2.13.0 or newer, allowing the dependency-policy baseline entries for issue 895
+  to be cleared. (#895)- Render AWS range Terraform tfvars from per-environment GitHub secrets, document the matching local overlay model, and replace committed account-bound bucket plus deployment-specific PAN-OS AMI values with placeholders. (#916)- **Deploy workflows no longer route pull requests to self-hosted deploy runners.** AWS/GCP deploy jobs are push or manual-dispatch only, prod AWS deploys can be protected through the `aws-prod` GitHub Environment, and AWS ECR deploys now consume immutable digest-pinned images. (#935)- **GKE authorized-networks allowlist is now fail-closed at the Terraform layer,
+  and both gates enforce the same parsed-prefix contract.** `gke_master_authorized_cidrs`
+  in `platform/terraform/gcp/modules/platform-core/variables.tf` loses its
+  `default = []` and gains a `validation` block expressing a four-part contract
+  from the parsed prefix: the list is non-empty; every entry has an explicit
+  `/N` suffix (no bare IPs); every entry parses as a CIDR (no garbage, bad
+  octets, or bad prefixes); and the parsed prefix length is `> 0` (every
+  spelling of `/0`, IPv4 or IPv6, is rejected by prefix number, not by
+  string-suffix matching). So `terraform plan` / `terraform apply` /
+  `terraform test` fail with a clear error otherwise, including a direct apply
+  that bypasses the bootstrap preflight. `scripts/bootstrap/deploy.py`'s
+  `validate_gcp_control_plane_security_inputs` is tightened to enforce the
+  same four-part contract (`"/" in cidr`, `ipaddress.ip_network(..., strict=False)`,
+  `network.prefixlen > 0`), so the two gates stay in lockstep. Coverage in
+  `scripts/bootstrap/tests/test_deploy.py::TestGcpControlPlaneSecurityInputs`
+  expands to the unsafe inputs both gates reject (bare IPs, garbage with and
+  without slashes, bad octets/prefixes, IPv4 `/0`, IPv6 `/0`, mixed lists). The
+  cluster runs with `enable_private_endpoint = false`, so
+  `master_authorized_networks_config` is the only network-level restriction on
+  the public Kubernetes API server; an empty, malformed, or world-open list
+  would expose it to the entire internet. Recorded the design and the
+  private-endpoint boundary in
+  `docs/architecture/gke-control-plane-access-preflight.md` (listed as ADR-008
+  evidence). (#957)- **GCP platform and range VPCs now have explicit least-privilege firewall
+  policy with per-pool pod-CIDR isolation for the provisioner.** Range VPC
+  ingress is deny-by-default; the only ingress allow rule is
+  `range-allow-platform-provisioner`, sourced from a NEW dedicated
+  secondary pod range (`var.gke_provisioner_pods_cidr`, default
+  `10.46.0.0/20`) declared on the GKE subnet and attached to the
+  provisioner node pool via `network_config.pod_range`. A compromised
+  portal/worker/guacamole pod (running on the shared pod range) can no
+  longer satisfy the range firewall rule. The platform VPC now carries an
+  explicit deny rule against world-open SSH (22) and RDP (3389), and a
+  tag-scoped allow rule for the Google LB health-check ranges so GKE
+  backend probes continue to work. Optional break-glass direct admin SSH
+  onto platform and range VMs is gated on the new `operator_admin_cidrs`
+  module input (empty by default — dev relies on Workload Identity and
+  IAM paths) and rides at priority 800, strictly higher precedence than
+  the broad world-SSH/RDP deny at 900 so an explicit operator CIDR is not
+  shadowed. These admin-SSH rules are direct source-CIDR rules — not IAP
+  TCP forwarding rules — and the variable description reflects that. (#959)- **Cloud SQL deletion protection is now on by default for the platform
+  control-plane database.** `google_sql_database_instance.platform` now reads
+  its `deletion_protection` from the new `cloud_sql_deletion_protection`
+  module input, which defaults to `true`. Intentionally disposable
+  environments can opt out at the environment-root layer; dev gets the
+  secure default automatically. A misclick `terraform destroy` against the
+  shared platform database will now be rejected by the provider rather than
+  silently wiping control-plane state. (#960)- **Recorded the GCP GCS bucket encryption decision: Google-managed keys
+  remain the accepted posture.** ADR-008-R5 (`docs/adr/index.yaml`) is the
+  durable record; the
+  [gcp-gcs-cmek-preflight](../docs/architecture/gcp-gcs-cmek-preflight.md)
+  note carries the rationale, scope, owner, and the explicit review trigger
+  (an external compliance requirement). No CMEK / Cloud KMS resources are
+  created in this release — CMEK adoption is a separate piece of work
+  scoped to the day a compliance driver materializes, not a quiet follow-up. (#962)- **GCP Memorystore for the platform cache now runs on STANDARD_HA tier with
+  AUTH and server TLS, end-to-end.** `google_redis_instance.platform` is
+  `tier = STANDARD_HA`, `auth_enabled = true`,
+  `transit_encryption_mode = "SERVER_AUTHENTICATION"`. The
+  provider-generated AUTH token and the Memorystore server CA PEM both
+  land in a new `redis` Secret Manager bundle (mirroring the DB-password
+  shape) and are hydrated by `entrypoint.sh` as `REDIS_PASSWORD` and
+  `REDIS_CA_PEM` — neither value appears in the runtime ConfigMap,
+  generated env files, or process argv. Django Channels now builds a
+  `channels_redis` dict-form host with a `rediss://` address,
+  `ssl_cert_reqs = "required"`, and `ssl_ca_data` set to the Memorystore
+  CA so the server certificate is verified against the actual instance CA
+  rather than the system trust store. The helper fails closed if TLS is
+  enabled without a hydrated password, so silent fallback to a plaintext
+  connection is no longer reachable. Both the Helm chart NetworkPolicy and the
+  Kustomize-base NetworkPolicy now permit egress on the Memorystore TLS
+  port 6378 alongside the existing 6379 — the two cover the bootstrap
+  (Helm) and `_gcp-dev.yml` (`kubectl apply -k`) deploy paths respectively.
+  The platform-core module's `redis_tier` variable defaults to
+  `STANDARD_HA` as the production high-availability posture; AUTH and TLS
+  are enforced independently of tier, so a future disposable environment
+  can override to `BASIC` without weakening the security contract. (#963)- Remove tracked Terraform plan artifacts from source control. Eight
+  `tfplan` / `plan.out` files under `platform/terraform/environments/`
+  have been deleted; `.gitignore` now covers Terraform plan outputs
+  under both AWS and GCP environment trees. A new ADR-004-R8
+  `no-tracked-generated-artifacts` guardrail in
+  `scripts/adr_guard/adr_guard.py` fails closed when a plan-named file
+  is re-introduced under those roots, including via `git add -f`. (#1180)- Block re-introduction of bootstrap license / authcode material under
+  `temp/bootstrap/`. The existing `temp/` `.gitignore` entry covers
+  unforced adds; the new ADR-004-R8 `no-tracked-generated-artifacts`
+  guardrail in `scripts/adr_guard/adr_guard.py` fails closed when
+  `authcodes` / `*.authcodes` are re-introduced under
+  `temp/bootstrap/`, including via `git add -f`. The historical
+  `temp/bootstrap/license/authcodes` file is not present on `dev` or
+  `main`. (#1181)- **Aligned experiment and scenario editor authorization with the documented policy.** The view decorators advertise access for staff and the `Threat Research` group, but the service layer enforced staff-only — silently rejecting Threat Research users that the views had already admitted. The canonical predicate now lives in `shared.auth.can_edit_cms_authoring`, consumed by both `threat_research_required` and the experiment/scenario editor service layers, so the gate cannot drift. Per-scenario `enabled` / `staff_only` filtering via `cms.scenarios.registry.check_scenario_access` is unchanged. (#1183)- Stop injecting sensitive provisioner env vars as literal Kubernetes
+  Job env vars. The GCP Job adapter
+  (`shifter/shifter_platform/shared/cloud/gcp/task_runner.py`) now
+  splits the provisioner `env_overrides` into sensitive vs.
+  non-sensitive halves via a new
+  `shared.cloud.gcp.sensitive_env.split_env()` classifier. Sensitive
+  keys (`DB_PASSWORD`, `FIELD_ENCRYPTION_KEY`, `DC_DOMAIN_PASSWORD`,
+  plus any name matching the `_PASSWORD` / `_PASSPHRASE` /
+  `_PRIVATE_KEY` / `_API_TOKEN` / `_CREDENTIAL` / `_SECRET` suffix
+  rules) are routed through `valueFrom.secretKeyRef` pointing at an
+  ephemeral per-Job Secret. The Secret is created before the Job is
+  submitted, garbage-collected via `ownerReferences` once the Job is
+  deleted, and cleaned up on Job-creation failure. Pointer suffixes
+  (`_ID`, `_REF`, `_ARN`, etc.) take precedence so identifiers like
+  `GDC_ACCESS_SECRET_ID` remain literal env vars. (#1185)- Documented and pinned the AI experiment execution boundary for Claude Code runs. Experiment command dispatch now includes the `ai-experiment-execution-v1` policy payload for audit correlation, and regression tests guard the allowed `claude --dangerously-skip-permissions --output-format stream-json` invocation and transcript capture contract. (#1186)- **Experiment script dispatch no longer interpolates raw S3 keys or Claude prompts into remote shell syntax.** Script execution now uses fixed wrappers that decode validated payload data before invoking tools with structured argv. (#1187)- **CTF HTTP flag validators now pin outbound connections to a pre-validated IP.** Closes a DNS-rebinding window where a hostname could resolve to a public address during validation but to a loopback, private, link-local, or cloud-metadata address at request time. Every IPv4/IPv6 answer in the DNS reply must pass SSRF policy or the request is refused, and the TLS socket is opened to the validated address while SNI, certificate verification, and the `Host:` header retain the original hostname. (#1188)- Make provisioner field decryption fail closed. `decrypt_field()` in
+  `shifter/engine/provisioner/config.py` no longer silently returns the
+  input when `FIELD_ENCRYPTION_KEY` is missing or when the value fails to
+  decrypt. A new `FieldDecryptError` is raised on missing key, malformed
+  base64, and Fernet token failures (wrong key, malformed token); the
+  exception message never carries the input value. Empty input still
+  returns `""` as the absent-field sentinel. Adds tests covering each
+  failure mode. (#1189)- Require verified TLS for the `mcp/ops` Postgres pool. The pool config
+  in `mcp/ops/lib.js::buildPoolConfig` no longer disables TLS
+  verification — `rejectUnauthorized` stays `true` and `ssl.servername`
+  is set to the RDS endpoint discovered when the SSM tunnel started, so
+  SNI and hostname verification fire against the real RDS endpoint
+  instead of the localhost target of the port forward. The
+  `mcp-ops-tls-strict` adr_guard check (ADR-014-R7) backstops any other
+  file under `mcp/ops/` that would re-introduce `rejectUnauthorized:
+  false`. The trust model and refresh procedure are documented in
+  `mcp/ops/SECURITY.md` § "Database TLS". (#1190)- Make every Bandit SAST job blocking. `continue-on-error: true` is
+  removed from the `packer`, `bootstrap`, `gcp-scripts`,
+  `check-layer-imports`, and `installation` SAST jobs in
+  `.github/workflows/_quality.yml`. All seven Bandit jobs now block
+  merge on findings. A leading comment in the SAST section documents
+  the scope and owner, and the policy that adding a new Bandit job
+  must not reintroduce advisory mode without a fix-narrow-or-nosec
+  exception. Verified against all five previously-advisory paths
+  locally — current findings: zero. (#1193)- New `no-populated-secret-env-files` `adr_guard` check (ADR-004-R9)
+  prevents reintroducing populated values into tracked `*-secrets.env`
+  files under `platform/k8s/`. Allowed: comments, blank lines, empty
+  assignments (`KEY=`), and a **fixed** synthetic-placeholder allowlist
+  (`REPLACE_AT_DEPLOY`, `CHANGE_ME`, `PLACEHOLDER`, `EXAMPLE`, plus the
+  matching bracketed forms `<replace-at-deploy>`, `<change-me>`,
+  `<placeholder>`, `<example>`). The bracket allowlist is explicit
+  rather than a `<...>` pattern so a real credential cannot hide as
+  `<attacker-known-password>`. Parser splits on the first `=` so
+  non-identifier key shapes (`db.password=...`, `api-token=...`,
+  `export DB_PASSWORD=...`) still flow through the value check; inline
+  `# ...` is not honored as a comment; non-`=` lines are flagged as
+  malformed. Containment uses `git ls-files`, so gitignored local-dev
+  files are intentionally not scanned. Violation messages name the path
+  and variable name only, never the rejected value. Registered in
+  `fast` and `ci` levels; backstops gitleaks for low-entropy credentials
+  it ignores. The plaintext-removal content fix already shipped in
+  #1207. (#1195)- Wire the Phase 2 policy gates atop `registerTool` in
+  `mcp/ops/policy.js` (per parent issue #777). The wrapper now composes
+  five class-driven gates around every handler: env policy
+  (`confirm_env="prod"` required for prod calls), dry-run defaults
+  (`infra_mutation`/`ssm_arbitrary`/`db_arbitrary` return preview unless
+  `execute=true`), description redaction (`dev_bypass_tunnel` text
+  replaced before `list_tools`), idempotency keys (`named_db_write`
+  requires `idempotency_key`; same key returns cached result for 15
+  minutes), and secret handles (`secret_handle` tools return
+  `shf-secret:<uuid>` references; raw values resolvable only in-process
+  via `resolveSecretHandle`). A new `mcp/ops/audit.js` writes one
+  JSONL record per call to the path declared in `.shifter.yaml`'s
+  `audit.path` with `audit.redact` list applied. The 45 tools in
+  `mcp/ops/index.js` are still wired through `server.tool()` directly;
+  Phase 5 (#1201) is what routes them through `registerTool`. (#1198)- Add Phase 3 mid-cost policy defenses to `mcp/ops`'s `registerTool`
+  wrapper (per parent issue #777). The wrapper now composes three new
+  gates around every handler in the two-phase classes:
+
+  - **Two-phase `plan_<name>` → `execute_<name>`.** For
+    `infra_mutation`, `ssm_arbitrary`, and `db_arbitrary` tools, the
+    wrapper registers a paired `plan_<name>` (captures verbatim args,
+    returns `{plan_id, summary, ttl_seconds: 60}`, no handler run) and
+    `execute_<name>` (consumes the matching plan_id atomically, runs
+    the stored handler args through rate-cap + apex-approval +
+    idempotency). The plan store is in-process, volatile, bounded to 64
+    entries, single-use, with a 60-second TTL; expired entries are
+    reaped on every access.
+  - **Per-class sliding-window rate caps.** Reads
+    `class_defaults.<class>.rate_cap = {count, window_seconds}` (with
+    per-tool overrides via `tools.<name>.overrides.rate_cap`) and
+    refuses execute-side calls that would exceed the cap. The
+    `infra_mutation` default is `{count: 3, window_seconds: 60}`. Plan
+    calls do not consume capacity.
+  - **Startup profile from env.** `index.js` now resolves
+    `SHIFTER_OPS_PROFILE` via `profileFromEnv(process.env)` and passes
+    it to `loadPolicy({path, profile})` at server startup; missing or
+    malformed `.shifter.yaml` aborts startup before any tool is
+    registered. (#1199)- Add Phase 4 expensive policy defenses to `mcp/ops`'s `registerTool`
+  wrapper (per parent issue #777):
+
+  - **Untrusted-input fencing.** Producer descriptors declare an
+    `untrusted_source` label (from `.shifter.yaml`'s allowlisted
+    `untrusted_sources:` list) and the wrapper post-processes the
+    handler's text return into `[UNTRUSTED:<source>:BEGIN] ...
+    [UNTRUSTED:<source>:END]`. Producers: `get_log_events`,
+    `filter_log_events`, `tail_logs` (source `logs`), `get_s3_object`
+    (`s3`), and `ssm_get_command_output` (`ssm_stdout`). Consumer
+    descriptors declare an `untrusted_inputs: ["<field>"]` list; the
+    wrapper scans only those declared fields for a fence pattern and
+    refuses the call unless `acknowledge_untrusted_input: true` is set.
+    Consumers: `query.sql`, `execute.sql`, `ssm_send_command.command`,
+    `run_manage_command.command`.
+  - **Apex out-of-band operator approval.** A new `apex_operations:`
+    block in `.shifter.yaml` declares apex-gated rules by
+    `{tool|class, env, operation_kind, requires_write?}`. Defaults:
+    prod `terminate_ec2_instance`, prod `restart_ecs_service`, and prod
+    `db_arbitrary` writes. The wrapper generates a random 32-char hex
+    token, prints `[apex-approval] <tool> ... token=<...>` to stderr
+    (never to MCP responses, audit args, plan summaries, argv, env, or
+    `.shifter.yaml`), and parks the handler. A dedicated `approve`
+    MCP tool consumes the token and releases the parked handler;
+    unknown / already-consumed / expired tokens fail closed. A 60-second
+    timeout rejects the parked handler, so headless / CI runs fail
+    closed automatically. (#1200)- Migrate all 45 `mcp/ops` tool registrations from raw `server.tool(...)`
+  to policy-gated `registerTool(ctx, {...})` descriptors (per parent
+  issue #777, Phase 5). The descriptor is the authoritative source for
+  each tool's capability class; `.shifter.yaml` remains the single
+  source of truth for class defaults, profiles, environment policy,
+  audit config, per-tool overrides, the `apex_operations` list, and the
+  `untrusted_sources` allowlist.
+
+  Class assignments per the Phase 5 preflight:
+
+  - `observability` (17): `describe_log_streams`, `get_log_events`,
+    `filter_log_events`, `tail_logs`, `list_ec2_instances`,
+    `list_ecs_tasks`, `describe_ecs_service`, `describe_asg`,
+    `describe_target_health`, `list_s3_buckets`, `list_s3_objects`,
+    `get_s3_object`, `terraform_state`, `cost_summary`, `daily_spend`,
+    `risk_dashboard`, `risk_matrix`.
+  - `secret_handle` (2): `list_secrets`, `get_secret`.
+  - `ssm_arbitrary` (2): `ssm_send_command`, `ssm_get_command_output`.
+  - `ssm_named` (1): `run_manage_command`.
+  - `dev_bypass_tunnel` (2): `start_portal_test_tunnel`,
+    `stop_portal_test_tunnel`.
+  - `infra_mutation` (5): `start_ec2_instance`, `stop_ec2_instance`,
+    `terminate_ec2_instance`, `restart_ecs_service`, `reconcile_ranges`.
+  - `db_arbitrary` (4): `list_tables`, `describe_table`, `query`,
+    `execute` (with `is_write: true` so apex `requires_write` matchers
+    fire on `execute` but not on read-only queries).
+  - `named_db_read` (6): `list_risks`, `get_risk`, `risk_audit_log`,
+    `list_ranges`, `get_range`, `list_subnet_allocations`.
+  - `named_db_write` (6): `create_risk`, `update_risk`, `delete_risk`,
+    `restore_risk`, `add_risk_comment`, `delete_risk_comment`.
+
+  A new `approve` MCP tool (class `observability`) lets the operator's
+  agent release pending apex-approval tokens. The server loads
+  `.shifter.yaml` via `loadPolicy({path, profile: profileFromEnv(env)})`
+  at startup and fails closed on missing or malformed policy.
+  Operators who need destructive classes
+  (`infra_mutation`, `ssm_arbitrary`, `db_arbitrary`,
+  `dev_bypass_tunnel`) must set `SHIFTER_OPS_PROFILE=destructive` —
+  the default `standard` profile no longer registers those tools. (#1201)- Add Phase 6 negative-surface tests for `mcp/ops` at
+  `mcp/ops/tool-surface.test.js` (per parent issue #777). The suite is
+  the load-bearing ADR-014-R3 / R5 / R6 invariant for this server: it
+  exercises the live registration path — real `.shifter.yaml`, real
+  `loadPolicy`, real `registerTool` — against a fake server and asserts:
+
+  - Profile gating actually removes tools from the registered set
+    (`read_only` / `standard` / `destructive`); a disabled class
+    produces no `server.tool(...)` call at all (not "registered but
+    refused").
+  - Two-phase classes (`infra_mutation`, `ssm_arbitrary`,
+    `db_arbitrary`) register `plan_<name>` / `execute_<name>` pairs
+    only; the direct `<name>` is absent. `execute_<name>` without a
+    `plan_id` arg throws `PolicyError`.
+  - `class_defaults.secret_handle.return_mode = "handle"` is enforced
+    by the live policy (the ADR-014-R5 structural invariant);
+    `get_secret` is the only `secret_handle` registration on the
+    surface (`list_secrets` is correctly `observability`).
+  - Prod-touching tools refuse without `confirm_env="prod"` (gate
+    applies class-wide, not tool-specific).
+  - `dev_bypass_tunnel` descriptions are replaced with the
+    `policy.js` `REDACTED_DESCRIPTION` constant verbatim; the
+    defense-in-depth scan also checks for `/dev-login/`, `bypass`,
+    `Cognito`, and `MFA` substrings.
+  - Consumer tools (`plan_query`, `plan_execute`,
+    `plan_ssm_send_command`) refuse fenced input unless
+    `acknowledge_untrusted_input: true` is set; the registered schema
+    exposes the control field.
+  - Every `apex_operations[*].tool` rule in `.shifter.yaml` points at a
+    registered `execute_<name>`; `validateApexCoverage` is the
+    load-bearing gate, called from `registerAllOpsTools(ctx)`'s last
+    step.
+
+  `mcp/ops/index.js` gains a narrow seam for this: the
+  `registerTool(ctx, {...})` block + `validateApexCoverage(policy)`
+  move into an exported `registerAllOpsTools(ctx)` function, and
+  `new McpServer` / `loadPolicy` / `await server.connect(...)` move
+  behind an `async main()` guarded by
+  `if (import.meta.url === pathToFileURL(process.argv[1]).href)`.
+  Live behavior when run as `node mcp/ops/index.js` is unchanged. (#1202)- Bump vulnerable dependencies flagged by Dependabot. Python: `paramiko`
+  4.0.0 → 5.0.0 and `urllib3` 2.6.3 → 2.7.0 in `shifter/engine/provisioner`;
+  `django` 6.0.4 → 6.0.5, `paramiko` 4.0.0 → 5.0.0, `twisted` 25.5.0 →
+  26.4.0, and `ujson` 5.12.0 → 5.12.1 in `shifter/shifter_platform`. npm:
+  `hono`, `ip-address`, `fast-uri`, and `express-rate-limit` bumped in
+  `mcp/ops` and `mcp/planner` via `npm audit fix`. Clears advisories around
+  proxied redirect header leakage (urllib3), decompression-bomb safeguards
+  (urllib3), DNS DoS (twisted), JWT NumericDate validation (hono), CSS
+  declaration injection (hono), cache cross-user leakage (hono), HTML XSS
+  (ip-address), and percent-encoded host/path confusion (fast-uri). (#1222)- **Credential SCM PINs and NGFW authcodes are now encrypted inside persisted CMS credential JSON data.** Existing plaintext credential secrets are migrated to encrypted values, while application reads continue to receive decrypted values for provisioning.- **Experiment and scenario editor services now enforce staff-only access in the service layer.** This duplicates the existing view-level checks so accidental future entry points cannot bypass staff authorization.- **SSH management paths now enforce host-key verification.** Terminal, NGFW provisioning, NGFW deprovisioning, and NGFW MCP commands no longer disable SSH server authentication.- **Scenario editor delete confirmation no longer embeds scenario names in inline JavaScript.** The scenarios list now binds delete confirmation handlers in a separate script and reads names from a safely escaped `data-scenario-name` attribute, preventing stored XSS via crafted scenario names.- **Stopped the NGFW provisioner from dumping full Terraform output dicts to the
+  logs.** `ngfw_terraform.py` logged `json.dumps(output_data)` after both the AWS
+  and GDC VM-Series applies; those output dicts carry a Secret Manager /
+  Secrets Manager reference (`ssh_key_secret_id` / `ssh_key_secret_arn`), so the
+  dump wrote the reference in clear text (CodeQL `py/clear-text-logging-sensitive-data`)
+  and would have leaked any future sensitive output field. Both sites now log
+  only the non-sensitive correlation IDs (`request_id`, `instance_id`) and an
+  output-field count, via `log_redact.safe_log_value`.- **Stored XSS in CTF event form via scenario names is fixed.** `admin_event_create` and `admin_event_edit` no longer serialize scenario data with `json.dumps()` and pass it through `|safe` in the template. The views now pass a plain Python list and the template embeds it with Django's `json_script` filter, which escapes `<`, `>`, and `&` for safe inline script use. A scenario name containing `</script>` can no longer break out of the script block.- - Hardened `mcp/ngfw` by removing PAN-OS command execution tools from the MCP surface, so connected MCP clients can no longer run firewall admin commands or trigger Secrets Manager SSH key retrieval through this server.- Delete sensitive NGFW bootstrap S3 objects after the firewall reaches READY.- Hardened `mcp/planner` plan file access so `plan_id` must match the generated 8-character lowercase hex ID format, with path resolution containment checks that block traversal-based reads/deletes outside the planner directory.- Moved GCP dev VM guest password environment values out of the generated
+  `platform-runtime` ConfigMap into a generated Kubernetes Secret and wired
+  runtime Deployments to load those values via `secretRef`.- `SetupOrchestrator` now redacts known secret values from command stdout/stderr before writing setup logs.### Added
+
+- **Terminal UI surfaces per-instance IP and range number.** The Mission Control
+  terminal now shows each instance's internal IP next to its name in tabs,
+  split-mode dropdowns, and pane headers, and appends `- Range N` after the
+  scenario name in the header. This lets users correlate connected sessions with
+  XDR/XSIAM alerts (which key off IP) and the XDR tenant view (which keys off
+  range number). The IP is sourced through the existing `engine.services`
+  runtime-state contract, projected into `InstanceContext` by CMS, and rendered
+  via Django's `json_script` tag so the terminal payload no longer relies on
+  inline JavaScript interpolation. (#370)- Added a CI-time lint that statically scans provisioner setup plans and fails when a script or `stdin_input` contains an unrendered `{{word}}` template token that is not a declared render-context key. This catches the placeholder collision (e.g. a stray `{{end}}`/`{{range}}`) before it fails on a live range at provisioning time. (#616)- **Pre-event Polaris scenario-content smoketest harness.** The new
+  `scenario-dev/polaris/tests/scenario_smoketest/` package is an operator-run,
+  on-demand verifier that walks each CTFd challenge's canonical participant path
+  against a real staged range and checks the value it produces against the flag
+  configured in `ctfd-challenges.json`. The challenge universe is derived from
+  the board, so a challenge with no registered adapter is reported `uncovered`
+  (a failure) rather than silently skipped. It additionally performs the
+  read-only CTFd flag-row readback from `lessons-4.md` checklist item 4
+  (`GET /challenges/{id}/flags`, asserting non-empty) that catches the regression
+  where a `sync_polaris_ctfd.py` re-sync shipped 38/39 challenges unsubmittable.
+  Flag bodies are redacted to stable digests in all output. Run with
+  `python3 -m scenario_smoketest`; it is not wired to CI. (#617)- **Added an operator-triggered Polaris scenario AMI bake workflow.** The new
+  `polaris-scenario-bake.yml` (`workflow_dispatch` only, mirroring `packer.yml`)
+  builds the Polaris build tarball, stands up and health-checks a golden range,
+  creates the `polaris-vm` AMI, and updates the SSM parameter. A
+  repo→AMI content drift audit is documented in
+  `docs/architecture/polaris-repo-to-ami-drift-audit.md`. (#618)- Added shared authenticated WebSocket notification infrastructure with topic subscriptions, persisted missed-event replay, and experiment status notification registration. (#679)- ### Added
+  - Platform-level range egress IP allowlist (PLAT-220): `settings.range_egress` in `shifter.yaml` declares the policy once and is enforced uniformly on AWS (Network Firewall rule groups) and GCP (VPC firewall egress rules). The committed Terraform baseline carries an empty allowlist; operators write per-deployment CIDRs into a gitignored `local.auto.tfvars` so the repo no longer holds any deployment's allowlist. See `docs/architecture/range-egress-ip-allowlist.md` and ADR-017. (#775)- **Deploy control-plane gating is verified by one workflow-as-data model, with
+  a new ADR-003-R5 hard check.** `adr_guard.py` now carries a single model that
+  reads `deploy.yml` and the reusable deploy workflows as data and evaluates
+  their `if:` gates, branch/event routing, and change filters semantically. A new
+  `deploy-workflow-runner-exposure` adr_guard check enforces ADR-003-R5 at commit
+  time: every self-hosted deploy job must fail closed on `pull_request`, proven by
+  evaluating the job's `if:` for a pull_request event rather than substring
+  matching (so a guard broadened with `|| always()` is caught). The consolidated
+  test suite (`scripts/adr_guard/tests/test_deploy_workflow.py`) exercises the same
+  model for the remaining invariants: deploy jobs fail closed when an upstream is
+  `failure`/`cancelled` (#781), `workflow_dispatch` on `main` is the only
+  production-apply path and no `pull_request` routes a provider deploy (#892), the
+  `portal_image` (app image) and `shifter_platform` (Terraform) change filters
+  stay split (#913), mutating jobs bind a GitHub Environment, and the engine deploy
+  pins an immutable ECR digest. This replaces the earlier substring-based
+  `test_deploy_workflow_security.py`, folding deploy-workflow verification into one
+  home and one parser. (#921)- ### Added
+
+  - Added an ADR guard boundary-mock policy that blocks new first-party internal mock patch targets while allowing the existing legacy test baseline to shrink over time.
+  - Updated the SonarCloud CI job to use Node 24-backed action majors while preserving its coverage restore, scanner execution, and quality-gate reporting. (#927)- **AWS worker containers now self-heal and surface health to CloudWatch.** A host-level systemd-timer supervisor on the portal EC2 instance watches the `worker-cms`, `worker-engine`, `worker-mc`, and `ctf-scheduler` container health status, restarts any that go unhealthy (e.g. a wedged worker that is alive but not heartbeating), and emits a `Shifter/WorkerHealth` CloudWatch metric. A new `UnhealthyWorkers` alarm notifies the per-environment SNS alerts topic when a worker stays unhealthy. Previously `--restart unless-stopped` acted only on process exit, so a wedged worker stalled silently with no signal to CloudWatch. The supervisor is installed identically by both the fresh-boot (`user_data.sh`) and SSM-redeploy deploy paths. (#953)- **Added OSS Shifter UX research personas for the redesign foundation.** The new
+  `docs/design/ux-003-oss-shifter-research-personas.md` artifact documents the
+  core user archetypes, surface-by-surface jobs to be done, current-state pain
+  points, and the APTL-derived dark operational visual direction that future UX
+  issues can cite without introducing mockups or runtime UI changes. (#1092)- **OSS-release hygiene: community files, dependency automation, CI hardening, identifier strip, and a tfvars baseline + override refactor.** Added PANW org community templates verbatim (`SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`) and restructured `README.md` to follow the PANW open-source README example with a `Maintainers` section. Added `.github/dependabot.yml` enumerating every uv, npm, github-actions, and pre-commit package root (all targeting `dev`); a CodeQL workflow (`security-extended` suite, least-privilege permissions, no `pull_request_target`); and a PR-title-lint workflow validating conventional-commit titles. Stripped the SonarCloud project token from `README.md` badges and narrowed `.gitleaks.toml` allowlists previously needed only for that token. Replaced committed `keplerops.com` / `bedwards@paloaltonetworks.com` references with `example.com` placeholders outside the PANW-event-specific tooling under `scenario-dev/polaris/` and `platform/terraform/global/tssummit/`. Restructured `terraform.tfvars`: the four files in `dev/portal`, `prod/portal`, `gcp-dev`, and `ctfd-workshop` ship `example.com` baselines and deployment-specific values come from gitignored `local.auto.tfvars` (Terraform auto-loads `*.auto.tfvars`). CI deploy workflows (`_gcp-dev.yml`, `_shifter-platform.yml`) now source deployment values from GitHub secrets / repository variables instead of grepping committed tfvars; the full required surface is documented in `docs/dev/deploy-secrets.md`. Bootstrap email validator no longer hardcodes `@paloaltonetworks.com` — it derives the required domain from the Terraform `identity_allowed_email_domain` output (matching what the Identity Platform `beforeCreate` hook enforces). Generated kustomize files are kept as `REPLACE_AT_DEPLOY` placeholders where needed for static validation, with the deploy renderer overwriting at apply time. (#1196)- **Adopted [`towncrier`](https://towncrier.readthedocs.io/) for changelog management.** PRs no longer hand-edit `CHANGELOG.md`; they drop a tiny fragment under `changelog.d/<issue>.<type>.md` (with `<type>` one of `security` / `added` / `changed` / `deprecated` / `removed` / `fixed`), and the release process collates fragments into `CHANGELOG.md` via `uvx towncrier build`. Eliminates the merge-conflict pathology where every open PR had to be rebased — re-running the full `Deploy` workflow each time — every time another PR merged, just to move a `CHANGELOG.md` line. Includes `.gitattributes` `CHANGELOG.md merge=union` as belt-and-suspenders.### Changed
+
+- Portal web process now runs Gunicorn with Uvicorn workers
+  (`-k uvicorn_worker.UvicornWorker`) by default in the container
+  `entrypoint.sh`, instead of a single Daphne process. An unhandled
+  exception in a WebSocket consumer now crashes only one worker and
+  Gunicorn restarts it, instead of taking the whole portal down. Worker
+  count, bind address, and timeouts are env-owned:
+  `PORTAL_WEB_WORKERS` (default `4`), `PORTAL_WEB_BIND`
+  (default `0.0.0.0:8000`), `PORTAL_WEB_TIMEOUT` (default `90s`),
+  `PORTAL_WEB_GRACEFUL_TIMEOUT` (default `30s`). `daphne` remains in
+  `INSTALLED_APPS` for local Channels `runserver` integration. (#174)- **Polaris operator and CTFd sync scripts now share AWS/SSM and reconcile
+  helpers instead of duplicating them.** `scripts/polaris-aws-range/common.py`
+  owns the boto3 session, EC2 portal-instance discovery, SSM
+  ``send_command``/poll loop, Django-shell-via-SSM transport, JSON envelope
+  parsing, and a sensitive-output redaction helper; provisioning state,
+  batch state-machine, and range-health probe model are now their own
+  modules. `scripts/ctfd-workshop/ctfd_reconcile.py` owns the generic CTFd
+  row-reconciliation surface (page/challenge upsert, flag/hint reconcile,
+  manifest readers); `scripts/ctfd-workshop/polaris_manifest.py` owns
+  Polaris-specific challenge ordering, validation, and prerequisite
+  resolution. `seed_ctfd.py`, `sync_polaris_ctfd.py`,
+  `sync_polaris_ctfd_onboarding.py`, `orchestrate_provisioning.py`,
+  `check_range_health.py`, and `cleanup_non_keepers.py` are now thin CLI
+  entrypoints over these shared helpers. (#691)- **Platform test suites now enforce smaller behavior-focused modules.** Oversized CMS, CTF, engine, Mission Control, and shared schema tests were split by API boundary, and a structural pytest guard now catches future test modules over 800 lines or `Test*` classes over 300 lines. (#693)- Scenario editor service internals are split by responsibility while preserving the existing public service API and YAML behavior. (#699)- **Scenario editor views now delegate form and YAML validation to the service layer while preserving existing routes and templates.** (#700)- Polaris onboarding: CTFd orientation page now leads with a `Start Here` hero CTA above the mission narrative; the briefing deck closing was reordered so the literal first-click path (magic-link → ENTER RANGE → Kali → Start Here on `polaris.keplerops.com`) is the final projected handoff; added a printable seat handout under `scenario-dev/polaris/briefing-deck/seat-handout.html` for each seat. Removes the "where do I start" tax called out in `scenario-dev/polaris/lessons-4.md` from the May 2026 cohort. (#704)- **Scenario template cleanup for OSS distribution.** The `cms/scenarios/templates/` set now ships only `basic`, `basic_ngfw`, `ad_attack_lab`, `ad_attack_lab_ngfw`, and `polaris`. `basic.yaml` and `ad_attack_lab.yaml` are the PANW-free variants (`ngfw: false`, `xdr_agent: false` on all instances); `basic_ngfw.yaml` and the new `ad_attack_lab_ngfw.yaml` are the PANW variants with NGFW segmentation and Cortex XDR on the Windows instances. `cortex_byot.yaml`, `cortex_deployment_experience.yaml`, and `agentic_workshop.yaml` have been removed along with their dedicated supporting assets (`shifter/packer/ctf-*.pkr.hcl`, `shifter/packer/scripts/ctf/`, `shifter/packer/tests/test_ctf_boxes.py`, `scripts/ctfd-workshop/agentic_workshop.json`, `scripts/ctfd-workshop/seed_ctfd.py`, `scripts/ctfd-workshop/sync_range_flags.py`, `docs/scenarios/cortex-byot.md`, `docs/features/ctf.md`, `docs/features/ctf-organizer-guide.md`, `docs/features/ctf-uvic-customization.md`) and the corresponding `ctf-*` AMI choices in the Packer build/promote workflows. (#780)- Browser SSH terminals now have per-process and per-user session caps, idle and maximum-duration timeouts, and a low-frequency output poll, so terminal websocket load no longer destabilizes the portal during live events. The limits are tunable via the `TERMINAL_MAX_SESSIONS`, `TERMINAL_MAX_SESSIONS_PER_USER`, `TERMINAL_IDLE_TIMEOUT_SECONDS`, `TERMINAL_MAX_SESSION_SECONDS`, and `TERMINAL_READ_POLL_SECONDS` environment variables. (#847)- **Decoupled the portal Django Channels backend from autoscaling mode.** The
+  channel-layer backend is now an explicit, environment-owned posture
+  (`CHANNEL_LAYER_BACKEND` / the Terraform `enable_redis` knob) instead of a side
+  effect of `enable_autoscaling`: a single-instance portal can run on Redis, an
+  environment can disable Redis without changing ASG posture, a `redis` posture
+  fails closed when `REDIS_HOST` is missing rather than silently using the
+  in-memory layer, and the active backend is logged once at startup. Defaults
+  preserve current behavior (dev in-memory, prod Redis). See ADR-018. (#849)- - Provisioner internals now import their owning modules directly instead of routing through `main.py`, and the extracted provisioner modules are back in Sonar coverage. (#946)- Quality routing now runs validation by default for pull requests and `dev` pushes, with ordinary docs-only diffs as the only general skip path and guardrail documentation still treated as quality-relevant. (#954)- CI quality gates now run the previously orphaned support test suites, including cyberscript, Polaris AWS range helpers, scenario smoketests, migration proof coverage, and MCP planner checks. (#955)- ### Changed
+
+  - Enforced the protected-branch CI baseline by removing the `[skip tests]` bypass, adding an always-on pre-commit hygiene/secret-scan job to `PR Gate`, and running CodeQL for both `main` and `dev` PRs. (#974)- **Hard per-function complexity gate via Ruff `C901` (ADR-012).** Every lint-scoped Python package now enforces a McCabe per-function complexity limit of 15 (matching SonarCloud's default cognitive-complexity threshold). The gate runs through the existing Ruff pre-commit hooks and the per-package `*-lint` jobs in `.github/workflows/_quality.yml`. A new `python-complexity-gate` adr_guard check backstops the runtime gate with prefix-aware validation of `select`/`extend-select`/`ignore`/`extend-ignore`/`per-file-ignores`, cross-checks `PYTHON_COMPLEXITY_GATE_PYPROJECTS` against the `id: ruff` hooks in `.pre-commit-config.yaml`, reconciles in-source `# noqa: C901` exemptions against `docs/adr/complexity-backlog.md`, and rejects bare `# noqa` on function definitions. Eleven existing offenders (6 in `shifter_platform`, 5 in `shifter/engine/provisioner`) carry explicit per-function `# noqa: C901` exemptions and are listed in the backlog doc; the threshold ratchets down as that backlog shrinks. (#1135)- `mcp/ngfw/SECURITY.md` rewritten to describe the current `list_ngfws`-only
+  tool surface and to mark the previously-registered PAN-OS administration
+  tools (`run_command`, `show_system_info`, `show_routes`) as explicitly
+  historical. `mcp/ngfw/tool-surface.test.js` is now the bidirectional
+  guard: it parses `server.tool(...)` registrations out of `index.js` and
+  asserts the set equals exactly `{"list_ngfws"}`; it asserts the security
+  doc references the test by name and lists every live tool; and it
+  asserts removed tools cannot be described before the
+  `## Removed administration tools` section. A future surface change must
+  update both the test's expected set and the security doc in the same PR. (#1191)- ### Changed
+
+  - Added minimum Django i18n infrastructure and routed platform template literals through the English gettext catalog. (#1257)- **Internal code-quality cleanup of the GCP/GDC provisioner and portal notification
+  code.** Resolved the SonarCloud findings surfaced on the `dev` → `aws-dev`
+  promotion: replaced bare `Any` hints with specific types (kubernetes client
+  classes via `TYPE_CHECKING`, `botocore` `BaseClient`, Jinja `Template`, Django
+  user types), added missing docstrings, wrapped over-length lines, de-duplicated
+  string literals into constants, reduced over-parameterized helpers via small
+  frozen-dataclass parameter objects, and lowered the cognitive complexity of the
+  VPC-endpoint waiter. No runtime behavior change.- Consolidated Dependabot dependency updates across GitHub Actions, pre-commit hooks, and Python/npm packages.- Submission rate-limit errors for flag submissions now include a `retry_at` timestamp in the error details and message so clients can show participants exactly when they may submit again.### Removed
+
+- **Removed the superseded Polaris post-bake hotfix scripts.**
+  `apply_kali_bedrock_shard.py`, `apply_splice_watcher.py`, and
+  `run_postprovision.sh` patched already-deployed ranges by SSM fan-out before
+  their logic moved into `PolarisRangeBootstrapPlan`. They are deleted to end the
+  dual-ownership the bootstrap plan now covers. (#618)### Fixed
+
+- Grant `kms:Decrypt` on the portal Secrets Manager CMK to the provisioner ECS execution role and the portal EC2 instance role, fixing dev range provision/destroy/pause/resume tasks that aborted at startup with `AccessDeniedException: Access to KMS is not allowed` whenever the task definition referenced a secret encrypted with the post-2026-05-11 CMK. The portal `entrypoint.sh::fetch_runtime_secret` helper now propagates secret-fetch failures instead of silently returning empty strings, so a misconfigured runtime secret aborts container start rather than letting the container run with blank required env vars. A new `check-tf-kms-secrets-grant` pre-commit hook prevents the IAM regression from recurring. (#52)- - Applied the existing `PLATFORM_BOOTSTRAP_STAFF_EMAILS` /
+    `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` admin elevation contract to the
+    AWS/Cognito OIDC path and AWS platform deploy runtime. (#70)- **First-click RDP connections no longer redirect to the Guacamole login page.** The Mission Control broker now retries the Guacamole `/api/tokens` exchange with bounded exponential backoff for transient gateway/connection errors, closing a token-readiness race that surfaced as a failed first click followed by a successful second attempt. Tunable via `GUACAMOLE_TOKEN_RETRY_ATTEMPTS` and `GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS` (defaults: 3 attempts, 200ms base delay). (#395)- **Portal `/health` now reflects real dependency probes instead of always returning 200.** The endpoint runs the registered `django-health-check` database, cache, and storage checks and returns 500 when any probe fails. Load-balancer probes still admit past `ALLOWED_HOSTS` via a path-scoped Host-header normalization, and the public response stays coarse (a `working` / `unavailable` token per probe) so dependency failures do not leak DSNs, bucket names, or private hostnames. (#477)- **CTF scheduler startup now has a regression guard and the GCP scheduler pod can use the existing job-launcher RBAC when due event spin-up tasks submit provisioner Jobs.** (#484)- Hint-penalised CTF solves can now award `0` points instead of the historical `1`-point floor when the cumulative hint penalty reaches 100%, matching `CTF-203`'s "net score for a challenge solve shall never go below zero" clause. Also removed two stale `CTFSubmission.hint_used` references (admin participant-detail badge and a test factory dict key) that pointed at a field deleted in migration `0017`. (#519)- **Fixed the A0 Boreas annual report dropping its flag 6 payload.** The
+  `build_pdfs.py` generator now sources flag 6 from the CTFd board
+  (`ctfd-challenges.json`) and renders it on the Kursk Heavy Industries line of
+  `boreas-annual-2025.pdf`, so a clean-checkout rebake can no longer reintroduce
+  the "Follow the Money" Ottawa bug. A bake-time smoke (`verify_flags_baked.py`)
+  and the A0 smoketest now assert the canonical flag is present in the artifact. (#619)- The Polaris CTFd board sync now reconciles flag, hint, and tag rows on every challenge upsert instead of only for a hard-coded subset of categories, so re-syncs no longer leave mission challenges unsubmittable. The sync also validates the source manifest before mutating CTFd and verifies flag/hint rows after sync, failing loudly when a challenge has none. (#702)- Polaris CTFd sync now aliases canonical `FLAG{<16-hex>}` static flags to one case-insensitive regex row per source flag that accepts either the wrapped form or the bare `<16-hex>`. Participants who copy only the inner hex from a recovered artifact submit successfully; the wrapped form keeps working. Source `FLAG{<16-hex>}` content in `ctfd-challenges.json` / `ctfd-onboarding.json` and in all walkthroughs/page copy is unchanged. Manifest validation now rejects malformed wrappers and any non-16-hex body before any live CTFd write so a short or non-hex source can never derive a trivially short accepted answer. (#705)- Move Guacamole RDP/SSH token bootstrap off the portal request path with bounded background workers and pollable session status. (#848)- **Code-branch merges no longer start deployment jobs.** `deploy.yml` now leaves
+  deploy routing disabled for pull requests and pushes to `dev` or `main`; AWS/GCP
+  deployment still runs from `aws-dev`, `gcp-dev`, or deliberate manual dispatch. (#892)- Pushes to AWS environment branches that change only portal application code (`shifter/shifter_platform/**`, `cyberscript`, `installation`) now build the portal image, update the SSM image-tag parameter, and converge the running fleet again. Terraform plan/apply still runs only for Terraform-relevant changes, and docs-only pushes still deploy nothing. (#913)- **Deploy verification now fails loud instead of reporting a false-green deploy.** The Guacamole stabilization wait fails the run on timeout instead of warning and exiting 0 (a broken `guacd` image no longer passes silently), and the engine ECS deploy fails when the task-definition family cannot be described instead of skipping forever on a typo'd family name. A genuine first-ever deploy to a fresh AWS environment can still skip the engine task-family check via the new strict-default `aws_first_deploy` manual-dispatch input. A new `deploy-verification-fail-loud` ADR guard check (ADR-003-R3) keeps the invariant from regressing. (#914)- ### Fixed
+
+  - Derive AWS portal deployment mode from Terraform state, fail loud on topology drift, and document event-sized portal capacity as a deployment-secret overlay. (#915)- **AWS deploy workflows now queue Terraform applies and execute local saved plans.** Env-branch deploys no longer cancel an in-flight apply, core/range/platform Terraform operations wait on the backend lock, and apply jobs create and consume the exact local `tfplan` they apply instead of running a fresh unplanned apply. (#917)- Prevent AWS portal deploys from racing Django migrations across multi-instance boot by running a single deploy-owned migration before runtime containers start with boot migrations disabled. (#918)- **Portal readiness now checks Redis when Channels is Redis-backed, while ASG
+  instance replacement health uses EC2 status checks instead of ALB readiness.**
+  Shared DB/cache/Redis blips can still remove a target from ALB routing, but no
+  longer cause ASG instance churn. (#919)- Portal WebSocket connections (terminal SSH sessions, range-status and notification sockets) now work in the production container image. The Gunicorn/Uvicorn ASGI workers were missing a WebSocket protocol backend, so the built image rejected every WebSocket upgrade (falling through to a 301) while `/health` still returned 200 — a container-only regression the new built-image stack smoke catches. (#922)- **AWS single-instance portal deploy logic is now a tracked, tested script.** The reusable platform workflow sends `scripts/portal-deploy/deploy_portal.sh` through SSM instead of carrying the instance deploy body as an inline heredoc, with subprocess tests covering its argument validation and repeatable worker-health installation. (#925)- **Agent workflow instructions now pin Shifter GitHub operations to
+  `Brad-Edwards/shifter`.** Repo-local instructions and Ground Control plan
+  rules identify `.ground-control.yaml` as the canonical source for GitHub
+  issue, PR, CI, and traceability targets, and ADR guard now treats Ground
+  Control config files as documented guardrail surfaces. (#976)- AWS platform pull-request planning now ignores Python-only application changes while still running Quality, and platform Terraform plans wait briefly for state locks instead of failing immediately. (#1176)- **GCP job-launching workloads now explicitly mount Kubernetes service account tokens.** The portal and engine worker pods can authenticate to create provisioner Jobs in-cluster while non-launching workloads remain tokenless. (#1184)- **Shifter Engine deploys no longer drop the ECS task definition's `volumes` block.** The `Update ECS task definition` step in `_shifter-engine.yml` re-registered the definition by cherry-picking individual fields, which silently discarded `volumes` once Terraform added them (#1103) — every deploy failed with `Unknown volume 'provisioner-workspace'`. The step now re-registers the whole definition with only the read-only fields stripped, so `volumes`, `mountPoints`, `runtimePlatform`, and `ephemeralStorage` carry forward verbatim. (#1244)- **AWS platform deploys now render real per-deployment configuration instead of the committed `example.com` baseline.** `_shifter-platform.yml`'s `plan` and `apply` jobs render a gitignored `local.auto.tfvars` from the `TF_VARS_<ENV>_PORTAL` GitHub secret before Terraform runs — previously every AWS platform deploy planned and applied the intentionally-broken OSS example baseline because only the GCP workflow had the render step. The secret is selected strictly on the target environment (no fall-through to the other environment's payload) and the step fails loud when it is unset. An `adr_guard` check (`aws-platform-renders-deploy-tfvars`, ADR-011-R7) regression-protects the render step. (#1249)- **The post-apply RDS pending-modifications check no longer fails AWS platform deploys with spurious "RDS instance not found" errors.** The `db_instance_id` Terraform outputs for the portal and Guacamole RDS instances were emitting `aws_db_instance.id`, which became the `DbiResourceId` (`db-XXXX`) under the AWS provider v6 bump; the check resolves instances by `DBInstanceIdentifier`. Both outputs now emit `aws_db_instance.identifier`. (#1252)- Form inputs and interactive controls across the CTF, scenario editor, mission control, and risk register UIs now have associated visible labels, improving screen-reader and voice-control accessibility. (#1256)## [3.101.5] - 2026-05-10
 
 ### Security
 

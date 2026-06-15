@@ -74,10 +74,13 @@ def _render(**overrides):
 
 
 def test_envelope_includes_run_parameters_and_target():
-    md = _render()
-    assert "https://dev.example.com" in md
-    assert "portal-core" in md
-    assert "50" in md  # concurrency
+    config = _config()
+    md = _render(config=config)
+    # Assert on the config-derived value, not a hardcoded URL literal: the report
+    # must surface whatever target the run actually used.
+    assert config.target_url in md
+    assert config.profile in md
+    assert str(config.concurrency) in md
     assert "abc1234" in md  # git sha
 
 

@@ -529,6 +529,7 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 # exception ckv2-aws-63-nf-logging-cross-resource.
 resource "aws_networkfirewall_firewall" "this" {
   # checkov:skip=CKV2_AWS_63:Logging defined in aws_networkfirewall_logging_configuration "this" below.
+  # checkov:skip=CKV_AWS_344:Deletion protection controlled by var.network_firewall_delete_protection (dev false / prod true). See ADR-004-R11 exception ckv-aws-344-nf-delete-protection.
   encryption_configuration {
     type   = "CUSTOMER_KMS"
     key_id = aws_kms_key.range_vpc.arn
@@ -539,7 +540,7 @@ resource "aws_networkfirewall_firewall" "this" {
   name                = "${var.name_prefix}-firewall"
   firewall_policy_arn = aws_networkfirewall_firewall_policy.this[0].arn
   vpc_id              = aws_vpc.this.id
-  delete_protection   = true
+  delete_protection   = var.network_firewall_delete_protection
 
   subnet_mapping {
     subnet_id = aws_subnet.firewall[0].id

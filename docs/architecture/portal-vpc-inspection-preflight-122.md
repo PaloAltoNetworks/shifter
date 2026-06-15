@@ -172,7 +172,7 @@ all touched surfaces. At minimum for AWS portal Terraform plus docs:
 
 ```bash
 python3 scripts/adr_guard/adr_guard.py --all --level ci
-cd platform/terraform && tflint --recursive --config ../../.tflint.hcl
+TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"
 ```
 
 Also run `terraform fmt`, `terraform validate`, and Checkov through the

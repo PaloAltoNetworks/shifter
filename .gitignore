@@ -411,14 +411,10 @@ node_modules/
 # Build outputs
 dist/
 build/
-# POLARIS CTF range content is NOT a JS/TS build output — it is the
-# source of the docker-compose range. Re-include it explicitly so the
-# generic `build/` ignore above doesn't eat it.
-!scenario-dev/polaris/build/
-!scenario-dev/polaris/build/**
-# ...but still drop transient artifacts inside the re-included tree.
-scenario-dev/polaris/build/**/__pycache__/
-scenario-dev/polaris/build/**/*.pyc
+# Polaris range build output is generated/runtime material and must stay out
+# of source control. Keep source inputs under scenario-dev/polaris/{containers,
+# content-packages,design,tests,sdl}; leave scenario-dev/polaris/build/ ignored
+# by the generic build/ rule above.
 
 # Environment files
 .env

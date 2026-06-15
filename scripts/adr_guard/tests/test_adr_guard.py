@@ -1557,6 +1557,34 @@ class McpNoShellExecTests(unittest.TestCase):
             )
             self.assertIn("dc_domain_password", violations[0].message)
 
+    def test_no_plaintext_secrets_scans_global_tfvars_for_ngfw_material(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "global" / "summit-ranges"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "team2.tfvars").write_text(
+                'team_name = "Team2"\n'
+                'ngfw_authcode = "license-code"\n'
+                'ngfw_scm_pin_value = "registration-pin"\n'
+                'pin_value = "bare-registration-pin"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual({v.rule_id for v in violations}, {"ADR-004-R7"})
+            self.assertEqual(
+                {v.path for v in violations},
+                {"platform/terraform/global/summit-ranges/team2.tfvars"},
+            )
+            messages = "\n".join(v.message for v in violations)
+            self.assertIn("ngfw_authcode", messages)
+            self.assertIn("ngfw_scm_pin_value", messages)
+            self.assertIn("pin_value", messages)
+            self.assertNotIn("license-code", messages)
+            self.assertNotIn("registration-pin", messages)
+            self.assertNotIn("bare-registration-pin", messages)
+
     def test_no_plaintext_secrets_allows_var_reference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
@@ -1939,6 +1967,25 @@ class McpNoShellExecTests(unittest.TestCase):
                 violations[0].path,
                 "platform/terraform/environments/prod/portal/terraform.tfvars",
             )
+
+    def test_no_plaintext_secrets_skips_symlinked_tfvars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp) / "repo"
+            outside_root = Path(tmp) / "outside"
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "range"
+            tfvars_dir.mkdir(parents=True)
+            outside_root.mkdir()
+            outside_tfvars = outside_root / "local.auto.tfvars"
+            outside_tfvars.write_text('db_password = "outside-checkout-value"\n', encoding="utf-8")
+            link = tfvars_dir / "local.auto.tfvars"
+            try:
+                link.symlink_to(outside_tfvars)
+            except OSError:
+                self.skipTest("symlinks are not available on this filesystem")
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
 
 
 class K8sDeploymentSecurityContextTests(unittest.TestCase):
@@ -3916,6 +3963,22 @@ class NoTrackedGeneratedArtifactsTests(unittest.TestCase):
             for v in violations:
                 self.assertEqual(v.rule_id, "ADR-004-R8")
                 self.assertNotIn("XYZ-123", v.message)
+
+    def test_flags_polaris_build_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            build_dir = repo_root / "scenario-dev" / "polaris" / "build" / "A16-research-analyst"
+            build_dir.mkdir(parents=True)
+            (build_dir / "runtime-token").write_text("challenge-local-token", encoding="utf-8")
+
+            violations = ADR_GUARD.check_no_tracked_generated_artifacts(repo_root, None)
+
+            self.assertEqual(
+                {v.path for v in violations},
+                {"scenario-dev/polaris/build/A16-research-analyst/runtime-token"},
+            )
+            self.assertEqual({v.rule_id for v in violations}, {"ADR-004-R8"})
+            self.assertNotIn("challenge-local-token", violations[0].message)
 
     def test_clean_tree_emits_no_violations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

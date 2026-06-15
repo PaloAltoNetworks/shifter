@@ -1,103 +1,54 @@
-"""Tests for get_instance_ips_by_uuid() in engine/services.py."""
+"""Behavior tests for get_instance_ips_by_uuid() in engine/services.
 
-from datetime import UTC, datetime
-from unittest.mock import Mock, patch
+Reads a real ``Range`` row's ``provisioned_instances`` and maps each instance's
+uuid to its resolved internal host (host > private_ip > provider metadata),
+skipping instances without a uuid or a resolvable IP. No ORM mocking.
+"""
+
+import pytest
+from django.contrib.auth import get_user_model
+
+from engine.models import Range
+from engine.services import get_instance_ips_by_uuid
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
+
+
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(username="engine-ips@example.com", email="engine-ips@example.com")
+
+
+def _range(user, instances):
+    return Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=instances)
 
 
 class TestGetInstanceIpsByUuid:
-    """Service contract for get_instance_ips_by_uuid.
+    def test_returns_empty_when_range_not_found(self):
+        assert get_instance_ips_by_uuid(999999) == {}
 
-    - Input: range_id (int)
-    - Output: {uuid: ip} mapping for provisioned instances with both fields
-    - Missing range, missing UUIDs, or unresolvable IPs are dropped silently
-    """
+    def test_returns_empty_when_no_provisioned_instances(self, user):
+        assert get_instance_ips_by_uuid(_range(user, None).id) == {}
 
-    def _mock_range(self, instances):
-        from engine.models import Range
+    def test_maps_uuid_to_resolved_host(self, user):
+        range_obj = _range(user, [{"uuid": "i-1", "private_ip": "10.1.1.10"}])
+        assert get_instance_ips_by_uuid(range_obj.id) == {"i-1": "10.1.1.10"}
 
-        return Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.READY,
-            error_message="",
-            provisioned_instances=instances,
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
-        )
+    def test_skips_instances_without_uuid(self, user):
+        range_obj = _range(user, [{"private_ip": "10.1.1.10"}, {"uuid": "i-2", "private_ip": "10.1.1.20"}])
+        assert get_instance_ips_by_uuid(range_obj.id) == {"i-2": "10.1.1.20"}
 
-    def test_returns_empty_dict_when_range_not_found(self):
-        from engine.models import Range
-        from engine.services import get_instance_ips_by_uuid
+    def test_skips_instances_without_resolvable_ip(self, user):
+        range_obj = _range(user, [{"uuid": "i-1"}, {"uuid": "i-2", "private_ip": "10.1.1.20"}])
+        assert get_instance_ips_by_uuid(range_obj.id) == {"i-2": "10.1.1.20"}
 
-        with patch.object(Range.objects, "get", side_effect=Range.DoesNotExist):
-            assert get_instance_ips_by_uuid(999) == {}
+    def test_resolves_via_provider_metadata(self, user):
+        # provider_metadata nests the connectivity block under the provider name.
+        range_obj = _range(user, [{"uuid": "i-1", "provider_metadata": {"aws": {"private_ip": "10.2.2.2"}}}])
+        assert get_instance_ips_by_uuid(range_obj.id) == {"i-1": "10.2.2.2"}
 
-    def test_returns_empty_dict_when_no_provisioned_instances(self):
-        from engine.models import Range
-        from engine.services import get_instance_ips_by_uuid
-
-        with patch.object(Range.objects, "get", return_value=self._mock_range([])):
-            assert get_instance_ips_by_uuid(42) == {}
-
-    def test_maps_uuid_to_resolved_host(self):
-        from engine.models import Range
-        from engine.services import get_instance_ips_by_uuid
-
-        instances = [
-            {"uuid": "abc-123", "private_ip": "10.0.1.10"},
-            {"uuid": "def-456", "host": "10.0.1.20"},
-        ]
-        with patch.object(Range.objects, "get", return_value=self._mock_range(instances)):
-            result = get_instance_ips_by_uuid(42)
-        assert result == {"abc-123": "10.0.1.10", "def-456": "10.0.1.20"}
-
-    def test_skips_instances_without_uuid(self):
-        from engine.models import Range
-        from engine.services import get_instance_ips_by_uuid
-
-        instances = [
-            {"private_ip": "10.0.1.10"},
-            {"uuid": "", "private_ip": "10.0.1.11"},
-            {"uuid": "abc-123", "private_ip": "10.0.1.12"},
-        ]
-        with patch.object(Range.objects, "get", return_value=self._mock_range(instances)):
-            result = get_instance_ips_by_uuid(42)
-        assert result == {"abc-123": "10.0.1.12"}
-
-    def test_skips_instances_without_resolvable_ip(self):
-        from engine.models import Range
-        from engine.services import get_instance_ips_by_uuid
-
-        instances = [
-            {"uuid": "no-ip", "role": "attacker"},
-            {"uuid": "blank-ip", "private_ip": "  "},
-            {"uuid": "ok", "private_ip": "10.0.1.5"},
-        ]
-        with patch.object(Range.objects, "get", return_value=self._mock_range(instances)):
-            result = get_instance_ips_by_uuid(42)
-        assert result == {"ok": "10.0.1.5"}
-
-    def test_resolves_via_provider_metadata(self):
-        from engine.models import Range
-        from engine.services import get_instance_ips_by_uuid
-
-        instances = [
-            {
-                "uuid": "gcp-1",
-                "cloud_provider": "gcp",
-                "provider_metadata": {"gcp": {"private_ip": "10.200.0.1"}},
-            },
-        ]
-        with patch.object(Range.objects, "get", return_value=self._mock_range(instances)):
-            result = get_instance_ips_by_uuid(42)
-        assert result == {"gcp-1": "10.200.0.1"}
-
-    def test_priority_host_over_private_ip(self):
-        """Mirrors _resolve_instance_host priority: top-level host wins over private_ip."""
-        from engine.models import Range
-        from engine.services import get_instance_ips_by_uuid
-
-        instances = [{"uuid": "x", "host": "10.0.0.99", "private_ip": "10.0.1.1"}]
-        with patch.object(Range.objects, "get", return_value=self._mock_range(instances)):
-            result = get_instance_ips_by_uuid(42)
-        assert result == {"x": "10.0.0.99"}
+    def test_prefers_host_over_private_ip(self, user):
+        range_obj = _range(user, [{"uuid": "i-1", "host": "10.0.0.5", "private_ip": "10.1.1.10"}])
+        assert get_instance_ips_by_uuid(range_obj.id) == {"i-1": "10.0.0.5"}

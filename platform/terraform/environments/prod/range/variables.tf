@@ -74,6 +74,11 @@ variable "enable_ngfw_infrastructure" {
   type        = bool
 }
 
+variable "network_firewall_delete_protection" {
+  description = "Enable delete protection on the range egress Network Firewall. Dev sets false to allow intentional teardown; prod keeps true. Mirrors the db_deletion_protection convention."
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # Network Firewall IP Allowlist
 # ------------------------------------------------------------------------------

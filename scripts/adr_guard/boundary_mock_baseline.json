@@ -3122,11 +3122,6 @@
     },
     {
       "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_readiness.py",
-      "target": "mission_control.guacamole.time.sleep"
-    },
-    {
-      "count": 7,
       "path": "shifter/shifter_platform/tests/mission_control/test_guacamole_ssh.py",
       "target": "mission_control.guacamole.create_guacamole_auth_payload"
     },
@@ -3197,31 +3192,6 @@
     },
     {
       "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
-      "target": "mission_control.views._files.complete_script_upload"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
-      "target": "mission_control.views._files.delete_script"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
-      "target": "mission_control.views._files.initiate_script_upload"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
-      "target": "mission_control.views._files.list_scripts"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_files.py",
-      "target": "mission_control.views.render"
-    },
-    {
-      "count": 2,
       "path": "shifter/shifter_platform/tests/mission_control/test_views_guacamole.py",
       "target": "engine.services.connect_ngfw_terminal"
     },
@@ -3279,26 +3249,6 @@
       "count": 3,
       "path": "shifter/shifter_platform/tests/mission_control/test_views_ngfw.py",
       "target": "mission_control.views.render"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
-      "target": "mission_control.views._uploads.cms_cancel_upload"
-    },
-    {
-      "count": 2,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
-      "target": "mission_control.views._uploads.cms_complete_upload"
-    },
-    {
-      "count": 3,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
-      "target": "mission_control.views._uploads.cms_initiate_upload"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/mission_control/test_views_uploads.py",
-      "target": "mission_control.views._uploads.set_upload_in_progress"
     },
     {
       "count": 8,

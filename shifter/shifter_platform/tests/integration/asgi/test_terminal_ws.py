@@ -112,3 +112,26 @@ class TestTerminalWebsocketRealStack:
             await communicator.disconnect(code=1006 if index % 2 else 1000)
 
         assert session_registry.snapshot()["active_sessions"] == baseline
+
+
+class TestSessionRegistryIsolation:
+    """Regression for the capacity-test parallel flake (line ``assert acquired``).
+
+    The process-global ``session_registry`` must be reset between tests so a
+    slot leaked by one test cannot fail another's capacity assertion under
+    ``-n auto`` (it passed serially only by luck of ordering). These two tests
+    run in definition order in the same module — hence the same xdist worker —
+    so without the autouse ``_isolate_terminal_session_registry`` fixture the
+    second would observe the first's leak and fail.
+    """
+
+    @pytest.mark.asyncio
+    async def test_leaks_a_session_slot(self):
+        # Acquire without releasing, mimicking residual state from an async
+        # disconnect/cleanup that has not drained. 0/0 disables both caps so the
+        # acquire always succeeds.
+        assert await session_registry.try_acquire(987_654, 0, 0)
+
+    def test_registry_is_clean_after_leak(self):
+        # The autouse reset fixture must have cleared the prior test's leak.
+        assert session_registry.snapshot()["active_sessions"] == 0

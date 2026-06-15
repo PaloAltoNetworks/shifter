@@ -20,17 +20,22 @@ def _reset_session_registry():
 
     The registry is module-level (one per ASGI process in production). The
     consumer binds it as ``mission_control.consumers._session_registry`` (an
-    alias of ``terminal_sessions.session_registry``); rebinding the consumer
-    alias is what the integration tests read. Without the reset, a test that
-    reserves a slot leaks counts into later tests and makes the cap assertions
-    order-dependent.
+    alias of ``terminal_sessions.session_registry``). Resetting the canonical
+    singleton in place — rather than rebinding the alias to a throwaway
+    instance — gives each test a clean registry while keeping the alias and the
+    canonical singleton the same object. Rebinding to a fresh instance leaks a
+    decoupled registry into whatever test runs next on the same xdist worker
+    (notably the real-stack integration suite, which acquires on the canonical
+    singleton and expects the consumer to see the same slot).
     """
     from mission_control import consumers
-    from mission_control.terminal_sessions import TerminalSessionRegistry
+    from mission_control.terminal_sessions import session_registry
 
-    consumers._session_registry = TerminalSessionRegistry()
+    consumers._session_registry = session_registry
+    session_registry.reset()
     yield
-    consumers._session_registry = TerminalSessionRegistry()
+    consumers._session_registry = session_registry
+    session_registry.reset()
 
 
 @pytest.fixture

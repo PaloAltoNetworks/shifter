@@ -1,61 +1,54 @@
-"""Tests for mission_control.views._uploads (presigned-URL agent upload flow)."""
+"""Behavior tests for the presigned-URL agent upload views.
 
-from __future__ import annotations
+Drives the real upload endpoints with the test client and a real database.
+Validation, the session upload-lock, and the error/sanitization paths run fully
+first-party (with ``AWS_S3_BUCKET_NAME`` unset, the real S3 helpers raise, so
+the views exercise real ``CMSError`` handling). The success round-trip mocks the
+AWS SDK (a real cloud boundary) so the presigned-URL and head-object calls are
+deterministic.
+"""
 
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.test import RequestFactory
+from django.test import Client, override_settings
+from django.urls import reverse
+
+pytestmark = pytest.mark.django_db
+
+INITIATE = reverse("mission_control:initiate_upload")
+COMPLETE = reverse("mission_control:complete_upload")
+CANCEL = reverse("mission_control:cancel_upload")
 
 
-@pytest.fixture
-def rf():
-    return RequestFactory()
+def _post(client, url, payload):
+    body = payload if isinstance(payload, str) else json.dumps(payload)
+    return client.post(url, data=body, content_type="application/json")
 
 
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = 1
-    user.pk = 1
-    user.email = "u@example.com"
-    user.is_authenticated = True
-    return user
+def _body(resp):
+    return json.loads(resp.content)
 
 
-def _post(rf, path, payload, user, *, session=None):
-    """Build POST request with session dict attached."""
-    body = json.dumps(payload) if not isinstance(payload, str) else payload
-    req = rf.post(path, data=body, content_type="application/json")
-    req.user = user
-    req.session = session if session is not None else {}
-    return req
-
-
-# ---------------------------------------------------------------------------
-# initiate_upload
-# ---------------------------------------------------------------------------
+def _s3_mock():
+    """A boto3 client mock with deterministic presigned-URL + head-object."""
+    client = MagicMock()
+    client.generate_presigned_url.return_value = "https://s3.example/presigned"
+    client.head_object.return_value = {"ContentLength": 100, "ETag": '"abc123"'}
+    return client
 
 
 class TestInitiateUpload:
-    def test_returns_409_if_upload_already_in_progress(self, rf, mock_user):
-        import time
+    def test_requires_login(self):
+        assert _post(Client(), INITIATE, {}).status_code == 302
 
-        from mission_control.views import initiate_upload
-
-        session = {"upload_lock": {"started_at": time.time()}}
-        request = _post(rf, "/mc/api/upload/initiate/", {}, mock_user, session=session)
-        response = initiate_upload(request)
-        assert response.status_code == 409
-
-    def test_returns_400_for_invalid_json(self, rf, mock_user):
-        from mission_control.views import initiate_upload
-
-        request = _post(rf, "/mc/api/upload/initiate/", "not json", mock_user)
-        response = initiate_upload(request)
-        assert response.status_code == 400
-        assert "Invalid JSON" in json.loads(response.content)["error"]
+    def test_returns_400_for_invalid_json(self, authenticated_client):
+        client, _ = authenticated_client(email="up-json@example.com")
+        resp = _post(client, INITIATE, "not json")
+        assert resp.status_code == 400
+        assert "Invalid JSON" in _body(resp)["error"]
 
     @pytest.mark.parametrize(
         "payload,err_substr",
@@ -68,184 +61,78 @@ class TestInitiateUpload:
         ],
         ids=["name", "filename", "size-zero", "size-not-int", "agent-type"],
     )
-    def test_validation_errors(self, rf, mock_user, payload, err_substr):
-        from mission_control.views import initiate_upload
+    def test_validation_errors(self, authenticated_client, payload, err_substr):
+        client, _ = authenticated_client(email="up-val@example.com")
+        resp = _post(client, INITIATE, payload)
+        assert resp.status_code == 400
+        assert err_substr in _body(resp)["error"]
 
-        request = _post(rf, "/mc/api/upload/initiate/", payload, mock_user)
-        response = initiate_upload(request)
-        assert response.status_code == 400
-        assert err_substr in json.loads(response.content)["error"]
+    def test_returns_409_when_upload_already_in_progress(self, authenticated_client):
+        client, _ = authenticated_client(email="up-lock@example.com")
+        session = client.session
+        session["upload_lock"] = {"started_at": time.time()}
+        session.save()
+        resp = _post(client, INITIATE, {"name": "n", "filename": "a.msi", "file_size": 10})
+        assert resp.status_code == 409
 
-    def test_returns_400_when_cms_raises(self, rf, mock_user):
-        from cms.exceptions import CMSError
-        from mission_control.views import initiate_upload
-
-        request = _post(
-            rf,
-            "/mc/api/upload/initiate/",
-            {"name": "n", "filename": "f.msi", "file_size": 10},
-            mock_user,
-        )
-        with patch(
-            "mission_control.views._uploads.cms_initiate_upload",
-            side_effect=CMSError("file too big"),
-        ):
-            response = initiate_upload(request)
-        assert response.status_code == 400
-        # ``str(e)`` is no longer echoed to the response — the view returns one
-        # of a fixed set of authored literals from ``classify_user_message``.
-        assert json.loads(response.content)["error"] == "Upload could not be initiated"
-
-    def test_cms_error_message_is_not_echoed_to_response(self, rf, mock_user):
-        """An attacker-controlled exception message must not appear in the response body.
-
-        Guards CodeQL ``py/stack-trace-exposure``: the response body is now selected
-        from a fixed set of authored literals via ``classify_user_message`` — the
-        original exception text is logged but never reflected back to the caller.
-        """
-        from cms.exceptions import CMSError
-        from mission_control.views import initiate_upload
-
-        request = _post(
-            rf,
-            "/mc/api/upload/initiate/",
-            {"name": "n", "filename": "f.msi", "file_size": 10},
-            mock_user,
-        )
-        with patch(
-            "mission_control.views._uploads.cms_initiate_upload",
-            side_effect=CMSError("evil\r\nForged log entry"),
-        ):
-            response = initiate_upload(request)
-        body = json.loads(response.content)
-        assert response.status_code == 400
-        assert "\n" not in body["error"]
-        assert "\r" not in body["error"]
-        # Critical: the attacker-controlled text must NOT appear in the response.
-        assert "Forged" not in body["error"]
-        assert "evil" not in body["error"]
-        # Body is one of the authored literals from ``shared.errors``.
+    @override_settings(AWS_S3_BUCKET_NAME="")
+    def test_real_cms_error_is_sanitized_not_echoed(self, authenticated_client):
+        # With no S3 bucket configured the real S3 helper raises, so the view
+        # returns an authored literal -- never the raw exception text (guards
+        # py/stack-trace-exposure). Pinned via override_settings so the
+        # precondition holds regardless of ambient/other-test settings.
+        client, _ = authenticated_client(email="up-err@example.com")
+        resp = _post(client, INITIATE, {"name": "n", "filename": "agent.msi", "file_size": 10})
+        assert resp.status_code == 400
+        body = _body(resp)
         assert body["error"] == "Upload could not be initiated"
+        assert "\n" not in body["error"] and "\r" not in body["error"]
 
-    def test_returns_payload_and_sets_lock_on_success(self, rf, mock_user):
-        from mission_control.views import initiate_upload
-
-        request = _post(
-            rf,
-            "/mc/api/upload/initiate/",
-            {"name": "n", "filename": "/some/dir/agent.msi", "file_size": 100},
-            mock_user,
-        )
-        with (
-            patch(
-                "mission_control.views._uploads.cms_initiate_upload",
-                return_value={"presigned_url": "https://s3/x", "s3_key": "k", "upload_token": "t"},
-            ) as init,
-            patch("mission_control.views._uploads.set_upload_in_progress") as lock,
-        ):
-            response = initiate_upload(request)
-        assert response.status_code == 200
-        body = json.loads(response.content)
-        assert body["presigned_url"] == "https://s3/x"
-        # filename was basename-normalised
-        init.assert_called_once()
-        assert init.call_args.args[2] == "agent.msi"
-        lock.assert_called_once_with(request.session, True)
-
-
-# ---------------------------------------------------------------------------
-# complete_upload
-# ---------------------------------------------------------------------------
+    @override_settings(AWS_S3_BUCKET_NAME="test-bucket")
+    def test_success_returns_presigned_url_and_sets_lock(self, authenticated_client):
+        client, _ = authenticated_client(email="up-ok@example.com")
+        with patch("boto3.client", return_value=_s3_mock()):
+            resp = _post(client, INITIATE, {"name": "Agent", "filename": "/some/dir/agent.msi", "file_size": 100})
+        assert resp.status_code == 200
+        assert _body(resp)["presigned_url"] == "https://s3.example/presigned"
+        # The session lock was set.
+        assert "upload_lock" in client.session
 
 
 class TestCompleteUpload:
-    def test_returns_400_for_invalid_json(self, rf, mock_user):
-        from mission_control.views import complete_upload
+    def test_returns_400_for_invalid_json(self, authenticated_client):
+        client, _ = authenticated_client(email="comp-json@example.com")
+        assert _post(client, COMPLETE, "not json").status_code == 400
 
-        request = _post(rf, "/mc/api/upload/complete/", "not json", mock_user)
-        response = complete_upload(request)
-        assert response.status_code == 400
+    def test_invalid_token_is_rejected_and_clears_lock(self, authenticated_client):
+        client, _ = authenticated_client(email="comp-bad@example.com")
+        session = client.session
+        session["upload_lock"] = {"started_at": time.time()}
+        session.save()
+        resp = _post(client, COMPLETE, {"upload_token": "not-a-real-token"})
+        assert resp.status_code == 400
+        # Lock is cleared even on failure.
+        assert "upload_lock" not in client.session
 
-    def test_returns_400_when_cms_raises(self, rf, mock_user):
-        from cms.exceptions import CMSError
-        from mission_control.views import complete_upload
-
-        request = _post(rf, "/mc/api/upload/complete/", {"upload_token": "t"}, mock_user)
-        with (
-            patch(
-                "mission_control.views._uploads.cms_complete_upload",
-                side_effect=CMSError("bad token"),
-            ),
-            patch("mission_control.views._uploads.set_upload_in_progress") as lock,
-        ):
-            response = complete_upload(request)
-        assert response.status_code == 400
-        # Lock cleared even on failure
-        lock.assert_called_with(request.session, False)
-
-    def test_returns_success_payload(self, rf, mock_user):
-        from mission_control.views import complete_upload
-
-        agent = MagicMock(id=11, name="A1")
-        request = _post(rf, "/mc/api/upload/complete/", {"upload_token": "t"}, mock_user)
-        with (
-            patch("mission_control.views._uploads.cms_complete_upload", return_value=agent),
-            patch("mission_control.views._uploads.set_upload_in_progress") as lock,
-        ):
-            response = complete_upload(request)
-        body = json.loads(response.content)
-        assert body["success"] is True
-        assert body["agent_id"] == 11
-        lock.assert_called_with(request.session, False)
-
-
-# ---------------------------------------------------------------------------
-# cancel_upload
-# ---------------------------------------------------------------------------
+    # The complete success path is an end-to-end S3 download + MSI content
+    # inspection owned by cms.assets (covered by its own suites); the view's
+    # parse/delegate/format/lock behavior is covered by the error path above.
 
 
 class TestCancelUpload:
-    def test_invokes_cms_cancel_when_token_present(self, rf, mock_user):
-        from mission_control.views import cancel_upload
+    def test_cancel_with_token_clears_lock(self, authenticated_client):
+        client, _ = authenticated_client(email="cancel-ok@example.com")
+        session = client.session
+        session["upload_lock"] = {"started_at": time.time()}
+        session.save()
+        resp = _post(client, CANCEL, {"upload_token": "anything"})
+        assert resp.status_code == 200
+        assert "upload_lock" not in client.session
 
-        request = _post(rf, "/mc/api/upload/cancel/", {"upload_token": "t"}, mock_user)
-        with (
-            patch("mission_control.views._uploads.cms_cancel_upload") as cancel,
-            patch("mission_control.views._uploads.set_upload_in_progress") as lock,
-        ):
-            response = cancel_upload(request)
-        assert response.status_code == 200
-        cancel.assert_called_once()
-        lock.assert_called_once_with(request.session, False)
+    def test_cancel_without_token_still_ok(self, authenticated_client):
+        client, _ = authenticated_client(email="cancel-notoken@example.com")
+        assert _post(client, CANCEL, {}).status_code == 200
 
-    def test_ignores_cms_error(self, rf, mock_user):
-        from cms.exceptions import CMSError
-        from mission_control.views import cancel_upload
-
-        request = _post(rf, "/mc/api/upload/cancel/", {"upload_token": "t"}, mock_user)
-        with (
-            patch("mission_control.views._uploads.cms_cancel_upload", side_effect=CMSError("x")),
-            patch("mission_control.views._uploads.set_upload_in_progress"),
-        ):
-            response = cancel_upload(request)
-        assert response.status_code == 200
-
-    def test_skips_cancel_when_token_missing(self, rf, mock_user):
-        from mission_control.views import cancel_upload
-
-        request = _post(rf, "/mc/api/upload/cancel/", {}, mock_user)
-        with (
-            patch("mission_control.views._uploads.cms_cancel_upload") as cancel,
-            patch("mission_control.views._uploads.set_upload_in_progress") as lock,
-        ):
-            cancel_upload(request)
-        cancel.assert_not_called()
-        lock.assert_called_once_with(request.session, False)
-
-    def test_tolerates_invalid_json_via_sendbeacon(self, rf, mock_user):
-        from mission_control.views import cancel_upload
-
-        request = _post(rf, "/mc/api/upload/cancel/", "not json", mock_user)
-        with patch("mission_control.views._uploads.set_upload_in_progress"):
-            response = cancel_upload(request)
-        assert response.status_code == 200
+    def test_cancel_tolerates_invalid_json(self, authenticated_client):
+        client, _ = authenticated_client(email="cancel-json@example.com")
+        assert _post(client, CANCEL, "not json").status_code == 200

@@ -1,1 +1,0 @@
-**Experiment and scenario editor services now enforce staff-only access in the service layer.** This duplicates the existing view-level checks so accidental future entry points cannot bypass staff authorization.

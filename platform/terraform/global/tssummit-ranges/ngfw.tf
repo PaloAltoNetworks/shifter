@@ -272,34 +272,8 @@ resource "aws_secretsmanager_secret_version" "ngfw_ssh_key" {
   secret_string = tls_private_key.ngfw.private_key_pem
 }
 
-# ------------------------------------------------------------------------------
-# Bootstrap (S3)
-# ------------------------------------------------------------------------------
-
-resource "aws_s3_object" "ngfw_init_cfg" {
-  bucket       = var.ngfw_bootstrap_bucket
-  key          = "bootstrap/ngfw/${var.team_name}/config/init-cfg.txt"
-  content_type = "text/plain"
-
-  content = <<-EOT
-type=dhcp-client
-hostname=ngfw-${var.team_name}
-dns-primary=8.8.8.8
-dns-secondary=8.8.4.4
-panorama-server=cloud
-vm-series-auto-registration-pin-id=${var.ngfw_scm_pin_id}
-vm-series-auto-registration-pin-value=${var.ngfw_scm_pin_value}
-plugin-op-commands-advance-routing=enable
-EOT
-}
-
-resource "aws_s3_object" "ngfw_authcodes" {
-  bucket       = var.ngfw_bootstrap_bucket
-  key          = "bootstrap/ngfw/${var.team_name}/license/authcodes"
-  content_type = "text/plain"
-  content      = var.ngfw_authcode
-}
-
+# Secret-bearing NGFW bootstrap files under config/ and license/ are staged
+# outside Terraform so their contents do not enter source, plan, or state.
 resource "aws_s3_object" "ngfw_content_placeholder" {
   bucket  = var.ngfw_bootstrap_bucket
   key     = "bootstrap/ngfw/${var.team_name}/content/.keep"
@@ -359,8 +333,6 @@ resource "aws_instance" "ngfw" {
   }
 
   depends_on = [
-    aws_s3_object.ngfw_init_cfg,
-    aws_s3_object.ngfw_authcodes,
     aws_secretsmanager_secret_version.ngfw_ssh_key,
   ]
 }

@@ -48,6 +48,12 @@ variable "enable_portal_inspection" {
   type        = bool
 }
 
+variable "portal_inspection_delete_protection" {
+  description = "Enable delete protection on the portal inspection AWS Network Firewall. Mirrors the `enable_deletion_protection` (ALB) / `db_deletion_protection` (RDS) convention: secure default is `true` in prod; dev environments that need intentional teardown set this to `false` and re-apply before destroying. This is a Terraform lifecycle setting only — it governs whether Terraform may delete the firewall and does not change inspection, routing, or logging."
+  type        = bool
+  default     = true
+}
+
 variable "enable_log_aggregation" {
   description = "Whether the env root's log aggregation pipeline is enabled. Used only to fail closed: enable_portal_inspection requires enable_log_aggregation = true so firewall FLOW / ALERT logs reach the existing pipeline instead of dead-ending in CloudWatch."
   type        = bool

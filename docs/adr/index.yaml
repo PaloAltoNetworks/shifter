@@ -73,8 +73,8 @@
       },
       {
         "id": "ADR-003-R5",
-        "description": "Deploy workflows must keep pull_request events on GitHub-hosted PR validation only. Jobs that can reach self-hosted deploy runners, assume deploy roles, push ECR images, mutate infrastructure, or restart runtime services must be gated to trusted push/workflow_dispatch runs and bind a separate GitHub Environment name such as aws-dev, aws-prod, or gcp-dev. AWS ECR repositories are immutable; AWS deploy consumers use repo@sha256 image digests instead of mutable latest/short-SHA image identity.",
-        "checks": []
+        "description": "Deploy workflows must keep pull_request events on GitHub-hosted PR validation only. Jobs that can reach self-hosted deploy runners, assume deploy roles, push ECR images, mutate infrastructure, or restart runtime services must be gated to trusted push/workflow_dispatch runs and bind a separate GitHub Environment name such as aws-dev, aws-prod, or gcp-dev. AWS ECR repositories are immutable; AWS deploy consumers use repo@sha256 image digests instead of mutable latest/short-SHA image identity. The deploy-workflow-runner-exposure check enforces the pull_request half by evaluating each reusable workflow's self-hosted job if-expression for a pull_request event and requiring it to fail closed (semantic evaluation, not substring matching).",
+        "checks": ["deploy-workflow-runner-exposure"]
       }
     ],
     "exceptions": [],
@@ -88,7 +88,7 @@
       ".github/workflows/_shifter-platform.yml",
       "scripts/portal_deploy/portal_deploy.py",
       "scripts/portal-deploy/deploy_portal.sh",
-      "scripts/adr_guard/tests/test_deploy_workflow_security.py",
+      "scripts/adr_guard/tests/test_deploy_workflow.py",
       "platform/terraform/environments/dev/portal/outputs.tf",
       "platform/terraform/environments/prod/portal/outputs.tf"
     ]
@@ -122,7 +122,7 @@
       },
       {
         "id": "ADR-004-R5",
-        "description": "Kubernetes manifests are validated with kubeconform and linted with kube-linter on two tiers. Local pre-commit hooks scan platform/k8s/ but exclude Kustomize patch files (patch-*.yaml) from both validators because patches are partial strategic-merge documents and cannot satisfy standalone Deployment schema/lint checks (no selector, no image, no securityContext). CI (.github/workflows/_quality.yml) runs `kustomize build` on every kustomization.yaml root under platform/k8s/ and runs both validators against the rendered output, which catches overlay-introduced regressions on the manifests that actually deploy.",
+        "description": "Kubernetes manifests are validated with kubeconform and linted with kube-linter on two tiers. Kustomize patch files use the .patch extension so directory-wide validators do not treat partial strategic-merge documents as standalone Deployments (no selector, no image, no securityContext). CI (.github/workflows/_quality.yml) runs `kustomize build` on every kustomization.yaml root under platform/k8s/ and runs both validators against the rendered output, which catches overlay-introduced regressions on the manifests that actually deploy.",
         "checks": []
       },
       {
@@ -132,12 +132,12 @@
       },
       {
         "id": "ADR-004-R7",
-        "description": "Committed Terraform variable files under platform/terraform/environments/ must not assign string literals to *_password / *_secret / *_token / *_key / *_credentials variables; reference an out-of-band secret store (Secrets Manager, SSM, environment) instead. Backstops gitleaks for low-entropy committed credentials it ignores.",
+        "description": "Committed Terraform variable files under platform/terraform/environments/ and platform/terraform/global/ must not assign string literals to secret-bearing suffixes: password, secret, token, key, credentials, authcode, or pin_value. Bare authcode and pin_value names are also blocked. Reference an out-of-band secret store (Secrets Manager, SSM, environment) instead. Backstops gitleaks for low-entropy committed credentials it ignores.",
         "checks": ["no-plaintext-secrets-in-tfvars"]
       },
       {
         "id": "ADR-004-R8",
-        "description": "Generated and pre-staging sensitive artifacts must not be tracked in source: Terraform plan outputs (tfplan, tfplan.binary, plan.out, *.tfplan) under platform/terraform/environments/ and platform/terraform/gcp/environments/, and license/authcode bootstrap material (authcodes, *.authcodes) under temp/bootstrap/. The blocked path/name set is centralized in scripts/adr_guard/adr_guard.py; the guardrail fails closed and emits repo-relative paths only, never file contents.",
+        "description": "Generated and pre-staging sensitive artifacts must not be tracked in source: Terraform plan outputs (tfplan, tfplan.binary, plan.out, *.tfplan) under platform/terraform/environments/ and platform/terraform/gcp/environments/, Polaris range build output under scenario-dev/polaris/build/, and license/authcode bootstrap material (authcodes, *.authcodes) under temp/bootstrap/. The blocked path/name set is centralized in scripts/adr_guard/adr_guard.py; the guardrail fails closed and emits repo-relative paths only, never file contents.",
         "checks": ["no-tracked-generated-artifacts"]
       },
       {

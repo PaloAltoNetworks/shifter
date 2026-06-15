@@ -1,1 +1,0 @@
-**Credential SCM PINs and NGFW authcodes are now encrypted inside persisted CMS credential JSON data.** Existing plaintext credential secrets are migrated to encrypted values, while application reads continue to receive decrypted values for provisioning.

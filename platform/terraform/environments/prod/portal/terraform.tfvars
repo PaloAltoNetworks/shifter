@@ -142,6 +142,9 @@ enable_waf_logging     = true
 enable_portal_inspection    = true
 firewall_log_retention_days = 365
 
+# prod: secure default; flip false + apply before any intentional destroy
+portal_inspection_delete_protection = true
+
 # ------------------------------------------------------------------------------
 # Engine Provisioner
 # ------------------------------------------------------------------------------

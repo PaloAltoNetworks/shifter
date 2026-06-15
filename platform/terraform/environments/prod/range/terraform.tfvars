@@ -46,3 +46,7 @@ vm_series_instance_type = "m5.xlarge"
 # ------------------------------------------------------------------------------
 
 enable_ngfw_infrastructure = true
+
+# Network Firewall lifecycle
+# prod: secure default; flip false + apply before any intentional destroy
+network_firewall_delete_protection = true

@@ -1,79 +1,86 @@
-"""Tests for mission_control.views._files (script upload + delete views)."""
+"""Behavior tests for the experiment-script upload/list/delete views.
 
-from __future__ import annotations
+Drives the real ``mission_control`` file views with the test client and a real
+database. The script views require staff / Threat-Research access; a plain user
+is rejected with 403. Validation, the page/list reads, and the error paths run
+fully first-party (with ``AWS_S3_BUCKET_NAME`` unset the real S3 helpers raise,
+so the views exercise real ``ScriptUploadError`` handling). The initiate success
+path mocks the AWS SDK (a real cloud boundary). The complete success path is an
+S3 download + content inspection owned by cms.experiments and covered there.
+"""
 
 import json
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.http import HttpResponse
-from django.test import RequestFactory
+from django.test import Client, override_settings
+from django.urls import reverse
+
+pytestmark = pytest.mark.django_db
+
+FILES_PAGE = reverse("mission_control:files")
+FILE_UPLOAD = reverse("mission_control:file_upload")
+API_SCRIPTS = reverse("mission_control:api_list_scripts")
 
 
 @pytest.fixture
-def rf():
-    return RequestFactory()
+def staff_client(authenticated_client, django_user_model) -> Callable[..., tuple]:
+    """An authenticated client whose user is staff (grants script access)."""
+
+    def _make(email: str):
+        user = django_user_model.objects.create_user(username=email, email=email, is_staff=True)
+        return authenticated_client(user=user)
+
+    return _make
 
 
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = 1
-    user.pk = 1
-    user.email = "u@example.com"
-    user.is_authenticated = True
-    return user
+def _post(client, url, payload):
+    body = payload if isinstance(payload, str) else json.dumps(payload)
+    return client.post(url, data=body, content_type="application/json")
 
 
-def _post(rf, path, payload, user):
-    body = json.dumps(payload) if not isinstance(payload, str) else payload
-    req = rf.post(path, data=body, content_type="application/json")
-    req.user = user
-    req.session = {}
-    return req
+def _body(resp):
+    return json.loads(resp.content)
 
 
-def _get(rf, path, user):
-    req = rf.get(path)
-    req.user = user
-    req.session = {}
-    return req
+def _s3_mock():
+    client = MagicMock()
+    client.generate_presigned_url.return_value = "https://s3.example/presigned"
+    return client
 
 
-# ---------------------------------------------------------------------------
-# files (HTML page)
-# ---------------------------------------------------------------------------
+class TestScriptAccessControl:
+    def test_files_page_requires_login(self):
+        assert Client().get(FILES_PAGE).status_code == 302
+
+    def test_non_privileged_user_is_forbidden(self, authenticated_client):
+        client, _ = authenticated_client(email="plain@example.com")
+        assert client.get(FILES_PAGE).status_code == 403
 
 
 class TestFilesPage:
-    def test_renders_with_scripts(self, rf, mock_user):
-        from mission_control.views import files
-
-        scripts = [MagicMock(name="s1"), MagicMock(name="s2")]
-        request = _get(rf, "/mc/files/", mock_user)
-        with (
-            patch("mission_control.views._files.list_scripts", return_value=scripts),
-            patch("mission_control.views.render", return_value=HttpResponse("ok")) as render,
-        ):
-            files(request)
-        _r, template, context = render.call_args.args
-        assert template == "mission_control/files.html"
-        assert context["scripts"] is scripts
-        assert context["active_nav"] == "files"
+    def test_renders_empty_for_new_staff_user(self, staff_client):
+        client, _ = staff_client("files-page@example.com")
+        response = client.get(FILES_PAGE)
+        assert response.status_code == 200
+        assert "mission_control/files.html" in [t.name for t in response.templates if t.name]
+        assert response.context["active_nav"] == "files"
+        assert list(response.context["scripts"]) == []
 
 
-# ---------------------------------------------------------------------------
-# file_upload (JSON two-step)
-# ---------------------------------------------------------------------------
+class TestApiListScripts:
+    def test_returns_empty_for_new_staff_user(self, staff_client):
+        client, _ = staff_client("files-api@example.com")
+        response = client.get(API_SCRIPTS)
+        assert response.status_code == 200
+        assert _body(response)["scripts"] == []
 
 
 class TestFileUploadInitiate:
-    def test_returns_400_for_invalid_json(self, rf, mock_user):
-        from mission_control.views import file_upload
-
-        request = _post(rf, "/mc/api/files/", "not json", mock_user)
-        response = file_upload(request)
-        assert response.status_code == 400
+    def test_returns_400_for_invalid_json(self, staff_client):
+        client, _ = staff_client("files-json@example.com")
+        assert _post(client, FILE_UPLOAD, "not json").status_code == 400
 
     @pytest.mark.parametrize(
         "payload,err_substr",
@@ -85,132 +92,45 @@ class TestFileUploadInitiate:
         ],
         ids=["name", "filename", "size-zero", "size-not-int"],
     )
-    def test_validation_errors(self, rf, mock_user, payload, err_substr):
-        from mission_control.views import file_upload
+    def test_validation_errors(self, staff_client, payload, err_substr):
+        client, _ = staff_client("files-val@example.com")
+        resp = _post(client, FILE_UPLOAD, payload)
+        assert resp.status_code == 400
+        assert err_substr in _body(resp)["error"]
 
-        request = _post(rf, "/mc/api/files/", payload, mock_user)
-        response = file_upload(request)
-        assert response.status_code == 400
-        assert err_substr in json.loads(response.content)["error"]
+    @override_settings(AWS_S3_BUCKET_NAME="")
+    def test_real_error_is_sanitized_not_echoed(self, staff_client):
+        # No S3 bucket configured -> real S3 helper raises -> authored literal.
+        # Pinned via override_settings so the precondition holds regardless of
+        # ambient/other-test settings.
+        client, _ = staff_client("files-err@example.com")
+        resp = _post(client, FILE_UPLOAD, {"name": "n", "filename": "x.sh", "file_size": 10})
+        assert resp.status_code == 400
+        body = _body(resp)
+        assert body["error"] == "Upload could not be initiated"
+        assert "\n" not in body["error"] and "\r" not in body["error"]
 
-    def test_returns_400_when_initiate_raises(self, rf, mock_user):
-        from cms.services import ScriptUploadError
-        from mission_control.views import file_upload
-
-        request = _post(
-            rf,
-            "/mc/api/files/",
-            {"name": "n", "filename": "x.sh", "file_size": 10},
-            mock_user,
-        )
-        with patch(
-            "mission_control.views._files.initiate_script_upload",
-            side_effect=ScriptUploadError("nope"),
-        ):
-            response = file_upload(request)
-        assert response.status_code == 400
-        # ``str(e)`` is no longer echoed to the response; "nope" doesn't match
-        # any classifier keyword, so the authored default is returned.
-        assert json.loads(response.content)["error"] == "Upload could not be initiated"
-
-    def test_returns_presigned_payload_with_basename(self, rf, mock_user):
-        from mission_control.views import file_upload
-
-        request = _post(
-            rf,
-            "/mc/api/files/",
-            {"name": "n", "filename": "/path/x.sh", "file_size": 10},
-            mock_user,
-        )
-        with patch(
-            "mission_control.views._files.initiate_script_upload",
-            return_value={"presigned_url": "https://s3/x", "upload_token": "t"},
-        ) as init:
-            response = file_upload(request)
-        assert response.status_code == 200
-        # Basename normalisation: only 'x.sh' passed
-        assert init.call_args.args[2] == "x.sh"
+    @override_settings(AWS_S3_BUCKET_NAME="test-bucket")
+    def test_success_returns_presigned_url(self, staff_client):
+        client, _ = staff_client("files-ok@example.com")
+        with patch("boto3.client", return_value=_s3_mock()):
+            resp = _post(client, FILE_UPLOAD, {"name": "Script", "filename": "/path/x.py", "file_size": 10})
+        assert resp.status_code == 200
+        assert _body(resp)["presigned_url"] == "https://s3.example/presigned"
 
 
 class TestFileUploadComplete:
-    def test_returns_400_when_complete_raises(self, rf, mock_user):
-        from cms.services import ScriptUploadError
-        from mission_control.views import file_upload
-
-        request = _post(rf, "/mc/api/files/", {"upload_token": "t"}, mock_user)
-        with patch(
-            "mission_control.views._files.complete_script_upload",
-            side_effect=ScriptUploadError("invalid"),
-        ):
-            response = file_upload(request)
-        assert response.status_code == 400
-
-    def test_returns_success_payload(self, rf, mock_user):
-        from mission_control.views import file_upload
-
-        script = MagicMock(pk=7, name="myscript")
-        script.name = "myscript"
-        request = _post(rf, "/mc/api/files/", {"upload_token": "t"}, mock_user)
-        with patch(
-            "mission_control.views._files.complete_script_upload",
-            return_value=script,
-        ):
-            response = file_upload(request)
-        body = json.loads(response.content)
-        assert body["success"] is True
-        assert body["script_id"] == 7
-
-
-# ---------------------------------------------------------------------------
-# file_delete
-# ---------------------------------------------------------------------------
+    def test_invalid_token_rejected(self, staff_client):
+        client, _ = staff_client("files-comp@example.com")
+        resp = _post(client, FILE_UPLOAD, {"upload_token": "not-a-real-token"})
+        assert resp.status_code == 400
 
 
 class TestFileDelete:
-    def test_redirects_on_success(self, rf, mock_user):
-        from mission_control.views import file_delete
-
-        request = _post(rf, "/mc/files/3/delete/", {}, mock_user)
-        request._messages = MagicMock()
-        with patch("mission_control.views._files.delete_script") as delete:
-            response = file_delete(request, 3)
-        assert response.status_code == 302
-        delete.assert_called_once_with(mock_user, 3)
-
-    def test_redirects_even_on_error(self, rf, mock_user):
-        from cms.services import ScriptUploadError
-        from mission_control.views import file_delete
-
-        request = _post(rf, "/mc/files/3/delete/", {}, mock_user)
-        request._messages = MagicMock()
-        with patch(
-            "mission_control.views._files.delete_script",
-            side_effect=ScriptUploadError("boom"),
-        ):
-            response = file_delete(request, 3)
-        assert response.status_code == 302
-
-
-# ---------------------------------------------------------------------------
-# api_list_scripts (JSON)
-# ---------------------------------------------------------------------------
-
-
-class TestApiListScripts:
-    def test_returns_serialized_scripts(self, rf, mock_user):
-        from mission_control.views import api_list_scripts
-
-        s1 = MagicMock()
-        s1.pk = 1
-        s1.name = "a"
-        s1.original_filename = "a.sh"
-        s2 = MagicMock()
-        s2.pk = 2
-        s2.name = "b"
-        s2.original_filename = "b.sh"
-        request = _get(rf, "/mc/api/files/", mock_user)
-        with patch("mission_control.views._files.list_scripts", return_value=[s1, s2]):
-            response = api_list_scripts(request)
-        body = json.loads(response.content)
-        assert len(body["scripts"]) == 2
-        assert body["scripts"][0]["name"] == "a"
+    def test_delete_nonexistent_redirects(self, staff_client):
+        client, _ = staff_client("files-del@example.com")
+        # delete_script raises ScriptUploadError for a missing script; the view
+        # catches it, flashes a message, and redirects.
+        resp = client.post(reverse("mission_control:file_delete", args=[999999]))
+        assert resp.status_code == 302
+        assert resp.url == FILES_PAGE

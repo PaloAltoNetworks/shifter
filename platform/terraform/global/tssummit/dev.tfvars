@@ -12,9 +12,6 @@ ctfd_ami_id = "ami-0b0b78dcacbab728f"
 ngfw_ami_id           = "ami-065e27477b191614c" # PAN-OS 11.2.8 (same as ranges)
 ngfw_bootstrap_bucket = "shifter-dev-user-storage-e3462f0c"
 ngfw_server_subnet_id = "subnet-0ae47ffb1e2fe078b"
-ngfw_authcode         = "D6153905"
-ngfw_scm_pin_id       = "cb5d90f7-5c19-41e2-a92a-a13b4e8dc60c"
-ngfw_scm_pin_value    = "387db972a60d4f89a4251db70bf06c58"
 
 # Workstation
 workstation_ami_id = "ami-058f0cf1cc0bc26b3"

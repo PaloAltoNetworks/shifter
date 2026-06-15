@@ -24,7 +24,7 @@ RUN uv export --no-hashes --no-emit-project --frozen > requirements.txt && \
     uv pip install --system --no-cache --no-deps /cyberscript /installation
 
 # Production stage
-FROM python:3.12-slim-trixie AS production
+FROM python:3.14-slim-trixie AS production
 
 WORKDIR /app
 

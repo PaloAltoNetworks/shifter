@@ -177,8 +177,11 @@ entries. Completed so far:
   boundary and recording backoff sleeps via `monkeypatch` instead of a
   first-party `time.sleep` patch.
 - `engine`: range-lifecycle service suites (`engine/services/test_create_range`,
-  `test_cancel_range`), driven against real `Range`/`Request` rows with ECS as a
-  no-op under the test settings.
+  `test_cancel_range`, `test_destroy_range`, `test_pause_range`,
+  `test_resume_range`), driven against real `Range`/`Request` rows. ECS is a
+  no-op for create/destroy; pause/resume require a successful dispatch, so they
+  configure ECS via `override_settings` and mock the AWS task runner at the
+  `boto3` boundary.
 
 Decomposition-owned suites are out of scope here and land with their own
 issues: provisioner (#946), `ctf/**` and `cms/experiments/test_orchestrator*`

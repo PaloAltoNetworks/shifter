@@ -2841,26 +2841,6 @@
       "target": "engine.models.Request.objects.get"
     },
     {
-      "count": 4,
-      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
-      "target": "engine.ecs.start_range_teardown"
-    },
-    {
-      "count": 10,
-      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
-      "target": "engine.ecs.start_teardown"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
-      "target": "engine.models.Range.objects.filter"
-    },
-    {
-      "count": 17,
-      "path": "shifter/shifter_platform/tests/engine/services/test_destroy_range.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
       "count": 7,
       "path": "shifter/shifter_platform/tests/engine/services/test_get_instance_ips_by_uuid.py",
       "target": "engine.models.Range.objects.get"
@@ -2909,26 +2889,6 @@
       "count": 11,
       "path": "shifter/shifter_platform/tests/engine/services/test_ngfw_lifecycle.py",
       "target": "engine.models.Request.objects.get"
-    },
-    {
-      "count": 10,
-      "path": "shifter/shifter_platform/tests/engine/services/test_pause_range.py",
-      "target": "engine.ecs.start_range_operation"
-    },
-    {
-      "count": 17,
-      "path": "shifter/shifter_platform/tests/engine/services/test_pause_range.py",
-      "target": "engine.models.Range.objects.select_for_update"
-    },
-    {
-      "count": 10,
-      "path": "shifter/shifter_platform/tests/engine/services/test_resume_range.py",
-      "target": "engine.ecs.start_range_operation"
-    },
-    {
-      "count": 18,
-      "path": "shifter/shifter_platform/tests/engine/services/test_resume_range.py",
-      "target": "engine.models.Range.objects.select_for_update"
     },
     {
       "count": 2,

@@ -43,6 +43,9 @@ SMOKE_WS_PATH="${SMOKE_WS_PATH:-ws/notifications/}"
 SMOKE_PAGES="${SMOKE_PAGES:-/dashboard/ /mission-control/ /mission-control/terminal/ /mission-control/settings/ /mission-control/help/}"
 SMOKE_BOOT_TIMEOUT="${SMOKE_BOOT_TIMEOUT:-180}"
 SMOKE_HEARTBEAT_TIMEOUT="${SMOKE_HEARTBEAT_TIMEOUT:-120}"
+# Bound for log-line assertions against `docker logs` (the line is already
+# emitted; this only absorbs docker log-delivery lag behind the readiness probe).
+SMOKE_LOG_ASSERT_TIMEOUT="${SMOKE_LOG_ASSERT_TIMEOUT:-20}"
 
 PG_IMAGE="${SMOKE_PG_IMAGE:-postgres:16}"
 REDIS_IMAGE="${SMOKE_REDIS_IMAGE:-redis:7}"
@@ -125,9 +128,21 @@ health_200() { [[ "$(http_status || true)" == "200" ]]; }
 
 assert_skipped_migrations() {
   local container="$1"
-  if ! docker logs "$container" 2>&1 | grep -q "Skipping migrations"; then
-    fail "${container} did not skip migrations (SKIP_MIGRATIONS contract broken)"
-  fi
+  # entrypoint.sh emits "Skipping migrations" before it execs the server, so a
+  # running, healthy container has already logged it. But docker log delivery
+  # for that early line can lag the readiness probe on a busy runner, so a
+  # single-shot `docker logs | grep` the instant /health flips to 200 is racy.
+  # Poll (bounded, like wait_for): a genuine SKIP_MIGRATIONS break makes the
+  # entrypoint log "Running migrations" instead, so the line never appears and
+  # this still fails; only the delivery race is absorbed.
+  local deadline=$((SECONDS + SMOKE_LOG_ASSERT_TIMEOUT))
+  while (( SECONDS < deadline )); do
+    if docker logs "$container" 2>&1 | grep -q "Skipping migrations"; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "${container} did not skip migrations (SKIP_MIGRATIONS contract broken)"
 }
 
 assert_home_writable() {

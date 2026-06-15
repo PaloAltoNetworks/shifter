@@ -3840,6 +3840,7 @@ PYTHON_COMPLEXITY_GATE_PYPROJECTS = (
     "scripts/gcp",
     "scripts/check_layer_imports",
     "scripts/check_rds_pending_modifications",
+    "uat/event-load-harness",
 )
 
 # Single repo-wide threshold for ruff's McCabe (C901) check. Equality, not <=.

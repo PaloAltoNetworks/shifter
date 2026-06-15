@@ -336,6 +336,24 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  event-load-harness-lint:
+    permissions:
+      contents: read
+    name: Lint (event-load-harness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Lint Python
+        working-directory: uat/event-load-harness
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   k8s-lint:
     permissions:
       contents: read
@@ -654,6 +672,23 @@ jobs:
           uv tool install bandit
           bandit -r shifter/installation/ --skip B101 --exclude shifter/installation/tests,shifter/installation/.venv
 
+  event-load-harness-sast:
+    permissions:
+      contents: read
+    name: SAST (event-load-harness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run Bandit
+        working-directory: uat/event-load-harness
+        run: |
+          uv tool install 'bandit[toml]'
+          bandit -r . -c pyproject.toml
+
   # ===========================================================================
   # Python Tests
   # ===========================================================================
@@ -971,6 +1006,27 @@ jobs:
           path: shifter/installation/coverage.xml
           if-no-files-found: error
           retention-days: 1
+
+  event-load-harness-tests:
+    permissions:
+      contents: read
+    name: Tests (event-load-harness)
+    if: ${{ !inputs.skip_tests }}
+    needs: [event-load-harness-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: uat/event-load-harness
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: uat/event-load-harness
+        run: uv run pytest tests/ -q
 
   migration-proof-tests:
     permissions:

@@ -61,4 +61,6 @@ indent-style = "space"
 
 [tool.bandit]
 exclude_dirs = [".venv", "tests"]
-skips = ["B101"]
+# B101 assert; B311 random (load distribution, not crypto); B404/B603/B607
+# subprocess for a fixed-argv `git rev-parse` call (no shell, no untrusted input).
+skips = ["B101", "B311", "B404", "B603", "B607"]

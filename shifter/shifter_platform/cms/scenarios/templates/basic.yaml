@@ -13,7 +13,7 @@ instances:
   - name: Workstation
     role: victim
     os_type: from_agent
-    xdr_agent: true
+    xdr_agent: false
 
 subnets:
   - name: core

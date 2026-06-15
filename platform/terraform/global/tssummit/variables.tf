@@ -12,7 +12,7 @@ variable "ami_id" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 variable "key_name" {
@@ -65,23 +65,6 @@ variable "ngfw_bootstrap_bucket" {
 variable "ngfw_server_subnet_id" {
   description = "Existing dev-server subnet ID for NGFW server interface"
   type        = string
-}
-
-variable "ngfw_scm_pin_id" {
-  description = "SCM auto-registration PIN ID (certid)"
-  type        = string
-}
-
-variable "ngfw_scm_pin_value" {
-  description = "SCM auto-registration PIN value (certsecret)"
-  type        = string
-  sensitive   = true
-}
-
-variable "ngfw_authcode" {
-  description = "VM-Series license authcode"
-  type        = string
-  sensitive   = true
 }
 
 # ------------------------------------------------------------------------------

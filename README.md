@@ -52,7 +52,7 @@ You describe attack scenarios, network topology, and victim configurations
 without dealing with cloud primitives or infrastructure complexity.
 
 See
-[`cortex_byot.yaml`](shifter/shifter_platform/cms/scenarios/templates/cortex_byot.yaml)
+[`ad_attack_lab_ngfw.yaml`](shifter/shifter_platform/cms/scenarios/templates/ad_attack_lab_ngfw.yaml)
 for a complete example.
 
 ## Getting Started

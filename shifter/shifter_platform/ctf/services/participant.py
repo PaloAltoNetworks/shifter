@@ -18,6 +18,7 @@ from django.utils import timezone
 from ctf.enums import ParticipantStatus
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
 from ctf.models import CTFEvent, CTFParticipant, CTFTeam
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -46,7 +47,7 @@ def invite_participant(
         CTFNotFoundError: If event or team doesn't exist.
         CTFValidationError: If participant already exists or data is invalid.
     """
-    logger.info("Inviting participant %s to event %s", email, event_id)
+    logger.info("Inviting participant %s to event %s", safe_log_value(email), safe_log_value(event_id))
 
     try:
         event = CTFEvent.objects.get(pk=event_id)
@@ -109,8 +110,8 @@ def invite_participant(
 
         logger.info(
             "Invited participant %s to event %s (id: %s)",
-            email,
-            event_id,
+            safe_log_value(email),
+            safe_log_value(event_id),
             participant.id,
         )
 
@@ -212,7 +213,7 @@ def bulk_import_participants(
         CTFNotFoundError: If event doesn't exist.
         CTFValidationError: If CSV format is invalid.
     """
-    logger.info("Bulk importing participants to event %s", event_id)
+    logger.info("Bulk importing participants to event %s", safe_log_value(event_id))
 
     try:
         event = CTFEvent.objects.get(pk=event_id)
@@ -252,7 +253,7 @@ def bulk_import_participants(
     logger.info(
         "Bulk imported %d participants to event %s",
         len(created),
-        event_id,
+        safe_log_value(event_id),
     )
     return created
 
@@ -429,7 +430,7 @@ def delete_participant(participant_id: UUID) -> bool:
     Raises:
         CTFNotFoundError: If participant doesn't exist.
     """
-    logger.info("Deleting participant %s", participant_id)
+    logger.info("Deleting participant %s", safe_log_value(participant_id))
 
     try:
         participant = CTFParticipant.objects.get(pk=participant_id)
@@ -444,7 +445,7 @@ def delete_participant(participant_id: UUID) -> bool:
         _clear_ctf_participant_profile(participant.user, participant.event)
 
     participant.delete(soft=True)
-    logger.info("Deleted participant %s", participant_id)
+    logger.info("Deleted participant %s", safe_log_value(participant_id))
 
     return True
 
@@ -465,7 +466,7 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
     """
     import secrets
 
-    logger.info("Resending invite for participant %s", participant_id)
+    logger.info("Resending invite for participant %s", safe_log_value(participant_id))
 
     try:
         participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
@@ -511,9 +512,9 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
         text_content=text_content,
     )
     if not sent:
-        logger.warning("Failed to send resend invite email for participant %s", participant_id)
+        logger.warning("Failed to send resend invite email for participant %s", safe_log_value(participant_id))
 
-    logger.info("Resent invite for participant %s", participant_id)
+    logger.info("Resent invite for participant %s", safe_log_value(participant_id))
 
     return participant
 
@@ -557,15 +558,18 @@ def _auto_register_participant(participant: CTFParticipant) -> None:
     )
 
 
-def _set_ctf_participant_profile(user: User, event: CTFEvent):
+def _set_ctf_participant_profile(user: User, event: CTFEvent) -> None:
     """Set CTF Participant group and active_ctf_event for a user.
 
     Adds the user to the CTF Participant group (additive — never removes
-    other groups) and sets active_ctf_event on the profile.
+    other groups) and sets active_ctf_event on the profile. ``set_active_ctf_event``
+    already ensures the profile row exists, so nothing is returned (the single
+    caller ignores the value, and ctf must not surface a ``management`` model type
+    across the layer boundary — ADR-001).
     """
     from django.contrib.auth.models import Group
 
-    from management.services import get_user_profile, set_active_ctf_event
+    from management.services import set_active_ctf_event
     from shared.auth import CTF_PARTICIPANT_GROUP
 
     participant_group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
@@ -577,7 +581,6 @@ def _set_ctf_participant_profile(user: User, event: CTFEvent):
         user.email,
         event.pk,
     )
-    return get_user_profile(user)
 
 
 def _clear_ctf_participant_profile(user: User, event: CTFEvent) -> None:

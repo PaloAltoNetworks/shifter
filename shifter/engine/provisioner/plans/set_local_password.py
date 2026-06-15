@@ -27,10 +27,14 @@ Why this lives in a setup plan instead of in user_data
 Roles in scope
 --------------
 
-This plan applies to non-DC guests (kali, ubuntu, windows-victim). The
-DC role's local Administrator account *is* the domain Administrator,
-so its password is set by the DC promote workflow using the
-deployment-scoped ``DC_DOMAIN_PASSWORD`` value (not this plan).
+This plan applies to non-DC guests (kali, ubuntu, windows-victim). Some
+Kali assets, such as the POLARIS range host, expose the participant
+desktop through a container rather than a host-level ``kali`` account;
+those use the Linux container variant so the per-instance password is
+set on the real Guacamole/participant endpoint. The DC role's local
+Administrator account *is* the domain Administrator, so its password is
+set by the DC promote workflow using the deployment-scoped
+``DC_DOMAIN_PASSWORD`` value (not this plan).
 """
 
 from __future__ import annotations
@@ -51,6 +55,7 @@ from .base import SetupStep
 # ---------------------------------------------------------------------------
 LINUX_SET_PASSWORD_SCRIPT = """#!/bin/bash
 set -euo pipefail
+ssh_user="{{ rdp_username }}"
 # Resolve a privileged ``chpasswd`` invocation. On AWS SSM the agent
 # runs commands as root so ``chpasswd`` works directly. On GDC the
 # guest SSH executor authenticates as the cloud-init default user
@@ -67,9 +72,45 @@ else
     fi
     CHPASSWD_CMD=(sudo -n chpasswd)
 fi
+# If the account exists but is locked, unlock before setting the
+# per-instance password. This is best-effort: some distros return a
+# non-zero status when the account is already usable.
+if id "$ssh_user" >/dev/null 2>&1; then
+    if [ "$(id -u)" -eq 0 ]; then
+        usermod -U "$ssh_user" >/dev/null 2>&1 || true
+    else
+        sudo -n usermod -U "$ssh_user" >/dev/null 2>&1 || true
+    fi
+fi
 "${CHPASSWD_CMD[@]}" <<'__SHIFTER_RDP_PW__'
 {{ rdp_username }}:{{ rdp_password }}
 __SHIFTER_RDP_PW__
+"""  # noqa: S105  # nosec B105  # NOSONAR shell script template, not a credential
+
+LINUX_SET_CONTAINER_PASSWORD_SCRIPT = """#!/bin/bash
+set -euo pipefail
+container="{{ rdp_container_name }}"
+ssh_user="{{ rdp_username }}"
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "FATAL: docker is unavailable; cannot set password in $container" >&2
+    exit 1
+fi
+if ! docker ps --format '{{.Names}}' | grep -qx "$container"; then
+    echo "FATAL: container $container is not running" >&2
+    docker ps --format '{{.Names}} {{.Status}}' >&2 || true
+    exit 1
+fi
+if ! docker exec "$container" id "$ssh_user" >/dev/null 2>&1; then
+    echo "FATAL: user $ssh_user is absent in container $container" >&2
+    exit 1
+fi
+
+docker exec "$container" usermod -U "$ssh_user" >/dev/null 2>&1 || true
+docker exec -i "$container" chpasswd <<'__SHIFTER_RDP_PW__'
+{{ rdp_username }}:{{ rdp_password }}
+__SHIFTER_RDP_PW__
+echo "Password set for $ssh_user in container $container"
 """  # noqa: S105  # nosec B105  # NOSONAR shell script template, not a credential
 
 LINUX_VERIFY_SCRIPT = """#!/bin/bash
@@ -94,6 +135,28 @@ case "$status" in
         ;;
     *)
         echo "FATAL: password status for $ssh_user is '$status' (expected 'PS')" >&2
+        exit 1
+        ;;
+esac
+"""
+
+LINUX_VERIFY_CONTAINER_SCRIPT = """#!/bin/bash
+set -euo pipefail
+container="{{ rdp_container_name }}"
+ssh_user="{{ rdp_username }}"
+
+if ! docker ps --format '{{.Names}}' | grep -qx "$container"; then
+    echo "FATAL: container $container is not running" >&2
+    exit 1
+fi
+status=$(docker exec "$container" passwd -S "$ssh_user" 2>/dev/null | awk '{print $2}' || echo "")
+case "$status" in
+    PS|P)
+        echo "Password for $ssh_user is set and unlocked in container $container"
+        exit 0
+        ;;
+    *)
+        echo "FATAL: password status for $ssh_user in $container is '$status' (expected 'PS')" >&2
         exit 1
         ;;
 esac
@@ -151,10 +214,13 @@ class SetLocalPasswordPlan:
     ``password``.
     """
 
-    def __init__(self, *, platform: str) -> None:
+    def __init__(self, *, platform: str, target_container: str | None = None) -> None:
         if platform not in ("linux", "windows"):
             raise ValueError(f"Unknown platform for SetLocalPasswordPlan: {platform!r}")
+        if target_container and platform != "linux":
+            raise ValueError("target_container is only supported for linux password setup")
         self._platform = platform
+        self._target_container = target_container
 
     @property
     def steps(self) -> list[SetupStep]:
@@ -162,7 +228,7 @@ class SetLocalPasswordPlan:
             return [
                 SetupStep(
                     name="set_local_password_linux",
-                    script=LINUX_SET_PASSWORD_SCRIPT,
+                    script=LINUX_SET_CONTAINER_PASSWORD_SCRIPT if self._target_container else LINUX_SET_PASSWORD_SCRIPT,
                     timeout_seconds=60,
                     requires_reboot=False,
                 ),
@@ -181,7 +247,7 @@ class SetLocalPasswordPlan:
         if self._platform == "linux":
             return SetupStep(
                 name="verify_local_password_linux",
-                script=LINUX_VERIFY_SCRIPT,
+                script=LINUX_VERIFY_CONTAINER_SCRIPT if self._target_container else LINUX_VERIFY_SCRIPT,
                 timeout_seconds=30,
                 is_verification=True,
             )
@@ -212,4 +278,8 @@ class SetLocalPasswordPlan:
             raise ValueError("SetLocalPasswordPlan requires non-empty rdp_username")
         if not password:
             raise ValueError("SetLocalPasswordPlan requires non-empty rdp_password")
-        return context
+        if not self._target_container:
+            return context
+        enriched = dict(context)
+        enriched["rdp_container_name"] = self._target_container
+        return enriched

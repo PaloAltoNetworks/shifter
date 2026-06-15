@@ -106,6 +106,21 @@ if (( kursk_hit == 0 )); then
     fail "Kursk/12,000,000 line not found in annual PDF text extraction"
 fi
 
+# The Kursk row alone is not flag 6 — the participant needs the FLAG{...}
+# payload baked onto the "PO ref:" line under it. Probing only for the
+# Kursk row was a false pass: a clean-checkout rebake that dropped the
+# flag (regression #619) still passed. Assert the canonical flag literal
+# is in the extracted text.
+annual_text=""
+if [[ -x /opt/tools/bin/pdf2txt.py ]]; then
+    annual_text="$(/opt/tools/bin/pdf2txt.py "$TMP/annual.pdf" 2>/dev/null)"
+fi
+if [[ -z "$annual_text" ]] && command -v pdftotext >/dev/null; then
+    annual_text="$(pdftotext "$TMP/annual.pdf" - 2>/dev/null)"
+fi
+flag6="$(printf '%s' "$annual_text" | grep -oE 'FLAG\{[a-f0-9]+\}' | head -1)"
+check_flag "flag 6" "FLAG{c6f8d2b3e91a4507}" "$flag6"
+
 echo
 echo "--- Design elements ---"
 curl -s "http://$HOST/robots.txt" | grep -q '/internal/' && pass "robots.txt disallows /internal/" || fail "robots.txt /internal/ missing"

@@ -62,6 +62,12 @@ variable "db_engine_version" {
   type        = string
 }
 
+variable "db_ca_cert_identifier" {
+  description = "RDS CA certificate identifier for portal and provisioner database TLS."
+  type        = string
+  default     = "rds-ca-rsa2048-g1"
+}
+
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
@@ -265,6 +271,19 @@ variable "enable_autoscaling" {
   type        = bool
 }
 
+variable "enable_redis" {
+  description = <<-EOT
+    Wire Redis as the Django Channels backend for the portal runtime
+    (ADR-018, #849). Environment-owned and INDEPENDENT of enable_autoscaling:
+    a single-instance dev portal may use Redis, and an environment may disable
+    Redis to save cost without changing ASG posture. When true, the Redis
+    endpoint is published to SSM and the container runs with
+    CHANNEL_LAYER_BACKEND=redis (fail-closed if the endpoint is missing); when
+    false, the portal runs CHANNEL_LAYER_BACKEND=in_memory.
+  EOT
+  type        = bool
+}
+
 variable "asg_min_size" {
   description = "Minimum number of instances in the ASG"
   type        = number
@@ -278,6 +297,21 @@ variable "asg_max_size" {
 variable "asg_desired_capacity" {
   description = "Desired number of instances in the ASG"
   type        = number
+}
+
+variable "asg_warm_pool_min_size" {
+  description = "Minimum number of pre-initialized portal instances to keep in the ASG warm pool. Set 0 to disable."
+  type        = number
+}
+
+variable "asg_warm_pool_state" {
+  description = "Warm pool instance state. Valid values are Stopped, Running, or Hibernated."
+  type        = string
+
+  validation {
+    condition     = contains(["Stopped", "Running", "Hibernated"], var.asg_warm_pool_state)
+    error_message = "asg_warm_pool_state must be one of: Stopped, Running, Hibernated."
+  }
 }
 
 variable "scale_up_threshold" {
@@ -353,6 +387,25 @@ variable "enable_waf_logging" {
 }
 
 # ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+variable "enable_portal_inspection" {
+  description = "Insert an AWS Network Firewall east-west inspection boundary between the portal public (ALB) tier and the private services tier. Requires enable_log_aggregation = true."
+  type        = bool
+}
+
+variable "firewall_log_retention_days" {
+  description = "CloudWatch retention in days for portal Network Firewall FLOW / ALERT logs."
+  type        = number
+}
+
+variable "portal_inspection_delete_protection" {
+  description = "Enable delete protection on the portal inspection Network Firewall. Dev sets false to allow intentional teardown; prod keeps true. Mirrors the db_deletion_protection convention."
+  type        = bool
+}
+
+# ------------------------------------------------------------------------------
 # Engine Provisioner
 # ------------------------------------------------------------------------------
 
@@ -360,6 +413,12 @@ variable "engine_container_tag" {
   description = "Docker image tag for engine provisioner container"
   type        = string
   default     = "latest"
+}
+
+variable "engine_container_image_digest" {
+  description = "Immutable Docker image digest for engine provisioner container"
+  type        = string
+  default     = ""
 }
 
 variable "dc_domain_name" {
@@ -437,6 +496,12 @@ variable "guacamole_db_max_allocated_storage" {
 variable "guacamole_db_engine_version" {
   description = "PostgreSQL engine version for Guacamole"
   type        = string
+}
+
+variable "guacamole_db_ca_cert_identifier" {
+  description = "RDS CA certificate identifier for Guacamole database TLS."
+  type        = string
+  default     = "rds-ca-rsa2048-g1"
 }
 
 variable "guacamole_db_multi_az" {

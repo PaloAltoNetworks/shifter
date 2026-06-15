@@ -6,12 +6,13 @@ These handlers process range and NGFW status updates from the Shifter Engine pro
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from django.utils import timezone
 
 from engine.models import Range
 from risk_register.models import AuditLog
-from risk_register.services import audit_log_system_event
+from risk_register.services import StateChange, audit_log_system_event
 from shared.enums import ResourceStatus
 from shared.messages.envelope import parse_sns_message
 from shared.messages.events import (
@@ -83,36 +84,50 @@ def process_range_event(message: str | dict) -> None:
         logger.debug("Ignoring event_type=%s", event_type)
 
 
-def _handle_status_updated(event: dict) -> None:
+def _resolve_authorized_range(event: dict[str, Any]) -> Range | None:
+    """Resolve and authorize the range targeted by a status-update event.
+
+    Returns None (after logging) when the event is missing identifiers, the
+    range does not exist, or the event's user does not own it.
+    """
+    range_id = event.get("range_id")
+    if range_id is None or event.get("new_status") is None:
+        logger.warning("Missing range_id or new_status in event")
+        return None
+
+    range_obj: Range | None
+    try:
+        range_obj = Range.objects.get(id=range_id)
+    except Range.DoesNotExist:
+        logger.warning("Range not found: range_id=%s", range_id)
+        return None
+
+    if range_obj.user_id != event.get("user_id"):
+        logger.error(
+            "user_id mismatch: message=%s, range=%s (range_id=%s)",
+            event.get("user_id"),
+            range_obj.user_id,
+            range_id,
+        )
+        range_obj = None
+    return range_obj
+
+
+def _handle_status_updated(event: dict[str, Any]) -> None:
     """Handle range.status.updated event - update status and timestamps.
 
     Args:
         event: Event payload with range_id, user_id, new_status, error_message.
     """
-    range_id = event.get("range_id")
-    user_id = event.get("user_id")
-    new_status = event.get("new_status")
+    range_obj = _resolve_authorized_range(event)
+    if range_obj is None:
+        return
+
+    # _resolve_authorized_range guarantees both keys are present and non-None.
+    range_id = event["range_id"]
+    new_status = event["new_status"]
     error_message = event.get("error_message")
     event_id = event.get("event_id", "unknown")
-
-    if range_id is None or new_status is None:
-        logger.warning("Missing range_id or new_status in event")
-        return
-
-    try:
-        range_obj = Range.objects.get(id=range_id)
-    except Range.DoesNotExist:
-        logger.warning("Range not found: range_id=%s", range_id)
-        return
-
-    if range_obj.user_id != user_id:
-        logger.error(
-            "user_id mismatch: message=%s, range=%s (range_id=%s)",
-            user_id,
-            range_obj.user_id,
-            range_id,
-        )
-        return
 
     previous_status = range_obj.status
     range_obj.status = new_status
@@ -142,8 +157,10 @@ def _handle_status_updated(event: dict) -> None:
         entity_id=range_id,
         action=_status_to_action(new_status),
         source="engine.handlers",
-        previous_state={"status": previous_status},
-        new_state={"status": new_status},
+        state=StateChange(
+            previous={"status": previous_status},
+            new={"status": new_status},
+        ),
         context=error_message or "",
         request_id=event_id,
     )
@@ -157,7 +174,7 @@ def _handle_status_updated(event: dict) -> None:
     )
 
 
-def _handle_provisioned(event: dict) -> None:
+def _handle_provisioned(event: dict[str, Any]) -> None:
     """Handle range.provisioned event notification - log only, no DB updates.
 
     The provisioner writes all state directly to the database (instances,
@@ -209,7 +226,7 @@ def process_ngfw_event(message: str | dict) -> None:
     _handle_ngfw_event(event)
 
 
-def _handle_ngfw_event(event: dict) -> None:
+def _handle_ngfw_event(event: dict[str, Any]) -> None:
     """Handle NGFW event notification - log only, no DB updates.
 
     The provisioner writes all state directly to the database.
@@ -232,10 +249,12 @@ def _handle_ngfw_event(event: dict) -> None:
         entity_id=app_id or 0,
         action=_status_to_action(status) if status else AuditLog.Action.UPDATE,
         source="engine.handlers",
-        new_state={
-            "status": status,
-            "instance_id": instance_id,
-        },
+        state=StateChange(
+            new={
+                "status": status,
+                "instance_id": instance_id,
+            }
+        ),
         request_id=str(request_id) if request_id else event_id,
     )
 

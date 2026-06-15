@@ -1,683 +1,120 @@
-"""GDC VM Runtime guest lifecycle for the active GCP range plane."""
+"""GDC VM Runtime guest lifecycle for the active GCP range plane.
+
+Public entry points: :func:`apply_range_assets`,
+:func:`destroy_range_assets`, :func:`run_power_operation`. Internal
+helpers live in private sibling modules (``_gdc_vm_naming``,
+``_gdc_vm_templates``, ``_gdc_vm_image_source``, ``_gdc_vm_secrets``,
+``_gdc_vm_kube``, ``_gdc_vm_disks``, ``_gdc_vm_runner``) and are re-imported
+here so ``gdc_vmseries_ngfw`` callers and existing
+``patch("gdc_vmruntime_assets.X")`` test fixtures keep working unchanged.
+"""
 
 from __future__ import annotations
 
 import logging
-import os
-import re
-import subprocess  # nosec B404 - used for kubectl virt runtime operations
+
+# Bandit B404 suppressed; the subprocess module is used for kubectl virt runtime operations.
+import subprocess  # nosec B404  # NOSONAR — bandit suppression must stay inline (S139)
 import tempfile
-import time
-from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
-from cloud.gcp.base import get_project_id, import_google_module
-from components.instance import sanitize_hostname
-from config import GDCNetworkAccessConfig, GDCVMRuntimeConfig, load_gdc_network_access_config, load_gdc_vmruntime_config
+from _gdc_vm_disks import (
+    _asset_labels,
+    _build_disk_manifest,
+    _build_vm_manifest,
+    _VMComputeSpec,
+    _VMNetworkSpec,
+)
+from _gdc_vm_image_source import _resolve_image_source
+from _gdc_vm_kube import (
+    _VM_DISK_PLURAL,
+    _VM_GROUP,
+    _VM_PLURAL,
+    _VM_VERSION,
+    _apply_namespaced_custom_object,
+    _build_kube_api_client,
+    _collect_vmi_metadata,
+    _delete_namespaced_custom_object,
+    _extract_vm_ip,
+    _import_kubernetes_modules,
+    _wait_for_deleted,
+    _wait_for_disk_ready,
+    _wait_for_vm_ready,
+    _wait_for_vm_stopped,
+)
+from _gdc_vm_naming import (
+    _assignment_key,
+    _build_instance_hostname,
+    _disk_name,
+    _sanitize_name,
+    _vm_name,
+)
+from _gdc_vm_runner import (
+    _build_subnet_pending_instances,
+    _instance_os_label,
+    _iter_vm_runtime_instances,
+    _KubeAccess,
+    _resolve_power_target,
+    _select_namespace,
+    _SubnetContext,
+    _VMRuntimeRunContext,
+)
+from _gdc_vm_secrets import (
+    _IMAGE_IMPORT_K8S_NAME,
+    _delete_rdp_password_secret,
+    _delete_ssh_secret,
+    _ensure_gcs_image_secret,
+    _ensure_rdp_password_secret,
+    _ensure_ssh_secret,
+    _read_secret_payload,
+)
+from _gdc_vm_templates import _render_user_data
+from config import load_gdc_network_access_config, load_gdc_vmruntime_config
 from executors.factory import get_ssh_username
-from utils.crypto import derive_ssh_public_key, generate_rdp_password, generate_ssh_keypair
+from log_redact import safe_log_fingerprint, safe_log_value
+
+if TYPE_CHECKING:
+    from kubernetes.client import CoreV1Api, CustomObjectsApi
+    from kubernetes.client.exceptions import ApiException
 
 logger = logging.getLogger(__name__)
 
-_VM_GROUP = "vm.cluster.gke.io"
-_VM_VERSION = "v1"
-_VM_DISK_PLURAL = "virtualmachinedisks"
-_VM_PLURAL = "virtualmachines"
-_VMI_GROUP = "kubevirt.io"
-_VMI_VERSION = "v1"
-_VMI_PLURAL = "virtualmachineinstances"
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
-_IMAGE_IMPORT_SECRET_SUFFIX = "-".join(("gdc", "vm", "image", "gcs"))
-_POLL_INTERVAL_SECONDS = 5
-_DISK_READY_TIMEOUT_SECONDS = 1800
-_VM_READY_TIMEOUT_SECONDS = 1800
-_VM_STOP_TIMEOUT_SECONDS = 900
-_DELETE_TIMEOUT_SECONDS = 300
-_MANAGED_BY_LABEL = "shifter-provisioner"
-_SECRETMANAGER_MODULE = "google.cloud.secretmanager"
-_GOOGLE_EXCEPTIONS_MODULE = "google.api_core.exceptions"
-
-
-def _import_kubernetes_modules():
-    try:
-        import kubernetes
-        from kubernetes import client, config
-        from kubernetes.client.exceptions import ApiException
-    except ImportError as exc:
-        raise RuntimeError("GDC VM Runtime asset lifecycle requires the kubernetes Python client") from exc
-
-    return kubernetes, client, config, ApiException
-
-
-def _sanitize_name(value: str, *, max_length: int = 63) -> str:
-    normalized = re.sub(r"[^a-z0-9-]+", "-", value.strip().lower())
-    normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
-    normalized = normalized[:max_length].rstrip("-")
-    return normalized or "range"
-
-
-def _build_kube_api_client(kubeconfig_yaml: str):
-    _, client, config, _ = _import_kubernetes_modules()
-    import yaml
-
-    kubeconfig_dict = yaml.safe_load(kubeconfig_yaml)
-    if not isinstance(kubeconfig_dict, dict):
-        raise RuntimeError("GDC kubeconfig secret did not decode into a kubeconfig document")
-
-    loader = config.kube_config.KubeConfigLoader(config_dict=kubeconfig_dict)
-    configuration = client.Configuration()
-    loader.load_and_set(configuration)
-    return client.ApiClient(configuration=configuration)
-
-
-def _instance_token(instance: dict[str, Any]) -> str:
-    uuid_value = str(instance.get("uuid", "")).strip()
-    if uuid_value:
-        return _sanitize_name(uuid_value.split("-")[-1], max_length=12)
-    name_value = str(instance.get("name", "")).strip()
-    if name_value:
-        return _sanitize_name(name_value, max_length=12)
-    return _sanitize_name(f"{instance.get('role', 'vm')}-{instance.get('os_type', 'guest')}", max_length=12)
-
-
-def _assignment_key(instance: dict[str, Any], index: int) -> str:
-    """Build the stable key used by the network runner for per-asset IPs."""
-    uuid_value = str(instance.get("uuid", "")).strip()
-    if uuid_value:
-        return uuid_value
-    name_value = str(instance.get("name", "")).strip()
-    if name_value:
-        return name_value
-    return f"asset-{index}"
-
-
-def _is_vm_runtime_asset(instance: dict[str, Any]) -> bool:
-    """Return True when the instance should be provisioned as a VM Runtime VM."""
-    return str(instance.get("asset_type", "vm_runtime_vm")).strip() == "vm_runtime_vm"
-
-
-def _vm_name(range_id: int, subnet_name: str, instance: dict[str, Any]) -> str:
-    token = _instance_token(instance)
-    role = _sanitize_name(str(instance.get("role", "vm")), max_length=12)
-    return _sanitize_name(f"range-{range_id}-{subnet_name}-{role}-{token}")
-
-
-def _disk_name(vm_name: str) -> str:
-    return _sanitize_name(f"{vm_name}-boot")
-
-
-def _build_instance_hostname(instance: dict[str, Any], vm_name: str) -> str:
-    display_name = str(instance.get("name", "")).strip()
-    if display_name:
-        return sanitize_hostname(display_name)
-    return sanitize_hostname(vm_name, max_length=20)
-
-
-def _build_instance_secret_name(range_id: int, instance: dict[str, Any], *, kind: str = "ssh") -> str:
-    """Build a per-instance Secret Manager secret name for ``kind``.
-
-    ``kind`` is appended as the trailing identifier so SSH keys and RDP
-    passwords live in distinct secrets per instance (``ssh`` vs
-    ``rdp-password``). The naming pattern matches the AWS Terraform
-    range module convention.
-    """
-    environment = _sanitize_name(os.environ.get("ENVIRONMENT", "gcp-dev"), max_length=32)
-    token = _instance_token(instance)
-    role = _sanitize_name(str(instance.get("role", "vm")), max_length=12)
-    return _sanitize_name(
-        f"shifter-{environment}-range-{range_id}-{role}-{token}-{kind}",
-        max_length=255,
-    )
-
-
-def _load_template(name: str):
-    env = Environment(
-        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-        autoescape=select_autoescape(
-            enabled_extensions=("html", "xml"),
-            default_for_string=False,
-            default=False,
-        ),
-    )
-    return env.get_template(name)
-
-
-def _render_user_data(instance: dict[str, Any], hostname: str, public_key: str) -> str:
-    """Render the cloud-init user_data for a GDC VM Runtime instance.
-
-    Per #762, the per-instance guest password is **not** rendered into
-    user_data. The engine provisioner sets it post-boot via SSH (Linux)
-    or SSH-driven PowerShell (Windows) using the per-instance SSH key
-    already provisioned in ``authorized_keys`` /
-    ``administrators_authorized_keys`` by this template. The DC role's
-    domain Administrator password (deployment-scoped
-    ``DC_DOMAIN_PASSWORD``) is set by the DC promote workflow via
-    Ansible/SSM, also post-boot.
-    """
-    role = str(instance.get("role", "victim"))
-    os_type = str(instance.get("os_type", "ubuntu"))
-
-    if role == "dc":
-        template = _load_template("dc_windows.ps1.j2")
-        return template.render(public_key=public_key)
-    if os_type == "windows":
-        template = _load_template("victim_windows.ps1.j2")
-        return template.render(public_key=public_key)
-    if role == "attacker" or os_type == "kali":
-        template = _load_template("kali.sh.j2")
-        return template.render(hostname=hostname, public_key=public_key)
-
-    template = _load_template("victim_linux.sh.j2")
-    return template.render(public_key=public_key, ssh_user=get_ssh_username(os_type, role))
-
-
-def _resolve_image_source(source_url: str, gcs_secret_name: str | None) -> dict[str, Any]:
-    if source_url.startswith("gs://"):
-        gcs_source: dict[str, Any] = {"url": source_url}
-        if gcs_secret_name:
-            gcs_source["secretRef"] = gcs_secret_name
-        return {"gcs": gcs_source}
-    if source_url.startswith("https://"):
-        return {"http": {"url": source_url}}
-    if source_url.startswith("docker://"):
-        return {"registry": {"url": source_url}}
-    if source_url.startswith("registry://"):
-        return {"registry": {"url": f"docker://{source_url.removeprefix('registry://')}"}}
-    if source_url.startswith("oci://"):
-        return {"registry": {"url": f"docker://{source_url.removeprefix('oci://')}"}}
-    raise RuntimeError(
-        f"Unsupported GDC VM Runtime image source {source_url!r}. "
-        "Use gs://, https://, docker://, registry://, or oci://."
-    )
-
-
-def _asset_labels(range_id: int, request_uuid: str, subnet_name: str, instance_uuid: str) -> dict[str, str]:
-    labels = {
-        "app.kubernetes.io/managed-by": _MANAGED_BY_LABEL,
-        "shifter.dev/range-id": str(range_id),
-        "shifter.dev/request-id": request_uuid,
-        "shifter.dev/subnet-name": _sanitize_name(subnet_name),
-        "shifter.dev/range-plane": "gdc-vmruntime",
-    }
-    if instance_uuid:
-        labels["shifter.dev/instance-uuid"] = instance_uuid
-    return labels
-
-
-def _build_disk_manifest(
-    *,
-    namespace: str,
-    disk_name: str,
-    source_url: str,
-    gcs_secret_name: str | None,
-    disk_size_gib: int,
-    storage_class_name: str,
-    labels: dict[str, str],
-) -> dict[str, Any]:
-    return {
-        "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
-        "kind": "VirtualMachineDisk",
-        "metadata": {
-            "name": disk_name,
-            "namespace": namespace,
-            "labels": labels,
-        },
-        "spec": {
-            "size": f"{disk_size_gib}Gi",
-            "storageClassName": storage_class_name,
-            "source": _resolve_image_source(source_url, gcs_secret_name),
-        },
-    }
-
-
-def _build_vm_manifest(
-    *,
-    namespace: str,
-    vm_name: str,
-    disk_name: str,
-    network_name: str,
-    static_ip: str,
-    subnet_cidr: str,
-    user_data: str,
-    os_label: str,
-    vcpus: int,
-    memory: str,
-    labels: dict[str, str],
-) -> dict[str, Any]:
-    prefix_length = subnet_cidr.split("/", 1)[1]
-    return {
-        "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
-        "kind": "VirtualMachine",
-        "metadata": {
-            "name": vm_name,
-            "namespace": namespace,
-            "labels": labels,
-        },
-        "spec": {
-            "osType": os_label,
-            "compute": {
-                "cpu": {"vcpus": vcpus},
-                "memory": {"capacity": memory},
-            },
-            "interfaces": [
-                {
-                    "name": "eth0",
-                    "networkName": network_name,
-                    "ipAddresses": [f"{static_ip}/{prefix_length}"],
-                    "default": True,
-                }
-            ],
-            "disks": [
-                {
-                    "boot": True,
-                    "autoDelete": False,
-                    "virtualMachineDiskName": disk_name,
-                }
-            ],
-            "cloudInit": {
-                "noCloud": {
-                    "userData": user_data,
-                }
-            },
-        },
-    }
-
-
-def _apply_namespaced_custom_object(
-    custom_api,
-    *,
-    group: str,
-    version: str,
-    plural: str,
-    namespace: str,
-    body: dict[str, Any],
-    api_exception,
-) -> None:
-    name = body["metadata"]["name"]
-    try:
-        custom_api.create_namespaced_custom_object(
-            group=group,
-            version=version,
-            plural=plural,
-            namespace=namespace,
-            body=body,
-        )
-        logger.info("Created %s %s/%s", body["kind"], namespace, name)
-    except api_exception as exc:
-        if exc.status != 409:
-            raise
-        custom_api.patch_namespaced_custom_object(
-            group=group,
-            version=version,
-            plural=plural,
-            namespace=namespace,
-            name=name,
-            body=body,
-        )
-        logger.info("Updated %s %s/%s", body["kind"], namespace, name)
-
-
-def _delete_namespaced_custom_object(
-    custom_api,
-    *,
-    group: str,
-    version: str,
-    plural: str,
-    namespace: str,
-    name: str,
-    api_exception,
-) -> None:
-    try:
-        custom_api.delete_namespaced_custom_object(
-            group=group,
-            version=version,
-            plural=plural,
-            namespace=namespace,
-            name=name,
-        )
-        logger.info("Deleted %s %s/%s", plural, namespace, name)
-    except api_exception as exc:
-        if exc.status != 404:
-            raise
-
-
-def _wait_for_disk_ready(custom_api, namespace: str, disk_name: str, api_exception) -> dict[str, Any]:
-    deadline = time.monotonic() + _DISK_READY_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            disk = custom_api.get_namespaced_custom_object(
-                group=_VM_GROUP,
-                version=_VM_VERSION,
-                plural=_VM_DISK_PLURAL,
-                namespace=namespace,
-                name=disk_name,
-            )
-        except api_exception as exc:
-            if exc.status == 404:
-                time.sleep(_POLL_INTERVAL_SECONDS)
-                continue
-            raise
-
-        status = disk.get("status", {})
-        phase = str(status.get("phase", "")).lower()
-        if phase == "succeeded":
-            return disk
-        if phase == "failed":
-            raise RuntimeError(f"VirtualMachineDisk {namespace}/{disk_name} failed to import")
-        time.sleep(_POLL_INTERVAL_SECONDS)
-
-    raise RuntimeError(f"Timed out waiting for VirtualMachineDisk {namespace}/{disk_name} to become ready")
-
-
-def _extract_vm_ip(vm: dict[str, Any]) -> str:
-    status = vm.get("status", {})
-    for interface in status.get("interfaces", []) or []:
-        ip_addresses = interface.get("ipAddresses") or []
-        if ip_addresses:
-            return str(ip_addresses[0]).split("/", 1)[0]
-    return ""
-
-
-def _wait_for_vm_ready(custom_api, namespace: str, vm_name: str, api_exception) -> dict[str, Any]:
-    deadline = time.monotonic() + _VM_READY_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            vm = custom_api.get_namespaced_custom_object(
-                group=_VM_GROUP,
-                version=_VM_VERSION,
-                plural=_VM_PLURAL,
-                namespace=namespace,
-                name=vm_name,
-            )
-        except api_exception as exc:
-            if exc.status == 404:
-                time.sleep(_POLL_INTERVAL_SECONDS)
-                continue
-            raise
-
-        status = vm.get("status", {})
-        state = str(status.get("state", "")).lower()
-        private_ip = _extract_vm_ip(vm)
-        if state == "running" and private_ip:
-            return vm
-        if state in {"failed", "error"}:
-            raise RuntimeError(f"VirtualMachine {namespace}/{vm_name} entered state={state}")
-        time.sleep(_POLL_INTERVAL_SECONDS)
-
-    raise RuntimeError(f"Timed out waiting for VirtualMachine {namespace}/{vm_name} to become ready")
-
-
-def _wait_for_vm_stopped(custom_api, namespace: str, vm_name: str, api_exception) -> dict[str, Any]:
-    deadline = time.monotonic() + _VM_STOP_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            vm = custom_api.get_namespaced_custom_object(
-                group=_VM_GROUP,
-                version=_VM_VERSION,
-                plural=_VM_PLURAL,
-                namespace=namespace,
-                name=vm_name,
-            )
-        except api_exception as exc:
-            if exc.status == 404:
-                time.sleep(_POLL_INTERVAL_SECONDS)
-                continue
-            raise
-
-        status = vm.get("status", {})
-        state = str(status.get("state", "")).lower()
-        if state == "stopped":
-            return vm
-        if state in {"failed", "error"}:
-            raise RuntimeError(f"VirtualMachine {namespace}/{vm_name} entered state={state}")
-        time.sleep(_POLL_INTERVAL_SECONDS)
-
-    raise RuntimeError(f"Timed out waiting for VirtualMachine {namespace}/{vm_name} to stop")
-
-
-def _wait_for_deleted(
-    custom_api,
-    namespace: str,
-    name: str,
-    group: str,
-    version: str,
-    plural: str,
-    api_exception,
-) -> None:
-    deadline = time.monotonic() + _DELETE_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            custom_api.get_namespaced_custom_object(
-                group=group,
-                version=version,
-                plural=plural,
-                namespace=namespace,
-                name=name,
-            )
-        except api_exception as exc:
-            if exc.status == 404:
-                return
-            raise
-        time.sleep(_POLL_INTERVAL_SECONDS)
-
-    raise RuntimeError(f"Timed out waiting for {plural} {namespace}/{name} to delete")
-
-
-def _read_secret_payload(secret_id: str) -> tuple[str, str]:
-    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
-    client = secretmanager.SecretManagerServiceClient()
-    if secret_id.startswith("projects/"):
-        full_secret_name = secret_id
-    else:
-        full_secret_name = f"projects/{get_project_id()}/secrets/{secret_id}"
-    response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
-    return response.payload.data.decode("utf-8"), full_secret_name
-
-
-def _ensure_ssh_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, str]:
-    project_id = get_project_id()
-    if not project_id:
-        raise RuntimeError("GCP project ID is required to manage GDC VM Runtime SSH secrets")
-
-    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
-    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
-    client = secretmanager.SecretManagerServiceClient()
-    secret_id = _build_instance_secret_name(range_id, instance, kind="ssh")
-    full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
-
-    try:
-        response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
-        private_key = response.payload.data.decode("utf-8")
-    except google_exceptions.NotFound:
-        private_key, _public_key = generate_ssh_keypair()
-        with suppress(google_exceptions.AlreadyExists):
-            client.create_secret(
-                request={
-                    "parent": f"projects/{project_id}",
-                    "secret_id": secret_id,
-                    "secret": {"replication": {"automatic": {}}},
-                }
-            )
-        client.add_secret_version(
-            request={
-                "parent": full_secret_name,
-                "payload": {"data": private_key.encode("utf-8")},
-            }
-        )
-
-    return full_secret_name, derive_ssh_public_key(private_key)
-
-
-def _delete_ssh_secret(range_id: int, instance: dict[str, Any]) -> None:
-    project_id = get_project_id()
-    if not project_id:
-        return
-
-    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
-    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
-    client = secretmanager.SecretManagerServiceClient()
-    secret_name = f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='ssh')}"
-    try:
-        client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC SSH secret %s", secret_name)
-    except google_exceptions.NotFound:
-        return
-
-
-def _ensure_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, str]:
-    """Create or read a per-instance RDP password (GCP Secret Manager) (#762).
-
-    Idempotent: on repeated runs (e.g., resume after a transient
-    failure) the existing secret's value is returned so the guest's
-    chpasswd / net-user step keeps using the same value across boots.
-    Returns a tuple of ``(secret_ref, password_value)``.
-    """
-    project_id = get_project_id()
-    if not project_id:
-        raise RuntimeError("GCP project ID is required to manage GDC VM Runtime RDP password secrets")
-
-    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
-    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
-    client = secretmanager.SecretManagerServiceClient()
-    secret_id = _build_instance_secret_name(range_id, instance, kind="rdp-password")
-    full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
-
-    try:
-        response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
-        password = response.payload.data.decode("utf-8")
-    except google_exceptions.NotFound:
-        password = generate_rdp_password()
-        with suppress(google_exceptions.AlreadyExists):
-            client.create_secret(
-                request={
-                    "parent": f"projects/{project_id}",
-                    "secret_id": secret_id,
-                    "secret": {"replication": {"automatic": {}}},
-                }
-            )
-        client.add_secret_version(
-            request={
-                "parent": full_secret_name,
-                "payload": {"data": password.encode("utf-8")},
-            }
-        )
-
-    return full_secret_name, password
-
-
-def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None:
-    project_id = get_project_id()
-    if not project_id:
-        return
-
-    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
-    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
-    client = secretmanager.SecretManagerServiceClient()
-    secret_name = (
-        f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='rdp-password')}"
-    )
-    try:
-        client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC RDP password secret %s", secret_name)
-    except google_exceptions.NotFound:
-        return
-
-
-def _ensure_gcs_image_secret(
-    core_api,
-    client_module,
-    namespace: str,
-    vm_config: GDCVMRuntimeConfig,
-    api_exception,
-) -> str | None:
-    if not vm_config.image_gcs_secret_id:
-        return None
-
-    secret_data, _full_secret_name = _read_secret_payload(vm_config.image_gcs_secret_id)
-    body = client_module.V1Secret(
-        metadata=client_module.V1ObjectMeta(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace),
-        type="Opaque",
-        string_data={"creds-gcp.json": secret_data},
-    )
-    try:
-        core_api.create_namespaced_secret(namespace=namespace, body=body)
-        logger.info("Created GDC VM image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
-    except api_exception as exc:
-        if exc.status != 409:
-            raise
-        core_api.patch_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace, body=body)
-        logger.info("Updated GDC VM image access secret %s/%s", namespace, _IMAGE_IMPORT_SECRET_SUFFIX)
-    return _IMAGE_IMPORT_SECRET_SUFFIX
-
-
-def _collect_vmi_metadata(custom_api, namespace: str, vm_name: str, api_exception) -> dict[str, Any]:
-    try:
-        vmi = custom_api.get_namespaced_custom_object(
-            group=_VMI_GROUP,
-            version=_VMI_VERSION,
-            plural=_VMI_PLURAL,
-            namespace=namespace,
-            name=vm_name,
-        )
-    except api_exception as exc:
-        if exc.status == 404:
-            return {}
-        raise
-
-    status = vmi.get("status", {})
-    metadata = {
-        "gdc_vmi_name": str(vmi.get("metadata", {}).get("name", "")).strip(),
-        "gdc_node_name": str(status.get("nodeName", "")).strip(),
-    }
-    return {key: value for key, value in metadata.items() if value}
-
-
-def _get_runtime_metadata(state: dict[str, Any]) -> dict[str, Any]:
-    provider_metadata = state.get("provider_metadata")
-    if not isinstance(provider_metadata, dict):
-        return {}
-
-    for provider_name in ("gcp", "gdc"):
-        metadata = provider_metadata.get(provider_name)
-        if isinstance(metadata, dict):
-            return metadata
-
-    return {}
-
-
-def _resolve_power_target(state: dict[str, Any]) -> tuple[str, str]:
-    metadata = _get_runtime_metadata(state)
-    namespace = str(metadata.get("namespace") or state.get("gdc_namespace", "")).strip()
-    vm_name = str(metadata.get("vm_name") or state.get("gdc_vm_name") or state.get("instance_id", "")).strip()
-    if not namespace or not vm_name:
-        raise RuntimeError("GDC VM Runtime state is missing namespace or VM name")
-    return namespace, vm_name
-
-
-def _instance_os_label(os_type: str) -> str:
-    return "Windows" if os_type == "windows" else "Linux"
-
-
-def _select_namespace(range_id: int, subnet_outputs: dict[str, dict[str, Any]], access: GDCNetworkAccessConfig) -> str:
-    for subnet_output in subnet_outputs.values():
-        namespace = str(subnet_output.get("gdc_namespace", "")).strip()
-        if namespace:
-            return namespace
-    return _sanitize_name(f"{access.namespace_prefix}-{range_id}")
+# Re-exports for ``gdc_vmseries_ngfw`` and test patches; keep them in
+# ``__all__`` so Pyflakes (F401) does not flag them as unused imports.
+__all__ = [
+    "_IMAGE_IMPORT_K8S_NAME",
+    "_VM_DISK_PLURAL",
+    "_VM_GROUP",
+    "_VM_PLURAL",
+    "_VM_VERSION",
+    "_apply_namespaced_custom_object",
+    "_build_disk_manifest",
+    "_build_kube_api_client",
+    "_delete_namespaced_custom_object",
+    "_import_kubernetes_modules",
+    "_read_secret_payload",
+    "_resolve_image_source",
+    "_sanitize_name",
+    "_wait_for_deleted",
+    "_wait_for_disk_ready",
+    "_wait_for_vm_ready",
+    "apply_range_assets",
+    "destroy_range_assets",
+    "run_power_operation",
+]
 
 
 def _delete_vm_runtime_resource(
-    custom_api,
+    custom_api: CustomObjectsApi,
     *,
     namespace: str,
     name: str,
     plural: str,
     label: str,
-    api_exception,
+    api_exception: type[ApiException],
 ) -> None:
+    """Delete a GDC VM-Runtime resource and wait for its removal, logging timeouts."""
     _delete_namespaced_custom_object(
         custom_api,
         group=_VM_GROUP,
@@ -690,29 +127,31 @@ def _delete_vm_runtime_resource(
     try:
         _wait_for_deleted(custom_api, namespace, name, _VM_GROUP, _VM_VERSION, plural, api_exception)
     except RuntimeError:
-        logger.warning("Timed out waiting for GDC %s %s/%s to delete", label, namespace, name)
+        logger.warning(
+            "Timed out waiting for GDC %s %s/%s to delete",
+            safe_log_value(label),
+            safe_log_value(namespace),
+            safe_log_fingerprint(name),
+        )
 
 
 def _build_pending_vm_runtime_instance(
     *,
-    range_id: int,
-    request_uuid: str,
-    namespace: str,
-    subnet_name: str,
+    run: _VMRuntimeRunContext,
     instance: dict[str, Any],
     index: int,
-    asset_ip_assignments: dict[str, Any],
-    subnet_cidr: str,
-    network_name: str,
-    vm_config: GDCVMRuntimeConfig,
-    gcs_secret_name: str | None,
-    custom_api,
-    api_exception,
+    subnet: _SubnetContext,
 ) -> dict[str, Any]:
-    static_ip = str(asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
+    """Apply disk + VM manifests for a single instance and return its pending record."""
+    range_id = run.range_id
+    request_uuid = run.request_uuid
+    vm_config = run.vm_config
+    gcs_secret_name = run.gcs_secret_name
+    kube = run.kube
+    static_ip = str(subnet.asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
     if not static_ip:
         raise RuntimeError(f"Missing deterministic IP assignment for VM Runtime asset {instance!r}")
-    vm_name = _vm_name(range_id, subnet_name, instance)
+    vm_name = _vm_name(range_id, subnet.subnet_name, instance)
     disk_name = _disk_name(vm_name)
     hostname = _build_instance_hostname(instance, vm_name)
     ssh_secret_ref, public_key = _ensure_ssh_secret(range_id, instance)
@@ -729,9 +168,9 @@ def _build_pending_vm_runtime_instance(
     user_data = _render_user_data(instance, hostname, public_key)
     os_type = str(instance.get("os_type", "ubuntu"))
     profile = vm_config.get_profile(role=str(instance.get("role", "victim")), os_type=os_type)
-    labels = _asset_labels(range_id, request_uuid, subnet_name, str(instance.get("uuid", "")))
+    labels = _asset_labels(range_id, request_uuid, subnet.subnet_name, str(instance.get("uuid", "")))
     disk_manifest = _build_disk_manifest(
-        namespace=namespace,
+        namespace=subnet.namespace,
         disk_name=disk_name,
         source_url=profile.source_url,
         gcs_secret_name=gcs_secret_name if profile.source_url.startswith("gs://") else None,
@@ -740,41 +179,45 @@ def _build_pending_vm_runtime_instance(
         labels=labels,
     )
     _apply_namespaced_custom_object(
-        custom_api,
+        kube.custom_api,
         group=_VM_GROUP,
         version=_VM_VERSION,
         plural=_VM_DISK_PLURAL,
-        namespace=namespace,
+        namespace=subnet.namespace,
         body=disk_manifest,
-        api_exception=api_exception,
+        api_exception=kube.api_exception,
     )
-    _wait_for_disk_ready(custom_api, namespace, disk_name, api_exception)
+    _wait_for_disk_ready(kube.custom_api, subnet.namespace, disk_name, kube.api_exception)
 
     vm_manifest = _build_vm_manifest(
-        namespace=namespace,
+        namespace=subnet.namespace,
         vm_name=vm_name,
         disk_name=disk_name,
-        network_name=network_name,
-        static_ip=static_ip,
-        subnet_cidr=subnet_cidr,
         user_data=user_data,
-        os_label=_instance_os_label(os_type),
-        vcpus=profile.vcpus,
-        memory=profile.memory,
         labels=labels,
+        network=_VMNetworkSpec(
+            network_name=subnet.network_name,
+            static_ip=static_ip,
+            subnet_cidr=subnet.subnet_cidr,
+        ),
+        compute=_VMComputeSpec(
+            os_label=_instance_os_label(os_type),
+            vcpus=profile.vcpus,
+            memory=profile.memory,
+        ),
     )
     _apply_namespaced_custom_object(
-        custom_api,
+        kube.custom_api,
         group=_VM_GROUP,
         version=_VM_VERSION,
         plural=_VM_PLURAL,
-        namespace=namespace,
+        namespace=subnet.namespace,
         body=vm_manifest,
-        api_exception=api_exception,
+        api_exception=kube.api_exception,
     )
     return {
         "instance": instance,
-        "subnet_name": subnet_name,
+        "subnet_name": subnet.subnet_name,
         "vm_name": vm_name,
         "disk_name": disk_name,
         "hostname": hostname,
@@ -789,9 +232,10 @@ def _build_vm_runtime_output(
     *,
     namespace: str,
     pending: dict[str, Any],
-    custom_api,
-    api_exception,
+    custom_api: CustomObjectsApi,
+    api_exception: type[ApiException],
 ) -> dict[str, Any]:
+    """Wait for a pending VM to become ready and return its provisioner output dict."""
     vm = _wait_for_vm_ready(custom_api, namespace, pending["vm_name"], api_exception)
     private_ip = _extract_vm_ip(vm) or pending["static_ip"]
     vmi_metadata = _collect_vmi_metadata(custom_api, namespace, pending["vm_name"], api_exception)
@@ -833,24 +277,15 @@ def _build_vm_runtime_output(
     return output
 
 
-def _iter_vm_runtime_instances(subnets: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
-    assets: list[tuple[str, dict[str, Any]]] = []
-    for subnet in subnets:
-        subnet_name = str(subnet.get("name", "")).strip()
-        for instance in subnet.get("instances") or []:
-            if _is_vm_runtime_asset(instance):
-                assets.append((subnet_name, instance))
-    return assets
-
-
 def _destroy_vm_runtime_vms(
     *,
-    custom_api,
+    custom_api: CustomObjectsApi,
     namespace: str,
     range_id: int,
     assets: list[tuple[str, dict[str, Any]]],
-    api_exception,
+    api_exception: type[ApiException],
 ) -> None:
+    """Delete every VirtualMachine resource owned by a range."""
     for subnet_name, instance in assets:
         vm_name = _vm_name(range_id, subnet_name, instance)
         _delete_vm_runtime_resource(
@@ -865,12 +300,13 @@ def _destroy_vm_runtime_vms(
 
 def _destroy_vm_runtime_disks_and_secrets(
     *,
-    custom_api,
+    custom_api: CustomObjectsApi,
     namespace: str,
     range_id: int,
     assets: list[tuple[str, dict[str, Any]]],
-    api_exception,
+    api_exception: type[ApiException],
 ) -> None:
+    """Delete every VirtualMachineDisk and per-instance secret owned by a range."""
     for subnet_name, instance in assets:
         disk_name = _disk_name(_vm_name(range_id, subnet_name, instance))
         _delete_vm_runtime_resource(
@@ -887,15 +323,16 @@ def _destroy_vm_runtime_disks_and_secrets(
 
 def _delete_image_import_secret_if_needed(
     *,
-    core_api,
+    core_api: CoreV1Api,
     namespace: str,
-    api_exception,
+    api_exception: type[ApiException],
 ) -> None:
+    """Delete the GCS image-pull Secret if one was configured for the range plane."""
     image_gcs_secret_id = load_gdc_vmruntime_config().image_gcs_secret_id
     if not image_gcs_secret_id:
         return
     try:
-        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace)
+        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_K8S_NAME, namespace=namespace)
     except api_exception as exc:
         if exc.status != 404:
             raise
@@ -919,45 +356,30 @@ def apply_range_assets(
     api_client = _build_kube_api_client(access.kubeconfig)
     custom_api = client_module.CustomObjectsApi(api_client)
     core_api = client_module.CoreV1Api(api_client)
+    kube = _KubeAccess(custom_api=custom_api, api_exception=api_exception)
 
     range_id = int(variables["range_id"])
     namespace = _select_namespace(range_id, subnet_outputs, access)
     gcs_secret_name = _ensure_gcs_image_secret(core_api, client_module, namespace, vm_config, api_exception)
+    run = _VMRuntimeRunContext(
+        range_id=range_id,
+        request_uuid=request_uuid,
+        vm_config=vm_config,
+        gcs_secret_name=gcs_secret_name,
+        kube=kube,
+    )
 
     pending_instances: list[dict[str, Any]] = []
     for subnet in variables.get("subnets", []):
-        subnet_name = str(subnet.get("name", "")).strip()
-        subnet_output = subnet_outputs.get(subnet_name, {})
-        asset_ip_assignments = dict(subnet_output.get("gdc_asset_ip_assignments") or {})
-        subnet_cidr = str(subnet_output.get("subnet_cidr", "")).strip()
-        network_name = str(subnet_output.get("gdc_network_name", "")).strip()
-        if not subnet_name or not subnet_cidr or not network_name:
-            raise RuntimeError(f"GDC subnet output missing network details for {subnet_name!r}")
-
-        instances = list(subnet.get("instances") or [])
-        for index, instance in enumerate(instances):
-            if not _is_vm_runtime_asset(instance):
-                continue
-            pending_instances.append(
-                {
-                    **_build_pending_vm_runtime_instance(
-                        range_id=range_id,
-                        request_uuid=request_uuid,
-                        namespace=namespace,
-                        subnet_name=subnet_name,
-                        instance=instance,
-                        index=index,
-                        asset_ip_assignments=asset_ip_assignments,
-                        subnet_cidr=subnet_cidr,
-                        network_name=network_name,
-                        vm_config=vm_config,
-                        gcs_secret_name=gcs_secret_name,
-                        custom_api=custom_api,
-                        api_exception=api_exception,
-                    ),
-                    "subnet_output": subnet_output,
-                }
+        pending_instances.extend(
+            _build_subnet_pending_instances(
+                subnet=subnet,
+                subnet_outputs=subnet_outputs,
+                namespace=namespace,
+                run=run,
+                build_instance=_build_pending_vm_runtime_instance,
             )
+        )
 
     return [
         _build_vm_runtime_output(
@@ -1034,6 +456,9 @@ def run_power_operation(operation: str, state: dict[str, Any]) -> None:
 
     try:
         command = ["kubectl", "--kubeconfig", kubeconfig_path, "virt", operation, vm_name, "--namespace", namespace]
+
+        # tokens (see _sanitize_name) and the binary path is resolved via PATH; not a
+        # user-controlled command line.
         subprocess.run(command, check=True, capture_output=True)  # noqa: S603
     except FileNotFoundError as exc:
         raise RuntimeError("GDC VM Runtime power operations require kubectl with the virt plugin") from exc

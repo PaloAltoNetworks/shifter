@@ -53,6 +53,18 @@ variable "secret_arns" {
   type        = list(string)
 }
 
+variable "secrets_manager_kms_key_arn" {
+  description = <<-EOT
+    ARN of the portal Secrets Manager CMK. The EC2 role needs kms:Decrypt on
+    this key to fetch values from any portal Secrets Manager secret encrypted
+    with the CMK (e.g. the dc-domain password). Without it,
+    `entrypoint.sh::fetch_runtime_secret` fails the get_secret_value call with
+    `AccessDeniedException: Access to KMS is not allowed`. Required, no
+    default. See issue #52.
+  EOT
+  type        = string
+}
+
 variable "app_port" {
   description = "Port the Django app listens on"
   type        = number
@@ -137,6 +149,23 @@ variable "asg_desired_capacity" {
   type        = number
 }
 
+variable "asg_warm_pool_min_size" {
+  description = "Minimum number of pre-initialized instances to keep in the ASG warm pool. Set 0 to disable the warm pool."
+  type        = number
+  default     = 0
+}
+
+variable "asg_warm_pool_state" {
+  description = "Warm pool instance state. Valid values are Stopped, Running, or Hibernated."
+  type        = string
+  default     = "Stopped"
+
+  validation {
+    condition     = contains(["Stopped", "Running", "Hibernated"], var.asg_warm_pool_state)
+    error_message = "asg_warm_pool_state must be one of: Stopped, Running, Hibernated."
+  }
+}
+
 variable "redis_endpoint" {
   description = "Redis endpoint for Django Channels"
   type        = string
@@ -166,6 +195,11 @@ variable "sqs_queue_urls" {
   type        = map(string)
 }
 
+variable "sqs_kms_key_arn" {
+  description = "ARN of the CMK encrypting the portal messaging SNS/SQS resources"
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # Bootstrap Configuration (Parameter Store + Lifecycle Hook)
 # ------------------------------------------------------------------------------
@@ -192,4 +226,10 @@ variable "lifecycle_hook_heartbeat_timeout" {
   description = "Heartbeat timeout for ASG lifecycle hook in seconds (max 7200)"
   type        = number
   default     = 600
+}
+
+variable "worker_health_alarm_actions" {
+  description = "SNS topic ARNs notified when the UnhealthyWorkers alarm (#953) fires; empty disables alarm notifications"
+  type        = list(string)
+  default     = []
 }

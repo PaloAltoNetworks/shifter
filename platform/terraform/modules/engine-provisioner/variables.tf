@@ -34,9 +34,15 @@ variable "ecr_repository_url" {
 }
 
 variable "container_image_tag" {
-  description = "Docker image tag to deploy"
+  description = "Bootstrap Docker image tag for the engine provisioner container when no digest is supplied"
   type        = string
   default     = "latest"
+}
+
+variable "container_image_digest" {
+  description = "Immutable Docker image digest for the engine provisioner container"
+  type        = string
+  default     = ""
 }
 
 variable "task_cpu" {
@@ -349,5 +355,10 @@ variable "alarm_email" {
 
 variable "sns_topic_arn" {
   description = "ARN of the SNS topic for range event publishing"
+  type        = string
+}
+
+variable "sns_kms_key_arn" {
+  description = "ARN of the CMK used by the encrypted SNS range-events topic"
   type        = string
 }

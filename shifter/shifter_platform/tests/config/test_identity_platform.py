@@ -317,3 +317,16 @@ def test_identity_platform_logout_is_plain_session_logout(rf, identity_user):
     mock_logout.assert_called_once_with(request)
     assert response.status_code == 200
     assert b"identity_platform_logout.js" in response.content
+
+
+def test_verify_identity_token_wraps_firebase_verification_errors(monkeypatch):
+    """A firebase verification failure surfaces as IdentityPlatformAuthError, not a raw error."""
+    from config import identity_platform as ip
+
+    def _raise(*args, **kwargs):
+        raise ValueError("bad token")
+
+    monkeypatch.setattr(ip, "_ensure_firebase_app", lambda: None)
+    monkeypatch.setattr(ip.firebase_auth, "verify_id_token", _raise)
+    with pytest.raises(ip.IdentityPlatformAuthError):
+        ip.verify_identity_token("token")

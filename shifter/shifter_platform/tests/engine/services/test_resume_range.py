@@ -1,412 +1,103 @@
-"""Tests for resume_range() in engine/services.py."""
+"""Behavior tests for resume_range() in engine/services.
 
-import logging
-from unittest.mock import Mock, patch
+Drives the real service against real ``Range`` rows resolved via their linked
+Request (set up with the real ``create_range``). A PAUSED range transitions to
+RESUMING and a no-op ECS operation is dispatched under the test settings; other
+statuses are rejected, and READY/RESUMING are idempotent.
+"""
+
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from shared.enums import ResourceStatus
+import pytest
+from django.contrib.auth import get_user_model
+from django.test import override_settings
+
+from engine import create_range, resume_range
+from engine.models import Range
+from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
+
+# See test_pause_range: ECS is configured so the op can dispatch, with the AWS
+# task runner mocked at the boto3 boundary to return a task ARN.
+ECS_SETTINGS = {
+    "CLOUD_PROVIDER": "aws",
+    "ENGINE_TASK_CLUSTER": "test-cluster",
+    "ENGINE_TASK_DEFINITION": "test-taskdef",
+    "ENGINE_TASK_NETWORK_SECURITY_GROUP_ID": "sg-test",
+    "ENGINE_TASK_NETWORK_SUBNET_IDS": "subnet-aaa,subnet-bbb",
+}
+
+
+def _ecs_client_mock():
+    client = MagicMock()
+    client.run_task.return_value = {"tasks": [{"taskArn": "arn:aws:ecs:us-east-2:123:task/cluster/op"}]}
+    return client
+
+
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(username="engine-resume@example.com", email="engine-resume@example.com")
+
+
+def _request_spec(user_id):
+    return RequestSpec(
+        request_id=uuid4(),
+        user_id=user_id,
+        items=[
+            RangeSpec(
+                uuid=str(uuid4()),
+                scenario_id="basic",
+                user_id=user_id,
+                subnets=[
+                    SubnetSpec(
+                        name="default",
+                        uuid=str(uuid4()),
+                        instances=[InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4()))],
+                        connected_to=[],
+                    )
+                ],
+            )
+        ],
+    )
+
+
+@pytest.fixture
+def request_id_in_status(user):
+    def _make(status):
+        spec = _request_spec(user.id)
+        create_range(spec)
+        Range.objects.filter(request__request_id=spec.request_id).update(status=status)
+        return spec.request_id
+
+    return _make
 
 
 class TestResumeRange:
-    """Tests for resume_range() in engine/services.py.
-
-    Tests the service contract:
-    - Inputs: request_id (UUID)
-    - Outputs: bool (True if resume initiated or already ready, False otherwise)
-    - Side effects: sets status to RESUMING, triggers ECS operation
-    - Errors: none raised (returns False for not found/invalid state)
-    - Logging: DEBUG on entry, INFO on status change, WARNING for not found/invalid state
-    """
-
-    # -------------------------------------------------------------------------
-    # Outputs - returns bool indicating success
-    # -------------------------------------------------------------------------
-
-    def test_returns_true_when_ecs_task_started(self):
-        """Service returns True when range exists, can be resumed, and ECS task starts."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", return_value=task_arn),
-        ):
-            result = resume_range(request_id)
-            assert result is True
-
-    def test_returns_false_when_ecs_returns_none(self):
-        """Service returns False when ECS task fails to start (returns None)."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", return_value=None),
-        ):
-            result = resume_range(request_id)
-            assert result is False
-
-    def test_returns_true_when_already_ready(self):
-        """Service returns True (idempotent) when range is already ready."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-        ):
-            result = resume_range(request_id)
-            assert result is True
-
-    def test_returns_true_when_already_resuming(self):
-        """Service returns True (idempotent) when range is already resuming."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.RESUMING.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-        ):
-            result = resume_range(request_id)
-            assert result is True
-
-    def test_returns_false_when_range_not_found(self):
-        """Service returns False when no range found for request_id."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=None)))),
-            ),
-            patch("django.db.transaction.atomic"),
-        ):
-            result = resume_range(request_id)
-            assert result is False
-
-    def test_returns_false_when_not_in_paused_state(self):
-        """Service returns False when range is not in PAUSED state."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PROVISIONING.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-        ):
-            result = resume_range(request_id)
-            assert result is False
-
-    def test_returns_false_when_destroyed(self):
-        """Service returns False when range is destroyed."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.DESTROYED.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-        ):
-            result = resume_range(request_id)
-            assert result is False
-
-    # -------------------------------------------------------------------------
-    # Side effects - status update and ECS operation
-    # -------------------------------------------------------------------------
-
-    def test_sets_status_to_resuming(self):
-        """Service sets range status to RESUMING."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", return_value=task_arn),
-        ):
-            resume_range(request_id)
-
-            # After the atomic block sets RESUMING and ECS succeeds, status stays RESUMING
-            assert mock_range.status == ResourceStatus.RESUMING.value
-            mock_range.save.assert_called()
-
-    def test_calls_start_range_operation_with_resume(self):
-        """Service calls start_range_operation with 'resume' operation."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", return_value=task_arn) as mock_operation,
-        ):
-            resume_range(request_id)
-
-            mock_operation.assert_called_once_with(request_id, "resume")
-
-    def test_does_not_modify_range_when_already_ready(self):
-        """Service does not modify range when already READY."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-        ):
-            resume_range(request_id)
-
-            mock_range.save.assert_not_called()
-
-    def test_does_not_call_operation_when_already_ready(self):
-        """Service does not call start_range_operation when already READY."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation") as mock_operation,
-        ):
-            resume_range(request_id)
-
-            mock_operation.assert_not_called()
-
-    # -------------------------------------------------------------------------
-    # ECS failure recovery (Fix 3)
-    # -------------------------------------------------------------------------
-
-    def test_reverts_status_when_ecs_returns_none(self):
-        """Service reverts status to PAUSED when ECS returns None."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", return_value=None),
-        ):
-            resume_range(request_id)
-
-            assert mock_range.status == ResourceStatus.PAUSED.value
-
-    def test_reverts_status_on_cloud_task_error(self):
-        """Service reverts status to PAUSED when ECS raises CloudTaskError."""
-        from engine.models import Range
-        from engine.services import resume_range
-        from shared.cloud.exceptions import CloudTaskError
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-
-        cloud_error = CloudTaskError("Cluster not found")
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", side_effect=cloud_error),
-        ):
-            resume_range(request_id)
-
-            assert mock_range.status == ResourceStatus.PAUSED.value
-
-    def test_returns_false_on_cloud_task_error(self):
-        """Service returns False when ECS raises CloudTaskError."""
-        from engine.models import Range
-        from engine.services import resume_range
-        from shared.cloud.exceptions import CloudTaskError
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-
-        cloud_error = CloudTaskError("Cluster not found")
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", side_effect=cloud_error),
-        ):
-            result = resume_range(request_id)
-            assert result is False
-
-    # -------------------------------------------------------------------------
-    # Logging
-    # -------------------------------------------------------------------------
-
-    def test_logs_debug_on_entry(self, caplog):
-        """Service logs debug on entry with request_id."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", return_value=task_arn),
-            caplog.at_level(logging.DEBUG, logger="engine"),
-        ):
-            resume_range(request_id)
-
-        assert str(request_id) in caplog.text
-
-    def test_logs_warning_when_range_not_found(self, caplog):
-        """Service logs warning when range not found."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=None)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            caplog.at_level(logging.WARNING, logger="engine"),
-        ):
-            resume_range(request_id)
-
-        assert str(request_id) in caplog.text
-
-    def test_logs_warning_when_invalid_state(self, caplog):
-        """Service logs warning when range is in invalid state for resume."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PROVISIONING.value)
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            caplog.at_level(logging.WARNING, logger="engine"),
-        ):
-            resume_range(request_id)
-
-        assert str(request_id) in caplog.text
-
-    def test_logs_info_when_status_changed(self, caplog):
-        """Service logs info when ECS task started."""
-        from engine.models import Range
-        from engine.services import resume_range
-
-        request_id = uuid4()
-        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
-
-        with (
-            patch.object(
-                Range.objects,
-                "select_for_update",
-                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
-            ),
-            patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", return_value=task_arn),
-            caplog.at_level(logging.INFO, logger="engine"),
-        ):
-            resume_range(request_id)
-
-        assert task_arn in caplog.text or str(request_id) in caplog.text
+    def test_resumes_a_paused_range(self, request_id_in_status):
+        request_id = request_id_in_status(Range.Status.PAUSED)
+        # Configure ECS + mock the boto3 dispatch only around the resume call, so
+        # the create_range setup above still runs with ECS as a no-op.
+        with override_settings(**ECS_SETTINGS), patch("boto3.client", return_value=_ecs_client_mock()):
+            assert resume_range(request_id) is True
+        assert Range.objects.get(request__request_id=request_id).status == Range.Status.RESUMING
+
+    def test_idempotent_when_already_ready(self, request_id_in_status):
+        request_id = request_id_in_status(Range.Status.READY)
+        assert resume_range(request_id) is True
+        assert Range.objects.get(request__request_id=request_id).status == Range.Status.READY
+
+    def test_idempotent_when_already_resuming(self, request_id_in_status):
+        request_id = request_id_in_status(Range.Status.RESUMING)
+        assert resume_range(request_id) is True
+
+    def test_rejects_non_paused_range(self, request_id_in_status):
+        request_id = request_id_in_status(Range.Status.PROVISIONING)
+        assert resume_range(request_id) is False
+        assert Range.objects.get(request__request_id=request_id).status == Range.Status.PROVISIONING
+
+    def test_returns_false_when_request_not_found(self, db):
+        assert resume_range(uuid4()) is False

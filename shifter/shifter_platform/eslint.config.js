@@ -4,7 +4,7 @@ import security from 'eslint-plugin-security';
 
 export default [
   {
-    ignores: ['**/*.test.js'],
+    ignores: ['**/*.test.js', 'static/js/vendor/**'],
   },
   eslint.configs.recommended,
   security.configs.recommended,

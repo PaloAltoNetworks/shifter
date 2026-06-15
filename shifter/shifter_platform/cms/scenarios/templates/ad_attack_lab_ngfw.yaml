@@ -1,0 +1,38 @@
+id: ad_attack_lab_ngfw
+name: AD Attack Lab with NGFW
+description: Active Directory attack lab with NGFW segmentation, domain controller, Kali attacker, and domain-joined Windows victim. Cortex XDR agent on Windows instances.
+enabled: true
+ngfw: true
+
+instances:
+  - name: Attacker
+    role: attacker
+    os_type: kali
+    xdr_agent: false
+    ai_agent: true
+
+  - name: Domain Controller
+    role: dc
+    os_type: windows
+    domain_controller: true
+    xdr_agent: true
+    ai_agent: true
+    dc_config:
+      domain_name: internal.shifter
+      netbios_name: INTSHIFTER
+
+  - name: Workstation
+    role: victim
+    os_type: from_agent
+    xdr_agent: true
+    ai_agent: true
+    join_domain: true
+
+subnets:
+  - name: attack
+    instances: [Attacker]
+    connected_to: [target]
+
+  - name: target
+    instances: [Domain Controller, Workstation]
+    connected_to: [attack]

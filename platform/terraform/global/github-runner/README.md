@@ -6,16 +6,21 @@ let it deploy to both dev and prod.
 
 ## Architecture
 
-- `aws_instance.runner[count]` — Amazon Linux 2023, t3.large, no inbound
+- `aws_instance.runner[count]`: Amazon Linux 2023, t3.large, no inbound
   rules (egress to GitHub/ECR/SSM). Access via SSM Session Manager.
-- IAM instance profile with `AmazonSSMManagedInstanceCore` + an inline
-  policy granting ECR push/pull on `shifter-*` repos.
-- `user_data` installs Docker, the build chain, the .NET runtime libs
+- IAM instance profile with inline SSM Session Manager and ECR push/pull
+  policies. Inline policies avoid `iam:AttachRolePolicy`, which may be
+  denied by AWS Organizations SCPs in fresh managed accounts.
+- Launch user data installs Docker, the build chain, the .NET runtime libs
   the Actions binary needs, and downloads the latest runner tarball.
-  **Registration is manual** — see below.
+  **Registration is manual** -- see below.
 
 State backend: `<env>.s3.tfbackend` (partial; bucket/key supplied at
 `terraform init` time).
+
+For a fresh AWS account, run `scripts/bootstrap/deploy.py bootstrap` before
+this runner root. Bootstrap creates the shared S3 state bucket and rewrites
+`dev.s3.tfbackend`; the runner root intentionally reuses that backend.
 
 ## Scheduling policy
 
@@ -27,10 +32,15 @@ whichever runner frees up next. Standard GitHub-hosted labels such as
 Shifter splits work across both capacity pools instead:
 
 - Portable quality jobs run on `ubuntu-latest`, using the repository's
-  GitHub-hosted runner allotment.
+  GitHub-hosted runner allotment. Pull-request events are hosted-only;
+  `deploy.yml` must not route PR code into reusable jobs that target
+  `runs-on: self-hosted`.
 - Deployment, image build, Packer, and environment-mutating jobs remain
   on `self-hosted`, using the EC2 runner pool that has the expected
-  long-lived tooling and account access patterns.
+  long-lived tooling and account access patterns. Those jobs run only on
+  trusted `push` / `workflow_dispatch` paths and bind a GitHub
+  Environment such as `aws-dev`, `aws-prod`, or `gcp-dev` before assuming
+  deploy credentials.
 
 ## Deploying
 
@@ -46,13 +56,33 @@ The script reads `PANW_SHIFTER_DEV_PROFILE` from `.env`. AWS pager
 should be disabled (`export AWS_PAGER=""`) or `aws` calls will block on
 `less`.
 
+Before applying in a new account, update `dev.tfvars` with the account-local
+VPC and subnet. The runner instances need outbound internet access for GitHub,
+ECR, and SSM; the default VPC public subnet is acceptable for dev bootstrap.
+
+```bash
+aws ec2 describe-vpcs \
+  --profile "$PANW_SHIFTER_DEV_PROFILE" \
+  --region us-east-2 \
+  --filters Name=is-default,Values=true \
+  --query 'Vpcs[0].VpcId' \
+  --output text
+
+aws ec2 describe-subnets \
+  --profile "$PANW_SHIFTER_DEV_PROFILE" \
+  --region us-east-2 \
+  --filters Name=default-for-az,Values=true \
+  --query 'Subnets[?AvailabilityZone==`us-east-2a`].SubnetId | [0]' \
+  --output text
+```
+
 ## Registering a runner (one-time per instance)
 
 Each EC2 ships ready to register but not yet registered. `./config.sh`
 needs a single-use **registration token** from GitHub. The token is
 exchanged once for long-lived runner credentials stored in `.runner` /
-`.credentials` on the instance — after that, the runner stays
-authenticated indefinitely. You only mint a new token when adding,
+`.credentials` on the instance. After that, the runner stays authenticated
+indefinitely. You only mint a new token when adding,
 re-registering, or replacing a runner.
 
 ```bash
@@ -88,7 +118,7 @@ gh api repos/Brad-Edwards/shifter/actions/runners --jq '.runners[] | {name, stat
 
 The bundled dependency installer matches on `/etc/os-release`'s `ID`
 and aborts with `Can't detect current OS type` because AL2023 reports
-`ID="amzn"` (and `ID_LIKE="fedora"` only — not real fedora). The
+`ID="amzn"` (and `ID_LIKE="fedora"` only, not real Fedora). The
 runner binary still needs libicu / krb5-libs / zlib / lttng-ust /
 openssl-libs at startup or `./config.sh` exits with
 `Libicu's dependencies is missing for Dotnet Core 6.0`.
@@ -102,7 +132,7 @@ ever swap distros, drop the explicit `dnf install` line and let
 
 You cannot re-use a token across multiple runners; mint one per
 registration call. The runner itself does not need fresh tokens after
-registration — long-lived `.credentials` handle ongoing auth.
+registration because long-lived `.credentials` handle ongoing auth.
 
 ### `runner-deploy.sh` clobbered the lockfile
 

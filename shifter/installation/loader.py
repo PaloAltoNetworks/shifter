@@ -23,7 +23,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from . import registry
+from . import range_egress, registry
 from .errors import ConfigIssue, InstallationConfigError
 from .schema import RootConfig
 
@@ -86,6 +86,14 @@ def _reject_duplicate_keys(node: yaml.Node, _visited: set[int] | None = None) ->
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
+    """Read the YAML file at ``path`` and return the parsed top-level mapping.
+
+    Raises :class:`InstallationConfigError` when the file is missing,
+    unreadable, syntactically invalid, empty, or not a mapping at the top
+    level. Duplicate / merge keys are rejected during a parse-to-node-graph
+    pre-pass so PyYAML's silent last-wins behavior cannot validate a config
+    the operator did not author.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -126,6 +134,12 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
 
 
 def _yaml_issue(path: Path, exc: yaml.YAMLError) -> ConfigIssue:
+    """Convert a YAML parse error to a sanitized :class:`ConfigIssue`.
+
+    The message is composed strictly from the parser's own problem description
+    and position so a parse error on a line that holds a value (for example a
+    mistyped secret) cannot be echoed back through the error surface.
+    """
     # Build the message from the parser's own problem description and position only —
     # never from the file content — so a parse error on a line that holds a value
     # (for example a mistyped secret) cannot be echoed back through the error surface.
@@ -138,6 +152,13 @@ def _yaml_issue(path: Path, exc: yaml.YAMLError) -> ConfigIssue:
 
 
 def _issues_from_validation_error(exc: ValidationError) -> list[ConfigIssue]:
+    """Convert a Pydantic ``ValidationError`` to sorted, deduplicated issues.
+
+    Each issue carries the dotted location of the offending key (or ``<root>``)
+    and Pydantic's type-derived message. The input value is never read, so a
+    rejected secret reference cannot leak through this conversion. Returned
+    issues are sorted by ``(path, message)`` so renderings are stable.
+    """
     seen: set[tuple[str, str]] = set()
     issues: list[ConfigIssue] = []
     for err in exc.errors():
@@ -168,6 +189,10 @@ def _backend_issues_from_raw(data: dict[str, Any]) -> list[ConfigIssue]:
     settings = data.get("settings", {})
     if isinstance(settings, dict):
         issues.extend(bundle.settings_issues(settings))
+        # range_egress (PLAT-220) is cross-backend; the bundle-specific check above
+        # may pass-through a settings_model=None backend without inspecting it.
+        _, range_egress_issues = range_egress.validate_settings_block(settings)
+        issues.extend(range_egress_issues)
     secrets = data.get("secrets", {})
     if isinstance(secrets, dict):
         issues.extend(bundle.secret_reference_issues(secrets))
@@ -195,13 +220,21 @@ def load_root_config(path: str | Path) -> RootConfig:
     # The root schema validated the *shape*; the selected backend bundle owns the
     # contents of ``settings`` and the per-provider secret reference grammar.
     bundle = registry.get_backend_bundle(config.backend)
-    if bundle is None:  # pragma: no cover - an unknown backend already failed the root schema
+    # A validated backend always resolves to a bundle in practice; this guards
+    # against the registry unexpectedly yielding None (covered by tests).
+    if bundle is None:
         return config
     try:
         normalized_settings = bundle.validate_settings(config.settings)
     except InstallationConfigError as exc:
         # Aggregate the settings *and* secret-reference problems before raising.
         raise InstallationConfigError([*exc.issues, *bundle.secret_reference_issues(config.secrets)]) from exc
+    # Cross-backend settings validation (PLAT-220 range_egress). Lives in the loader
+    # because the policy shape applies identically to AWS and GCP; per-backend
+    # settings_model migrations (#1116 / #1117) may later move this onto the model.
+    normalized_settings, range_egress_issues = range_egress.validate_settings_block(normalized_settings)
+    if range_egress_issues:
+        raise InstallationConfigError([*range_egress_issues, *bundle.secret_reference_issues(config.secrets)])
     secret_issues = bundle.secret_reference_issues(config.secrets)
     if secret_issues:
         raise InstallationConfigError(secret_issues)

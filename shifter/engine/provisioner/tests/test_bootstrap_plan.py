@@ -51,3 +51,49 @@ class TestBootstrapPlan:
         instance = MockInstance(hostname="")
         with pytest.raises(ValueError, match="hostname"):
             plan.get_context(instance)
+
+
+@dataclass
+class MockPolarisInstance:
+    """Mock instance for Polaris bootstrap context tests."""
+
+    dc_ip: str | None = "10.1.2.7"
+    public_key: str = "ssh-rsa AAAA"
+
+
+class TestPolarisRangeBootstrapPlan:
+    """Tests for PolarisRangeBootstrapPlan context rendering."""
+
+    def test_get_context_uses_agent_bucket_for_smoketest_tarball(self, monkeypatch):
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        monkeypatch.delenv("POLARIS_TESTS_BUCKET", raising=False)
+        monkeypatch.delenv("AGENT_STORAGE_BUCKET", raising=False)
+        monkeypatch.setenv("AGENT_S3_BUCKET", "shifter-dev-user-storage-123")
+
+        context = PolarisRangeBootstrapPlan.get_context(MockPolarisInstance())
+
+        assert context["polaris_tests_bucket"] == "shifter-dev-user-storage-123"
+        assert context["polaris_tests_key"] == "polaris/tests/polaris-tests.tar.gz"
+
+    def test_get_context_allows_explicit_tests_bucket_and_key(self, monkeypatch):
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        monkeypatch.setenv("POLARIS_TESTS_BUCKET", "custom-polaris-tests")
+        monkeypatch.setenv("POLARIS_TESTS_KEY", "custom/tests.tar.gz")
+        monkeypatch.setenv("AGENT_S3_BUCKET", "ignored-agent-bucket")
+
+        context = PolarisRangeBootstrapPlan.get_context(MockPolarisInstance())
+
+        assert context["polaris_tests_bucket"] == "custom-polaris-tests"
+        assert context["polaris_tests_key"] == "custom/tests.tar.gz"
+
+    def test_get_context_requires_tests_bucket(self, monkeypatch):
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        monkeypatch.delenv("POLARIS_TESTS_BUCKET", raising=False)
+        monkeypatch.delenv("AGENT_STORAGE_BUCKET", raising=False)
+        monkeypatch.delenv("AGENT_S3_BUCKET", raising=False)
+
+        with pytest.raises(ValueError, match="POLARIS_TESTS_BUCKET"):
+            PolarisRangeBootstrapPlan.get_context(MockPolarisInstance())

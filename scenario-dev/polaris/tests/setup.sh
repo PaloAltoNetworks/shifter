@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # NORTHSTORM range setup: build all images and bring up the full topology.
 #
-# Runs from the range host (ctf-range-builder). Assumes docker-compose.yml
-# and all content dirs are already synced to $RANGE_DIR (default
-# /home/atomik/range) from the repo.
+# Runs from the range host. Assumes docker-compose.yml and all content dirs are
+# already synced to $RANGE_DIR, which defaults to this script's parent range
+# directory.
 #
 # Usage:
-#     bash /home/atomik/range/setup.sh
+#     bash tests/setup.sh
 #     RANGE_DIR=/some/other/path bash setup.sh
 #
 # Exits 0 on successful bring-up + readiness, 1 on any failure.
 
 set -euo pipefail
-RANGE_DIR="${RANGE_DIR:-/home/atomik/range}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_RANGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RANGE_DIR="${RANGE_DIR:-$DEFAULT_RANGE_DIR}"
 COMPOSE_FILE="${COMPOSE_FILE:-$RANGE_DIR/build/docker-compose.yml}"
 # Legacy flat-layout fallback: if new location doesn't exist, try $RANGE_DIR/docker-compose.yml
 if [[ ! -f "$COMPOSE_FILE" ]] && [[ -f "$RANGE_DIR/docker-compose.yml" ]]; then
@@ -36,6 +38,49 @@ log() { echo "[setup] $*"; }
 
 log "range dir: $RANGE_DIR"
 log "compose file: $COMPOSE_FILE"
+
+# Stage the per-range splice-relay keypair (#707). Production ranges get
+# this from the provisioner's POLARIS_RANGE_BOOTSTRAP_SCRIPT; the dev
+# docker-compose range generates it here so the same a9/a14 entrypoints
+# consume the same env-var shape. Idempotent on re-run: if the override
+# already carries a splice key the keypair is reused.
+COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
+OVERRIDE_FILE="$COMPOSE_DIR/docker-compose.override.yml"
+SPLICE_KEY_DIR="$RANGE_DIR/.splice"
+
+ensure_splice_keypair() {
+    if [[ -s "$OVERRIDE_FILE" ]] && grep -q '^[[:space:]]*KALI_SPLICE_PRIVATE_KEY_B64:' "$OVERRIDE_FILE"; then
+        log "splice keypair already staged in $OVERRIDE_FILE"
+        return 0
+    fi
+
+    mkdir -p "$SPLICE_KEY_DIR"
+    chmod 700 "$SPLICE_KEY_DIR"
+    if [[ ! -f "$SPLICE_KEY_DIR/splice_relay" ]]; then
+        ssh-keygen -t ed25519 -N "" -C "splice-relay@dev-$(date -u +%Y%m%dT%H%M%SZ)" \
+            -f "$SPLICE_KEY_DIR/splice_relay" -q
+    fi
+    local priv_b64 pub
+    priv_b64="$(base64 -w0 < "$SPLICE_KEY_DIR/splice_relay")"
+    pub="$(cat "$SPLICE_KEY_DIR/splice_relay.pub")"
+
+    local tmp
+    tmp="$(mktemp "$COMPOSE_DIR/.override.yml.XXXXXX")"
+    cat > "$tmp" <<DEV_OVERRIDE_EOF
+services:
+  a9-splice:
+    environment:
+      A9_AUTHORIZED_KEY: "$pub"
+  a14-kali:
+    environment:
+      KALI_SPLICE_PRIVATE_KEY_B64: "$priv_b64"
+DEV_OVERRIDE_EOF
+    mv "$tmp" "$OVERRIDE_FILE"
+    log "splice keypair generated; wrote $OVERRIDE_FILE"
+}
+
+ensure_splice_keypair
+
 log "building all images..."
 # Cache is on by default. This is golden-lab development - speed of
 # iteration wins over reproducibility. Docker's cache invalidates

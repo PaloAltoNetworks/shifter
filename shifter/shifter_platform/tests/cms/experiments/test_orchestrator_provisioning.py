@@ -75,8 +75,8 @@ PATCH_EXPERIMENT = "cms.experiments.orchestrator.Experiment"
 PATCH_REQUEST_SPEC = "shared.schemas.RequestSpec"
 
 
-class TestRequestRangeProvisioning:
-    """Tests for _request_range_provisioning -- the experiment-to-engine bridge."""
+class TestRequestRangeProvisioningRecords:
+    """Record creation and engine call tests for range provisioning."""
 
     @patch(PATCH_ENGINE)
     @patch(PATCH_RANGE_INSTANCE)
@@ -190,7 +190,9 @@ class TestRequestRangeProvisioning:
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        mock_engine.assert_called_once()
+        assert isinstance(run.request_id, UUID)
+        mock_req_spec.assert_called_once_with(request_id=run.request_id, user_id=exp.user.pk, items=[mock_range_spec])
+        mock_engine.assert_called_once_with(mock_req_spec.return_value)
 
     @patch(PATCH_ENGINE)
     @patch(PATCH_RANGE_INSTANCE)
@@ -221,10 +223,6 @@ class TestRequestRangeProvisioning:
         mock_hydrate.assert_called_once()
         assert mock_hydrate.call_args[0][0] == "basic"
 
-    # -----------------------------------------------------------------
-    # Scenario without agent
-    # -----------------------------------------------------------------
-
     @patch(PATCH_ENGINE)
     @patch(PATCH_RANGE_INSTANCE)
     @patch(PATCH_REQUEST)
@@ -235,11 +233,11 @@ class TestRequestRangeProvisioning:
         self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
     ):
         """Scenarios that don't require agents can be provisioned without one."""
-        exp = _make_mock_experiment(agent=None, scenario_id="cortex_deployment_experience")
+        exp = _make_mock_experiment(agent=None, scenario_id="basic")
         mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
 
         mock_range_spec = MagicMock()
-        mock_range_spec.model_dump.return_value = {"scenario_id": "cortex_deployment_experience"}
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
         mock_hydrate.return_value = mock_range_spec
 
         run = _make_mock_run()
@@ -252,9 +250,9 @@ class TestRequestRangeProvisioning:
         mock_engine.assert_called_once()
         assert run.request_id is not None
 
-    # -----------------------------------------------------------------
-    # Error handling
-    # -----------------------------------------------------------------
+
+class TestRequestRangeProvisioningFailures:
+    """Failure tests for range provisioning."""
 
     @patch(PATCH_ENGINE)
     @patch(PATCH_HYDRATE)
@@ -347,9 +345,9 @@ class TestRequestRangeProvisioning:
         run.transition_to.assert_called_once_with(RunStatus.FAILED)
         mock_engine.assert_not_called()
 
-    # -----------------------------------------------------------------
-    # AD Attack Lab scenario
-    # -----------------------------------------------------------------
+
+class TestRequestRangeProvisioningScenarioData:
+    """Scenario-specific payload tests for range provisioning."""
 
     @patch(PATCH_ENGINE)
     @patch(PATCH_RANGE_INSTANCE)

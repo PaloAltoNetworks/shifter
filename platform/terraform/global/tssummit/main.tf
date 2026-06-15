@@ -91,6 +91,16 @@ resource "aws_vpc_security_group_ingress_rule" "webserver_from_endpoint" {
 # ------------------------------------------------------------------------------
 
 resource "aws_instance" "webserver1" {
+  monitoring    = true
+  ebs_optimized = true
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    http_endpoint               = "enabled"
+  }
+  root_block_device {
+    encrypted = true
+  }
   ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = var.key_name
@@ -188,6 +198,7 @@ resource "aws_vpc_security_group_ingress_rule" "ctfd_http" {
 
 resource "aws_vpc_security_group_egress_rule" "ctfd_all" {
   security_group_id = aws_security_group.ctfd.id
+  description       = "Ctfd egress (all protocols)"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
@@ -197,6 +208,13 @@ resource "aws_vpc_security_group_egress_rule" "ctfd_all" {
 # ------------------------------------------------------------------------------
 
 resource "aws_instance" "ctfd" {
+  monitoring    = true
+  ebs_optimized = true
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    http_endpoint               = "enabled"
+  }
   ami                    = var.ctfd_ami_id
   instance_type          = "t3.xlarge"
   subnet_id              = var.subnet_id

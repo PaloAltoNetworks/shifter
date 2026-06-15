@@ -316,6 +316,91 @@ resource "google_compute_firewall" "range_allow_operator_admin_ssh" {
   }
 }
 
+# ------------------------------------------------------------------------------
+# Range VPC — PLAT-220 egress policy
+# ------------------------------------------------------------------------------
+#
+# The public surface is `settings.range_egress` in shifter.yaml (validated by
+# shifter/installation/range_egress.py). These resources are the GCP bridge —
+# bridged through `range_egress_mode` + `range_egress_allowed_cidrs` Terraform
+# variables on this module — into native VPC firewall egress rules on the range
+# VPC. AWS Network Firewall is the corresponding bridge in
+# platform/terraform/modules/range/vpc/firewall.tf. See
+# docs/architecture/range-egress-ip-allowlist.md for the cross-cloud mapping.
+#
+# Mode handling:
+#
+# - status-quo (default): no rules created; range Cloud NAT egress is
+#   unrestricted (the historical posture before PLAT-220).
+# - deny-all: a low-priority (65534) EGRESS deny on all destinations blocks
+#   external traffic. Private Google Access (for Google APIs/Container
+#   Registry) and Cloud DNS metadata (169.254.169.254) ride the VPC's
+#   implicit-allow paths and are unaffected.
+# - allowlist: deny-all base + a higher-priority (1000) EGRESS allow on
+#   TCP 443 to the allowed CIDRs. TCP/443 matches the AWS bridge's
+#   existing victim-IPs rule group (the Network Firewall rules under
+#   platform/terraform/modules/range/vpc/firewall.tf use `pass tcp $HOME_NET
+#   any -> $ALLOWED_IPS 443`); both clouds enforce the same wire-level shape.
+
+# PLAT-220 cross-variable invariant check (always evaluated).
+#
+# The public RangeEgressPolicy validator enforces three rules on the
+# (mode, allowed_cidrs) pair: allowlist requires a non-empty list,
+# deny-all requires an empty list, status-quo requires an empty list.
+# `terraform_data` (Terraform >= 1.4; CI pins 1.7.1) has no provider
+# dependencies and `count = 1` unconditionally, so this precondition
+# fires for every plan/apply regardless of which mode is selected —
+# unlike a precondition on `range_egress_deny_all`, which would skip
+# evaluation entirely when mode='status-quo' (count = 0) and silently
+# let `status-quo` + a non-empty allowlist apply without firewall rules.
+resource "terraform_data" "range_egress_invariant" {
+  lifecycle {
+    precondition {
+      condition = (
+        (var.range_egress_mode == "status-quo" && length(var.range_egress_allowed_cidrs) == 0)
+        || (var.range_egress_mode == "deny-all" && length(var.range_egress_allowed_cidrs) == 0)
+        || (var.range_egress_mode == "allowlist" && length(var.range_egress_allowed_cidrs) > 0)
+      )
+      error_message = "PLAT-220: range_egress_mode='allowlist' requires a non-empty range_egress_allowed_cidrs; range_egress_mode='deny-all' or 'status-quo' must carry an empty list. The public RangeEgressPolicy contract (shifter/installation/range_egress.py) enforces this; this precondition mirrors it for direct Terraform use."
+    }
+  }
+}
+
+resource "google_compute_firewall" "range_egress_deny_all" {
+  count = var.range_egress_mode == "status-quo" ? 0 : 1
+
+  name        = "${local.name_prefix}-range-egress-deny-all"
+  project     = var.project_id
+  network     = google_compute_network.range.name
+  description = "PLAT-220: range egress is policy-driven. Low-precedence deny enforces fail-closed when the operator selects deny-all or allowlist; the allowlist rule rides higher precedence."
+  direction   = "EGRESS"
+  priority    = 65534
+
+  destination_ranges = ["0.0.0.0/0"]
+
+  deny {
+    protocol = "all"
+  }
+}
+
+resource "google_compute_firewall" "range_egress_allow_allowlist" {
+  count = var.range_egress_mode == "allowlist" && length(var.range_egress_allowed_cidrs) > 0 ? 1 : 0
+
+  name        = "${local.name_prefix}-range-egress-allow-allowlist"
+  project     = var.project_id
+  network     = google_compute_network.range.name
+  description = "PLAT-220: range egress allowlist (HTTPS to operator-declared CIDRs). Higher precedence than the deny-all base so the named destinations actually reach the internet."
+  direction   = "EGRESS"
+  priority    = 1000
+
+  destination_ranges = var.range_egress_allowed_cidrs
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+}
+
 # Platform VPC — explicit deny on world-open SSH/RDP. The platform VPC is
 # private-cluster-only today, but this rule is an audit anchor: if a future
 # resource accidentally exposes an external IP, the rule still blocks SSH/RDP.
@@ -420,6 +505,46 @@ resource "google_service_account" "workload" {
   display_name = "Shifter ${var.environment} ${each.key}"
 }
 
+# Cloud KMS key ring + crypto key for Artifact Registry encryption (CKV_GCP_84).
+# The AR service identity needs the `cloudkms.cryptoKeyEncrypterDecrypter` role
+# on this key for every repo that references it (granted below).
+resource "google_kms_key_ring" "artifact_registry" {
+  name     = "${local.name_prefix}-ar"
+  location = var.artifact_registry_location
+  project  = var.project_id
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_kms_crypto_key" "artifact_registry" {
+  name            = "${local.name_prefix}-ar-docker"
+  key_ring        = google_kms_key_ring.artifact_registry.id
+  rotation_period = "7776000s" # 90 days
+  purpose         = "ENCRYPT_DECRYPT"
+  labels          = local.common_labels
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Artifact Registry service-identity grant. The AR service account follows
+# the deterministic per-project pattern `service-<project-number>@gcp-sa-
+# artifactregistry.iam.gserviceaccount.com`, so we resolve the project
+# number from the `google_project` data source instead of pulling in the
+# `google-beta` provider for `google_project_service_identity`.
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+resource "google_kms_crypto_key_iam_member" "artifact_registry" {
+  crypto_key_id = google_kms_crypto_key.artifact_registry.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-artifactregistry.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_artifact_registry_repository" "docker" {
   for_each = local.artifact_repositories
 
@@ -428,8 +553,12 @@ resource "google_artifact_registry_repository" "docker" {
   repository_id = "${local.name_prefix}-${each.key}"
   description   = "Docker images for ${each.key} in ${var.environment}"
   format        = "DOCKER"
+  kms_key_name  = google_kms_crypto_key.artifact_registry.id
 
-  depends_on = [google_project_service.required]
+  depends_on = [
+    google_project_service.required,
+    google_kms_crypto_key_iam_member.artifact_registry,
+  ]
 }
 
 resource "google_storage_bucket" "assets" {
@@ -940,6 +1069,11 @@ resource "google_container_node_pool" "web" {
   cluster    = google_container_cluster.platform.name
   node_count = var.web_node_count
 
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
   node_config {
     machine_type    = var.web_machine_type
     service_account = google_service_account.gke_nodes.email
@@ -954,6 +1088,10 @@ resource "google_container_node_pool" "web" {
     shielded_instance_config {
       enable_secure_boot          = true
       enable_integrity_monitoring = true
+    }
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
     }
   }
 }
@@ -996,6 +1134,11 @@ resource "google_container_node_pool" "workers" {
   cluster    = google_container_cluster.platform.name
   node_count = var.worker_node_count
 
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
   node_config {
     machine_type    = var.worker_machine_type
     service_account = google_service_account.gke_nodes.email
@@ -1011,6 +1154,10 @@ resource "google_container_node_pool" "workers" {
       enable_secure_boot          = true
       enable_integrity_monitoring = true
     }
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
   }
 }
 
@@ -1020,6 +1167,11 @@ resource "google_container_node_pool" "provisioner" {
   location   = var.region
   cluster    = google_container_cluster.platform.name
   node_count = var.provisioner_node_count
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
 
   # ADR-008-R4 (#959): the provisioner pool draws pod IPs from a
   # dedicated secondary range (declared on the GKE subnet and on the
@@ -1047,6 +1199,10 @@ resource "google_container_node_pool" "provisioner" {
     shielded_instance_config {
       enable_secure_boot          = true
       enable_integrity_monitoring = true
+    }
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
     }
   }
 }

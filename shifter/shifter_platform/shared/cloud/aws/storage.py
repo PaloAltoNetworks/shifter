@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, BinaryIO
 
 import boto3
+from botocore.client import BaseClient
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 
 from shared.cloud.exceptions import CloudStorageError
+from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,8 @@ logger = logging.getLogger(__name__)
 class AWSObjectStorage:
     """S3 implementation of ObjectStorage protocol."""
 
-    def _get_client(self) -> Any:
+    @staticmethod
+    def _get_client() -> BaseClient:
         endpoint_url: str | None = os.environ.get("AWS_ENDPOINT_URL")
         region: str = str(getattr(settings, "CLOUD_REGION", None) or getattr(settings, "AWS_S3_REGION", "us-east-2"))
         if not endpoint_url:
@@ -41,14 +44,30 @@ class AWSObjectStorage:
             config=config,
         )
 
+    @staticmethod
+    def _owner_kwargs() -> dict[str, str]:
+        """Return ``{"ExpectedBucketOwner": account_id}`` when the AWS account id is configured.
+
+        AWS S3 supports ``ExpectedBucketOwner`` on every Get/Put/Head/Delete/Copy/
+        Tagging request; the call fails with ``AccessDenied`` if the bucket's
+        owner does not match. This defends against bucket-squatting and against
+        operator misconfiguration that swaps the deployment's bucket out from
+        under us. Gated on the ``AWS_S3_EXPECTED_BUCKET_OWNER`` env var (or
+        ``settings.AWS_S3_EXPECTED_BUCKET_OWNER``) so dev/test environments
+        without a fixed account id continue to work.
+        """
+        owner = os.environ.get("AWS_S3_EXPECTED_BUCKET_OWNER") or getattr(settings, "AWS_S3_EXPECTED_BUCKET_OWNER", "")
+        return {"ExpectedBucketOwner": owner} if owner else {}
+
     def upload_file(
         self,
-        file_obj: Any,
+        file_obj: BinaryIO,
         bucket: str,
         key: str,
         content_type: str = "",
     ) -> None:
-        logger.debug("upload_file: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("upload_file: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             extra_args: dict[str, str] = {}
@@ -56,51 +75,62 @@ class AWSObjectStorage:
                 extra_args["ContentType"] = content_type
             client.upload_fileobj(file_obj, bucket, key, ExtraArgs=extra_args)
         except (ClientError, BotoCoreError) as e:
-            logger.error("upload_file: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("upload_file: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to upload to S3: {e}") from e
-        logger.info("upload_file: success bucket=%s key=%s", bucket, key)
+        logger.info("upload_file: success bucket=%s key=%s", bucket, safe_key)
 
     def delete_object(self, bucket: str, key: str) -> None:
-        logger.debug("delete_object: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("delete_object: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
-            client.delete_object(Bucket=bucket, Key=key)
+            client.delete_object(Bucket=bucket, Key=key, **self._owner_kwargs())
         except (ClientError, BotoCoreError) as e:
-            logger.error("delete_object: failed bucket=%s key=%s error=%s", bucket, key, e)
-            raise CloudStorageError(f"Failed to delete from S3: {e}") from e  # nosec B608
-        logger.info("delete_object: success bucket=%s key=%s", bucket, key)
+            logger.exception("delete_object: failed bucket=%s key=%s", bucket, safe_key)
+            msg = f"S3 delete failed: {e}"
+            raise CloudStorageError(msg) from e
+        logger.info("delete_object: success bucket=%s key=%s", bucket, safe_key)
 
     def copy_object(self, bucket: str, src_key: str, dst_key: str) -> None:
         """Server-side copy within the same bucket. No data flows through this process."""
-        logger.debug("copy_object: bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+        safe_src = safe_log_value(src_key)
+        safe_dst = safe_log_value(dst_key)
+        logger.debug("copy_object: bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
         try:
             client = self._get_client()
+            owner_kwargs = self._owner_kwargs()
+            copy_source_kwargs = (
+                {"ExpectedSourceBucketOwner": owner_kwargs["ExpectedBucketOwner"]} if owner_kwargs else {}
+            )
             client.copy_object(
                 Bucket=bucket,
                 CopySource={"Bucket": bucket, "Key": src_key},
                 Key=dst_key,
+                **owner_kwargs,
+                **copy_source_kwargs,
             )
         except (ClientError, BotoCoreError) as e:
             logger.exception(
                 "copy_object: failed bucket=%s src=%s dst=%s",
                 bucket,
-                src_key,
-                dst_key,
+                safe_src,
+                safe_dst,
             )
             raise CloudStorageError(f"Failed to copy S3 object: {e}") from e
-        logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+        logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
 
     def head_object(self, bucket: str, key: str) -> dict[str, Any]:
-        logger.debug("head_object: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("head_object: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
-            response: dict[str, Any] = client.head_object(Bucket=bucket, Key=key)
+            response: dict[str, Any] = client.head_object(Bucket=bucket, Key=key, **self._owner_kwargs())
             return {
                 "content_length": response["ContentLength"],
                 "etag": response["ETag"].strip('"'),
             }
         except (ClientError, BotoCoreError) as e:
-            logger.error("head_object: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("head_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to head S3 object: {e}") from e
 
     def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes:
@@ -114,13 +144,15 @@ class AWSObjectStorage:
         """
         if max_bytes <= 0:
             raise ValueError("max_bytes must be positive")
-        logger.debug("read_object_header: bucket=%s key=%s max_bytes=%d", bucket, key, max_bytes)
+        safe_key = safe_log_value(key)
+        logger.debug("read_object_header: bucket=%s key=%s max_bytes=%d", bucket, safe_key, max_bytes)
         try:
             client = self._get_client()
             response = client.get_object(
                 Bucket=bucket,
                 Key=key,
                 Range=f"bytes=0-{max_bytes - 1}",
+                **self._owner_kwargs(),
             )
             stream = response["Body"]
             try:
@@ -131,8 +163,8 @@ class AWSObjectStorage:
             logger.exception(
                 "read_object_header: failed bucket=%s key=%s error=%s",
                 bucket,
-                key,
-                e,
+                safe_key,
+                safe_log_value(e),
             )
             raise CloudStorageError(f"Failed to read S3 object header: {e}") from e
         return body[:max_bytes]
@@ -146,10 +178,11 @@ class AWSObjectStorage:
         preflights — `head_object` raises on miss and is unsafe for that
         use because exception-as-boolean swallows real failures.
         """
-        logger.debug("object_exists: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("object_exists: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
-            client.head_object(Bucket=bucket, Key=key)
+            client.head_object(Bucket=bucket, Key=key, **self._owner_kwargs())
             return True
         except ClientError as e:
             code = (e.response.get("Error") or {}).get("Code")
@@ -159,12 +192,12 @@ class AWSObjectStorage:
             logger.exception(
                 "object_exists: unexpected ClientError bucket=%s key=%s code=%s",
                 bucket,
-                key,
+                safe_key,
                 code,
             )
             raise CloudStorageError(f"Failed to test S3 object existence: {e}") from e
         except BotoCoreError as e:
-            logger.exception("object_exists: BotoCoreError bucket=%s key=%s", bucket, key)
+            logger.exception("object_exists: BotoCoreError bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to test S3 object existence: {e}") from e
 
     def generate_presigned_upload_url(
@@ -174,7 +207,8 @@ class AWSObjectStorage:
         content_type: str,
         expires_in: int,
     ) -> str:
-        logger.debug("generate_presigned_upload_url: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("generate_presigned_upload_url: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             url: str = client.generate_presigned_url(
@@ -187,7 +221,11 @@ class AWSObjectStorage:
                 ExpiresIn=expires_in,
             )
         except (ClientError, BotoCoreError) as e:
-            logger.error("generate_presigned_upload_url: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception(
+                "generate_presigned_upload_url: failed bucket=%s key=%s",
+                bucket,
+                safe_key,
+            )
             raise CloudStorageError(f"Failed to generate presigned upload URL: {e}") from e
         return url
 
@@ -197,7 +235,8 @@ class AWSObjectStorage:
         key: str,
         expires_in: int,
     ) -> str:
-        logger.debug("generate_presigned_download_url: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("generate_presigned_download_url: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             url: str = client.generate_presigned_url(
@@ -209,20 +248,26 @@ class AWSObjectStorage:
                 ExpiresIn=expires_in,
             )
         except (ClientError, BotoCoreError) as e:
-            logger.error("generate_presigned_download_url: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception(
+                "generate_presigned_download_url: failed bucket=%s key=%s",
+                bucket,
+                safe_key,
+            )
             raise CloudStorageError(f"Failed to generate presigned download URL: {e}") from e
         return url
 
     def tag_object(self, bucket: str, key: str, tags: dict[str, str]) -> None:
-        logger.debug("tag_object: bucket=%s key=%s tags=%s", bucket, key, tags)
+        safe_key = safe_log_value(key)
+        logger.debug("tag_object: bucket=%s key=%s tags=%s", bucket, safe_key, tags)
         try:
             client = self._get_client()
             client.put_object_tagging(
                 Bucket=bucket,
                 Key=key,
                 Tagging={"TagSet": [{"Key": k, "Value": v} for k, v in tags.items()]},
+                **self._owner_kwargs(),
             )
         except (ClientError, BotoCoreError) as e:
-            logger.error("tag_object: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("tag_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to tag S3 object: {e}") from e
-        logger.debug("tag_object: success bucket=%s key=%s", bucket, key)
+        logger.debug("tag_object: success bucket=%s key=%s", bucket, safe_key)

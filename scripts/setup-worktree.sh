@@ -91,6 +91,21 @@ ensure_symlink \
     "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" \
     "shifter/engine/provisioner/.venv"
 
+# Gitignored Terraform deployment overlays. Keep per-account values in the
+# main checkout and symlink them into worktrees so local plans remain usable
+# without committing deployment-specific tfvars.
+for tfvars_overlay in \
+    "platform/terraform/environments/dev/portal/local.auto.tfvars" \
+    "platform/terraform/environments/dev/range/local.auto.tfvars" \
+    "platform/terraform/environments/prod/portal/local.auto.tfvars" \
+    "platform/terraform/environments/prod/range/local.auto.tfvars"
+do
+    ensure_symlink \
+        "$MAIN_REPO/$tfvars_overlay" \
+        "$WORKTREE_ROOT/$tfvars_overlay" \
+        "$tfvars_overlay"
+done
+
 # Node modules (for stylelint, prettier, etc.)
 if [[ -f "$WORKTREE_ROOT/package.json" ]]; then
     if [[ -d "$WORKTREE_ROOT/node_modules" ]]; then

@@ -14,21 +14,22 @@ from shared.messages.events import EVENT_TYPE_STATUS_UPDATED
 logger = logging.getLogger(__name__)
 
 
-def _lookup_range_instance(request_id, range_id):
+def _lookup_range_instance(request_id, range_id, *, include_deleted=False):
     """Resolve a `RangeInstance` from request_id (new pattern) or range_id (legacy).
 
     Returns the instance or None; the caller is responsible for short-circuiting
     when this returns None (it has already logged the reason).
     """
+    manager = RangeInstance.all_objects if include_deleted else RangeInstance.objects
     if request_id:
         try:
-            return RangeInstance.objects.get(request__request_id=request_id)
+            return manager.get(request__request_id=request_id)
         except RangeInstance.DoesNotExist:
             logger.warning("RangeInstance not found: request_id=%s", request_id)
             return None
     if range_id is not None:
         try:
-            return RangeInstance.objects.get(range_id=range_id)
+            return manager.get(range_id=range_id)
         except RangeInstance.DoesNotExist:
             logger.warning("RangeInstance not found: range_id=%s", range_id)
             return None
@@ -79,7 +80,8 @@ def process_range_event(message: str | dict) -> None:
         logger.error("Invalid status value: %s (range_id=%s)", new_status, range_id)
         return
 
-    instance = _lookup_range_instance(request_id, range_id)
+    include_deleted = new_status == ResourceStatus.DESTROYED.value
+    instance = _lookup_range_instance(request_id, range_id, include_deleted=include_deleted)
     if instance is None:
         return
 

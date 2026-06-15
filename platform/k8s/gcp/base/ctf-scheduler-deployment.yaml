@@ -21,8 +21,8 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-      serviceAccountName: workers
-      automountServiceAccountToken: false
+      serviceAccountName: ctf-scheduler
+      automountServiceAccountToken: true
       containers:
         - name: ctf-scheduler
           image: us-docker.pkg.dev/placeholder-project/shifter/portal:0.0.0

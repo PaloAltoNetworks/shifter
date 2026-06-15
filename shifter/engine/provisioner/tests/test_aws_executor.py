@@ -208,7 +208,7 @@ class TestAWSExecutorPollingLogic:
         ]
 
         executor = AWSExecutor(session=mock_session)
-        with patch("executors.aws_executor.time.sleep"):  # Skip actual sleep
+        with patch("executors._aws_executor_vpc_endpoints.time.sleep"):  # Skip actual sleep
             result = executor.wait_for_endpoint_available("vpce-12345", timeout=60)
 
         assert result.success is True

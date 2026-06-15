@@ -4,15 +4,15 @@ version = "0.1.0"
 description = "Self-service cyber range platform"
 requires-python = ">=3.12"
 dependencies = [
-    "asyncssh",
+    "asyncssh>=2.23.0",
     "bleach>=6.3.0",
     "boto3",
     "channels",
     "channels-redis",
     "daphne",
-    "django>=6.0.4",
+    "django>=6.0.6",
     "django-encrypted-model-fields>=0.6.5",
-    "django-health-check<4.0",
+    "django-health-check<5.0",
     "django-ses",
     "djangorestframework",
     "firebase-admin",
@@ -22,9 +22,18 @@ dependencies = [
     "paramiko",
     "psycopg[binary]",
     "pycurl>=7.45.7",
-    "pydantic>=2.12.5",
+    "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     "requests",
+    "uvicorn-worker",
+    # uvicorn's WebSocket protocol backend. Not imported directly: the
+    # Gunicorn/Uvicorn ASGI workers (entrypoint.sh) need websockets (or wsproto)
+    # installed to accept WebSocket upgrades. Without it the built image's
+    # uvicorn logs "No supported WebSocket library detected" and the portal's
+    # terminal / range-status / notification sockets fail at runtime while
+    # /health still passes - the exact container-only regression class the #922
+    # stack smoke exists to catch.
+    "websockets",
     "whitenoise",
 ]
 
@@ -34,15 +43,15 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest>=9.0.3",
     "pytest-django>=4.11.1",
-    "ruff>=0.14.9",
+    "ruff>=0.15.13",
     "bandit>=1.9.2",
     "pre-commit>=4.5.0",
     "pytest-asyncio>=1.3.0",
     "pytest-xdist>=3.5.0",
-    "mypy>=1.14.0",
-    "django-stubs>=5.1.0",
-    "types-requests>=2.32.0",
-    "types-bleach>=6.2.0",
+    "mypy>=2.1.0",
+    "django-stubs>=6.0.4",
+    "types-requests>=2.33.0.20260513",
+    "types-bleach>=6.3.0.20260508",
     "types-Markdown>=3.7.0",
 ]
 
@@ -57,8 +66,20 @@ pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
 # end-to-end runtime on representative slices while keeping full-suite
 # parallelism enabled.
 addopts = "-n auto --maxprocesses=4 --dist loadscope --reuse-db"
+markers = [
+    "redis: integration tests requiring a real Redis channel layer (run with -m redis -n0; needs a Redis service)",
+]
 
 [tool.coverage.run]
+# ``source = ["."]`` makes coverage record paths from the
+# shifter_platform package root so coverage.xml has unambiguous
+# repo-relative names (``cms/services/_common.py`` rather than
+# ``services/_common.py`` rooted at the ``cms`` source directory).
+# Without this, SonarCloud cannot disambiguate when two Django apps
+# happen to share a sub-path (e.g. ``cms/services/_common.py`` and
+# ``engine/services/_common.py``) and attributes coverage to whichever
+# source root it picks, leaving the loser at 0%.
+source = ["."]
 omit = [
     "tests/conftest.py",
     "tests/*/conftest.py",
@@ -112,6 +133,8 @@ max-complexity = 15
 ]
 "config/settings.py" = [
     "S105",   # empty password string for default
+    "F403",   # ``from config._<topic> import *`` re-exports Django settings
+    "F405",   # ditto — names land via star-imports declared with __all__
 ]
 
 [tool.ruff.format]
@@ -157,6 +180,7 @@ constraint-dependencies = [
     "virtualenv>=20.36.1",
     "pygments>=2.20.0",
     "requests>=2.33.0",
+    "pyjwt>=2.13.0",
 ]
 
 [tool.django-stubs]

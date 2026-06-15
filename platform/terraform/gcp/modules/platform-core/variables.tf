@@ -311,3 +311,61 @@ variable "operator_admin_cidrs" {
     error_message = "operator_admin_cidrs entries must be valid CIDRs with an explicit /N suffix (IPv4 must be /24 or longer; IPv6 must be /96 or longer). Direct break-glass SSH is never opened to broad external ranges; route wider operator access through IAP / OS Login instead (ADR-008-R4)."
   }
 }
+
+# ------------------------------------------------------------------------------
+# Range Egress (PLAT-220)
+# ------------------------------------------------------------------------------
+#
+# The public surface for range egress policy is `settings.range_egress` in
+# shifter.yaml (validated by shifter/installation/range_egress.py). These two
+# variables are the GCP bridge into that policy:
+#
+# - mode = "status-quo": no new firewall rules are created; range Cloud NAT
+#   behavior is unchanged. This is the documented default when the operator
+#   omits the `range_egress` block.
+# - mode = "deny-all": a low-priority EGRESS deny on the range VPC blocks all
+#   external destinations (Google metadata + private API access via Private
+#   Google Access remains because those targets ride the internal VPC).
+# - mode = "allowlist": deny-all base + a higher-priority EGRESS allow to the
+#   CIDRs in `range_egress_allowed_cidrs` on TCP 443.
+#
+# See docs/architecture/range-egress-ip-allowlist.md.
+variable "range_egress_mode" {
+  description = "Range egress policy mode (bridge for shifter.yaml settings.range_egress.mode). One of status-quo, deny-all, allowlist."
+  type        = string
+  default     = "status-quo"
+
+  validation {
+    condition     = contains(["status-quo", "deny-all", "allowlist"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: status-quo, deny-all, allowlist."
+  }
+}
+
+variable "range_egress_allowed_cidrs" {
+  description = "IP CIDR allowlist for range egress when range_egress_mode = allowlist (bridge for shifter.yaml settings.range_egress.allowed_cidrs)."
+  type        = list(string)
+  default     = []
+
+  # Single-variable validation only: cross-variable validation (mode allowlist
+  # + non-empty cidrs) was added in Terraform 1.9, and CI pins 1.7.1 for
+  # gcp-dev. The mode/allowlist cross-variable invariant rides a
+  # `lifecycle.precondition` on the `range_egress_deny_all` firewall rule in
+  # main.tf instead (1.2+) — that fires at plan/apply time even on 1.7.1.
+  # The shape rules below mirror the public RangeEgressPolicy contract:
+  # well-formed CIDR (IPv4 or IPv6), parsed prefix length > 0 (rejects /0
+  # and alternate spellings like 0.0.0.0/00), no host bits set, no duplicates.
+  validation {
+    condition = (
+      length(distinct(var.range_egress_allowed_cidrs)) == length(var.range_egress_allowed_cidrs)
+      && alltrue([
+        for c in var.range_egress_allowed_cidrs : (
+          can(cidrhost(c, 0))
+          && can(tonumber(split("/", c)[1]))
+          && tonumber(split("/", c)[1]) > 0
+          && cidrhost(c, 0) == split("/", c)[0]
+        )
+      ])
+    )
+    error_message = "range_egress_allowed_cidrs must be a list of canonical CIDR network addresses (IPv4 or IPv6) with no duplicates; default-route prefixes (parsed prefix length 0, e.g. 0.0.0.0/0, ::/0, 0.0.0.0/00) and host-bits-set inputs are rejected (the platform contract; see docs/architecture/range-egress-ip-allowlist.md)."
+  }
+}

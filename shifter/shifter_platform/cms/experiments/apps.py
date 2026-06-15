@@ -10,3 +10,9 @@ class ExperimentsConfig(AppConfig):
     name = "cms.experiments"
     label = "experiments"
     verbose_name = "Experiments"
+
+    def ready(self) -> None:
+        """Register experiment notification types."""
+        from cms.experiments.notifications import register_experiment_notifications
+
+        register_experiment_notifications()

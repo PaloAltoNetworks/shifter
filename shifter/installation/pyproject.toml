@@ -19,7 +19,7 @@ shifter-config = "installation.cli:main"
 dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.14.10",
+    "ruff>=0.15.13",
     "bandit>=1.9.2",
     "types-pyyaml>=6.0",
 ]

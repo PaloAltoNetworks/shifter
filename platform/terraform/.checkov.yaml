@@ -1,0 +1,126 @@
+# Checkov configuration for shifter Terraform (ADR-004-R11)
+#
+# Single source of truth shared by the local pre-commit hook
+# (.pre-commit-config.yaml) and the GitHub Actions security-iac job
+# (.github/workflows/_quality.yml). soft-fail is OFF: first-party
+# Terraform under platform/terraform/ is a blocking Checkov path.
+#
+# Every skip-check entry below MUST point to a matching ADR exception
+# in docs/adr/exceptions.yaml (rule_id: ADR-004-R11) with owner,
+# reason, expires_on, and the relevant Checkov policy identifier.
+# The ADR entry's `paths:` field is the path scope of the exception
+# (Checkov has no native per-rule path scoping, so the audit trail
+# lives in the ADR registry).
+#
+# Per-resource skips for rules that appear in mixed contexts use
+# inline `# checkov:skip=CKV_X:reason. See ADR-004-R11 exception <slug>.`
+# comments on the resource itself.
+
+framework:
+  - terraform
+
+# `directory:` is provided by the caller (pre-commit hook + GH Action) so the
+# same config can target platform/terraform/ from any working directory
+# without leaking module-source traversals into other repo paths.
+
+quiet: true
+compact: true
+soft-fail: false
+
+skip-check:
+  # ── Globally skipped: repo-policy rules ─────────────────────────────────────
+  #
+  # CKV2_AWS_34 — SSM Parameter SecureString. Repo policy is secrets-in-SM.
+  - CKV2_AWS_34
+  # CKV_AWS_51 — ECR mutable tags. Module default is MUTABLE; per-caller pin.
+  - CKV_AWS_51
+  # CKV_AWS_46 — false positive on templatefile interpolation.
+  - CKV_AWS_46
+
+  # ── Path-scoped (engine-provisioner IAM) ────────────────────────────────────
+  # CKV_AWS_355 / CKV_AWS_290 / CKV_AWS_289 — provisioner IAM design.
+  - CKV_AWS_355
+  - CKV_AWS_290
+  - CKV_AWS_289
+
+  # ── Path-scoped (demo / event ranges) ───────────────────────────────────────
+  # CKV_AWS_88 / CKV_AWS_130 — public IP + public subnets for workshop access.
+  - CKV_AWS_88
+  - CKV_AWS_130
+  # CKV_AWS_24 / CKV_AWS_25 / CKV_AWS_260 — open SSH/RDP/HTTP for workshops.
+  - CKV_AWS_24
+  - CKV_AWS_25
+  - CKV_AWS_260
+
+  # ── Default outbound egress ─────────────────────────────────────────────────
+  # CKV_AWS_382 — egress 0.0.0.0/0 all-ports. Default outbound.
+  - CKV_AWS_382
+
+  # ── Service-account IAM users ───────────────────────────────────────────────
+  # CKV_AWS_273 / CKV_AWS_274 / CKV_AWS_40 / CKV2_AWS_22 — programmatic users.
+  - CKV_AWS_273
+  - CKV_AWS_274
+  - CKV_AWS_40
+  - CKV2_AWS_22
+
+  # ── Runtime-attached resources ──────────────────────────────────────────────
+  # CKV2_AWS_5 — SGs attached at runtime (ECS task ENIs, Pulumi instances).
+  - CKV2_AWS_5
+  # CKV2_AWS_19 — NGFW EIPs associated via aws_eip_association at apply.
+  - CKV2_AWS_19
+  # CKV2_AWS_41 — IAM role on EC2: demo workshop instances do not run AWS SDKs.
+  - CKV2_AWS_41
+
+  # ── Secrets Manager rotation (no rotation Lambdas yet) ──────────────────────
+  # CKV2_AWS_57 — covered by manual rotation procedures in each owning module.
+  - CKV2_AWS_57
+
+  # ── Log-archive S3 bucket / ephemeral state buckets ─────────────────────────
+  # CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 — log/state buckets.
+  - CKV_AWS_18
+  - CKV_AWS_21
+  - CKV_AWS_144
+  - CKV2_AWS_62
+
+  # ── Module-default driven by per-environment variable ───────────────────────
+  # CKV_AWS_157 — RDS Multi-AZ controlled by var.multi_az / var.db_multi_az.
+  - CKV_AWS_157
+  # CKV_AWS_293 — RDS deletion protection controlled by var.deletion_protection.
+  - CKV_AWS_293
+
+  # ── Container networking ────────────────────────────────────────────────────
+  # CKV_AWS_341 — Launch template hop_limit=2 required for bridged containers.
+  - CKV_AWS_341
+
+  # ── Guacamole ALB target group HTTP (TLS terminates at ALB) ─────────────────
+  - CKV_AWS_378
+
+  # ── GCP platform-core follow-up issue ───────────────────────────────────────
+  # All CKV_GCP_* / CKV2_GCP_* in gcp/modules/platform-core/main.tf need
+  # per-flag triage; deferred to a follow-up issue with the GCP deploy
+  # team. See docs/adr/exceptions.yaml entry for the full list.
+  - CKV_GCP_6
+  - CKV_GCP_9
+  - CKV_GCP_10
+  - CKV_GCP_12
+  - CKV_GCP_13
+  - CKV_GCP_21
+  - CKV_GCP_51
+  - CKV_GCP_53
+  - CKV_GCP_54
+  - CKV_GCP_61
+  - CKV_GCP_62
+  - CKV_GCP_65
+  - CKV_GCP_69
+  - CKV_GCP_73
+  - CKV_GCP_79
+  - CKV_GCP_83
+  - CKV_GCP_84
+  - CKV_GCP_107
+  - CKV_GCP_108
+  - CKV_GCP_109
+  - CKV_GCP_110
+  - CKV_GCP_111
+  - CKV_GCP_124
+  - CKV2_GCP_10
+  - CKV2_GCP_13

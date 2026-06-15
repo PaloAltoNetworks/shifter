@@ -411,6 +411,27 @@ def create_dynamodb_table(table_name: str, region: str, profile: str, dry_run: b
         )
 
 
+def administrator_access_policy_document() -> str:
+    """Return the inline administrator policy used for bootstrap and CI roles.
+
+    Some AWS organizations deny iam:AttachRolePolicy via SCP while still
+    allowing inline role policies. The effective policy matches AWS managed
+    AdministratorAccess without depending on managed-policy attachment APIs.
+    """
+    return json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": "*",
+                    "Resource": "*",
+                }
+            ],
+        }
+    )
+
+
 @dataclass
 class BootstrapConfig:
     env: str
@@ -694,6 +715,9 @@ def gcloud_resource_exists(cmd: list[str]) -> bool:
 
 _UNKNOWN_ERROR = "unknown error"
 _GKE_WORKLOAD_IDENTITY_ANNOTATION = "iam.gke.io/gcp-service-account"
+_GDC_SCENARIO_POD_KALI_IMAGE = (
+    "docker.io/kalilinux/kali-rolling@sha256:256893c92bbd289b07d9ef8a62e75f9c7cb3d9e570fb3d3725b2e86b9acd5728"
+)
 _YAML_METADATA = "metadata:"
 
 
@@ -1851,7 +1875,7 @@ def render_gcp_platform_runtime_env(
         "GDC_DC_DISK_SIZE_GIB=64",
         "# Optional overrides for lower-fidelity in-range scenario Pods.",
         "GDC_SCENARIO_POD_IMAGE_PULL_POLICY=IfNotPresent",
-        "GDC_SCENARIO_POD_KALI_IMAGE=docker.io/kalilinux/kali-rolling:latest",
+        f"GDC_SCENARIO_POD_KALI_IMAGE={_GDC_SCENARIO_POD_KALI_IMAGE}",
         "GDC_SCENARIO_POD_UBUNTU_IMAGE=docker.io/library/ubuntu:24.04",
         f"PLATFORM_BOOTSTRAP_STAFF_EMAILS={bootstrap_staff_emails}",
         f"PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS={bootstrap_superuser_emails}",
@@ -1871,6 +1895,39 @@ def parse_env_contract(rendered: str) -> dict[str, str]:
             raise ValueError(f"Invalid env contract line: {raw_line!r}")
         values[key] = value
     return values
+
+
+def validate_image_tag(image_tag: str) -> str:
+    """Return a non-moving image tag suitable for deployment manifests."""
+    tag = image_tag.strip()
+    if not tag:
+        raise ValueError("image tag must be non-empty")
+    if tag == "latest":
+        raise ValueError("image tag must be immutable; refusing to use latest")
+    return tag
+
+
+def resolve_gcp_control_plane_image_tag() -> str:
+    """Resolve the immutable tag used for all GCP control-plane images."""
+    env_tag = os.environ.get("SHIFTER_IMAGE_TAG", "").strip()
+    if env_tag:
+        return validate_image_tag(env_tag)
+
+    github_sha = os.environ.get("GITHUB_SHA", "").strip()
+    if github_sha:
+        return validate_image_tag(github_sha[:7])
+
+    result = run_cmd(
+        ["git", "-C", str(get_repo_root()), "rev-parse", "--short=7", "HEAD"],
+        check=False,
+        capture=True,
+    )
+    if result is None:
+        raise RuntimeError("Unable to resolve image tag from git")
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
+        raise RuntimeError(f"Unable to resolve image tag from git: {stderr}")
+    return validate_image_tag(result.stdout.strip())
 
 
 def parse_simple_env_file(path: Path) -> dict[str, str]:
@@ -2077,9 +2134,11 @@ def render_gcp_helm_values(
     *,
     guacamole_db_payload: dict[str, str],
     guacamole_json_secret: str,
+    image_tag: str,
     bootstrap_operator_email: str | None = None,
 ) -> dict[str, object]:
     """Render Helm values for the Shifter release from Terraform outputs and runtime secrets."""
+    pinned_image_tag = validate_image_tag(image_tag)
     image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
     service_accounts = _get_output_value(outputs, "workload_service_accounts")
     public_hostname = str(_get_output_value(outputs, "public_hostname")).strip()
@@ -2092,7 +2151,7 @@ def render_gcp_helm_values(
         **parse_env_contract(
             render_gcp_platform_runtime_env(config, bootstrap_operator_email=bootstrap_operator_email)
         ),
-        **parse_env_contract(runtime_renderer.render_env(outputs)),
+        **parse_env_contract(runtime_renderer.render_env(outputs, image_tag=pinned_image_tag)),
     }
     edge_policy_name = str(_get_output_value(outputs, "cloud_armor_security_policy_name")).strip()
     control_plane_database = _get_output_value(outputs, "control_plane_database")
@@ -2139,17 +2198,17 @@ def render_gcp_helm_values(
         "images": {
             "portal": {
                 "repository": image_roots["portal"],
-                "tag": "latest",
+                "tag": pinned_image_tag,
                 "pullPolicy": "Always",
             },
             "guacd": {
                 "repository": image_roots["guacd"],
-                "tag": "latest",
+                "tag": pinned_image_tag,
                 "pullPolicy": "Always",
             },
             "guacamoleClient": {
                 "repository": image_roots["guacamole-client"],
-                "tag": "latest",
+                "tag": pinned_image_tag,
                 "pullPolicy": "Always",
             },
         },
@@ -2680,6 +2739,7 @@ def stage_gcp_control_plane_values(
     outputs: dict[str, dict[str, object]],
     staging_root: Path,
     *,
+    image_tag: str,
     bootstrap_operator_email: str | None = None,
 ) -> Path:
     """Stage the generated Helm values file for the Shifter release."""
@@ -2694,6 +2754,7 @@ def stage_gcp_control_plane_values(
         outputs,
         guacamole_db_payload=guacamole_db_payload,
         guacamole_json_secret=guacamole_json_secret,
+        image_tag=image_tag,
         bootstrap_operator_email=bootstrap_operator_email,
     )
     values_path = staging_root / "shifter.values.generated.json"
@@ -2701,8 +2762,14 @@ def stage_gcp_control_plane_values(
     return values_path
 
 
-def push_gcp_control_plane_images(outputs: dict[str, dict[str, object]], dry_run: bool = False):
+def push_gcp_control_plane_images(
+    outputs: dict[str, dict[str, object]],
+    *,
+    image_tag: str,
+    dry_run: bool = False,
+) -> None:
     """Build and push the control-plane images to Artifact Registry."""
+    pinned_image_tag = validate_image_tag(image_tag)
     image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
     artifact_registry_host = str(image_roots["portal"]).split("/")[0]
     repo_root = get_repo_root()
@@ -2711,22 +2778,22 @@ def push_gcp_control_plane_images(outputs: dict[str, dict[str, object]], dry_run
 
     image_builds = [
         (
-            f"{image_roots['portal']}:latest",
+            f"{image_roots['portal']}:{pinned_image_tag}",
             repo_root / "shifter",
             repo_root / "shifter" / "shifter_platform" / "Dockerfile",
         ),
         (
-            f"{image_roots['pulumi-provisioner']}:latest",
+            f"{image_roots['pulumi-provisioner']}:{pinned_image_tag}",
             repo_root / "shifter" / "engine" / "provisioner",
             repo_root / "shifter" / "engine" / "provisioner" / "Dockerfile",
         ),
         (
-            f"{image_roots['guacd']}:latest",
+            f"{image_roots['guacd']}:{pinned_image_tag}",
             repo_root / "shifter" / "engine" / "guacd",
             repo_root / "shifter" / "engine" / "guacd" / "Dockerfile",
         ),
         (
-            f"{image_roots['guacamole-client']}:latest",
+            f"{image_roots['guacamole-client']}:{pinned_image_tag}",
             repo_root / "shifter" / "engine" / "guacamole",
             repo_root / "shifter" / "engine" / "guacamole" / "Dockerfile",
         ),
@@ -3206,12 +3273,14 @@ def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = Fals
         return outputs
 
     bootstrap_operator_email = ensure_gcp_identity_platform_operator(config, outputs, dry_run=dry_run)
-    push_gcp_control_plane_images(outputs, dry_run=dry_run)
+    image_tag = resolve_gcp_control_plane_image_tag()
+    push_gcp_control_plane_images(outputs, image_tag=image_tag, dry_run=dry_run)
     with tempfile.TemporaryDirectory(prefix="shifter-gcp-platform-") as staging_root_name:
         values_path = stage_gcp_control_plane_values(
             config,
             outputs,
             Path(staging_root_name),
+            image_tag=image_tag,
             bootstrap_operator_email=bootstrap_operator_email,
         )
         deploy_gcp_control_plane_with_helm(config, outputs, values_path, dry_run=dry_run)
@@ -3380,16 +3449,19 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         profile=profile,
     )
 
-    # Attach AdministratorAccess to bootstrap role (temporary, will be deleted)
+    # Add AdministratorAccess-equivalent permissions inline. The target AWS org
+    # may deny iam:AttachRolePolicy via SCP even for admin operators.
     run_cmd(
         [
             "aws",
             "iam",
-            "attach-role-policy",
+            "put-role-policy",
             "--role-name",
             config.bootstrap_role_name,
-            "--policy-arn",
-            "arn:aws:iam::aws:policy/AdministratorAccess",
+            "--policy-name",
+            "bootstrap-administrator-access",
+            "--policy-document",
+            administrator_access_policy_document(),
         ],
         dry_run=dry_run,
         profile=profile,
@@ -3480,16 +3552,16 @@ use_lockfile = true
 
     info(f"Deleting temporary bootstrap role: {config.bootstrap_role_name}")
 
-    # Detach AdministratorAccess first
+    # Delete the inline bootstrap policy first.
     run_cmd(
         [
             "aws",
             "iam",
-            "detach-role-policy",
+            "delete-role-policy",
             "--role-name",
             config.bootstrap_role_name,
-            "--policy-arn",
-            "arn:aws:iam::aws:policy/AdministratorAccess",
+            "--policy-name",
+            "bootstrap-administrator-access",
         ],
         dry_run=dry_run,
         check=False,

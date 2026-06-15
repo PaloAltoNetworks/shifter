@@ -6,12 +6,32 @@ on:
       environment:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       is_dev:
         required: true
         type: boolean
       deploy_changes:
         required: true
         type: boolean
+      first_deploy:
+        description: >-
+          Allow the engine deploy to skip when the ECS task definition family
+          does not exist yet. Set true only for the first-ever deploy to a fresh
+          AWS environment, before the platform Terraform apply has created the
+          provisioner task definition. Automatic deploys always require the
+          family to exist, so a typo'd family name fails the run.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      image_tag:
+        description: Run-scoped ECR tag pushed for the engine provisioner image
+        value: ${{ jobs.build.outputs.image_tag }}
+      image_digest:
+        description: Immutable ECR digest pushed for the engine provisioner image
+        value: ${{ jobs.build.outputs.image_digest }}
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -24,26 +44,31 @@ env:
 jobs:
   validate:
     name: Validate (${{ inputs.environment }})
-    runs-on: self-hosted
+    # PR validation only needs a local Docker build and no cloud credentials.
+    # Keep it on GitHub-hosted runners so PRs do not queue behind the
+    # deployment runner pool; build/deploy remain self-hosted below.
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build provisioner image locally
         run: docker build --no-cache -t shifter-engine-validate ./shifter/engine/provisioner
 
   build:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: validate
     permissions:
       id-token: write
       contents: read
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     outputs:
-      image_tag: ${{ steps.sha.outputs.short }}
+      image_tag: ${{ steps.image.outputs.tag }}
+      image_digest: ${{ steps.build.outputs.digest }}
     env:
       ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -54,26 +79,29 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set short SHA
-        id: sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+      - name: Set image tag
+        id: image
+        run: |
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          echo "tag=${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: ./shifter/engine/provisioner
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
           no-cache: true
 
   deploy:
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     permissions:
       id-token: write
     needs: build
@@ -88,17 +116,31 @@ jobs:
 
       - name: Update ECS task definition
         env:
-          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
           ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
+          FIRST_DEPLOY: ${{ inputs.first_deploy }}
         run: |
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest"
+            exit 1
+          fi
           # Get AWS account ID
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          NEW_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          NEW_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
 
-          # Get current task definition (skip if doesn't exist yet - first deploy)
+          # Get current task definition. A missing family must fail the deploy:
+          # an unconditional skip means a typo'd family name silently skips every
+          # engine deploy forever. The only legitimate skip is the first-ever
+          # deploy to a fresh environment, before the platform Terraform apply
+          # has created the family — that is gated on the explicit first_deploy
+          # bootstrap input (mirrors gcp_require_active_certificate).
           TASK_DEF=$(aws ecs describe-task-definition --task-definition "${TASK_FAMILY}" --query 'taskDefinition' 2>/dev/null) || {
-            echo "::warning::Task definition ${TASK_FAMILY} does not exist yet. Skipping deploy - Platform terraform will create it."
-            exit 0
+            if [ "${FIRST_DEPLOY}" = "true" ]; then
+              echo "::warning::Bootstrap (first_deploy): task definition ${TASK_FAMILY} does not exist yet; skipping engine deploy. The platform Terraform apply will create it. Re-run without aws_first_deploy once the platform stack has been applied."
+              exit 0
+            fi
+            echo "::error::ECS task definition family ${TASK_FAMILY} does not exist or could not be read; the engine deploy cannot proceed. For the first-ever deploy to a fresh environment, re-run via workflow_dispatch with aws_first_deploy=true; otherwise verify TASK_FAMILY matches the Terraform-managed provisioner family."
+            exit 1
           }
 
           # Swap the image into the existing task definition and strip the

@@ -17,18 +17,21 @@ Usage (from your workstation):
     python3 scripts/polaris-aws-range/cleanup_non_keepers.py --execute       # real
 
 The script fires an SSM command that runs the actual Django work inside
-the portal container. See cleanup-plan.md for the policy rationale and
-full keep/destroy lists.
+the portal container via :mod:`common.PortalShellTransport`. See
+cleanup-plan.md for the policy rationale and full keep/destroy lists.
 """
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import sys
-import time
 
-import boto3
+from common import (
+    PolarisAwsContext,
+    PortalShellTransport,
+    SsmExecutor,
+    find_portal_instance,
+)
 
 # -----------------------------------------------------------------------------
 # Hard-coded safety config — DO NOT edit without cross-checking cleanup-plan.md
@@ -62,7 +65,6 @@ EXPECTED_DESTROY_MAX = 110  # defense: never destroy more than this many
 
 AWS_PROFILE = "panw-shifter-dev-workstation"
 AWS_REGION = "us-east-2"
-PORTAL_INSTANCE_TAG_NAME = "dev-portal-ec2"
 
 # -----------------------------------------------------------------------------
 # The Django-shell snippet that runs inside the portal container.
@@ -126,47 +128,9 @@ except Exception:
 """
 
 
-def find_portal_instance(ec2) -> str:
-    resp = ec2.describe_instances(Filters=[
-        {"Name": "tag:Name", "Values": [PORTAL_INSTANCE_TAG_NAME]},
-        {"Name": "instance-state-name", "Values": ["running"]},
-    ])
-    for r in resp["Reservations"]:
-        for i in r["Instances"]:
-            return i["InstanceId"]
-    raise RuntimeError(f"no running instance tagged Name={PORTAL_INSTANCE_TAG_NAME}")
-
-
-def run_in_portal(ssm, instance_id: str, script: str) -> tuple[str, str]:
-    """Ship the script into the portal container via SSM and return (stdout, stderr)."""
-    py_b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
-    wrapper = rf"""
-set -euo pipefail
-echo "{py_b64}" | base64 -d > /tmp/cnk.py
-sudo docker cp /tmp/cnk.py portal:/tmp/cnk.py
-sudo docker exec portal bash -c 'while IFS= read -r -d "" kv; do export "$kv"; done < /proc/1/environ && cd /app && python manage.py shell < /tmp/cnk.py'
-sudo docker exec portal rm -f /tmp/cnk.py || true
-rm -f /tmp/cnk.py || true
-"""
-    resp = ssm.send_command(
-        InstanceIds=[instance_id],
-        DocumentName="AWS-RunShellScript",
-        Comment="polaris cleanup non-keepers",
-        Parameters={"commands": [wrapper], "executionTimeout": ["900"]},
-        TimeoutSeconds=900,
-    )
-    cid = resp["Command"]["CommandId"]
-    # poll
-    for _ in range(180):
-        time.sleep(5)
-        inv = ssm.get_command_invocation(CommandId=cid, InstanceId=instance_id)
-        if inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
-            break
-    return inv.get("StandardOutputContent", ""), inv.get("StandardErrorContent", "")
-
-
 def parse_events(stdout: str) -> list[dict]:
-    events = []
+    """Extract structured ``SHELL_EVENT|...`` records from raw SSM stdout."""
+    events: list[dict] = []
     for line in stdout.splitlines():
         if line.startswith("SHELL_EVENT|"):
             try:
@@ -200,19 +164,22 @@ def main() -> int:
     else:
         print("Running in DRY-RUN mode (no changes will be made). Pass --execute to destroy.")
 
-    session = boto3.Session(profile_name=args.profile, region_name=args.region)
-    ec2 = session.client("ec2")
-    ssm = session.client("ssm")
-    portal = find_portal_instance(ec2)
+    ctx = PolarisAwsContext(profile=args.profile, region=args.region)
+    portal = find_portal_instance(ctx.ec2())
     print(f"portal instance: {portal}")
 
+    transport = PortalShellTransport(
+        executor=SsmExecutor(ctx.ssm(), poll_interval_s=5.0, default_timeout_s=900),
+        portal_instance_id=portal,
+        tmp_name="cnk",
+    )
     inner = INNER_SCRIPT.format(
         event_id=EVENT_ID,
         keep_emails_list=sorted(KEEP_EMAILS),
         dry_run=not args.execute,
     )
-    stdout, stderr = run_in_portal(ssm, portal, inner)
-    events = parse_events(stdout)
+    result = transport.run_raw(inner, timeout_s=900, comment="polaris cleanup non-keepers")
+    events = parse_events(result.stdout)
 
     return _summarize_events(events, execute=args.execute)
 

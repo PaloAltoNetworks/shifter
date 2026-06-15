@@ -207,6 +207,20 @@ resource "aws_ssm_parameter" "redis_endpoint" {
   tags = local.common_tags
 }
 
+# Explicit channel-layer backend posture (ADR-018, #849). Always written with a
+# non-empty value so the runtime is unambiguous and independent of whether the
+# redis-endpoint write succeeded: a "redis" posture without a reachable endpoint
+# makes Django fail closed at startup instead of silently using in-memory.
+# Decoupled from enable_autoscaling — this is wiring posture, not compute topology.
+resource "aws_ssm_parameter" "channel_layer_backend" {
+  name        = "${local.ps_prefix}/channel-layer-backend"
+  description = "Django Channels backend posture (redis | in_memory)"
+  type        = "String"
+  value       = var.enable_redis ? "redis" : "in_memory"
+
+  tags = local.common_tags
+}
+
 resource "aws_ssm_parameter" "db_host_override" {
   count = var.enable_db_host_override ? 1 : 0
 

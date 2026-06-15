@@ -6,22 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 
-class TestConnectTerminal:
-    """Tests for connect_terminal() in engine/services.py.
-
-    Tests the service contract:
-    - Inputs: user (required), instance_uuid (required string)
-    - Outputs: SSHConnection for the specified instance
-    - Side effects: none (read-only operation)
-    - Errors: validates inputs, ownership, range status, instance existence
-    - Logging: DEBUG on success, ERROR on failures
-
-    The function looks up Range by instance_uuid in provisioned_instances JSONB.
-    """
-
-    # -------------------------------------------------------------------------
-    # Outputs - returns SSHConnection
-    # -------------------------------------------------------------------------
+class TestConnectTerminalOutputs:
+    """Output contract tests for connect_terminal()."""
 
     def test_returns_ssh_connection(self):
         """Service returns SSHConnection for valid inputs."""
@@ -118,6 +104,10 @@ class TestConnectTerminal:
         assert result.username == "ubuntu"
         assert result.private_key == ssh_key
 
+
+class TestConnectTerminalLookup:
+    """Range lookup and side-effect tests for connect_terminal()."""
+
     def test_filters_range_by_instance_uuid_and_user(self):
         """Service queries Range by instance_uuid in provisioned_instances."""
         from engine import connect_terminal
@@ -147,10 +137,6 @@ class TestConnectTerminal:
                 user=mock_user,
             )
 
-    # -------------------------------------------------------------------------
-    # Side effects - none expected (read-only)
-    # -------------------------------------------------------------------------
-
     def test_does_not_modify_range(self):
         """Service does not modify the Range object."""
         from engine import connect_terminal
@@ -177,9 +163,9 @@ class TestConnectTerminal:
             connect_terminal(mock_user, "instance-uuid-123")
             mock_range.save.assert_not_called()
 
-    # -------------------------------------------------------------------------
-    # Input validation - user parameter
-    # -------------------------------------------------------------------------
+
+class TestConnectTerminalInputValidation:
+    """Input validation tests for connect_terminal()."""
 
     def test_requires_user_argument(self):
         """Service raises TypeError if user not provided."""
@@ -194,10 +180,6 @@ class TestConnectTerminal:
 
         with pytest.raises((TypeError, ValueError)):
             connect_terminal(None, "uuid-123")
-
-    # -------------------------------------------------------------------------
-    # Input validation - instance_uuid parameter
-    # -------------------------------------------------------------------------
 
     def test_raises_on_none_instance_uuid(self):
         """Service raises error if instance_uuid is None."""
@@ -217,9 +199,9 @@ class TestConnectTerminal:
         with pytest.raises((TypeError, ValueError)):
             connect_terminal(mock_user, "")
 
-    # -------------------------------------------------------------------------
-    # Error handling - range not found
-    # -------------------------------------------------------------------------
+
+class TestConnectTerminalErrorStates:
+    """Range and instance error-state tests for connect_terminal()."""
 
     def test_raises_when_no_range_found_for_instance(self):
         """Service raises ValueError when no range contains the instance."""
@@ -236,10 +218,6 @@ class TestConnectTerminal:
             pytest.raises(ValueError, match=r"No range found"),
         ):
             connect_terminal(mock_user, "non-existent-uuid")
-
-    # -------------------------------------------------------------------------
-    # Error handling - range status
-    # -------------------------------------------------------------------------
 
     def test_raises_when_range_not_ready(self):
         """Service raises ValueError when range is not READY."""
@@ -277,10 +255,6 @@ class TestConnectTerminal:
         ):
             connect_terminal(mock_user, "uuid-123")
 
-    # -------------------------------------------------------------------------
-    # Error handling - instance not found in range
-    # -------------------------------------------------------------------------
-
     def test_raises_when_instance_uuid_not_found_in_range(self):
         """Service raises ValueError when instance UUID doesn't exist in range."""
         from engine import connect_terminal
@@ -300,9 +274,9 @@ class TestConnectTerminal:
         ):
             connect_terminal(mock_user, "non-existent-uuid")
 
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG on success
-    # -------------------------------------------------------------------------
+
+class TestConnectTerminalLogging:
+    """Logging tests for connect_terminal()."""
 
     def test_logs_debug_on_entry(self, caplog):
         """Service logs debug on entry with user_id and instance_uuid."""
@@ -331,10 +305,6 @@ class TestConnectTerminal:
             connect_terminal(mock_user, "instance-uuid-123")
 
         assert "instance-uuid-123" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - ERROR on failures
-    # -------------------------------------------------------------------------
 
     def test_logs_error_when_range_not_found(self, caplog):
         """Service logs error when no range found for instance."""
@@ -398,9 +368,9 @@ class TestConnectTerminal:
 
         assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
 
-    # -------------------------------------------------------------------------
-    # SSH username based on os_type
-    # -------------------------------------------------------------------------
+
+class TestConnectTerminalUsernameMapping:
+    """OS username mapping tests for connect_terminal()."""
 
     def test_uses_kali_username_for_kali_os_type(self):
         """Service uses 'kali' username when os_type is 'kali'."""
@@ -564,9 +534,9 @@ class TestConnectTerminal:
             result = connect_terminal(mock_user, "win-uuid-123")
             assert result.username == "Administrator"
 
-    # -------------------------------------------------------------------------
-    # Persistent tmux sessions (session_id)
-    # -------------------------------------------------------------------------
+
+class TestConnectTerminalSessionIds:
+    """Session id tests for connect_terminal()."""
 
     def test_sets_session_id_for_kali_instances(self):
         """Service sets session_id for Kali instances (tmux persistent session)."""

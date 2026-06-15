@@ -16,6 +16,7 @@ from cms.scenarios.loader import get_all_scenarios as get_yaml_scenarios
 from cms.scenarios.loader import list_scenario_ids as list_yaml_ids
 from cms.scenarios.loader import load_scenario as load_yaml_scenario
 from cms.scenarios.schema import ScenarioTemplate
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -49,7 +50,7 @@ def _get_db_scenarios() -> list[ScenarioTemplate]:
         except Exception:
             logger.warning(
                 "Skipping invalid DB scenario: scenario_id=%s, id=%s",
-                s.scenario_id,
+                safe_log_value(s.scenario_id),
                 s.id,
             )
     return scenarios

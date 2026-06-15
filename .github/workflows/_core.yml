@@ -6,6 +6,9 @@ on:
       environment:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       is_dev:
         required: true
         type: boolean
@@ -26,11 +29,12 @@ jobs:
       pull-requests: write
     name: Plan (${{ inputs.environment }})
     runs-on: self-hosted
+    if: github.event_name != 'pull_request'
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -42,7 +46,7 @@ jobs:
         working-directory: platform/terraform
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
-      - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
+      - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -64,6 +68,7 @@ jobs:
       pull-requests: write
     name: Apply (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: plan
     if: |
       always() &&
@@ -74,7 +79,7 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -83,5 +88,6 @@ jobs:
         with:
           terraform_version: "1.13.3"
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
-      - run: terraform apply -auto-approve
+      - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan
+      - run: terraform apply -lock-timeout=5m tfplan
       - run: terraform output -json

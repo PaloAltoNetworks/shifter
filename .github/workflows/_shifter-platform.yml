@@ -6,12 +6,33 @@ on:
       environment:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       is_dev:
         required: true
         type: boolean
       apply_changes:
         required: true
         type: boolean
+      # Split per concern (#913). `apply_changes` is deployment
+      # permission (environment branch / manual dispatch); these two
+      # say which paths actually changed. Terraform plan/apply and the
+      # Guacamole image publish run only for platform_changes;
+      # the portal image build/deploy runs for either signal.
+      platform_changes:
+        description: Terraform/platform-infrastructure inputs changed (or manual dispatch)
+        required: true
+        type: boolean
+      portal_image_changes:
+        description: Portal image source changed (or manual dispatch)
+        required: true
+        type: boolean
+      engine_image_digest:
+        description: Engine provisioner image digest from the upstream build job
+        required: false
+        type: string
+        default: ""
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -39,11 +60,18 @@ jobs:
       pull-requests: write
     name: Plan (${{ inputs.environment }})
     runs-on: self-hosted
+    needs: push-guacamole-images
+    if: |
+      always() &&
+      github.event_name != 'pull_request' &&
+      inputs.platform_changes &&
+      (needs.push-guacamole-images.result == 'success' ||
+       needs.push-guacamole-images.result == 'skipped')
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -61,6 +89,8 @@ jobs:
         # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
         env:
           IS_DEV: ${{ inputs.is_dev }}
+          ENGINE_IMAGE_DIGEST: ${{ inputs.engine_image_digest }}
+          ENGINE_TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
           TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
           TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
         run: |
@@ -81,6 +111,30 @@ jobs:
             exit 1
           fi
           printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
+          resolve_engine_image_digest() {
+            local digest="${ENGINE_IMAGE_DIGEST}"
+            if [ -n "${digest}" ]; then
+              if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::Engine build did not produce a valid ECR image digest"
+                exit 1
+              fi
+              printf '%s\n' "${digest}"
+              return
+            fi
+
+            local current_image
+            if ! current_image=$(aws ecs describe-task-definition --task-definition "${ENGINE_TASK_FAMILY}" --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null); then
+              echo "::error::No engine image digest was provided and ECS task definition ${ENGINE_TASK_FAMILY} could not be read. Run a deploy path that builds the engine image so Terraform receives the build digest."
+              exit 1
+            fi
+            if [[ "${current_image}" =~ @(sha256:[0-9a-f]{64})$ ]]; then
+              printf '%s\n' "${BASH_REMATCH[1]}"
+              return
+            fi
+            echo "::error::Existing ECS task definition ${ENGINE_TASK_FAMILY} is not digest-pinned (${current_image}). Run the engine image deploy first so platform Terraform can preserve a digest."
+            exit 1
+          }
+          printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
       - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
@@ -105,18 +159,17 @@ jobs:
       pull-requests: write
     name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
-    needs: plan
+    environment: ${{ inputs.github_environment }}
     if: |
-      always() &&
       inputs.apply_changes &&
-      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      inputs.platform_changes &&
       github.event_name != 'pull_request'
     env:
       GUACD_REPO: ${{ inputs.is_dev && 'shifter-dev-guacd' || 'shifter-guacd' }}
       GUACAMOLE_CLIENT_REPO: ${{ inputs.is_dev && 'shifter-dev-guacamole-client' || 'shifter-guacamole-client' }}
       GUACAMOLE_VERSION: "1.5.5"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -126,7 +179,16 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Check guacd image tag
+        id: guacd-image
+        run: |
+          if aws ecr describe-images --repository-name "$GUACD_REPO" --image-ids imageTag="$GUACAMOLE_VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push guacd image (with RDP file transfer support)
+        if: steps.guacd-image.outputs.exists != 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./shifter/engine/guacd
@@ -135,9 +197,17 @@ jobs:
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
           no-cache: true
+      - name: Check guacamole-client image tag
+        id: guacamole-client-image
+        run: |
+          if aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPO" --image-ids imageTag="$GUACAMOLE_VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push guacamole-client image (with OIDC extension)
+        if: steps.guacamole-client-image.outputs.exists != 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./shifter/engine/guacamole
@@ -146,7 +216,6 @@ jobs:
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
           no-cache: true
 
   apply:
@@ -156,10 +225,12 @@ jobs:
       pull-requests: write
     name: Apply (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: [plan, push-guacamole-images]
     if: |
       always() &&
       inputs.apply_changes &&
+      inputs.platform_changes &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
       (needs.push-guacamole-images.result == 'success' || needs.push-guacamole-images.result == 'skipped') &&
       github.event_name != 'pull_request'
@@ -167,7 +238,7 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -183,6 +254,8 @@ jobs:
         # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
         env:
           IS_DEV: ${{ inputs.is_dev }}
+          ENGINE_IMAGE_DIGEST: ${{ inputs.engine_image_digest }}
+          ENGINE_TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
           TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
           TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
         run: |
@@ -203,70 +276,94 @@ jobs:
             exit 1
           fi
           printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
+          resolve_engine_image_digest() {
+            local digest="${ENGINE_IMAGE_DIGEST}"
+            if [ -n "${digest}" ]; then
+              if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::Engine build did not produce a valid ECR image digest"
+                exit 1
+              fi
+              printf '%s\n' "${digest}"
+              return
+            fi
+
+            local current_image
+            if ! current_image=$(aws ecs describe-task-definition --task-definition "${ENGINE_TASK_FAMILY}" --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null); then
+              echo "::error::No engine image digest was provided and ECS task definition ${ENGINE_TASK_FAMILY} could not be read. Run a deploy path that builds the engine image so Terraform receives the build digest."
+              exit 1
+            fi
+            if [[ "${current_image}" =~ @(sha256:[0-9a-f]{64})$ ]]; then
+              printf '%s\n' "${BASH_REMATCH[1]}"
+              return
+            fi
+            echo "::error::Existing ECS task definition ${ENGINE_TASK_FAMILY} is not digest-pinned (${current_image}). Run the engine image deploy first so platform Terraform can preserve a digest."
+            exit 1
+          }
+          printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - name: Handle Service Discovery replacement
         env:
           ENV: ${{ inputs.environment }}
         run: |
-          # Check if Service Discovery service needs replacement
-          echo "Running terraform plan to check for Service Discovery changes..."
+          echo "Creating saved Terraform plan for Service Discovery check and apply..."
           terraform plan -detailed-exitcode -lock-timeout=5m -out=tfplan 2>&1 || PLAN_EXIT=$?
-
-          echo "Plan exit code: ${PLAN_EXIT:-0}"
-
-          # Exit code 2 means there are changes
-          if [ "${PLAN_EXIT:-0}" = "2" ]; then
-            # Check if service discovery service is being deleted/replaced
-            echo "Checking plan for Service Discovery changes..."
-            if terraform show -json tfplan | jq -e '.resource_changes[]? | select(.address | contains("service_discovery_service")) | select(.change.actions | index("delete"))' > /dev/null 2>&1; then
-              echo "Service Discovery service deletion detected - scaling down ECS services first"
-
-              # Find the Guacamole ECS cluster using AWS CLI directly (pattern: {env}-portal-guacamole)
-              CLUSTER_NAME="${ENV}-portal-guacamole"
-              echo "Looking for Guacamole cluster: $CLUSTER_NAME"
-
-              # Verify cluster exists
-              if aws ecs describe-clusters --clusters "$CLUSTER_NAME" --query "clusters[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
-                echo "Found active Guacamole cluster: $CLUSTER_NAME"
-
-                # Scale down guacd service to deregister from Service Discovery
-                GUACD_SERVICE="${ENV}-portal-guacd"
-                echo "Scaling down guacd service: $GUACD_SERVICE"
-
-                if aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
-                  echo "Scaling guacd service to 0..."
-                  aws ecs update-service --cluster "$CLUSTER_NAME" --service "$GUACD_SERVICE" --desired-count 0 --no-cli-pager
-
-                  # Wait for tasks to drain (max 2 minutes)
-                  # shellcheck disable=SC2034
-                  for i in $(seq 1 24); do
-                    RUNNING=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
-                    if [ "$RUNNING" = "0" ]; then
-                      echo "All guacd tasks stopped"
-                      break
-                    fi
-                    echo "Waiting for tasks to stop... ($RUNNING running)"
-                    sleep 5
-                  done
-
-                  # Give Service Discovery time to deregister
-                  echo "Waiting for Service Discovery to deregister instances..."
-                  sleep 15
-                else
-                  echo "guacd service not found or not active"
-                fi
-              else
-                echo "Guacamole cluster not found or not active"
-              fi
-            else
-              echo "No Service Discovery deletion in plan"
-            fi
-          else
-            echo "No changes detected or plan succeeded without changes"
+          if [ "${PLAN_EXIT:-0}" != "0" ] && [ "${PLAN_EXIT:-0}" != "2" ]; then
+            echo "::error::Terraform plan failed with exit code ${PLAN_EXIT}"
+            exit "${PLAN_EXIT}"
           fi
 
-          rm -f tfplan
-      - run: terraform apply -auto-approve
+          if [ ! -f tfplan ]; then
+            echo "::error::Terraform did not create the expected saved plan tfplan"
+            exit 1
+          fi
+
+          terraform show -no-color tfplan
+
+          echo "Checking saved Terraform plan for Service Discovery changes..."
+          if terraform show -json tfplan | jq -e '.resource_changes[]? | select(.address | contains("service_discovery_service")) | select(.change.actions | index("delete"))' > /dev/null 2>&1; then
+            echo "Service Discovery service deletion detected - scaling down ECS services first"
+
+            # Find the Guacamole ECS cluster using AWS CLI directly (pattern: {env}-portal-guacamole)
+            CLUSTER_NAME="${ENV}-portal-guacamole"
+            echo "Looking for Guacamole cluster: $CLUSTER_NAME"
+
+            # Verify cluster exists
+            if aws ecs describe-clusters --clusters "$CLUSTER_NAME" --query "clusters[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
+              echo "Found active Guacamole cluster: $CLUSTER_NAME"
+
+              # Scale down guacd service to deregister from Service Discovery
+              GUACD_SERVICE="${ENV}-portal-guacd"
+              echo "Scaling down guacd service: $GUACD_SERVICE"
+
+              if aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
+                echo "Scaling guacd service to 0..."
+                aws ecs update-service --cluster "$CLUSTER_NAME" --service "$GUACD_SERVICE" --desired-count 0 --no-cli-pager
+
+                # Wait for tasks to drain (max 2 minutes)
+                # shellcheck disable=SC2034
+                for i in $(seq 1 24); do
+                  RUNNING=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
+                  if [ "$RUNNING" = "0" ]; then
+                    echo "All guacd tasks stopped"
+                    break
+                  fi
+                  echo "Waiting for tasks to stop... ($RUNNING running)"
+                  sleep 5
+                done
+
+                # Give Service Discovery time to deregister
+                echo "Waiting for Service Discovery to deregister instances..."
+                sleep 15
+              else
+                echo "guacd service not found or not active"
+              fi
+            else
+              echo "Guacamole cluster not found or not active"
+            fi
+          else
+            echo "No Service Discovery deletion in saved plan"
+          fi
+      - run: terraform apply -lock-timeout=5m tfplan
       - name: Verify RDS pending modifications applied (dev only)
         # Dev opts into apply_immediately=true so any post-apply
         # PendingModifiedValues means the deploy is incomplete. Prod
@@ -341,7 +438,13 @@ jobs:
             sleep 30
           done
 
-          echo "::warning::Guacamole services did not stabilize within 20 minutes — continuing (services may still be starting)"
+          # Timeout is a failed deploy, not a warning: a green run that leaves
+          # Guacamole unstable reproduces the event-day inconsistent-RDP symptom
+          # with no pipeline evidence. The FAILED circuit-breaker branch above
+          # already exits 1; the timeout must too. If first boot legitimately
+          # needs longer, raise MAX_ATTEMPTS rather than downgrading the result.
+          echo "::error::Guacamole ECS services did not stabilize within 20 minutes (guacd: $GUACD_STATUS | guacamole-client: $CLIENT_STATUS) on cluster $CLUSTER_NAME. Inspect the ECS service events for $GUACD_SERVICE / $CLIENT_SERVICE."
+          exit 1
 
   build:
     permissions:
@@ -350,14 +453,28 @@ jobs:
       pull-requests: write
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: apply
-    if: inputs.apply_changes && github.event_name != 'pull_request'
+    # Runs for Terraform changes (after a successful apply) AND for
+    # app-only changes (#913), where plan/apply are legitimately
+    # skipped. Fail-closed: a skipped apply passes only when no
+    # Terraform change was requested, so a failed/cancelled plan or
+    # apply (or an upstream failure that skipped apply on a
+    # Terraform-relevant run) still blocks the image deploy.
+    if: |
+      always() &&
+      inputs.apply_changes &&
+      github.event_name != 'pull_request' &&
+      (inputs.platform_changes || inputs.portal_image_changes) &&
+      (needs.apply.result == 'success' ||
+       (needs.apply.result == 'skipped' && !inputs.platform_changes))
     outputs:
-      image_tag: ${{ steps.sha.outputs.short }}
+      image_tag: ${{ steps.image.outputs.tag }}
+      image_digest: ${{ steps.build.outputs.digest }}
     env:
       ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-portal' || 'shifter-portal' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -365,9 +482,11 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - name: Set short SHA
-        id: sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+      - name: Set image tag
+        id: image
+        run: |
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          echo "tag=${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and push
@@ -378,8 +497,7 @@ jobs:
           file: ./shifter/shifter_platform/Dockerfile
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
           no-cache: true
 
   deploy:
@@ -389,6 +507,7 @@ jobs:
       pull-requests: write
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
+    environment: ${{ inputs.github_environment }}
     needs: build
     if: inputs.apply_changes && github.event_name != 'pull_request'
     env:
@@ -399,7 +518,12 @@ jobs:
       PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -408,20 +532,28 @@ jobs:
 
       - name: Get deployment config
         id: config
-        env:
-          # `vars` are repository / environment variables managed in
-          # GitHub settings; this avoids parsing the committed example
-          # tfvars baseline. Default `false` for safety — autoscaling
-          # opts in explicitly per environment.
-          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}
         run: |
-          echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> "$GITHUB_OUTPUT"
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" resolve-topology \
+            --terraform-dir "${GITHUB_WORKSPACE}/platform/terraform/environments/${ENV}/portal" \
+            --backend-config "${ENV}.s3.tfbackend" \
+            --instance-tag "$INSTANCE_TAG" \
+            --github-output "$GITHUB_OUTPUT"
 
-      - name: Update Parameter Store with new image tag
+      - name: Update Parameter Store with new image digest
         env:
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
         run: |
-          echo "Updating Parameter Store with image tag: ${IMAGE_TAG}"
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest"
+            exit 1
+          fi
+          echo "Updating Parameter Store with image digest: ${IMAGE_DIGEST}"
+          aws ssm put-parameter \
+            --name "${PS_PREFIX}/image-digest" \
+            --value "${IMAGE_DIGEST}" \
+            --type String \
+            --overwrite
           aws ssm put-parameter \
             --name "${PS_PREFIX}/image-tag" \
             --value "${IMAGE_TAG}" \
@@ -452,11 +584,10 @@ jobs:
         id: instance
         if: steps.config.outputs.enable_autoscaling != 'true'
         run: |
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' --output text)
-          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "Error: Could not find running Platform EC2 instance with tag: $INSTANCE_TAG"; exit 1
+          INSTANCE_ID="${{ steps.config.outputs.instance_id }}"
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "::error::Terraform resolved single-instance mode but did not return an instance id"
+            exit 1
           fi
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
 
@@ -464,13 +595,91 @@ jobs:
         id: asg
         if: steps.config.outputs.enable_autoscaling == 'true'
         run: |
-          ASG_NAME=$(aws autoscaling describe-auto-scaling-groups \
-            --query "AutoScalingGroups[?contains(AutoScalingGroupName, '${ENV}-portal-asg')].AutoScalingGroupName | [0]" \
-            --output text)
-          if [ "$ASG_NAME" == "None" ] || [ -z "$ASG_NAME" ]; then
-            echo "Error: Could not find ASG with name containing: ${ENV}-portal-asg"; exit 1
+          ASG_NAME="${{ steps.config.outputs.asg_name }}"
+          if [ -z "$ASG_NAME" ]; then
+            echo "::error::Terraform resolved ASG mode but did not return an ASG name"
+            exit 1
           fi
           echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Run database migrations (ASG mode)
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+        run: |
+          echo "Selecting one in-service ASG instance for deploy-owned migration: $ASG_NAME"
+          MIGRATION_INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" \
+            --output text)
+
+          if [ -z "$MIGRATION_INSTANCE_ID" ] || [ "$MIGRATION_INSTANCE_ID" = "None" ]; then
+            echo "::error::No healthy in-service instance found in ASG $ASG_NAME for database migration"
+            exit 1
+          fi
+
+          echo "Running migration on instance: $MIGRATION_INSTANCE_ID"
+
+          # Wait for cloud-init to complete so Docker and the ECR credential helper are available.
+          for i in $(seq 1 30); do
+            RESULT=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$MIGRATION_INSTANCE_ID" \
+              --parameters 'commands=["cloud-init status --wait || cloud-init status"]' \
+              --query "Command.CommandId" --output text 2>/dev/null) || true
+            if [ -n "$RESULT" ]; then
+              sleep 10
+              STATUS=$(aws ssm get-command-invocation --command-id "$RESULT" --instance-id "$MIGRATION_INSTANCE_ID" \
+                --query "StandardOutputContent" --output text 2>/dev/null) || true
+              if echo "$STATUS" | grep -q "done"; then echo "Cloud-init complete"; break; fi
+            fi
+            echo "Attempt $i: Waiting for cloud-init..."; sleep 10
+          done
+
+          DEPLOY_SCRIPT_PATH="${GITHUB_WORKSPACE}/scripts/portal-deploy/deploy_portal.sh"
+          DEPLOY_SCRIPT_B64=$(base64 -w0 "$DEPLOY_SCRIPT_PATH")
+          DEPLOY_ARGS=$(jq -cn \
+            --arg awsRegion "$AWS_REGION" \
+            --arg psPrefix "$PS_PREFIX" \
+            '[
+              "--aws-region", $awsRegion,
+              "--ps-prefix", $psPrefix,
+              "--migrate-only"
+            ]')
+
+          PARAMS_FILE=$(mktemp)
+          jq -n \
+            --arg deployScriptB64 "$DEPLOY_SCRIPT_B64" \
+            --argjson deployArgs "$DEPLOY_ARGS" \
+            '{
+              commands: [
+                ("printf %s " + ($deployScriptB64 | @sh) + " | base64 -d > /tmp/shifter-deploy-portal.sh"),
+                "chmod 0755 /tmp/shifter-deploy-portal.sh",
+                ((["/tmp/shifter-deploy-portal.sh"] + $deployArgs) | @sh)
+              ]
+            }' > "$PARAMS_FILE"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$MIGRATION_INSTANCE_ID" \
+            --parameters "file://$PARAMS_FILE" \
+            --timeout-seconds 900 \
+            --query "Command.CommandId" --output text)
+
+          rm -f "$PARAMS_FILE"
+
+          echo "Migration SSM Command ID: $COMMAND_ID"
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$MIGRATION_INSTANCE_ID" \
+            --cli-read-timeout 30 \
+            --cli-connect-timeout 30
+
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$MIGRATION_INSTANCE_ID" --query "Status" --output text)
+          if [ "$STATUS" != "Success" ]; then
+            echo "Migration failed!"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$MIGRATION_INSTANCE_ID" --query "StandardErrorContent" --output text
+            exit 1
+          fi
+          echo "Database migration completed successfully."
 
       - name: Deploy via SSM (single instance mode)
         if: steps.config.outputs.enable_autoscaling != 'true'
@@ -493,104 +702,48 @@ jobs:
             echo "Attempt $i: Waiting for cloud-init..."; sleep 10
           done
 
-          # Deploy script reads config from Parameter Store and restarts containers
-          DEPLOY_SCRIPT=$(cat << 'EOFSCRIPT'
-          set -euo pipefail
-          AWS_REGION="us-east-2"
-          PS_PREFIX="__PS_PREFIX__"
+          # Deploy script reads config from Parameter Store and restarts containers.
+          DEPLOY_SCRIPT_PATH="${GITHUB_WORKSPACE}/scripts/portal-deploy/deploy_portal.sh"
+          DEPLOY_SCRIPT_B64=$(base64 -w0 "$DEPLOY_SCRIPT_PATH")
 
-          get_param() { aws ssm get-parameter --name "$1" --with-decryption --query 'Parameter.Value' --output text --region "$AWS_REGION"; }
-          validate_bootstrap_email_list() {
-            local name="$1"
-            local value="$2"
-            if [[ -n "$value" && ! "$value" =~ ^[A-Za-z0-9._%+@,-]+$ ]]; then
-              echo "Invalid $name: expected a comma-separated email list"
-              exit 1
-            fi
-          }
+          # Worker-container health supervisor (#953) artifacts stay single-sourced
+          # under modules/portal/ec2/worker-health and are injected base64-encoded
+          # so both AWS deploy paths install byte-identical files.
+          WH_DIR="${GITHUB_WORKSPACE}/platform/terraform/modules/portal/ec2/worker-health"
+          WH_MONITOR_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.sh")
+          WH_SERVICE_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.service")
+          WH_TIMER_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.timer")
+          # name_prefix is "<environment>-portal"; matches the Terraform alarm dimension.
+          WH_NAME_PREFIX="$ENV-portal"
 
-          IMAGE_TAG=$(get_param "$PS_PREFIX/image-tag")
-          ECR_REGISTRY=$(get_param "$PS_PREFIX/ecr-registry")
-          ECR_REPOSITORY=$(get_param "$PS_PREFIX/ecr-repository")
-          DOMAIN_NAME=$(get_param "$PS_PREFIX/domain-name")
-          S3_BUCKET=$(get_param "$PS_PREFIX/s3-bucket")
-          DB_SECRET_ARN=$(get_param "$PS_PREFIX/db-secret-arn")
-          APP_SECRET_ARN=$(get_param "$PS_PREFIX/app-secret-arn")
-          COGNITO_SECRET_ARN=$(get_param "$PS_PREFIX/cognito-secret-arn")
-          GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" || echo "")
-          DC_DOMAIN_PASSWORD_SECRET_ARN=$(get_param "$PS_PREFIX/dc-domain-password-secret-arn" || echo "")
-          GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" || echo "")
-          GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" || echo "")
-          ENGINE_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/engine-ecs-cluster-arn")
-          ENGINE_TASK_DEFINITION_ARN=$(get_param "$PS_PREFIX/engine-task-definition-arn")
-          ENGINE_ECS_SECURITY_GROUP_ID=$(get_param "$PS_PREFIX/engine-ecs-security-group-id")
-          ENGINE_PRIVATE_SUBNET_IDS=$(get_param "$PS_PREFIX/engine-private-subnet-ids")
-          SQS_CMS_URL=$(get_param "$PS_PREFIX/sqs-cms-url")
-          SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
-          SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
-          REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
-          EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend" || echo "")
-          CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email" || echo "")
-          PLATFORM_BOOTSTRAP_STAFF_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-staff-emails" || echo "")
-          PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-superuser-emails" || echo "")
-          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_STAFF_EMAILS" "$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
-          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
-
-          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          echo "Deploying image: $IMAGE"
-
-          COMMON_ENV="-e AWS_REGION=$AWS_REGION -e AWS_S3_BUCKET_NAME=$S3_BUCKET -e DB_SECRET_ARN=$DB_SECRET_ARN"
-          COMMON_ENV="$COMMON_ENV -e APP_SECRET_ARN=$APP_SECRET_ARN -e COGNITO_SECRET_ARN=$COGNITO_SECRET_ARN"
-          [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
-          [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
-          [ -n "$GUACAMOLE_API_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
-          [ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e DC_DOMAIN_PASSWORD_SECRET_ARN=$DC_DOMAIN_PASSWORD_SECRET_ARN"
-          # Add localhost to ALLOWED_HOSTS for dev (enables SSM tunnel testing)
-          # PS_PREFIX comes from Parameter Store, not user input - safe to use
-          if [[ "$PS_PREFIX" == *"/dev/"* ]]; then
-            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME,localhost,127.0.0.1"
-          else
-            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME"
-          fi
-          COMMON_ENV="$COMMON_ENV -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
-          COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e ENGINE_ECS_CLUSTER_ARN=$ENGINE_ECS_CLUSTER_ARN"
-          COMMON_ENV="$COMMON_ENV -e ENGINE_TASK_DEFINITION_ARN=$ENGINE_TASK_DEFINITION_ARN"
-          COMMON_ENV="$COMMON_ENV -e ENGINE_ECS_SECURITY_GROUP_ID=$ENGINE_ECS_SECURITY_GROUP_ID"
-          COMMON_ENV="$COMMON_ENV -e ENGINE_PRIVATE_SUBNET_IDS=$ENGINE_PRIVATE_SUBNET_IDS"
-          COMMON_ENV="$COMMON_ENV -e SQS_CMS_URL=$SQS_CMS_URL -e SQS_ENGINE_URL=$SQS_ENGINE_URL -e SQS_MC_URL=$SQS_MC_URL"
-          [ -n "$REDIS_ENDPOINT" ] && COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
-          [ -n "$EMAIL_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
-          [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
-          [ -n "$PLATFORM_BOOTSTRAP_STAFF_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_STAFF_EMAILS=$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
-          [ -n "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
-
-          docker pull "$IMAGE"
-          # The DC domain password secret is Terraform-managed (created and
-          # seeded by the engine-provisioner module), so it always carries an
-          # AWSCURRENT value — no pre-deploy populate check needed, same as the
-          # DB / app / Cognito secret ARNs above.
-          docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
-          docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
-          eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"
-          eval docker run -d --name worker-cms --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue cms
-          eval docker run -d --name worker-engine --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue engine
-          eval docker run -d --name worker-mc --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue mc
-          eval docker run -d --name ctf-scheduler --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_ctf_scheduler
-          docker ps
-          echo "Deployment complete!"
-          EOFSCRIPT
-          )
-
-          # Substitute PS_PREFIX
-          DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__PS_PREFIX__/${PS_PREFIX}}"
+          DEPLOY_ARGS=$(jq -cn \
+            --arg awsRegion "$AWS_REGION" \
+            --arg psPrefix "$PS_PREFIX" \
+            --arg whMonitorB64 "$WH_MONITOR_B64" \
+            --arg whServiceB64 "$WH_SERVICE_B64" \
+            --arg whTimerB64 "$WH_TIMER_B64" \
+            --arg whNamePrefix "$WH_NAME_PREFIX" \
+            '[
+              "--aws-region", $awsRegion,
+              "--ps-prefix", $psPrefix,
+              "--worker-health-monitor-b64", $whMonitorB64,
+              "--worker-health-service-b64", $whServiceB64,
+              "--worker-health-timer-b64", $whTimerB64,
+              "--worker-health-name-prefix", $whNamePrefix
+            ]')
 
           # Run deploy via SSM using temp file to avoid quoting issues
           PARAMS_FILE=$(mktemp)
-          cat > "$PARAMS_FILE" << EOF
-          {
-            "commands": [$(echo "$DEPLOY_SCRIPT" | jq -Rs .)]
-          }
-          EOF
+          jq -n \
+            --arg deployScriptB64 "$DEPLOY_SCRIPT_B64" \
+            --argjson deployArgs "$DEPLOY_ARGS" \
+            '{
+              commands: [
+                ("printf %s " + ($deployScriptB64 | @sh) + " | base64 -d > /tmp/shifter-deploy-portal.sh"),
+                "chmod 0755 /tmp/shifter-deploy-portal.sh",
+                ((["/tmp/shifter-deploy-portal.sh"] + $deployArgs) | @sh)
+              ]
+            }' > "$PARAMS_FILE"
 
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
@@ -644,7 +797,7 @@ jobs:
             echo "Waiting for it to complete..."
           else
             # Start instance refresh
-            # New instances will read updated image tag from Parameter Store via user_data
+            # New instances read the updated image digest from Parameter Store via user_data.
             # Lifecycle hook ensures instance is ready before joining ALB
             REFRESH_ID=$(aws autoscaling start-instance-refresh \
               --auto-scaling-group-name "$ASG_NAME" \
@@ -689,3 +842,13 @@ jobs:
           done
 
           echo "Platform ASG deployment successful!"
+
+      - name: Verify ASG image digest
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" verify-asg-image \
+            --asg-name "$ASG_NAME" \
+            --image-digest "$IMAGE_DIGEST"

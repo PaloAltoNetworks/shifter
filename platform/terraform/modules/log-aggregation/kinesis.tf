@@ -14,6 +14,7 @@ resource "aws_cloudwatch_log_group" "firehose_errors" {
 
   name              = "/aws/firehose/${var.name_prefix}-logs-${var.environment}"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.log_aggregation[0].arn
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-firehose-errors-${var.environment}"
@@ -102,6 +103,30 @@ resource "aws_iam_role_policy" "firehose_logs" {
   })
 }
 
+resource "aws_iam_role_policy" "firehose_kms" {
+  count = var.enable_log_aggregation ? 1 : 0
+
+  name = "kms-log-delivery"
+  role = aws_iam_role.firehose[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+          "kms:ReEncrypt*"
+        ]
+        Resource = aws_kms_key.log_aggregation[0].arn
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # Kinesis Firehose Delivery Stream
 # ------------------------------------------------------------------------------
@@ -111,6 +136,12 @@ resource "aws_kinesis_firehose_delivery_stream" "logs" {
 
   name        = "${var.name_prefix}-logs-${var.environment}"
   destination = "extended_s3"
+
+  server_side_encryption {
+    enabled  = true
+    key_type = "CUSTOMER_MANAGED_CMK"
+    key_arn  = aws_kms_key.log_aggregation[0].arn
+  }
 
   extended_s3_configuration {
     role_arn   = aws_iam_role.firehose[0].arn
@@ -135,6 +166,8 @@ resource "aws_kinesis_firehose_delivery_stream" "logs" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-logs-${var.environment}"
   })
+
+  depends_on = [aws_iam_role_policy.firehose_kms]
 }
 
 # ------------------------------------------------------------------------------
@@ -155,6 +188,12 @@ resource "aws_kinesis_firehose_delivery_stream" "waf" {
   # WAF requires this specific prefix
   name        = "aws-waf-logs-${var.name_prefix}-${var.environment}"
   destination = "extended_s3"
+
+  server_side_encryption {
+    enabled  = true
+    key_type = "CUSTOMER_MANAGED_CMK"
+    key_arn  = aws_kms_key.log_aggregation[0].arn
+  }
 
   extended_s3_configuration {
     role_arn   = aws_iam_role.firehose[0].arn
@@ -179,4 +218,6 @@ resource "aws_kinesis_firehose_delivery_stream" "waf" {
   tags = merge(local.common_tags, {
     Name = "aws-waf-logs-${var.name_prefix}-${var.environment}"
   })
+
+  depends_on = [aws_iam_role_policy.firehose_kms]
 }

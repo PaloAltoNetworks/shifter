@@ -29,9 +29,9 @@ output "availability_zones" {
   value       = module.vpc.availability_zones
 }
 
-output "private_route_table_id" {
-  description = "ID of the private route table (for NAT gateway access)"
-  value       = module.vpc.private_route_table_id
+output "private_route_table_ids" {
+  description = "IDs of the per-AZ private route tables, ordered by availability_zones."
+  value       = module.vpc.private_route_table_ids
 }
 
 # ------------------------------------------------------------------------------
@@ -76,6 +76,11 @@ output "db_resource_id" {
 # ------------------------------------------------------------------------------
 # EC2 / Autoscaling
 # ------------------------------------------------------------------------------
+
+output "enable_autoscaling" {
+  description = "Whether the portal EC2 tier is deployed as an Auto Scaling Group."
+  value       = var.enable_autoscaling
+}
 
 output "ec2_instance_id" {
   description = "ID of the EC2 instance (empty if ASG mode)"

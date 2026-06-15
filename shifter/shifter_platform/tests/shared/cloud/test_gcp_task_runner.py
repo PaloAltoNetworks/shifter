@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -213,9 +214,7 @@ class TestGCPTaskRunnerRunTask:
         repo_root = Path(__file__).resolve().parents[5]
         tf_path = repo_root / "platform" / "terraform" / "modules" / "engine-provisioner" / "task_definition.tf"
         source = tf_path.read_text(encoding="utf-8")
-        assert f'name                   = "{PROVISIONER_CONTAINER_NAME}"' in source or (
-            f'name = "{PROVISIONER_CONTAINER_NAME}"' in source
-        ), (
+        assert re.search(rf'\bname\s*=\s*"{re.escape(PROVISIONER_CONTAINER_NAME)}"', source), (
             f"task_definition.tf must reference the provisioner container name "
             f"{PROVISIONER_CONTAINER_NAME!r} that the GCP task runner gates hardening on; "
             "renaming one without the other would silently break ECS↔GCP alignment"

@@ -2,7 +2,7 @@
 # This file IS `terraform.tfvars` (committed). Deployment-specific overrides go in
 # a sibling `local.auto.tfvars` (gitignored) — Terraform auto-loads
 # `*.auto.tfvars` and the local values win. CI deploys render the overrides
-# from GitHub secrets/repository variables; see docs/dev/deploy-secrets.md.
+# from GitHub secrets; see docs/dev/deploy-secrets.md.
 
 
 # ------------------------------------------------------------------------------
@@ -11,7 +11,7 @@
 
 environment        = "prod"
 aws_region         = "us-east-2"
-log_retention_days = 90
+log_retention_days = 365
 
 tags = {
   Project     = "shifter"
@@ -99,6 +99,10 @@ asg_desired_capacity = 2
 scale_up_threshold   = 70
 scale_down_threshold = 30
 
+# Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
+# Prod runs the portal on Redis (CHANNEL_LAYER_BACKEND=redis), as before.
+enable_redis = true
+
 # ------------------------------------------------------------------------------
 # Redis
 # ------------------------------------------------------------------------------
@@ -118,7 +122,9 @@ log_level = "INFO"
 # ------------------------------------------------------------------------------
 
 # Disabled for initial deployment - enable when ready for XDR integration
-enable_log_aggregation = false
+# Enabled so portal Network Firewall FLOW / ALERT logs reach the existing
+# CloudWatch -> Firehose -> S3 / SQS pipeline (#122 fail-closed contract).
+enable_log_aggregation = true
 
 # ------------------------------------------------------------------------------
 # Phase 5: Additional Log Sources
@@ -128,6 +134,16 @@ enable_alb_access_logs = true
 enable_vpc_flow_logs   = true
 enable_rds_log_exports = true
 enable_waf_logging     = true
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+enable_portal_inspection    = true
+firewall_log_retention_days = 365
+
+# prod: secure default; flip false + apply before any intentional destroy
+portal_inspection_delete_protection = true
 
 # ------------------------------------------------------------------------------
 # Engine Provisioner

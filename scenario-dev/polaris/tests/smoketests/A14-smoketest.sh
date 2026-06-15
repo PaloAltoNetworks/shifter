@@ -23,13 +23,24 @@ echo "A14 smoketest - Kali attack platform"
 
 echo
 echo "--- Content files ---"
-for f in /home/kali/README.md /home/kali/mission_brief.txt /home/kali/mission_brief.pdf \
-         /home/kali/tools/flag_submit.sh /home/kali/tools/modbus_scan.py \
-         /home/kali/.config/claude/system_prompt.txt; do
+# README.md, mission_brief.{txt,pdf}, and tools/flag_submit.sh were removed
+# in 2026-04 (see scenario-dev/polaris/build/a14/Dockerfile:85): they were
+# stale relative to the CTFd board and Kali has no route to CTFd, so a
+# Kali-side submission helper is broken by design. CTFd is the reference.
+# The remaining content drops are START_HERE.txt (visible participant
+# onramp), modbus_scan.py (Mission 4 helper), the Claude POLARIS system
+# prompt, and the warm-up challenge target.
+for f in /home/kali/tools/modbus_scan.py \
+         /home/kali/START_HERE.txt \
+         /home/kali/.config/claude/system_prompt.txt \
+         /home/kali/.polaris/welcome.txt; do
     [[ -f "$f" ]] && pass "$f present" || fail "$f missing"
 done
-[[ -x /home/kali/tools/flag_submit.sh ]] && pass "flag_submit.sh executable" || fail "flag_submit.sh not exec"
 [[ -x /home/kali/tools/modbus_scan.py ]] && pass "modbus_scan.py executable" || fail "modbus_scan.py not exec"
+grep -q 'polaris.keplerops.com' /home/kali/START_HERE.txt \
+    && pass "START_HERE names CTFd" || fail "START_HERE missing CTFd URL"
+grep -q 'cannot submit flags to CTFd' /home/kali/START_HERE.txt \
+    && pass "START_HERE explains CTFd is browser-only" || fail "START_HERE missing browser-only guidance"
 
 echo
 echo "--- Kali user and services ---"
@@ -81,7 +92,7 @@ echo
 echo "--- Network reach: permitted targets ---"
 # A14 is on shared (172.20.0.0/24), corporate (172.20.10.0/24), and the
 # pre-wired splice-link to A9. Should reach A0 (shared), A1/A3/A4/A15/A16
-# (corporate), DNS (shared), A2 (GCP VM via host route), A9 (splice-link).
+# (corporate), DNS (shared), A2 (adjacent Windows DC), A9 (splice-link).
 # A7 Gitea is lab-only and NOT directly reachable from A14 — participants
 # must pivot through A16 to clone from Gitea.
 for label_host_port in \

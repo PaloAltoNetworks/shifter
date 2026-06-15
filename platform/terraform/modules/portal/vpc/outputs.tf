@@ -15,6 +15,11 @@ output "public_subnet_ids" {
   value       = aws_subnet.public[*].id
 }
 
+output "public_subnet_cidrs" {
+  description = "CIDR blocks of public subnets."
+  value       = aws_subnet.public[*].cidr_block
+}
+
 output "private_subnet_ids" {
   description = "IDs of private subnets"
   value       = aws_subnet.private[*].id
@@ -35,12 +40,41 @@ output "availability_zones" {
   value       = local.azs
 }
 
-output "private_route_table_id" {
-  description = "ID of the private route table"
-  value       = aws_route_table.private.id
+output "private_route_table_ids" {
+  description = "IDs of the per-AZ private route tables (ordered by availability_zones)."
+  value       = aws_route_table.private[*].id
+}
+
+output "gateway_endpoint_ids" {
+  description = "Map of private-tier gateway VPC endpoint service key to endpoint ID."
+  value       = { for service, endpoint in aws_vpc_endpoint.gateway : service => endpoint.id }
+}
+
+output "interface_endpoint_ids" {
+  description = "Map of private-tier interface VPC endpoint service key to endpoint ID."
+  value       = { for service, endpoint in aws_vpc_endpoint.interface : service => endpoint.id }
 }
 
 output "flow_logs_log_group_name" {
   description = "Name of the CloudWatch log group for VPC flow logs"
   value       = var.enable_flow_logs ? aws_cloudwatch_log_group.flow_logs[0].name : ""
+}
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+output "inspection_enabled" {
+  description = "Whether the portal east-west inspection boundary is enabled."
+  value       = var.enable_portal_inspection
+}
+
+output "firewall_endpoint_ids_by_az" {
+  description = "Map of availability_zone -> portal Network Firewall endpoint ID. Empty map when inspection is disabled."
+  value       = var.enable_portal_inspection ? local.firewall_endpoint_ids_by_az : {}
+}
+
+output "firewall_log_group_name" {
+  description = "Name of the CloudWatch log group receiving Network Firewall FLOW / ALERT logs. Empty string when inspection is disabled."
+  value       = var.enable_portal_inspection ? aws_cloudwatch_log_group.firewall[0].name : ""
 }

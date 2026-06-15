@@ -41,15 +41,17 @@ scenario-dev/polaris/
 │   ├── dns/                        BIND sidecar (boreas-systems.ctf + boreas.local zones, AXFR enabled)
 │   ├── a0/ ... a14/                Dockerfiles + runtime configs per asset
 │   └── A0-boreas-website/ ...      content generators (server.py, build_*.py, bootstrap.sh, init SQL)
-│       A14-kali/
+│       A14-kali/                   Kali starter text, warm-up note, Claude prompt
 │
 ├── tests/                          everything test-related
 │   ├── setup.sh                    build + up + wait ready
 │   ├── reset.sh                    force-recreate sticky-state services (a5/a10/a11/a12/a13)
-│   ├── run-all-smoketests.sh       full sweep: reset + 15 asset smoketests + isolation
+│   ├── run-all-smoketests.sh       infra sweep: reset + per-asset smoketests + isolation
 │   ├── isolation-smoketest.sh      cross-cutting network boundary validation (70 checks)
 │   ├── smoketests/                 one per asset, pointed at the live range from its pivot container
 │   │   ├── A0-smoketest.sh ... A14-smoketest.(sh|py)
+│   ├── scenario_smoketest/         pre-event challenge-hint → flag verifier (Python package; see its README)
+│   ├── test_scenario_smoketest.py  unit tests for scenario_smoketest
 │   └── walkthroughs/               step-by-step happy-path participant guides, grouped by flag range
 │       ├── README.md
 │       ├── 00-range-access-docker.md
@@ -74,16 +76,24 @@ trust these in this order:
 
 1. `build/docker-compose.yml` and the build/runtime content under `build/`
 2. `build/ctfd-challenges.json` for the core Polaris board: challenge names, categories, values, hints, and prerequisites
-3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd-only onboarding content such as the landing page, quickstart page, and Start Here warm-up
-4. `tests/walkthroughs/` for the intended participant path through the live topology
-5. `design/` as the spec that should be kept in sync with the implementation
+3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd onboarding content such as the landing page, quickstart page, and Start Here warm-up
+4. `build/A14-kali/START_HERE.txt` and `build/A14-kali/welcome.txt` for the local Kali copy of the first-five-minutes path and warm-up flag note
+5. `tests/walkthroughs/` for the intended participant path through the live topology
+6. `design/` as the spec that should be kept in sync with the implementation
 
 If these disagree, reconcile the docs against the actual build and walkthroughs
 first instead of assuming the older design prose is correct.
 
 ## Getting started
 
-1. **Deploy** — on the range host (ctf-range-builder GCP VM):
+For AWS standalone/default-VPC bring-up, use
+[`scripts/polaris-aws-range/README.md`](../../scripts/polaris-aws-range/README.md).
+That path provisions the Ubuntu range host and A2 Windows DC in AWS, then runs
+the same `tests/` validation scripts over SSM.
+
+Legacy local-compose flow:
+
+1. **Deploy** — on the range host:
    ```
    rsync -a scenario-dev/polaris/ ctf-range-builder:/home/atomik/range/
    ssh ctf-range-builder 'bash /home/atomik/range/tests/setup.sh'
@@ -93,9 +103,22 @@ first instead of assuming the older design prose is correct.
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/run-all-smoketests.sh'
    ```
-   Expected: `16 / 16 asset sweeps PASS`, `NORTHSTORM full range: PASS`.
+   Expected: all listed asset sweeps pass and `NORTHSTORM full range: PASS`.
+   Infrastructure-level: per-asset connectivity + cross-cutting network
+   isolation. Does not verify CTFd challenge content.
 
-3. **Reset** — before each test or between participant sessions:
+3. **Verify scenario content** — pre-event content check that every CTFd
+   covered hint path produces the configured flag:
+   ```
+   ssh ctf-range-builder 'cd /home/atomik/range/tests && python3 -m scenario_smoketest --only 1,2,3,4,5,6,31'
+   ```
+   Content-level (vs. step 2's infra sweep). Current executable adapter
+   coverage is challenges `1-6` and `31`; an unfiltered run intentionally exits
+   non-zero while uncovered board challenges remain. Full usage, flags, and the
+   CTFd-token security model live in
+   [`tests/scenario_smoketest/README.md`](tests/scenario_smoketest/README.md).
+
+4. **Reset** — before each test or between participant sessions:
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/reset.sh'
    ```
@@ -108,7 +131,7 @@ first instead of assuming the older design prose is correct.
 |--------|--------------------------|---------------------|-----|
 | A0     | shared                   | a14-kali            | a14 is on shared |
 | A1     | corporate                | a14-kali            | a14 is on corporate |
-| A2     | external GCP VM          | a14-kali            | routed via host |
+| A2     | adjacent Windows VM      | a14-kali            | routed via host/VPC |
 | A3     | corporate                | a14-kali            | a14 reaches on corporate |
 | A4     | corporate                | a14-kali            | a14 is on corporate |
 | A5     | scada (VLAN 40)          | a15-ops-eng         | only A15 reaches scada |

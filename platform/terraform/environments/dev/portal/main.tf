@@ -21,7 +21,8 @@ provider "aws" {
 }
 
 locals {
-  name_prefix = "${var.environment}-portal"
+  name_prefix                 = "${var.environment}-portal"
+  alb_access_logs_bucket_name = "${local.name_prefix}-alb-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
   # Add padding to field_encryption_key (b64_url doesn't include padding, but Fernet requires it)
   field_encryption_key_padded = "${random_id.field_encryption_key.b64_url}="
 }
@@ -33,7 +34,7 @@ locals {
 data "terraform_remote_state" "foundation" {
   backend = "s3"
   config = {
-    bucket = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
+    bucket = "shifter-dev-infra-1697b88e-01b3-424f-be63-8ab29df0ce39"
     key    = "shifter/dev/terraform.tfstate"
     region = "us-east-2"
   }
@@ -46,7 +47,7 @@ data "terraform_remote_state" "foundation" {
 data "terraform_remote_state" "range" {
   backend = "s3"
   config = {
-    bucket = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
+    bucket = "shifter-dev-infra-1697b88e-01b3-424f-be63-8ab29df0ce39"
     key    = "dev/range/terraform.tfstate"
     region = "us-east-2"
   }
@@ -232,6 +233,14 @@ module "vpc" {
   # Phase 5: VPC Flow Logs
   enable_flow_logs   = var.enable_vpc_flow_logs
   log_retention_days = var.log_retention_days
+
+  # Portal east-west inspection (#122)
+  enable_portal_inspection    = var.enable_portal_inspection
+  enable_log_aggregation      = var.enable_log_aggregation
+  firewall_log_retention_days = var.firewall_log_retention_days
+
+  # Network Firewall lifecycle (mirrors db_deletion_protection root-var / tfvars convention)
+  portal_inspection_delete_protection = var.portal_inspection_delete_protection
 }
 
 # ------------------------------------------------------------------------------
@@ -241,15 +250,16 @@ module "vpc" {
 module "rds" {
   source = "../../../modules/portal/rds"
 
-  name_prefix         = local.name_prefix
-  secrets_kms_key_arn = aws_kms_key.secrets_manager.arn
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_subnet_ids
-  allowed_cidr_blocks = [module.vpc.vpc_cidr]
+  name_prefix                = local.name_prefix
+  secrets_kms_key_arn        = aws_kms_key.secrets_manager.arn
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  allowed_security_group_ids = [module.ec2.security_group_id]
 
   db_name               = var.db_name
   db_username           = var.db_username
   engine_version        = var.db_engine_version
+  ca_cert_identifier    = var.db_ca_cert_identifier
   instance_class        = var.db_instance_class
   allocated_storage     = var.db_allocated_storage
   max_allocated_storage = var.db_max_allocated_storage
@@ -284,7 +294,8 @@ module "alb" {
 
   # Phase 5: ALB Access Logs and WAF Logging
   enable_access_logs      = var.enable_alb_access_logs
-  logs_bucket_name        = var.enable_alb_access_logs ? module.log_aggregation.logs_bucket_name : ""
+  logs_bucket_name        = var.enable_alb_access_logs ? local.alb_access_logs_bucket_name : ""
+  logs_bucket_policy_id   = var.enable_alb_access_logs ? module.log_aggregation.alb_logs_bucket_policy_id : ""
   enable_waf_logging      = var.enable_waf_logging
   waf_log_destination_arn = var.enable_waf_logging ? module.log_aggregation.waf_firehose_arn : ""
 
@@ -298,13 +309,13 @@ module "alb" {
 module "redis" {
   source = "../../../modules/portal/redis"
 
-  name_prefix         = local.name_prefix
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_subnet_ids
-  allowed_cidr_blocks = [module.vpc.vpc_cidr]
-  node_type           = var.redis_node_type
-  engine_version      = var.redis_engine_version
-  enable_replication  = var.redis_enable_replication
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  allowed_security_group_ids = [module.ec2.security_group_id]
+  node_type                  = var.redis_node_type
+  engine_version             = var.redis_engine_version
+  enable_replication         = var.redis_enable_replication
 
   # CloudWatch Alarms
   enable_alarms = var.alarm_email != ""
@@ -423,8 +434,9 @@ module "ssm" {
   sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]
   sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
-  redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
-  enable_redis   = var.enable_autoscaling
+  # Redis wiring is environment-owned and decoupled from autoscaling (ADR-018, #849).
+  redis_endpoint = var.enable_redis ? module.redis.redis_endpoint : ""
+  enable_redis   = var.enable_redis
 
   # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
   db_host_override        = module.rds.db_instance_address
@@ -445,6 +457,9 @@ module "ssm" {
 module "ec2" {
   source = "../../../modules/portal/ec2"
 
+  # Worker-container health alarm (#953) notifies the shared alerts topic.
+  worker_health_alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
+
   aws_region            = var.aws_region
   ec2_ami_id            = var.ec2_ami_id
   name_prefix           = local.name_prefix
@@ -461,9 +476,10 @@ module "ec2" {
     module.guacamole.json_auth_secret_arn,
     module.engine_provisioner.dc_domain_password_secret_arn,
   ]
-  s3_bucket_arn    = module.s3.bucket_arn
-  app_port         = var.app_port
-  root_volume_size = var.ec2_root_volume_size
+  secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
+  s3_bucket_arn               = module.s3.bucket_arn
+  app_port                    = var.app_port
+  root_volume_size            = var.ec2_root_volume_size
 
   # ECS permissions for engine provisioner
   ecs_cluster_arn            = module.engine_provisioner.ecs_cluster_arn
@@ -472,20 +488,23 @@ module "ec2" {
   ecs_execution_role_arn     = module.engine_provisioner.ecs_execution_role_arn
 
   # Autoscaling configuration
-  enable_autoscaling   = var.enable_autoscaling
-  subnet_ids           = module.vpc.private_subnet_ids
-  target_group_arn     = module.alb.target_group_arn
-  asg_min_size         = var.asg_min_size
-  asg_max_size         = var.asg_max_size
-  asg_desired_capacity = var.asg_desired_capacity
-  redis_endpoint       = var.enable_autoscaling ? module.redis.redis_endpoint : ""
-  scale_up_threshold   = var.scale_up_threshold
-  scale_down_threshold = var.scale_down_threshold
-  log_retention_days   = var.log_retention_days
+  enable_autoscaling     = var.enable_autoscaling
+  subnet_ids             = module.vpc.private_subnet_ids
+  target_group_arn       = module.alb.target_group_arn
+  asg_min_size           = var.asg_min_size
+  asg_max_size           = var.asg_max_size
+  asg_desired_capacity   = var.asg_desired_capacity
+  asg_warm_pool_min_size = var.asg_warm_pool_min_size
+  asg_warm_pool_state    = var.asg_warm_pool_state
+  redis_endpoint         = var.enable_redis ? module.redis.redis_endpoint : ""
+  scale_up_threshold     = var.scale_up_threshold
+  scale_down_threshold   = var.scale_down_threshold
+  log_retention_days     = var.log_retention_days
 
   # Messaging (SQS queues for message consumers)
-  sqs_queue_arns = values(module.messaging.sqs_queue_arns)
-  sqs_queue_urls = module.messaging.sqs_queue_urls
+  sqs_queue_arns  = values(module.messaging.sqs_queue_arns)
+  sqs_queue_urls  = module.messaging.sqs_queue_urls
+  sqs_kms_key_arn = module.messaging.kms_key_arn
 
   # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
@@ -495,6 +514,11 @@ module "ec2" {
   enable_ses              = true
 
   tags = var.tags
+
+  # First boot installs Docker and configures ECR/SSM-backed deployment. Make
+  # the portal AWS service endpoints part of the VPC dependency boundary so a
+  # fresh account does not race private AWS API reachability.
+  depends_on = [module.vpc]
 }
 
 # ------------------------------------------------------------------------------
@@ -554,6 +578,28 @@ module "s3" {
   tags                 = var.tags
 }
 
+resource "aws_iam_role_policy" "range_instance_portal_s3_kms_read" {
+  name = "portal-s3-kms-read"
+  role = replace(data.terraform_remote_state.range.outputs.range_instance_role_arn, "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/", "")
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = aws_kms_key.portal_s3.arn
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "s3.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # App Secret (Django secret key)
 # ------------------------------------------------------------------------------
@@ -602,9 +648,11 @@ resource "aws_vpc_peering_connection" "portal_to_range" {
   })
 }
 
-# Route from Portal private subnets to Range VPC via peering
+# Route from Portal private subnets to Range VPC via peering (per-AZ).
 resource "aws_route" "portal_to_range" {
-  route_table_id            = module.vpc.private_route_table_id
+  count = length(module.vpc.private_route_table_ids)
+
+  route_table_id            = module.vpc.private_route_table_ids[count.index]
   destination_cidr_block    = data.terraform_remote_state.range.outputs.vpc_cidr
   vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
 }
@@ -635,8 +683,9 @@ module "engine_provisioner" {
   secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
 
   # ECR
-  ecr_repository_url  = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
-  container_image_tag = var.engine_container_tag
+  ecr_repository_url     = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
+  container_image_tag    = var.engine_container_tag
+  container_image_digest = var.engine_container_image_digest
 
   # Networking (Portal VPC for RDS access)
   vpc_id             = module.vpc.vpc_id
@@ -705,7 +754,10 @@ module "engine_provisioner" {
   ngfw_instance_role_arn      = data.terraform_remote_state.range.outputs.ngfw_instance_role_arn != null ? data.terraform_remote_state.range.outputs.ngfw_instance_role_arn : ""
 
   # Messaging (SNS topic for range event publishing)
-  sns_topic_arn = module.messaging.sns_topic_arn
+  sns_topic_arn   = module.messaging.sns_topic_arn
+  sns_kms_key_arn = module.messaging.kms_key_arn
+
+  depends_on = [module.vpc]
 }
 
 moved {
@@ -760,6 +812,7 @@ module "guacamole" {
   db_allocated_storage     = var.guacamole_db_allocated_storage
   db_max_allocated_storage = var.guacamole_db_max_allocated_storage
   db_engine_version        = var.guacamole_db_engine_version
+  db_ca_cert_identifier    = var.guacamole_db_ca_cert_identifier
   db_multi_az              = var.guacamole_db_multi_az
   db_backup_retention_days = var.guacamole_db_backup_retention_days
   db_deletion_protection   = var.guacamole_db_deletion_protection
@@ -781,6 +834,32 @@ module "guacamole" {
   cognito_domain       = module.cognito.cognito_domain
   aws_region           = var.aws_region
   domain_name          = var.domain_name
+
+  depends_on = [module.vpc]
+}
+
+# ALB health checks and user traffic are routed through the portal inspection
+# boundary before they reach private targets. Source security group references
+# do not survive that middlebox path reliably, so keep those existing SG rules
+# and add CIDR-scoped ingress from only the ALB public subnet CIDRs.
+resource "aws_security_group_rule" "portal_app_from_alb_subnets" {
+  type              = "ingress"
+  from_port         = var.app_port
+  to_port           = var.app_port
+  protocol          = "tcp"
+  cidr_blocks       = module.vpc.public_subnet_cidrs
+  security_group_id = module.ec2.security_group_id
+  description       = "HTTP from ALB public subnets through inspection"
+}
+
+resource "aws_security_group_rule" "guacamole_client_from_alb_subnets" {
+  type              = "ingress"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  cidr_blocks       = module.vpc.public_subnet_cidrs
+  security_group_id = module.guacamole.guacamole_client_security_group_id
+  description       = "HTTP from ALB public subnets through inspection"
 }
 
 # ------------------------------------------------------------------------------
@@ -822,6 +901,8 @@ module "log_aggregation" {
     module.engine_provisioner.log_group_names,
     # Guacamole logs
     module.guacamole.log_group_names,
+    # Portal east-west inspection (#122)
+    var.enable_portal_inspection ? [module.vpc.firewall_log_group_name] : [],
   ) : []
 
   tags = var.tags
@@ -837,6 +918,7 @@ resource "aws_cloudwatch_log_group" "bedrock" {
 
   name              = "/aws/bedrock/${local.name_prefix}-invocations"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = merge(var.tags, {
     Name = "${local.name_prefix}-bedrock-invocations"

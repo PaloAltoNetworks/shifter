@@ -42,12 +42,8 @@ def mock_app():
     return app
 
 
-class TestProcessNgfwEvent:
-    """Tests for process_ngfw_event handler."""
-
-    # -------------------------------------------------------------------------
-    # ngfw.event - status updates
-    # -------------------------------------------------------------------------
+class TestProcessNgfwEventStatusUpdates:
+    """Status update tests for process_ngfw_event()."""
 
     def test_updates_status_on_ngfw_event(self, mock_instance, mock_app):
         """process_ngfw_event updates Instance and App status."""
@@ -139,9 +135,9 @@ class TestProcessNgfwEvent:
         mock_instance.save.assert_not_called()
         assert mock_app.status == original_app_status
 
-    # -------------------------------------------------------------------------
-    # Error handling
-    # -------------------------------------------------------------------------
+
+class TestProcessNgfwEventInvalidInputs:
+    """Ignored and invalid input tests for process_ngfw_event()."""
 
     def test_ignores_unknown_event_type(self, mock_instance, mock_app):
         """process_ngfw_event ignores unknown event types."""
@@ -269,10 +265,6 @@ class TestProcessNgfwEvent:
         assert mock_instance.status == ResourceStatus.PROVISIONING.value
         assert mock_app.status == ResourceStatus.PROVISIONING.value
 
-    # -------------------------------------------------------------------------
-    # Message formats
-    # -------------------------------------------------------------------------
-
     def test_handles_multiple_message_formats(self, mock_instance, mock_app):
         """process_ngfw_event handles raw dict and JSON string formats."""
         event = {
@@ -300,9 +292,9 @@ class TestProcessNgfwEvent:
             process_ngfw_event(json.dumps(event))
             assert mock_instance.status == ResourceStatus.READY.value
 
-    # -------------------------------------------------------------------------
-    # Serial number handling
-    # -------------------------------------------------------------------------
+
+class TestProcessNgfwEventSerialNumber:
+    """Serial number payload tests for process_ngfw_event()."""
 
     def test_stores_serial_number_in_app_data(self, mock_instance, mock_app):
         """process_ngfw_event stores serial_number in App.data."""

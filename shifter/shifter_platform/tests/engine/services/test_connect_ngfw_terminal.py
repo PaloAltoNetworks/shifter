@@ -8,23 +8,8 @@ import pytest
 from shared.enums import ResourceStatus
 
 
-class TestConnectNGFWTerminal:
-    """Tests for connect_ngfw_terminal() in engine/services.py.
-
-    Tests the service contract:
-    - Inputs: user (required), ngfw_uuid (required string)
-    - Outputs: SSHConnection for the NGFW management interface
-    - Side effects: none (read-only operation)
-    - Errors: validates inputs, ownership, status, state fields
-    - Logging: DEBUG/INFO on success, ERROR on failures
-
-    The function looks up NGFW Instance by UUID and validates ownership via
-    Instance → Request → User chain.
-    """
-
-    # -------------------------------------------------------------------------
-    # Outputs - returns SSHConnection
-    # -------------------------------------------------------------------------
+class TestConnectNGFWTerminalOutputs:
+    """Output contract tests for connect_ngfw_terminal()."""
 
     def test_returns_ssh_connection_for_ready_ngfw(self):
         """Service returns SSHConnection for NGFW in ready status."""
@@ -99,9 +84,9 @@ class TestConnectNGFWTerminal:
         mock_get_key.assert_called_once_with("projects/test/secrets/ngfw-admin")
         assert result.host == "10.200.0.10"
 
-    # -------------------------------------------------------------------------
-    # Side effects - none expected (read-only)
-    # -------------------------------------------------------------------------
+
+class TestConnectNGFWTerminalInputValidation:
+    """Side-effect and input validation tests for connect_ngfw_terminal()."""
 
     def test_does_not_modify_instance(self):
         """Service does not modify the Instance object."""
@@ -134,10 +119,6 @@ class TestConnectNGFWTerminal:
             connect_ngfw_terminal(mock_user, "ngfw-uuid-123")
             mock_ngfw.save.assert_not_called()
 
-    # -------------------------------------------------------------------------
-    # Input validation - user parameter
-    # -------------------------------------------------------------------------
-
     def test_requires_user_argument(self):
         """Service raises TypeError if user not provided."""
         from engine import connect_ngfw_terminal
@@ -151,10 +132,6 @@ class TestConnectNGFWTerminal:
 
         with pytest.raises(ValueError, match="user is required"):
             connect_ngfw_terminal(None, "uuid-123")
-
-    # -------------------------------------------------------------------------
-    # Input validation - ngfw_uuid parameter
-    # -------------------------------------------------------------------------
 
     def test_raises_on_none_ngfw_uuid(self):
         """Service raises ValueError if ngfw_uuid is None."""
@@ -174,9 +151,9 @@ class TestConnectNGFWTerminal:
         with pytest.raises(ValueError, match="ngfw_uuid is required"):
             connect_ngfw_terminal(mock_user, "")
 
-    # -------------------------------------------------------------------------
-    # Error handling - NGFW not found
-    # -------------------------------------------------------------------------
+
+class TestConnectNGFWTerminalAuthorizationErrors:
+    """Lookup and authorization error tests for connect_ngfw_terminal()."""
 
     def test_raises_when_ngfw_not_found(self):
         """Service raises ValueError when NGFW instance doesn't exist."""
@@ -193,10 +170,6 @@ class TestConnectNGFWTerminal:
             pytest.raises(ValueError, match=r"NGFW instance.*not found"),
         ):
             connect_ngfw_terminal(mock_user, "non-existent-uuid")
-
-    # -------------------------------------------------------------------------
-    # Authorization - user ownership
-    # -------------------------------------------------------------------------
 
     def test_raises_when_ngfw_has_no_request(self):
         """Service raises ValueError when NGFW instance has no associated request."""
@@ -256,9 +229,9 @@ class TestConnectNGFWTerminal:
         ):
             connect_ngfw_terminal(mock_user, "ngfw-uuid-123")
 
-    # -------------------------------------------------------------------------
-    # Status validation - must be ready
-    # -------------------------------------------------------------------------
+
+class TestConnectNGFWTerminalStateErrors:
+    """Status and state error tests for connect_ngfw_terminal()."""
 
     def test_raises_when_ngfw_provisioning(self):
         """Service raises ValueError when NGFW is PROVISIONING."""
@@ -347,10 +320,6 @@ class TestConnectNGFWTerminal:
         ):
             connect_ngfw_terminal(mock_user, "ngfw-uuid-123")
 
-    # -------------------------------------------------------------------------
-    # State validation - required fields
-    # -------------------------------------------------------------------------
-
     def test_raises_when_no_state(self):
         """Service raises ValueError when NGFW has no state."""
         from engine import connect_ngfw_terminal
@@ -435,10 +404,6 @@ class TestConnectNGFWTerminal:
         ):
             connect_ngfw_terminal(mock_user, "ngfw-uuid-123")
 
-    # -------------------------------------------------------------------------
-    # Error handling - secrets manager failures
-    # -------------------------------------------------------------------------
-
     def test_raises_when_secrets_manager_fails(self):
         """Service raises error when SSH key retrieval fails."""
         from engine import connect_ngfw_terminal
@@ -469,9 +434,9 @@ class TestConnectNGFWTerminal:
         ):
             connect_ngfw_terminal(mock_user, "ngfw-uuid-123")
 
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG/INFO on success
-    # -------------------------------------------------------------------------
+
+class TestConnectNGFWTerminalLogging:
+    """Logging tests for connect_ngfw_terminal()."""
 
     def test_logs_debug_on_entry(self, caplog):
         """Service logs debug on entry with user_id and ngfw_uuid."""
@@ -538,10 +503,6 @@ class TestConnectNGFWTerminal:
             connect_ngfw_terminal(mock_user, "ngfw-uuid-456")
 
         assert "Creating SSH connection" in caplog.text or "ngfw-uuid-456" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - ERROR on failures
-    # -------------------------------------------------------------------------
 
     def test_logs_error_when_ngfw_not_found(self, caplog):
         """Service logs error when NGFW instance not found."""

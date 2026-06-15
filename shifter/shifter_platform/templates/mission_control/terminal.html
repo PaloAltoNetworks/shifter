@@ -13,7 +13,12 @@
                     {% trans "Terminal" %}
                 </h1>
                 {% if has_active_range %}
-                    <span class="terminal-range-info">{{ scenario_name|default:active_range.scenario_id }}</span>
+                    <span class="terminal-range-info">
+                        {{ scenario_name|default:active_range.scenario_id }}
+                        {% if active_range.range_id %}
+                            - {% trans "Range" %} {{ active_range.range_id }}
+                        {% endif %}
+                    </span>
                 {% else %}
                     <span class="terminal-range-info text-muted">{% trans "No active range" %}</span>
                 {% endif %}
@@ -76,7 +81,10 @@
                                 </svg>
                             </span>
                             <span class="pane-title">{{ instance.name|default:instance.role }}</span>
-                            <span class="pane-subtitle">{{ instance.os_type }}</span>
+                            <span class="pane-subtitle">
+                                {{ instance.os_type }}
+                                {% if instance.private_ip %}· {{ instance.private_ip }}{% endif %}
+                            </span>
                             <button class="pane-action-btn ssh-btn"
                                     title='{% trans "Open SSH Session" %}'
                                     data-uuid="{{ instance.uuid }}">
@@ -98,7 +106,13 @@
                                      viewBox="0 0 24 24"
                                      fill="none"
                                      xmlns="http://www.w3.org/2000/svg">
-                                    <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2" />
+                                    <rect x="2"
+                                          y="3"
+                                          width="20"
+                                          height="14"
+                                          rx="2"
+                                          stroke="currentColor"
+                                          stroke-width="2" />
                                     <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                                     <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                                 </svg>
@@ -144,7 +158,13 @@
                                  viewBox="0 0 24 24"
                                  fill="none"
                                  xmlns="http://www.w3.org/2000/svg">
-                                <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2" />
+                                <rect x="2"
+                                          y="3"
+                                          width="20"
+                                          height="14"
+                                          rx="2"
+                                          stroke="currentColor"
+                                          stroke-width="2" />
                                 <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                                 <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                             </svg>
@@ -187,7 +207,13 @@
                                  viewBox="0 0 24 24"
                                  fill="none"
                                  xmlns="http://www.w3.org/2000/svg">
-                                <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2" />
+                                <rect x="2"
+                                          y="3"
+                                          width="20"
+                                          height="14"
+                                          rx="2"
+                                          stroke="currentColor"
+                                          stroke-width="2" />
                                 <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                                 <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                             </svg>
@@ -234,153 +260,29 @@
 {% endblock %}
 {% block extra_js %}
     {% if has_active_range %}
-        <!-- xterm.js from CDN with SRI -->
+        <!-- xterm.js from CDN with SRI. URLs centralised in TERMINAL_CDN_ASSETS (see settings.py). -->
         <link rel="stylesheet"
-              href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
-              integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh"
+              href="{{ terminal_cdn_assets.xterm_css.url }}"
+              integrity="{{ terminal_cdn_assets.xterm_css.integrity }}"
               crossorigin="anonymous">
-        <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"
-                integrity="sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH"
+        <script src="{{ terminal_cdn_assets.xterm_js.url }}"
+                integrity="{{ terminal_cdn_assets.xterm_js.integrity }}"
                 crossorigin="anonymous"></script>
-        <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"
-                integrity="sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn"
+        <script src="{{ terminal_cdn_assets.xterm_addon_fit.url }}"
+                integrity="{{ terminal_cdn_assets.xterm_addon_fit.integrity }}"
                 crossorigin="anonymous"></script>
-        <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"
-                integrity="sha384-iAAiqSZrWZz/YKZSTKOPNaRhVOg9JY14avg2EWEpYNnUsrnATA+Sg8pV7mak84/G"
+        <script src="{{ terminal_cdn_assets.xterm_addon_web_links.url }}"
+                integrity="{{ terminal_cdn_assets.xterm_addon_web_links.integrity }}"
                 crossorigin="anonymous"></script>
         <!-- Split.js for resizable split panes -->
-        <script src="https://unpkg.com/split.js@1.6.5/dist/split.min.js"></script>
+        <script src="{{ terminal_cdn_assets.split_js.url }}"></script>
+        {{ terminal_instances|json_script:"terminal-instances-data" }}
+        {{ connection_urls|json_script:"terminal-connection-urls-data" }}
+        {{ terminal_guacamole_config|json_script:"terminal-guacamole-config" }}
+        <script src="{% static 'js/terminal-layout.js' %}"></script>
         <script src="{% static 'js/terminal.js' %}"></script>
-        <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Instances from RangeContext (uuid, role, os_type, name)
-    const instances = [
-        {% for instance in active_range.instances %}
-        {
-            uuid: "{{ instance.uuid }}",
-            role: "{{ instance.role }}",
-            osType: "{{ instance.os_type }}",
-            name: "{{ instance.name|default:instance.role }}"
-        }{% if not forloop.last %},{% endif %}
-        {% endfor %}
-    ];
-
-    // Connection URLs from context processor (uuid, terminal_url)
-    const connectionUrls = [
-        {% for conn in connection_urls %}
-        {
-            uuid: "{{ conn.uuid }}",
-            terminalUrl: "{{ conn.terminal_url }}"
-        }{% if not forloop.last %},{% endif %}
-        {% endfor %}
-    ];
-
-    const terminalManager = new TerminalManager({
-        instances: instances,
-        connectionUrls: connectionUrls,
-        wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',
-        wsHost: window.location.host,
-    });
-    terminalManager.init();
-
-    async function openGuacamoleSession(button, instanceUuid, endpointUrl, sessionLabel) {
-        if (!instanceUuid) {
-            alert('Instance not available');
-            return;
-        }
-
-        // Disable button while loading
-        button.disabled = true;
-        button.classList.add('loading');
-
-        try {
-            const response = await fetch(endpointUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token }}',
-                },
-                body: JSON.stringify({ instance_uuid: instanceUuid }),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || `Failed to generate ${sessionLabel} URL`);
-            }
-
-            const popup = window.open(data.url, '_blank');
-            if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-                if (confirm(`Popup blocked. Click OK to open the ${sessionLabel} session in this tab.`)) {
-                    window.location.href = data.url;
-                } else {
-                    throw new Error('Popup blocked by browser');
-                }
-            }
-        } catch (error) {
-            console.error(`${sessionLabel} button error:`, error);
-            alert(`Failed to open ${sessionLabel} session: ` + error.message);
-        } finally {
-            button.disabled = false;
-            button.classList.remove('loading');
-        }
-    }
-
-    async function openRdpSession(button, instanceUuid) {
-        return openGuacamoleSession(
-            button,
-            instanceUuid,
-            '{% url "mission_control:guacamole_rdp_url" %}',
-            'RDP',
-        );
-    }
-
-    async function openSshSession(button, instanceUuid) {
-        return openGuacamoleSession(
-            button,
-            instanceUuid,
-            '{% url "mission_control:guacamole_ssh_url" %}',
-            'SSH',
-        );
-    }
-
-    document.querySelectorAll('.ssh-btn[data-uuid]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const button = e.currentTarget;
-            openSshSession(button, button.dataset.uuid);
-        });
-    });
-
-    // Setup RDP button click handlers for tabbed view (has data-uuid)
-    document.querySelectorAll('.rdp-btn[data-uuid]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const button = e.currentTarget;
-            openRdpSession(button, button.dataset.uuid);
-        });
-    });
-
-    document.getElementById('left-pane-ssh-btn')?.addEventListener('click', (e) => {
-        const select = document.getElementById('left-pane-select');
-        openSshSession(e.currentTarget, select?.value);
-    });
-
-    // Setup RDP button click handlers for split view (gets uuid from select)
-    document.getElementById('left-pane-rdp-btn')?.addEventListener('click', (e) => {
-        const select = document.getElementById('left-pane-select');
-        openRdpSession(e.currentTarget, select?.value);
-    });
-
-    document.getElementById('right-pane-ssh-btn')?.addEventListener('click', (e) => {
-        const select = document.getElementById('right-pane-select');
-        openSshSession(e.currentTarget, select?.value);
-    });
-
-    document.getElementById('right-pane-rdp-btn')?.addEventListener('click', (e) => {
-        const select = document.getElementById('right-pane-select');
-        openRdpSession(e.currentTarget, select?.value);
-    });
-});
-        </script>
+        <script src="{% static 'js/terminal-init.js' %}"></script>
+        <script src="{% static 'js/terminal-guacamole.js' %}"></script>
     {% endif %}
     {# has_active_range #}
 {% endblock %}

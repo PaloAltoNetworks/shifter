@@ -449,7 +449,12 @@ class TestLaunchRangeErrorHandling:
         mock_cms_list_scenarios,
         mock_cms_get_agent,
     ):
-        """View returns 400 when cms_create_range raises CMSError."""
+        """View returns 400 when cms_create_range raises CMSError.
+
+        The response body is now selected from a fixed set of authored literals
+        in ``shared.errors.classify_user_message`` so the original exception
+        text never reaches the client (CodeQL ``py/stack-trace-exposure``).
+        """
         with patch.object(
             views,
             "cms_create_range",
@@ -464,9 +469,10 @@ class TestLaunchRangeErrorHandling:
 
             response = views.launch_range(request)
             assert response.status_code == 400
-            assert _json(response)["error"] == "Agent not found"
+            # "not found" classifies as a not-found message.
+            assert _json(response)["error"] == "Resource not found"
 
-    def test_cms_error_message_passed_to_response(
+    def test_active_range_conflict_maps_to_authored_literal(
         self,
         rf,
         mock_user,
@@ -474,12 +480,13 @@ class TestLaunchRangeErrorHandling:
         mock_cms_list_scenarios,
         mock_cms_get_agent,
     ):
-        """CMSError message is included in error response."""
-        error_message = "User already has an active range"
+        """The "already have an active range" guidance is preserved via an
+        authored literal in the view — never by echoing ``str(e)`` directly.
+        """
         with patch.object(
             views,
             "cms_create_range",
-            side_effect=CMSError(error_message),
+            side_effect=CMSError("User already has an active range"),
         ):
             request = rf.post(
                 "/api/range/launch/",
@@ -489,7 +496,7 @@ class TestLaunchRangeErrorHandling:
             request.user = mock_user
 
             response = views.launch_range(request)
-            assert _json(response)["error"] == error_message
+            assert _json(response)["error"] == "You already have an active range"
 
 
 # -----------------------------------------------------------------------------

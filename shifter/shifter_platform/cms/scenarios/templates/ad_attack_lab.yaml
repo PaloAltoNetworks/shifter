@@ -2,7 +2,7 @@ id: ad_attack_lab
 name: AD Attack Lab
 description: Active Directory attack lab with domain controller, Kali attacker, and domain-joined Windows victim.
 enabled: true
-ngfw: true
+ngfw: false
 
 instances:
   - name: Attacker
@@ -15,7 +15,7 @@ instances:
     role: dc
     os_type: windows
     domain_controller: true
-    xdr_agent: true
+    xdr_agent: false
     ai_agent: true
     dc_config:
       domain_name: internal.shifter
@@ -24,7 +24,7 @@ instances:
   - name: Workstation
     role: victim
     os_type: from_agent
-    xdr_agent: true
+    xdr_agent: false
     ai_agent: true
     join_domain: true
 

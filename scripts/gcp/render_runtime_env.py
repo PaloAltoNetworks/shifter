@@ -60,7 +60,16 @@ def _string_list(raw: object) -> list[str]:
     return [str(item).strip() for item in raw if str(item).strip()]
 
 
-def render_env(outputs: dict[str, object]) -> str:
+def _validated_image_tag(image_tag: str) -> str:
+    tag = image_tag.strip()
+    if not tag:
+        raise ValueError("image_tag must be non-empty")
+    if tag == "latest":
+        raise ValueError("image_tag must be immutable; refusing to render latest")
+    return tag
+
+
+def render_env(outputs: dict[str, object], *, image_tag: str) -> str:
     """Render the GCP portal runtime env contract.
 
     A configured public hostname and managed TLS are mandatory: the renderer
@@ -69,6 +78,7 @@ def render_env(outputs: dict[str, object]) -> str:
     session/CSRF cookies, Identity Platform auth, ``https://<hostname>``
     ``SITE_URL``) is emitted unconditionally.
     """
+    pinned_image_tag = _validated_image_tag(image_tag)
     assets_bucket = _value(outputs, "assets_bucket_name")
     terraform_state_bucket = _value(outputs, "terraform_state_bucket_name")
     topic_id = _value(outputs, "platform_events_topic_id")
@@ -100,10 +110,14 @@ def render_env(outputs: dict[str, object]) -> str:
 
     site_url = f"https://{public_hostname}"
     # The public hostname is the only externally addressable host. Health-check
-    # probes hit /health/, which HealthCheckMiddleware short-circuits before
-    # ALLOWED_HOSTS validation, so the ingress IP is intentionally not an
-    # accepted application host. localhost/127.0.0.1 stay for in-pod probes and
-    # port-forward debugging.
+    # probes hit /health/ with the ingress IP as the Host header; the
+    # path-scoped `HealthCheckMiddleware` overrides that to `localhost` so
+    # `ALLOWED_HOSTS` admits the request, and then the real
+    # `config.health.CoarseHealthCheckView` runs the `django-health-check`
+    # probes (DB / cache / storage). The ingress IP is intentionally not an
+    # accepted application host outside that path. localhost / 127.0.0.1 stay
+    # for in-pod probes and port-forward debugging. See issue #477 and
+    # `docs/architecture/portal-health-readiness-preflight-477.md`.
     allowed_hosts = ",".join(_unique([public_hostname, "localhost", "127.0.0.1"]))
 
     bootstrap_staff_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_STAFF_EMAILS"))
@@ -147,7 +161,7 @@ def render_env(outputs: dict[str, object]) -> str:
         "GUACAMOLE_POSTGRESQL_HOSTNAME": guacamole_database["host"],
         "GUACAMOLE_POSTGRESQL_PORT": str(guacamole_database["port"]),
         "GUACAMOLE_POSTGRESQL_DATABASE": guacamole_database["database_name"],
-        "ENGINE_TASK_IMAGE": f"{image_roots['pulumi-provisioner']}:latest",
+        "ENGINE_TASK_IMAGE": f"{image_roots['pulumi-provisioner']}:{pinned_image_tag}",
         # GCP deployments authenticate against Identity Platform in every case.
         "AUTH_PROVIDER": "identity_platform",
         "IDENTITY_PLATFORM_API_KEY": identity_platform_api_key,
@@ -208,11 +222,12 @@ def render_env(outputs: dict[str, object]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--terraform-output-json", required=True, type=Path)
+    parser.add_argument("--image-tag", required=True)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
     outputs = json.loads(args.terraform_output_json.read_text())
-    rendered = render_env(outputs)
+    rendered = render_env(outputs, image_tag=args.image_tag)
     args.output.write_text(rendered)
     return 0
 

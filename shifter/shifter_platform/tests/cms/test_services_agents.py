@@ -372,12 +372,14 @@ class TestCreateAgent:
             )
             mock_create.assert_called_once_with(
                 user=mock_user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
+                spec=services.AgentUploadSpec(
+                    name="Test Agent",
+                    s3_key="agents/test/agent.msi",
+                    filename="agent.msi",
+                    os_slug="windows",
+                    file_size=1000,
+                    sha256="abc123",
+                ),
             )
 
     def test_passes_optional_upload_method_to_assets(self, mock_user):
@@ -396,7 +398,7 @@ class TestCreateAgent:
             )
             mock_create.assert_called_once()
             _, kwargs = mock_create.call_args
-            assert kwargs["upload_method"] == "presigned"
+            assert kwargs["spec"].upload_method == "presigned"
 
     # -------------------------------------------------------------------------
     # Service returns what assets service returns

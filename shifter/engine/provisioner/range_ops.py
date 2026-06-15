@@ -11,12 +11,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from events import publish_ngfw_event, publish_status_update
 from executors.aws_executor import AWSExecutor
-from main import get_db_connection, get_range_data_by_request_id, update_range_status
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from plans.ngfw_start import NGFWStartPlan
 from plans.ngfw_stop import NGFWStopPlan
 from plans.range_pause import RangePausePlan
 from plans.range_resume import RangeResumePlan
+from provisioner_db import get_db_connection, get_range_data_by_request_id, update_range_status
 
 logger = logging.getLogger(__name__)
 

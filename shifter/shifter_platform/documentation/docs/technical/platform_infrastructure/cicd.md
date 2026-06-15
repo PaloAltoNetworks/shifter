@@ -37,18 +37,20 @@ Jobs run only when relevant files change. `deploy.yml` detects changes and trigg
 | **core** | `platform/terraform/modules/ecr/**`, `platform/terraform/environments/*/*.tf` |
 | **range** | `platform/terraform/modules/range/**`, `platform/terraform/environments/*/range/**` |
 | **shifter_engine** | `shifter/engine/provisioner/**`, `platform/terraform/modules/pulumi-provisioner/**` |
-| **shifter_platform** | `platform/terraform/modules/portal/**`, `shifter/**` |
+| **shifter_platform** | `platform/terraform/modules/portal/**`, `platform/terraform/modules/guacamole/**`, `platform/terraform/environments/*/portal/**` (Terraform only) |
+| **portal_image** | `shifter/shifter_platform/**`, `shifter/cyberscript/**`, `shifter/installation/**` (portal image build/deploy, no Terraform) |
 
 ## Environment Targeting
 
-- Push to `dev` → validation only for AWS and GCP
+- Push to `dev` → Quality only; no deploy or Terraform plan jobs
 - Push to `aws-dev` → AWS dev deploy
 - Push to `gcp-dev` → fast GCP validate + GCP dev deploy
-- Push to `main` → AWS prod deploy
-- PRs to `dev` → cross-provider validation only
+- Push to `main` → code branch update only; no deploy or Terraform plan jobs
+- Manual dispatch on `main` → AWS prod deploy
+- PRs to `dev` → Quality only
 - PRs to `aws-dev` → AWS dev plan
 - PRs to `gcp-dev` → GCP validate
-- PRs to `main` → AWS prod plan only
+- PRs to `main` → Quality only
 
 ## Authentication
 
@@ -67,7 +69,7 @@ AWS roles defined in `platform/terraform/global/iam/github-oidc.tf`. GCP WIF con
 
 GCP now deploys through CI/CD on `gcp-dev`. The branch model is:
 
-- `dev`: validation-only integration branch for AWS and GCP
+- `dev`: Quality-only integration branch
 - `aws-dev`: AWS dev deploy branch
 - `gcp-dev`: GCP dev deploy branch
 
@@ -79,7 +81,7 @@ The GCP CI path:
 4. renders secure Helm values from Terraform outputs and Secret Manager
 5. installs or upgrades the Shifter Helm release
 
-On `gcp-dev` pushes, this path now runs as a fast deploy lane. It skips the repo-wide quality workflow and relies on the provider-local validation in `_gcp-dev.yml` so break/fix iteration on GCP does not wait for the full cross-repo lint/test matrix. The full quality gate still runs on `dev`, on PRs, and on production.
+On `gcp-dev` pushes, this path now runs as a fast deploy lane. It skips the repo-wide quality workflow and relies on the provider-local validation in `_gcp-dev.yml` so break/fix iteration on GCP does not wait for the full cross-repo lint/test matrix. The full quality gate still runs on PRs and on `dev`; production deploys are manual dispatches from `main`.
 
 The bootstrap path is security-gated and fails closed unless:
 

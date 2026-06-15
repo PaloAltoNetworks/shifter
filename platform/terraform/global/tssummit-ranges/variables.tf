@@ -74,23 +74,6 @@ variable "ngfw_bootstrap_bucket" {
   type        = string
 }
 
-variable "ngfw_scm_pin_id" {
-  description = "SCM auto-registration PIN ID (certid)"
-  type        = string
-}
-
-variable "ngfw_scm_pin_value" {
-  description = "SCM auto-registration PIN value (certsecret)"
-  type        = string
-  sensitive   = true
-}
-
-variable "ngfw_authcode" {
-  description = "VM-Series license authcode"
-  type        = string
-  sensitive   = true
-}
-
 # ------------------------------------------------------------------------------
 # Instance AMIs
 # ------------------------------------------------------------------------------
@@ -103,7 +86,7 @@ variable "webserver_ami_id" {
 variable "webserver_instance_type" {
   description = "Webserver EC2 instance type"
   type        = string
-  default     = "t2.small"
+  default     = "t3.small"
 }
 
 variable "workstation_ami_id" {

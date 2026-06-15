@@ -56,7 +56,12 @@ locals {
 # Guacd Task Definition
 # ------------------------------------------------------------------------------
 
+# Guacd needs to write to /var/run/ (UNIX socket) and /tmp/ at runtime. Making
+# the root filesystem read-only requires mounting these as tmpfs volumes; that
+# is a follow-up hardening pass tracked under ADR-004-R11 exception
+# ckv-aws-336-guacd-fs.
 resource "aws_ecs_task_definition" "guacd" {
+  # checkov:skip=CKV_AWS_336:Guacd needs writable /var/run + /tmp; tmpfs mount follow-up.
   family                   = "${var.name_prefix}-guacd"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"

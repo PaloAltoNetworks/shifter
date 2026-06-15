@@ -87,11 +87,14 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
 
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.this.id
+  description       = "all egress"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
 
 resource "aws_instance" "this" {
+  monitoring                  = true
+  ebs_optimized               = true
   ami                         = var.ami_id
   instance_type               = var.instance_type
   key_name                    = var.ssh_public_key != "" ? aws_key_pair.this[0].key_name : null

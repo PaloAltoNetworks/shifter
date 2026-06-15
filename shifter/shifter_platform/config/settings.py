@@ -1,12 +1,33 @@
 """
 Django settings for Shifter platform.
+
+Sub-sections (Channels layer, cloud/AWS task-runner + queue config,
+``LOGGING`` dict, terminal CDN assets) are split into ``config/_*.py``
+modules and re-imported here. The split keeps this module under Sonar
+S104's 500-line cap without changing the public ``config.settings``
+surface — ``from config.settings import X`` continues to resolve every
+name it always has.
 """
+
+from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Sub-module re-exports. Each sub-module declares ``__all__`` so the
+# wildcard surfaces only the names that are part of the public Django
+# settings contract. The wildcard suppressions on each line below
+# silence Sonar's S2208 (no-wildcard) guidance — for a settings module
+# the wildcard *is* the contract (Django's official split-settings
+# pattern uses ``from .base import *``).
+from config._channels import *  # NOSONAR
+from config._channels import _build_channel_layers
+from config._cloud import *  # NOSONAR
+from config._logging_config import *  # NOSONAR
+from config._terminal_assets import *  # NOSONAR
 
 load_dotenv()
 
@@ -30,6 +51,21 @@ def _env_list(name: str) -> list[str]:
     return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
 
 
+def _env_int(name: str, default: int) -> int:
+    """Parse an integer environment variable, falling back to ``default``.
+
+    An empty/unset value uses the default; a non-integer value is a
+    configuration error and fails loud rather than silently degrading.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+
+
 # Security
 _test_secret_key_default = "django-tests-secret-key" if IS_TEST_RUN else None
 
@@ -38,7 +74,8 @@ if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY environment variable is required")
 DEBUG = _env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
+# Required for debug context processor
+INTERNAL_IPS = ["127.0.0.1"]
 
 # Field encryption key for sensitive model fields (e.g., SCMCredential.scm_pin_value)
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -76,6 +113,7 @@ INSTALLED_APPS = [
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
+    "config.apps.PortalConfig",
     "rest_framework",
     "mission_control.apps.MissionControlConfig",
     "risk_register.apps.RiskRegisterConfig",
@@ -92,8 +130,10 @@ if AUTH_PROVIDER == "oidc":
     INSTALLED_APPS.append("mozilla_django_oidc")
 
 MIDDLEWARE = [
-    "config.middleware.HealthCheckMiddleware",  # Must be first to bypass ALLOWED_HOSTS for ALB
-    "config.middleware.RequestIDMiddleware",  # Request ID for audit logging correlation
+    # Must be first to bypass ALLOWED_HOSTS for ALB
+    "config.middleware.HealthCheckMiddleware",
+    # Request ID for audit logging correlation
+    "config.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -125,6 +165,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "mission_control.context_processors.active_range",
+                "mission_control.context_processors.terminal_cdn_assets",
                 "shared.context_processors.user_permissions",
                 "ctf.context_processors.ctf_navigation",
             ],
@@ -138,97 +179,39 @@ ASGI_APPLICATION = "config.asgi.application"
 # ------------------------------------------------------------------------------
 # Django Channels Configuration
 # ------------------------------------------------------------------------------
-
-
-# Redis for the channel layer (multi-instance pod deployment).
-#
-# Three runtime postures, in order of preference, derived from the env:
-#   1. REDIS_HOST empty       -> InMemoryChannelLayer (local dev,
-#                                pytest runs without a Redis dependency).
-#   2. REDIS_HOST set, no TLS -> channels_redis tuple host form (plaintext
-#                                Redis on a private network — the AWS and
-#                                pre-#963 GCP shape).
-#   3. REDIS_HOST + REDIS_TLS -> rediss://<password>@host:port/0 URL host.
-#                                REDIS_PASSWORD is hydrated by entrypoint.sh
-#                                from Secret Manager (ADR-008-R6).
-#
-# Fail closed when the TLS flag is on but no password was hydrated — silent
-# fallback to plaintext is the failure mode #963 was opened to close.
-def _build_channel_layers(env):
-    """Build CHANNEL_LAYERS from the given mapping (typically os.environ).
-
-    Pure function so it is unit-testable without touching real settings.
-    """
-    from django.core.exceptions import ImproperlyConfigured
-
-    host = env.get("REDIS_HOST", "").strip()
-    if not host:
-        return {
-            "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
-        }
-
-    port = int(env.get("REDIS_PORT", "6379"))
-    tls = env.get("REDIS_TLS", "").strip().lower() == "true"
-    if tls:
-        password = env.get("REDIS_PASSWORD", "").strip()
-        if not password:
-            raise ImproperlyConfigured(
-                "REDIS_TLS=true requires REDIS_PASSWORD (hydrated by entrypoint.sh "
-                "from Secret Manager); refusing to fall back to a plaintext connection"
-            )
-        # channels_redis (>= 4) accepts dict-form host entries; the dict is
-        # unpacked into `aioredis.ConnectionPool.from_url(address, **rest)`
-        # (see channels_redis/utils.py::create_pool), so redis-py's SSL
-        # kwargs flow through. SERVER_AUTHENTICATION on GCP Memorystore
-        # needs the instance CA to verify the server cert — when present,
-        # the CA PEM is passed via `ssl_ca_data` so we never have to write
-        # the cert to disk or mutate the system trust store. When absent
-        # (tests, or environments that haven't shipped the CA bundle yet),
-        # redis-py falls back to the system trust store with cert_reqs
-        # still required.
-        ca_pem = env.get("REDIS_CA_PEM", "")
-        if not ca_pem.strip():
-            # ADR-008-R6 fail-closed: the GCP runtime delivers the
-            # Memorystore server CA alongside the AUTH token in Secret
-            # Manager, and entrypoint.sh exports both as a unit. If the
-            # CA didn't make it into the env, either Terraform hasn't
-            # been re-applied with the new payload yet or the entrypoint
-            # block was bypassed — both are misconfigurations, not
-            # "fall back to system trust" cases. Memorystore uses a
-            # private CA, so the system trust store could not validate
-            # the cert anyway; this guard surfaces the misconfiguration
-            # at startup rather than as an opaque TLS handshake failure
-            # later.
-            raise ImproperlyConfigured(
-                "REDIS_TLS=true requires REDIS_CA_PEM (hydrated by entrypoint.sh "
-                "from the Memorystore server_ca_cert in Secret Manager); refusing "
-                "to fall back to the system trust store, which cannot validate the "
-                "Memorystore private CA"
-            )
-        address = f"rediss://:{password}@{host}:{port}/0"
-        # Use the raw CA value (do not strip) — the PEM block's
-        # trailing newline matters for some TLS implementations and the
-        # canonical form ends with one.
-        host_entry = {
-            "address": address,
-            "ssl_cert_reqs": "required",
-            "ssl_ca_data": ca_pem,
-        }
-        hosts = [host_entry]
-    else:
-        hosts = [(host, port)]
-
-    return {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": hosts},
-        },
-    }
-
-
+# Channel-layer construction lives in ``config._channels`` so this module
+# stays under the 500-line cap. See that module's docstring for the
+# AWS/GCP TLS posture matrix.
 REDIS_HOST = os.environ.get("REDIS_HOST", "")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 CHANNEL_LAYERS = _build_channel_layers(os.environ)
+
+# Shared WebSocket notification replay bounds (issue #679).
+WEBSOCKET_NOTIFICATION_MAX_REPLAY = _env_int("WEBSOCKET_NOTIFICATION_MAX_REPLAY", 100)
+WEBSOCKET_NOTIFICATION_RETENTION_DAYS = _env_int("WEBSOCKET_NOTIFICATION_RETENTION_DAYS", 7)
+
+# ------------------------------------------------------------------------------
+# Terminal WebSocket capacity controls (issue #847)
+# ------------------------------------------------------------------------------
+# Browser SSH terminals run inside the portal ASGI process: each active session
+# holds a websocket FD, an SSH socket, asyncssh connection/process state, and a
+# read task. During a live event a burst of sessions (or a reconnect storm) can
+# saturate the event loop and exhaust file descriptors, making the whole portal
+# look unreliable. These bounds cap concurrency and reclaim idle/abandoned
+# sessions. They are env-tunable so limits can be adjusted during an event
+# without a redeploy; the caps are per ASGI process, which matches how the
+# portal is deployed. A value <= 0 disables that individual limit.
+#
+# TERMINAL_READ_POLL_SECONDS is how often an idle session's read loop wakes to
+# enforce the timeouts; it does NOT add latency to terminal output (output is
+# delivered as soon as it arrives). The previous hard-coded 0.1s poll woke every
+# idle terminal ~10x/second; a multi-second interval cuts idle CPU by orders of
+# magnitude. See docs/architecture/terminal-websocket-capacity-preflight-847.md.
+TERMINAL_MAX_SESSIONS = _env_int("TERMINAL_MAX_SESSIONS", 200)
+TERMINAL_MAX_SESSIONS_PER_USER = _env_int("TERMINAL_MAX_SESSIONS_PER_USER", 10)
+TERMINAL_IDLE_TIMEOUT_SECONDS = _env_int("TERMINAL_IDLE_TIMEOUT_SECONDS", 1800)
+TERMINAL_MAX_SESSION_SECONDS = _env_int("TERMINAL_MAX_SESSION_SECONDS", 28800)
+TERMINAL_READ_POLL_SECONDS = _env_int("TERMINAL_READ_POLL_SECONDS", 30)
 
 # Database
 # Use SQLite for local dev/tests, PostgreSQL for deployed environments
@@ -276,6 +259,11 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
+# Default file storage needs a writable location for the
+# django-health-check storage probe. Keep it out of the immutable app source
+# tree so non-root production containers can prove storage readiness.
+MEDIA_ROOT = BASE_DIR / "media"
+
 # Use simple static storage for tests (no manifest required)
 if os.environ.get("TESTING") == "1":
     STORAGES = {
@@ -302,11 +290,12 @@ if not DEBUG:
 
     # HTTPS enforcement (issue #776). `SECURE_PROXY_SSL_HEADER` above tells
     # Django to read the LB's forwarded-proto, so `SECURE_SSL_REDIRECT`
-    # won't loop behind a TLS-terminating proxy. Health-check probes that
-    # arrive over plain HTTP without `X-Forwarded-Proto: https` will 301;
-    # add their paths to `SECURE_REDIRECT_EXEMPT` via env if the LB
-    # doesn't follow redirects.
+    # won't loop behind a TLS-terminating proxy. ALB health checks arrive
+    # over plain HTTP without `X-Forwarded-Proto: https` and do not follow
+    # redirects, so `/health` must remain a direct dependency-aware 200/500
+    # readiness surface instead of a 301.
     SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", True)
+    SECURE_REDIRECT_EXEMPT = [r"^health/?$"]
 
     # HSTS — defense in depth so an active downgrade can't strip the first
     # redirect. Defaults: 1 year, include subdomains, NO preload. Preload
@@ -320,106 +309,15 @@ if not DEBUG:
 # ------------------------------------------------------------------------------
 # Authentication
 # ------------------------------------------------------------------------------
+# Authentication backends, OIDC endpoint discovery, magic-link config,
+# and ``OIDC_EXEMPT_URLS`` are defined in ``config._oidc_settings`` so
+# this module stays under the 500-line cap. Re-exported via star-import
+# here (``noqa`` suppresses the unused/ambiguous-import warnings — these
+# names are part of the public Django settings surface).
 
-if AUTH_PROVIDER == "identity_platform":
-    AUTHENTICATION_BACKENDS = [
-        "config.identity_platform.IdentityPlatformBackend",
-        "django.contrib.auth.backends.ModelBackend",
-    ]
-else:
-    AUTHENTICATION_BACKENDS = [
-        "config.oidc.ShifterOIDCBackend",
-        "django.contrib.auth.backends.ModelBackend",
-    ]
-
-# Magic link authentication (PLAT-101)
-MAGIC_LINK_EXPIRY_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRY_HOURS", "24"))
-MAGIC_LINK_SINGLE_USE = _env_bool("MAGIC_LINK_SINGLE_USE", False)
-
-# OIDC settings - loaded from environment for AWS/Cognito deployments.
-OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "test-oidc-client-id" if IS_TEST_RUN else "")
-OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "test-oidc-client-secret" if IS_TEST_RUN else "")
-IDENTITY_PLATFORM_API_KEY = os.environ.get("IDENTITY_PLATFORM_API_KEY", "")
-IDENTITY_PLATFORM_PROJECT_ID = os.environ.get("IDENTITY_PLATFORM_PROJECT_ID", "")
-IDENTITY_PLATFORM_AUTH_DOMAIN = os.environ.get("IDENTITY_PLATFORM_AUTH_DOMAIN", "")
-IDENTITY_ALLOWED_EMAIL_DOMAIN = os.environ.get("IDENTITY_ALLOWED_EMAIL_DOMAIN", "paloaltonetworks.com")
-IDENTITY_ALLOWED_EMAILS = _env_csv("IDENTITY_ALLOWED_EMAILS")
-IDENTITY_PLATFORM_ISSUER = os.environ.get("IDENTITY_PLATFORM_ISSUER", "Shifter")
-IDENTITY_PLATFORM_TOTP_DISPLAY_NAME = os.environ.get(
-    "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
-    "Shifter Authenticator",
-)
-PLATFORM_BOOTSTRAP_STAFF_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_STAFF_EMAILS")
-PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS")
-
-# Cognito endpoints
-# Cognito has two different base URLs:
-# - Auth domain: for OAuth endpoints (authorize, token, userInfo)
-# - Issuer URL: for JWKS (token verification)
-_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "https://auth.example.test" if IS_TEST_RUN else "")
-_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "https://issuer.example.test" if IS_TEST_RUN else "")
-
-# Always define OIDC_OP_* variables to avoid runtime errors
-OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 - not a password, placeholder URL
-OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105
-OIDC_OP_USER_ENDPOINT = ""  # nosec B105
-OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105
-
-if AUTH_PROVIDER == "oidc" and _oidc_auth_domain and _oidc_issuer:
-    # OAuth endpoints use the auth domain
-    OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_auth_domain}/oauth2/authorize"
-    OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_auth_domain}/oauth2/token"
-    OIDC_OP_USER_ENDPOINT = f"{_oidc_auth_domain}/oauth2/userInfo"
-    # JWKS uses the issuer URL
-    OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
-else:
-    import warnings
-
-    if AUTH_PROVIDER == "oidc":
-        warnings.warn(
-            "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-# Token verification
-OIDC_RP_SIGN_ALGO = "RS256"
-
-# User mapping - Cognito uses 'email' claim
-OIDC_RP_SCOPES = "openid email profile"
-
-# Redirect after login/logout
-# Uses the dashboard router to redirect users based on their user type
-LOGIN_REDIRECT_URL = "/dashboard/"
-LOGOUT_REDIRECT_URL = "/"
-
-# Login URL - dev bypass in DEBUG, provider router in production
-LOGIN_URL = "/dev-login/" if DEBUG else "platform_login"
-
-# OIDC logout endpoint - clears the identity provider session in addition to Django session
-OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url" if AUTH_PROVIDER == "oidc" else ""
-
-# Create users on first login
-OIDC_CREATE_USER = True
-
-# Use email as username (default is sha1 hash of email)
-OIDC_USERNAME_ALGO = "config.oidc.generate_username"
-
-# URLs exempt from OIDC authentication (public pages)
-# Must be URL paths starting with "/" or view names (not regex patterns)
-OIDC_EXEMPT_URLS = [
-    "/",  # Landing page
-    "/health",  # Health check
-    "/health/",  # Health check with trailing slash
-    "/dev-login/",  # View enforces production blocking directly
-    "/dev-logout/",  # View enforces production blocking directly
-    "/ctf/register/",  # CTF magic link registration (token is the auth)
-    "/ctf/help/",  # CTF help page
-]
-
-# Session cookie lifetime — makes Django's 14-day default explicit.
-# CTF participants auth via magic link (ModelBackend), so OIDC SessionRefresh
-# won't expire their sessions. This ensures no surprises from Django defaults.
-SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 14 days
+# OIDC env-var guard above; F401/F403 are required for star-imports of
+# the public Django settings surface (the canonical split-settings idiom).
+from config._oidc_settings import *  # noqa: E402  # NOSONAR
 
 # ------------------------------------------------------------------------------
 # Field Encryption (django-encrypted-model-fields)
@@ -444,90 +342,22 @@ SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "noreply@shifter
 
 # Provisioning timeout - how long dashboard waits before showing timeout error
 # UI fallback is 60 min if not provided (avoids long range standup issues during testing)
-PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
-
-# ------------------------------------------------------------------------------
-# Cloud Provider Configuration
-# ------------------------------------------------------------------------------
-
-# Which cloud provider to use: "aws" (default) or "gcp" (future)
-CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
-GOOGLE_CLOUD_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
-GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID") or GOOGLE_CLOUD_PROJECT
-GCP_REGION = os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION", "")
-
-# Generic names — adapters use these; AWS-specific names kept as fallbacks
-CLOUD_REGION = (
-    os.environ.get("CLOUD_REGION") or os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
-)
-STORAGE_BUCKET_NAME = os.environ.get("STORAGE_BUCKET_NAME") or os.environ.get("AWS_S3_BUCKET_NAME", "")
-
-# ------------------------------------------------------------------------------
-# AWS S3 Configuration
-# ------------------------------------------------------------------------------
-
-AWS_S3_BUCKET_NAME = STORAGE_BUCKET_NAME  # Backward compat alias
-AWS_S3_REGION = CLOUD_REGION  # Backward compat alias
-AWS_REGION = CLOUD_REGION  # Backward compat alias
-AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
-
-# Topic for publishing events (provisioner -> workers)
-RANGE_EVENTS_TOPIC_ID = os.environ.get("RANGE_EVENTS_TOPIC_ID") or os.environ.get("SNS_RANGE_EVENTS_ARN", "")
-SNS_RANGE_EVENTS_ARN = RANGE_EVENTS_TOPIC_ID  # Backward compat alias
-
-# Shifter Engine task runner configuration.
-# AWS uses ECS-compatible values. GCP uses a Kubernetes namespace plus a
-# container image that the GKE-native task runner launches as a Job.
-ENGINE_TASK_CLUSTER = (
-    os.environ.get("ENGINE_TASK_NAMESPACE")
-    or os.environ.get("ENGINE_TASK_CLUSTER")
-    or os.environ.get("ENGINE_JOB_LOCATION")
-    or os.environ.get("ENGINE_ECS_CLUSTER_ARN")
-    or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
-)
-ENGINE_TASK_DEFINITION = (
-    os.environ.get("ENGINE_TASK_DEFINITION")
-    or os.environ.get("ENGINE_TASK_IMAGE")
-    or os.environ.get("ENGINE_TASK_DEFINITION_ARN")
-    or os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
-)
-ENGINE_TASK_SERVICE_ACCOUNT_NAME = os.environ.get("ENGINE_TASK_SERVICE_ACCOUNT_NAME", "")
-ENGINE_TASK_IMAGE_PULL_POLICY = os.environ.get("ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent")
-ENGINE_TASK_BACKOFF_LIMIT = int(os.environ.get("ENGINE_TASK_BACKOFF_LIMIT", "0"))
-ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED = int(os.environ.get("ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED", "3600"))
-ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = (
-    os.environ.get("ENGINE_TASK_NETWORK_SECURITY_GROUP_ID")
-    or os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID")
-    or os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
-)
-ENGINE_TASK_NETWORK_SUBNET_IDS = (
-    os.environ.get("ENGINE_TASK_NETWORK_SUBNET_IDS")
-    or os.environ.get("ENGINE_PRIVATE_SUBNET_IDS")
-    or os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
-)
-
-# Backward compat aliases for existing AWS call sites and tests
-ENGINE_ECS_CLUSTER_ARN = ENGINE_TASK_CLUSTER
-ENGINE_TASK_DEFINITION_ARN = ENGINE_TASK_DEFINITION
-ENGINE_ECS_SECURITY_GROUP_ID = ENGINE_TASK_NETWORK_SECURITY_GROUP_ID
-ENGINE_PRIVATE_SUBNET_IDS = ENGINE_TASK_NETWORK_SUBNET_IDS
-EXPERIMENT_TASK_DEFINITION = os.environ.get("EXPERIMENT_TASK_DEFINITION") or os.environ.get(
-    "EXPERIMENT_TASK_DEFINITION_ARN", ""
-)
-EXPERIMENT_TASK_DEFINITION_ARN = EXPERIMENT_TASK_DEFINITION
-
-# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
-LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
-PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
+# 30 minutes
+PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000
 
 # Agent upload limits
-AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
-AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
-AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+# 2GB max per file
+AGENT_MAX_FILE_SIZE_MB = 2048
+# 5GB max per user
+AGENT_USER_STORAGE_QUOTA_MB = 5120
+# 10 minutes for presigned URL
+AGENT_UPLOAD_URL_EXPIRES = 600
 
 # Experiment script upload limits
-SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1MB max per script
-SCRIPT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+# 1MB max per script
+SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024
+# 10 minutes for presigned URL
+SCRIPT_UPLOAD_URL_EXPIRES = 600
 
 # Server-side upload inspection (issue #696). Provider-neutral byte budget for
 # the magic-byte header read performed at finalization across CTF, agent, and
@@ -558,44 +388,18 @@ GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
 GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
 # Internal URL for server-to-server API calls (defaults to base URL if not set)
 GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMOLE_BASE_URL
-
-# ------------------------------------------------------------------------------
-# SQS Worker Configuration
-# ------------------------------------------------------------------------------
-# Queue identifiers are passed via environment variables by the deployment workflow.
-# On AWS the consumer and publisher both use the same SQS URL. On GCP workers
-# consume Pub/Sub subscriptions while publishers target topics, so the config
-# allows those identifiers to diverge without changing existing AWS call sites.
-
-
-def _build_queue_config(name: str, legacy_env: str, handler: str) -> dict[str, str]:
-    consumer_id = (
-        os.environ.get(f"QUEUE_{name}_CONSUMER_ID")
-        or os.environ.get(f"QUEUE_{name}_ID")
-        or os.environ.get(legacy_env, "")
-    )
-    publisher_id = (
-        os.environ.get(f"QUEUE_{name}_PUBLISHER_ID") or os.environ.get(f"QUEUE_{name}_TOPIC_ID") or consumer_id
-    )
-    return {
-        "url": consumer_id,
-        "consumer_id": consumer_id,
-        "publisher_id": publisher_id,
-        "handler": handler,
-    }
-
-
-QUEUE_CONFIG = {
-    "cms": _build_queue_config("CMS", "SQS_CMS_URL", "cms.handlers.process_event"),
-    "engine": _build_queue_config("ENGINE", "SQS_ENGINE_URL", "engine.handlers.process_event"),
-    "mc": _build_queue_config("MC", "SQS_MC_URL", "mission_control.handlers.process_event"),
-    "experiments": _build_queue_config(
-        "EXPERIMENTS",
-        "SQS_EXPERIMENTS_URL",
-        "cms.experiments.handlers.process_event",
-    ),
-}
-SQS_QUEUE_CONFIG = QUEUE_CONFIG  # Backward compat alias
+# Bounded async bootstrap workers for Guacamole token creation. Each worker may
+# hold a blocking Guacamole /api/tokens request, so keep this intentionally low
+# and scale with portal instance count.
+GUACAMOLE_BOOTSTRAP_WORKERS = int(os.environ.get("GUACAMOLE_BOOTSTRAP_WORKERS", "4"))
+GUACAMOLE_BOOTSTRAP_TTL_SECONDS = int(os.environ.get("GUACAMOLE_BOOTSTRAP_TTL_SECONDS", "300"))
+GUACAMOLE_BOOTSTRAP_INLINE = _env_bool("GUACAMOLE_BOOTSTRAP_INLINE", False)
+# First-click readiness retry for the /api/tokens exchange (issue #395).
+# Bounded exponential backoff inside mission_control.guacamole guards against the
+# token-readiness race that surfaces as a redirect to the Guacamole login page on
+# the user's first click.
+GUACAMOLE_TOKEN_RETRY_ATTEMPTS = int(os.environ.get("GUACAMOLE_TOKEN_RETRY_ATTEMPTS", "3"))
+GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS = int(os.environ.get("GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS", "200"))
 
 # ------------------------------------------------------------------------------
 # CTF Configuration
@@ -638,81 +442,7 @@ DEV_LOGIN_ALLOWED_CIDRS = _env_list("DEV_LOGIN_ALLOWED_CIDRS")
 # ------------------------------------------------------------------------------
 # Logging Configuration
 # ------------------------------------------------------------------------------
-# ECS-formatted logging for XDR/XSIAM ingestion
-# See config/logging.py for ECSFormatter implementation
-# Import must be inline to avoid E402 (settings.py is special)
-
-# Log level: DEBUG for dev, INFO for production
-# Set LOG_LEVEL=DEBUG in dev to see routing/tracing logs
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "ecs": {
-            "()": "config.logging.ECSFormatter",
-        },
-        "verbose": {
-            "format": "{levelname} {asctime} {module} {message}",
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "ecs",
-        },
-    },
-    "root": {
-        "handlers": ["console"],
-        "level": LOG_LEVEL,
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console"],
-            "level": "INFO",  # Keep Django framework logs at INFO
-            "propagate": False,
-        },
-        "django.request": {
-            "handlers": ["console"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "django.security": {
-            "handlers": ["console"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "mission_control": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "engine": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "cms": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "cms.experiments": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "config": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-        "ctf": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
-    },
-}
+# ECS-formatted logging for XDR/XSIAM ingestion lives in ``config.logging``
+# (formatter) and ``config._logging_config`` (dictConfig). ``LOGGING`` and
+# ``LOG_LEVEL`` are re-exported at the top of this file via star-equivalent
+# named imports.

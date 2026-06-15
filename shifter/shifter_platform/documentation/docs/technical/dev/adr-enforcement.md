@@ -85,8 +85,28 @@ The first slice intentionally stays small:
   `fast` and `ci` levels.
   Test coverage in `scripts/adr_guard/tests/test_adr_guard.py` drives
   the silent-bypass and prefix-selector cases through `subTest()` loops
-  so adding a new bypass shape (e.g., `extend-select`-side variants) is
+  so adding a new bypass shape (for example, `extend-select`-side variants) is
   one row in the cases tuple, not a new test method.
+  The `uat/event-load-harness` UAT load harness (#926) is a registered
+  package under this gate, with matching `Lint`/`SAST`/`Tests
+  (event-load-harness)` jobs in `.github/workflows/_quality.yml`.
+
+- `boundary-mock-policy`
+  Enforces ADR-019-R1: new Python tests may patch real process, network,
+  cloud, and framework transport boundaries, but must not add new
+  first-party internal callable patch targets. The check statically parses
+  tracked test files for `patch()` / mock `.patch()` string targets and
+  statically resolvable `patch.object(imported_module_or_class, ...)`
+  calls, then compares `(test file, target)` counts against
+  `scripts/adr_guard/boundary_mock_baseline.json`. The baseline records
+  current legacy topology-coupled tests so adoption does not require
+  rewriting the whole suite in one PR; the allowed counts may shrink but
+  must not grow. The check also compares the baseline file against the
+  branch reference so raising an allowance is a policy violation unless it
+  has a dated ADR exception. Prefer behavioral assertions, in-memory fakes
+  at service boundaries, or real framework test clients over patching
+  first-party service functions, views, render/logging/transaction aliases,
+  or model helpers.
 
 - `import-linter`
   Adds package-level forbidden-import contracts across the main Django app layers.
@@ -96,15 +116,73 @@ The first slice intentionally stays small:
   This includes the GCP deploy workflow's Terraform state-backend hardening
   (`_gcp-dev.yml`) so retention and IAM policy bootstrap logic remains valid.
 
+- Django i18n/static artifact tests
+  Enforce ADR-016-R3 in
+  `shifter/shifter_platform/tests/config/test_i18n_configuration.py` and
+  `shifter/shifter_platform/tests/platform/test_portal_dockerfile.py` by
+  requiring portal image builds to run `compilemessages` before
+  `collectstatic`, and requiring `entrypoint.sh` to stay free of runtime
+  static-artifact rebuilds.
+
 - `deploy-workflow-plan-scope`
-  Enforces ADR-003-R2 for the AWS platform workflow. The `shifter_platform`
+  Enforces ADR-003-R2 for the AWS deploy workflows. The `shifter_platform`
   change filter in `.github/workflows/deploy.yml` must stay scoped to
-  Terraform-consumed platform files, with application source changes routed
-  through the separate `shifter_app` filter so Quality still runs without
-  launching a platform Terraform plan. The check also requires every
-  `terraform plan` command in `_shifter-platform.yml` to include
-  `-lock-timeout=5m`, so legitimate concurrent platform plans wait on the
-  backend state lock instead of failing immediately.
+  Terraform-consumed platform files. Quality routing is separate and runs by
+  exclusion: `.github/workflows/deploy.yml` must expose a `quality_relevant`
+  output that runs Quality unless the diff is ordinary docs-only. Guardrail
+  docs, including `.github/pull_request_template.md`,
+  `.github/copilot-instructions.md`, `docs/adr/**`, and this ADR enforcement
+  page, are explicitly quality-relevant so ADR guard validates them. PR Gate
+  must reject a skipped Quality job unless `quality_relevant` is false.
+  Commit-message or label-based test skips are not accepted. Portal application
+  changes must also keep
+  reaching the portal image build/deploy path (#913): the check requires a
+  `portal_image` filter covering `shifter/shifter_platform/**`, exposed as a
+  `changes`-job output, included in the `shifter_platform` job's trigger
+  condition, and consumed by the platform `build` job through the
+  `portal_image_changes` input so an app-only push to an environment branch
+  builds and converges the portal image without running Terraform. The check
+  requires deploy concurrency to queue branch/manual runs rather than cancel
+  in-flight applies; PR cancellation may remain enabled. It also requires every
+  core, range, and platform `terraform plan` / saved-plan `terraform apply`
+  command to include `-lock-timeout=5m`, and requires each apply job to create
+  and execute a local saved `tfplan` instead of uploading raw binary plans as
+  artifacts or running a fresh unplanned apply. The platform Service Discovery
+  replacement check must inspect that same saved plan. Non-deploy support/test
+  surfaces that are not under `shifter/**` or `mcp/**` must use the
+  `quality_only` filter/output rather than being hidden in a deploy bucket:
+  `scripts/polaris-aws-range/**` and `scenario-dev/polaris/tests/**` are
+  required entries so the orphaned support suites run Quality without launching
+  Terraform plans, image builds, or environment deploys. On apply workflows,
+  `_shifter-platform.yml` still pushes the Guacamole ECR images before the
+  platform Terraform plan because the Guacamole module resolves current image
+  digests with `aws_ecr_image` data sources during plan. This ordering is
+  required for fresh AWS accounts where the repositories exist but the tags have
+  not been published yet.
+
+- `portal-deploy-mode-source-of-truth`
+  Enforces ADR-003-R4 for the AWS portal deploy path. `_shifter-platform.yml`
+  must call `scripts/portal_deploy/portal_deploy.py resolve-topology` instead
+  of reading `AWS_PORTAL_ENABLE_AUTOSCALING`; both AWS portal roots must export
+  `enable_autoscaling`; the helper must reject single-instance deploys unless
+  exactly one running tagged instance matches Terraform state; and the ASG path
+  must call `verify-asg-image` after instance refresh so every in-service
+  instance is checked for the new portal image tag.
+
+- `deploy-verification-fail-loud`
+  Enforces ADR-003-R3: deploy-verification steps must fail the run when the
+  thing they verify did not happen, instead of warning and exiting 0. The
+  `Wait for Guacamole ECS services to stabilize` step in
+  `_shifter-platform.yml` must `exit 1` on stabilization timeout (the FAILED
+  circuit-breaker branch already does); raise the poll timeout if first boot
+  legitimately needs longer rather than downgrading the timeout to a warning.
+  The `Update ECS task definition` step in `_shifter-engine.yml` must `exit 1`
+  when the ECS task-definition family cannot be described, so a missing or
+  typo'd family fails the deploy instead of silently skipping it forever; the
+  only permitted skip is gated on the explicit `first_deploy` bootstrap input,
+  surfaced as the `aws_first_deploy` `workflow_dispatch` input in `deploy.yml`
+  (strict by default, settable to `true` only on a manual dispatch for the
+  first-ever deploy to a fresh AWS environment).
 
 - `TFLint`
   Adds Terraform linting on top of `terraform fmt` and `terraform validate`.
@@ -138,7 +216,21 @@ The first slice intentionally stays small:
 - `checkov-k8s`
   CIS Kubernetes benchmark and container security checks on manifests in
   `platform/k8s/`. Currently soft-fail while existing manifests are being
-  hardened.
+  hardened. This posture is separate from Terraform Checkov policy and must not
+  be used to justify Terraform soft-fail.
+
+- `checkov-terraform`
+  IaC security scan over first-party Terraform in `platform/terraform/`. A
+  **blocking gate** under ADR-004-R11. Pre-commit (`.pre-commit-config.yaml`
+  `checkov`) and the GitHub Actions `security-iac` job both consume the same
+  config at `platform/terraform/.checkov.yaml`; `--soft-fail` is not set on
+  either surface. Accepted-risk waivers (Checkov `skip-check` entries in
+  `.checkov.yaml` or inline `# checkov:skip=CKV_X:…` comments on individual
+  resources) MUST have a matching entry in `docs/adr/exceptions.yaml` with
+  `rule_id: ADR-004-R11`, owner, reason (containing the Checkov policy ID),
+  `expires_on`, and affected `paths`. `adr_guard.py` rejects expired
+  exceptions, forcing owner re-review. Do not create a separate Checkov
+  waiver registry; the ADR exceptions registry is the audit trail.
 
 - `k8s-image-registry`
   Verifies that the staged GCP Kubernetes deployment assets still point at
@@ -160,7 +252,7 @@ The first slice intentionally stays small:
   base manifests are supporting snapshots. Validating both sources
   catches regressions where a chart template or values file removes
   a required securityContext field even when the base snapshots
-  remain compliant. Kind-based filtering, not filename-based — a
+  remain compliant. Kind-based filtering, not filename-based, means a
   Deployment shipped under any filename or extension is scanned.
   Multi-document files (`---` separator) and indentless YAML
   sequences are supported.
@@ -228,10 +320,12 @@ The first slice intentionally stays small:
 
 - `no-plaintext-secrets-in-tfvars`
   Architecture check that scans `*.tfvars` files committed under
-  `platform/terraform/environments/` and flags any line that assigns a
-  quoted string literal to a variable whose name ends in `_password`,
-  `_passwords`, `_secret`, `_secrets`, `_token`, `_tokens`, `_key`,
-  `_keys`, `_credential`, or `_credentials`. Heredoc string literals
+  `platform/terraform/environments/` and `platform/terraform/global/`
+  and flags any line that assigns a quoted string literal to a variable
+  whose name ends in a secret-bearing term: `password`, `passwords`,
+  `secret`, `secrets`, `token`, `tokens`, `key`, `keys`, `credential`,
+  `credentials`, `authcode`, `authcodes`, `pin_value`, or `pin_values`.
+  Bare `authcode` and `pin_value` names are also blocked. Heredoc string literals
   (`name = <<EOF` / `<<-EOF`) are flagged equivalently. Object/array
   assignments to a secret-bearing variable are walked forward to the
   matching brace/bracket and flagged when any string literal appears
@@ -280,14 +374,15 @@ The first slice intentionally stays small:
 
 - `no-tracked-generated-artifacts`
   Architecture check that fails the build when generated or pre-staging
-  sensitive artifacts are tracked in source under narrow roots. Two
+  sensitive artifacts are tracked in source under narrow roots. Three
   artifact families are blocked, each scoped to its own root:
   Terraform plan outputs (`tfplan`, `tfplan.binary`, `plan.out`,
   `*.tfplan`, `*.tfplan.binary`) under
   `platform/terraform/environments/` and
-  `platform/terraform/gcp/environments/`; and license / authcode
-  bootstrap material (`authcodes`, `*.authcodes`) under
-  `temp/bootstrap/`. Enumeration uses `git ls-files` (tracked +
+  `platform/terraform/gcp/environments/`; Polaris range build output
+  under `scenario-dev/polaris/build/`; and license / authcode bootstrap
+  material (`authcodes`, `*.authcodes`) under `temp/bootstrap/`.
+  Enumeration uses `git ls-files` (tracked +
   staged + untracked-but-not-ignored) so ignored ephemeral
   workspace artifacts are intentionally allowed; a synthetic-tree
   test-mode fallback walks the filesystem. The blocked path/name
@@ -296,7 +391,7 @@ The first slice intentionally stays small:
   guardrail fails closed: violations name only the repo-relative
   path and a remediation hint, never echoing plan content, license
   material, or binary payloads. Backstops `.gitignore`, which does
-  not retroactively un-track files that were already added (e.g.
+  not retroactively un-track files that were already added (for example,
   through `git add -f`), and complements
   `no-plaintext-secrets-in-tfvars`. Enforces ADR-004-R8.
 
@@ -311,7 +406,7 @@ The first slice intentionally stays small:
   `<placeholder>`, `<example>`) are allowed; anything else is
   flagged. The bracket allowlist is an explicit fixed set rather
   than a `<...>` pattern so a committer cannot hide a real credential
-  inside angle brackets (e.g. `DB_PASSWORD=<attacker-known-password>`).
+  inside angle brackets (for example, `DB_PASSWORD=<attacker-known-password>`).
   The parser splits on the first `=` so non-identifier key shapes
   (`db.password=...`, `api-token=...`, `export DB_PASSWORD=...`) are
   still subject to the value check; inline `# ...` is **not**
@@ -319,11 +414,11 @@ The first slice intentionally stays small:
   comment only when it is the first non-whitespace character on a
   line); non-comment, non-blank lines without `=` are flagged as
   malformed. Containment uses `git ls-files` so gitignored local-dev
-  files (e.g. `platform-runtime-secrets.local.env`) are intentionally
+  files (for example, `platform-runtime-secrets.local.env`) are intentionally
   not scanned; a synthetic-tree test-mode fallback walks the
   filesystem for unit tests. The roots and the synthetic-placeholder
   allowlist are centralized in `scripts/adr_guard/adr_guard.py` so
-  adding a future overlay (e.g. `gcp-prod`) is automatic and adding
+  adding a future overlay (for example, `gcp-prod`) is automatic and adding
   a new cluster tree is one entry. Failure reporting names the
   repo-relative path and the variable name only; the rejected value
   is never echoed. Real runtime secrets must flow in at deploy time
@@ -346,6 +441,55 @@ The first slice intentionally stays small:
   (`check-rds-pending-modifications-lint` / `-tests` in `_quality.yml`),
   and matching pre-commit hooks (ruff + pytest). Same pattern as
   `scripts/check_layer_imports/`.
+
+- `check-tf-kms-secrets-grant`
+  Pre-commit hook AND CI step (`.github/workflows/_quality.yml`'s
+  `terraform-lint` job) that fails when an IAM role whose attached
+  `aws_iam_role_policy` grants `secretsmanager:GetSecretValue` (or
+  any wildcard covering it, such as `secretsmanager:*`,
+  `secretsmanager:Get*`, or `*`) lacks an attached IAM Statement
+  granting `kms:Decrypt` on the portal Secrets Manager CMK. The grant
+  must satisfy all three predicates in the SAME Statement: Action
+  covers `kms:Decrypt` (action wildcard matching is done with
+  `fnmatch`, so `kms:*` and `kms:De*` also satisfy); Resource is
+  `var.secrets_manager_kms_key_arn` or `var.secrets_kms_key_arn`
+  (both module-input names refer to the same physical portal CMK in
+  the environment modules: engine-provisioner and portal/ec2 use
+  the first, guacamole uses the second) or `"*"` / `["*"]` (accepted
+  when the same statement carries the service condition); Condition
+  `StringEquals` or `StringLike` with
+  `"kms:ViaService" = "secretsmanager.<region>.amazonaws.com"`. The
+  per-statement coexistence check matters because IAM evaluates each
+  Statement in isolation; spreading the predicates across separate
+  statements does not satisfy a single Decrypt call. Independently,
+  any IAM Statement granting `kms:Decrypt` on `Resource="*"` (or
+  `["*"]`) must carry a `kms:ViaService` condition pinning to some
+  service; unconditioned wildcard `kms:Decrypt` is too broad.
+  Existence is gated on `secretsmanager:GetSecretValue` (not file
+  layout) so unrelated roles that happen to live in the same file
+  are not forced to acquire unnecessary KMS grants. Currently scoped
+  via the pre-commit `files:` regex (and the matching CI invocation
+  list) to `platform/terraform/modules/engine-provisioner/iam.tf`,
+  `platform/terraform/modules/portal/ec2/main.tf`, and
+  `platform/terraform/modules/guacamole/iam.tf`; expand both when a
+  new module starts reading portal Secrets Manager secrets. The
+  check is implemented in
+  `scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py`
+  and tested in
+  `scripts/check_tf_kms_secrets_grant/test_check_tf_kms_secrets_grant.py`
+  with stdlib `unittest` (mirrors `check_tf_iam_ec2_scope`). The
+  test suite itself is run by the `check-tf-checker-tests` pre-commit
+  hook and a matching CI step so a parser regression cannot land
+  merely because the current live `.tf` files remain in the
+  happy-path shape. Enforces ADR-004-R10. Backstops the failure mode
+  resolved by #52 where a fresh Secrets Manager CMK rotation left
+  several roles without `kms:Decrypt` and ECS task secrets injection
+  aborted at startup with `AccessDeniedException: Access to KMS is
+  not allowed` (which in turn was silently masked at the portal
+  entrypoint by an `export VAR=$(fetch_runtime_secret …)` pattern
+  that swallowed the fetch failure; see
+  `shifter/shifter_platform/entrypoint-lib.sh` and
+  `shifter/shifter_platform/tests/test_entrypoint_lib.sh`).
 
 ## Local Usage
 

@@ -60,6 +60,11 @@ resource "aws_route_table_association" "firewall" {
 
 # Victim domain allowlist - XDR/XSIAM endpoints only
 resource "aws_networkfirewall_rule_group" "victim_domains" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 100
@@ -96,6 +101,11 @@ resource "aws_networkfirewall_rule_group" "victim_domains" {
 
 # Kali domain allowlist - empty by default (Kali has full tools, no external access needed)
 resource "aws_networkfirewall_rule_group" "kali_domains" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall && length(var.kali_allowed_domains) > 0 ? 1 : 0
 
   capacity = 100
@@ -135,6 +145,11 @@ resource "aws_networkfirewall_rule_group" "kali_domains" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "ngfw_bypass" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall && var.enable_ngfw_infrastructure ? 1 : 0
 
   capacity = 10
@@ -164,6 +179,11 @@ resource "aws_networkfirewall_rule_group" "ngfw_bypass" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "block_ip_sni" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 10
@@ -227,6 +247,11 @@ locals {
 }
 
 resource "aws_networkfirewall_rule_group" "victim_ips" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? length(local.cidr_chunks) : 0
 
   capacity = 1000 # Each CIDR uses ~1 capacity unit
@@ -271,6 +296,11 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "allow_dns" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 10
@@ -311,6 +341,11 @@ resource "aws_networkfirewall_rule_group" "allow_dns" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "allow_ntp" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 10
@@ -348,6 +383,11 @@ resource "aws_networkfirewall_rule_group" "allow_ntp" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "drop_all" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 10
@@ -394,6 +434,11 @@ resource "aws_networkfirewall_rule_group" "drop_all" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_firewall_policy" "this" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   name = "${var.name_prefix}-firewall-policy"
@@ -478,12 +523,24 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 # Network Firewall
 # ------------------------------------------------------------------------------
 
+# NF logging is wired via a separate aws_networkfirewall_logging_configuration
+# resource (line 563), but Checkov's graph check cannot evaluate the cross-
+# resource reference and flags this firewall as unlogged. See ADR-004-R11
+# exception ckv2-aws-63-nf-logging-cross-resource.
 resource "aws_networkfirewall_firewall" "this" {
+  # checkov:skip=CKV2_AWS_63:Logging defined in aws_networkfirewall_logging_configuration "this" below.
+  # checkov:skip=CKV_AWS_344:Deletion protection controlled by var.network_firewall_delete_protection (dev false / prod true). See ADR-004-R11 exception ckv-aws-344-nf-delete-protection.
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   name                = "${var.name_prefix}-firewall"
   firewall_policy_arn = aws_networkfirewall_firewall_policy.this[0].arn
   vpc_id              = aws_vpc.this.id
+  delete_protection   = var.network_firewall_delete_protection
 
   subnet_mapping {
     subnet_id = aws_subnet.firewall[0].id
@@ -503,6 +560,7 @@ resource "aws_cloudwatch_log_group" "firewall" {
 
   name              = "/aws/network-firewall/${var.name_prefix}"
   retention_in_days = var.firewall_log_retention_days
+  kms_key_id        = aws_kms_key.range_vpc.arn
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-firewall-logs"

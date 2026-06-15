@@ -2767,7 +2767,7 @@ def push_gcp_control_plane_images(
     *,
     image_tag: str,
     dry_run: bool = False,
-):
+) -> None:
     """Build and push the control-plane images to Artifact Registry."""
     pinned_image_tag = validate_image_tag(image_tag)
     image_roots = _get_output_value(outputs, "artifact_registry_image_roots")

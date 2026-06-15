@@ -1640,6 +1640,36 @@ class TestGdcControlPlaneImages:
 
         assert deploy.resolve_gcp_control_plane_image_tag() == PINNED_IMAGE_TAG
 
+    def test_resolve_gcp_control_plane_image_tag_uses_github_sha(self, monkeypatch):
+        monkeypatch.delenv("SHIFTER_IMAGE_TAG", raising=False)
+        monkeypatch.setenv("GITHUB_SHA", "abcdef1234567890")
+
+        assert deploy.resolve_gcp_control_plane_image_tag() == "abcdef1"
+
+    def test_resolve_gcp_control_plane_image_tag_falls_back_to_git_head(self, monkeypatch):
+        monkeypatch.delenv("SHIFTER_IMAGE_TAG", raising=False)
+        monkeypatch.delenv("GITHUB_SHA", raising=False)
+        expected = "def5678"
+
+        with patch("deploy.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                ["git"],
+                0,
+                stdout=f"{expected}\n",
+                stderr="",
+            )
+
+            assert deploy.resolve_gcp_control_plane_image_tag() == expected
+
+        assert mock_run.call_args.args[0] == [
+            "git",
+            "-C",
+            str(deploy.get_repo_root()),
+            "rev-parse",
+            "--short=7",
+            "HEAD",
+        ]
+
 
 class TestGdcControlPlaneHelmChart:
     """Tests for the Helm chart that packages the GCP Shifter deployment."""

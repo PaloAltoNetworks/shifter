@@ -176,6 +176,9 @@ entries. Completed so far:
   (`test_guacamole_readiness`), mocking the HTTP exchange at the real `urllib`
   boundary and recording backoff sleeps via `monkeypatch` instead of a
   first-party `time.sleep` patch.
+- `engine`: range-lifecycle service suites (`engine/services/test_create_range`,
+  `test_cancel_range`), driven against real `Range`/`Request` rows with ECS as a
+  no-op under the test settings.
 
 Decomposition-owned suites are out of scope here and land with their own
 issues: provisioner (#946), `ctf/**` and `cms/experiments/test_orchestrator*`

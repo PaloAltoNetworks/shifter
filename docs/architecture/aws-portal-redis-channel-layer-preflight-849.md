@@ -196,7 +196,7 @@ python3 scripts/adr_guard/adr_guard.py --all --level ci
 If the implementation touches Terraform, also run:
 
 ```bash
-cd platform/terraform && tflint --recursive --config ../../.tflint.hcl
+TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"
 ```
 
 If it touches the GitHub Actions single-instance deploy path, run:

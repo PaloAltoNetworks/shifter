@@ -24,7 +24,6 @@ import uuid
 import pytest
 from channels.testing import WebsocketCommunicator
 
-from mission_control.terminal_sessions import session_registry
 from shared.enums import WebSocketCloseCode
 
 TERMINAL_PATH = "/ws/terminal/{instance}/"
@@ -32,6 +31,13 @@ TERMINAL_PATH = "/ws/terminal/{instance}/"
 
 def _terminal_url() -> str:
     return TERMINAL_PATH.format(instance=uuid.uuid4().hex)
+
+
+def _terminal_session_registry():
+    """Return the registry bound to SSHConsumer at test execution time."""
+    from mission_control import consumers
+
+    return consumers._session_registry
 
 
 @pytest.mark.django_db(transaction=True)
@@ -79,6 +85,7 @@ class TestTerminalWebsocketRealStack:
 
         # Saturate the single global slot so the consumer's pre-SSH cap check
         # rejects the new connection cheaply.
+        session_registry = _terminal_session_registry()
         acquired = await session_registry.try_acquire(ws_user.id, 1, 1)
         assert acquired
         try:
@@ -100,6 +107,7 @@ class TestTerminalWebsocketRealStack:
         must release the slot on the failure path. After the storm — including
         an abnormal client close — no slots may remain held.
         """
+        session_registry = _terminal_session_registry()
         baseline = session_registry.snapshot()["active_sessions"]
 
         for index in range(5):

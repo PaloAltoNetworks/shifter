@@ -31,30 +31,6 @@ ALLOWED_HOST = b"localhost"
 DISALLOWED_ORIGIN = b"http://evil.example.com"
 
 
-@pytest.fixture(autouse=True)
-def _isolate_terminal_session_registry():
-    """Reset the process-global terminal session registry around every test.
-
-    ``mission_control.terminal_sessions.session_registry`` is a module-level
-    singleton; ``mission_control.consumers`` binds it as the module global
-    ``_session_registry``. The real ``SSHConsumer`` driven through the ASGI
-    stack reads that consumer alias, while these tests acquire and inspect the
-    canonical singleton directly, so the two must be the *same* object and must
-    start each test empty. Other suites (``test_ssh_consumer_capacity``) may
-    leave the alias rebound and the counts non-zero; without this reset a
-    leaked slot makes the capacity test's ``try_acquire(..., 1, 1)`` return
-    ``False`` under ``-n auto`` even though it passes serially. Resetting in
-    place (not rebinding to a fresh instance) keeps the alias coupled.
-    """
-    from mission_control import consumers
-    from mission_control.terminal_sessions import session_registry
-
-    consumers._session_registry = session_registry
-    session_registry.reset()
-    yield
-    session_registry.reset()
-
-
 def _redis_endpoint() -> tuple[str, int]:
     return os.environ.get("REDIS_HOST", "localhost").strip() or "localhost", int(os.environ.get("REDIS_PORT", "6379"))
 

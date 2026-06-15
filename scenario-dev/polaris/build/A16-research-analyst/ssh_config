@@ -1,6 +1,0 @@
-Host eng-ws01
-    HostName eng-ws01.boreas.local
-    User research-analyst
-    IdentityFile ~/.ssh/id_rsa
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null

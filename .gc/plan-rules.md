@@ -18,7 +18,7 @@ architectural defaults, and Kubernetes-specific validators previously in
   require matching ADR/registry updates in the same change.
 - Plans that touch `.github/workflows/**` MUST pass `actionlint`.
 - Plans that touch Terraform under `platform/terraform/` MUST pass
-  `cd platform/terraform && tflint --recursive --config ../../.tflint.hcl`.
+  `TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"`.
 - Plans that touch Python in `shifter/shifter_platform/` MUST pass
   `uv run ruff check .` and `uv run ruff format --check .` from that
   directory.

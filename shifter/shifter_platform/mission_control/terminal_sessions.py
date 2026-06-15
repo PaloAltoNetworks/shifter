@@ -55,22 +55,6 @@ class TerminalSessionRegistry:
         """Aggregate counts for telemetry/logging (no per-user identifiers)."""
         return {"active_sessions": self._total, "distinct_users": len(self._per_user)}
 
-    def reset(self) -> None:
-        """Drop all accounting and return to an empty state.
-
-        Intended for process-lifecycle resets and per-test isolation only:
-        the caller must ensure no connect/disconnect accounting is in flight
-        (for example, between tests, or before the ASGI process begins serving
-        traffic). It intentionally bypasses the asyncio lock because there is
-        nothing concurrent to guard against at those boundaries. Resetting the
-        singleton in place keeps every alias of it (notably
-        ``mission_control.consumers._session_registry``) pointing at the same
-        object, which a fresh ``TerminalSessionRegistry()`` would silently
-        decouple.
-        """
-        self._total = 0
-        self._per_user.clear()
-
 
 # One registry per portal ASGI process. The cap is intentionally process-local.
 session_registry = TerminalSessionRegistry()

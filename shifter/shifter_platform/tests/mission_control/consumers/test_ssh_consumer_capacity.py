@@ -25,12 +25,16 @@ def _reset_session_registry():
     reserves a slot leaks counts into later tests and makes the cap assertions
     order-dependent.
     """
-    from mission_control import consumers
+    from mission_control import consumers, terminal_sessions
     from mission_control.terminal_sessions import TerminalSessionRegistry
 
-    consumers._session_registry = TerminalSessionRegistry()
+    registry = TerminalSessionRegistry()
+    terminal_sessions.session_registry = registry
+    consumers._session_registry = registry
     yield
-    consumers._session_registry = TerminalSessionRegistry()
+    registry = TerminalSessionRegistry()
+    terminal_sessions.session_registry = registry
+    consumers._session_registry = registry
 
 
 @pytest.fixture

@@ -24,6 +24,8 @@ import pytest
 
 import deploy
 
+PINNED_IMAGE_TAG = "abc1234"
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
@@ -1529,6 +1531,7 @@ class TestGdcControlPlaneHelmValues:
             outputs,
             guacamole_db_payload={"username": "guac", "password": "supersecret"},
             guacamole_json_secret="json-auth-key",
+            image_tag=PINNED_IMAGE_TAG,
         )
 
         assert values["releaseNamespace"] == "shifter-system"
@@ -1561,6 +1564,13 @@ class TestGdcControlPlaneHelmValues:
         )
         assert values["images"]["guacamoleClient"]["repository"] == (
             "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-guacamole-client/guacamole-client"
+        )
+        assert values["images"]["portal"]["tag"] == PINNED_IMAGE_TAG
+        assert values["images"]["guacd"]["tag"] == PINNED_IMAGE_TAG
+        assert values["images"]["guacamoleClient"]["tag"] == PINNED_IMAGE_TAG
+        assert (
+            values["runtimeEnv"]["ENGINE_TASK_IMAGE"] == "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/"
+            "shifter-gcp-dev-pulumi-provisioner/pulumi-provisioner:abc1234"
         )
         assert values["guacamoleRuntimeSecret"]["stringData"] == {
             "POSTGRESQL_USER": "guac",
@@ -1597,7 +1607,68 @@ class TestGdcControlPlaneHelmValues:
                 outputs,
                 guacamole_db_payload={"username": "guac", "password": "supersecret"},
                 guacamole_json_secret="json-auth-key",
+                image_tag=PINNED_IMAGE_TAG,
             )
+
+    def test_rejects_latest_image_tag(self):
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+
+        with pytest.raises(ValueError, match="latest"):
+            deploy.render_gcp_helm_values(
+                config,
+                outputs,
+                guacamole_db_payload={"username": "guac", "password": "supersecret"},
+                guacamole_json_secret="json-auth-key",
+                image_tag="latest",
+            )
+
+
+class TestGdcControlPlaneImages:
+    def test_push_gcp_control_plane_images_uses_only_pinned_tags(self, capsys):
+        outputs = _sample_gcp_control_plane_outputs("prod-rwctxzl6shxk")
+
+        deploy.push_gcp_control_plane_images(outputs, image_tag=PINNED_IMAGE_TAG, dry_run=True)
+
+        output = capsys.readouterr().out
+        assert ":latest" not in output
+        for image in ("portal", "pulumi-provisioner", "guacd", "guacamole-client"):
+            assert f"{image}:{PINNED_IMAGE_TAG}" in output
+
+    def test_resolve_gcp_control_plane_image_tag_prefers_env_override(self, monkeypatch):
+        monkeypatch.setenv("SHIFTER_IMAGE_TAG", PINNED_IMAGE_TAG)
+
+        assert deploy.resolve_gcp_control_plane_image_tag() == PINNED_IMAGE_TAG
+
+    def test_resolve_gcp_control_plane_image_tag_uses_github_sha(self, monkeypatch):
+        monkeypatch.delenv("SHIFTER_IMAGE_TAG", raising=False)
+        monkeypatch.setenv("GITHUB_SHA", "abcdef1234567890")
+
+        assert deploy.resolve_gcp_control_plane_image_tag() == "abcdef1"
+
+    def test_resolve_gcp_control_plane_image_tag_falls_back_to_git_head(self, monkeypatch):
+        monkeypatch.delenv("SHIFTER_IMAGE_TAG", raising=False)
+        monkeypatch.delenv("GITHUB_SHA", raising=False)
+        expected = "def5678"
+
+        with patch("deploy.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                ["git"],
+                0,
+                stdout=f"{expected}\n",
+                stderr="",
+            )
+
+            assert deploy.resolve_gcp_control_plane_image_tag() == expected
+
+        assert mock_run.call_args.args[0] == [
+            "git",
+            "-C",
+            str(deploy.get_repo_root()),
+            "rev-parse",
+            "--short=7",
+            "HEAD",
+        ]
 
 
 class TestGdcControlPlaneHelmChart:
@@ -1619,6 +1690,7 @@ class TestGdcControlPlaneHelmChart:
                     outputs,
                     guacamole_db_payload={"username": "guac", "password": "supersecret"},
                     guacamole_json_secret="json-auth-key",
+                    image_tag=PINNED_IMAGE_TAG,
                 )
             )
         )
@@ -1890,6 +1962,7 @@ class TestGdcControlPlaneRollout:
             patch("deploy.stage_gcp_control_plane_values", side_effect=record("stage")),
             patch("deploy.deploy_gcp_control_plane_with_helm", side_effect=record("deploy")),
             patch("deploy.walkthrough_gcp_dns_setup_and_wait_for_tls", side_effect=record("dns_tls")),
+            patch.dict(os.environ, {"SHIFTER_IMAGE_TAG": PINNED_IMAGE_TAG}),
         ):
             result = deploy.bootstrap_gcp_control_plane(config)
 

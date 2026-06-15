@@ -306,15 +306,12 @@ jobs:
           content = path.read_text(encoding="utf-8")
 
           updated, replacements = re.subn(
-            r"(?m)^(\s*newTag:\s*)latest\s*$",
+            r"(?m)^(\s*newTag:\s*)\S+\s*$",
             lambda match: f"{match.group(1)}{short_sha}",
             content,
           )
           if replacements == 0:
-            if re.search(r"(?m)^\s*newTag:\s*\S+\s*$", content):
-              print(f"No latest tags found in {path}; image tags are already pinned.")
-            else:
-              raise SystemExit(f"::error file={str(path)}::No image newTag entries found to pin")
+            raise SystemExit(f"::error file={str(path)}::No image newTag entries found to pin")
           else:
             path.write_text(updated, encoding="utf-8")
             print(f"Pinned {replacements} image tags in {path} to {short_sha}")
@@ -327,7 +324,6 @@ jobs:
           file: ./shifter/shifter_platform/Dockerfile
           push: true
           tags: |
-            ${{ env.PORTAL_IMAGE_ROOT }}:latest
             ${{ env.PORTAL_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push provisioner image
@@ -336,7 +332,6 @@ jobs:
           context: ./shifter/engine/provisioner
           push: true
           tags: |
-            ${{ env.PROVISIONER_IMAGE_ROOT }}:latest
             ${{ env.PROVISIONER_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push guacd image
@@ -345,7 +340,6 @@ jobs:
           context: ./shifter/engine/guacd
           push: true
           tags: |
-            ${{ env.GUACD_IMAGE_ROOT }}:latest
             ${{ env.GUACD_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push guacamole-client image
@@ -354,7 +348,6 @@ jobs:
           context: ./shifter/engine/guacamole
           push: true
           tags: |
-            ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}:latest
             ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - uses: google-github-actions/get-gke-credentials@3da1e46a907576cefaa90c484278bb5b259dd395
@@ -371,6 +364,7 @@ jobs:
           # rendered or applied (ADR-008-R1/R3).
           python3 scripts/gcp/render_runtime_env.py \
             --terraform-output-json /tmp/gcp-terraform-outputs.json \
+            --image-tag "${SHORT_SHA}" \
             --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env"
       - name: Render generated edge manifest
         run: |

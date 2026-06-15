@@ -211,12 +211,19 @@ class TestExperimentListView:
     @patch("cms.experiments.views.render")
     @patch("cms.experiments.views.services.list_experiments")
     def test_shows_own_experiments(self, mock_list, mock_render, rf, staff_user):
-        mock_list.return_value = [MagicMock(name="My Experiment")]
+        experiment = MagicMock(name="My Experiment")
+        mock_list.return_value = [experiment]
         mock_render.return_value = HttpResponse(status=200)
         request = _get_request(rf, staff_user)
         resp = experiment_list(request)
         assert resp.status_code == 200
         mock_list.assert_called_once_with(staff_user)
+        # The paginated experiments Page is the view's primary output beyond the
+        # status code; assert it reaches the template under the "experiments"
+        # key (mirrors test_detail_passes_experiment_to_template).
+        context = mock_render.call_args[0][2]
+        assert "experiments" in context
+        assert list(context["experiments"]) == [experiment]
 
 
 # =============================================================================
@@ -411,10 +418,15 @@ class TestScenarioInstancesView:
 
     @patch("cms.experiments.views.services.get_scenario_instances")
     def test_invalid_scenario_returns_400(self, mock_get, rf, staff_user):
-        mock_get.side_effect = ExperimentValidationError("Unknown scenario")
+        mock_get.side_effect = ExperimentValidationError("Unknown scenario internal-detail-xyz")
         request = _get_request(rf, staff_user)
         resp = scenario_instances(request, scenario_id="nonexistent_xyz")
         assert resp.status_code == 400
+        # py/stack-trace-exposure: raw exception text must not reach the client;
+        # the body is an authored, classified message instead.
+        data = json_mod.loads(resp.content)
+        assert data["error"] == "Invalid scenario request"
+        assert "internal-detail-xyz" not in resp.content.decode()
 
 
 # =============================================================================

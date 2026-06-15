@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.http import HttpResponse
+from django.urls import reverse
 
 from cms.experiments.exceptions import ArtifactError, ExperimentError, ExperimentValidationError, ScriptUploadError
 
@@ -116,9 +117,16 @@ class TestScriptViewFlows:
     def test_script_upload_initiate_error(self, rf, staff_user):
         from cms.experiments.views import script_upload
 
-        with patch(f"{SVC}.initiate_script_upload", side_effect=ScriptUploadError("too big")):
+        # ScriptUploadError is frequently raised from inner exceptions
+        # (e.g. `raise ScriptUploadError(f"Failed to generate upload URL: {e}") from e`),
+        # so str(e) can carry internal detail. py/stack-trace-exposure: the response
+        # body must be an authored, classified message, not the raw exception text.
+        err = ScriptUploadError("Failed to generate upload URL: s3://internal-secret-xyz")
+        with patch(f"{SVC}.initiate_script_upload", side_effect=err):
             resp = script_upload(_post(rf, staff_user, data={"name": "n", "filename": "f.py", "file_size": "10"}))
         assert resp.status_code == 400
+        assert json.loads(resp.content)["error"] == "Upload could not be initiated"
+        assert "internal-secret-xyz" not in resp.content.decode()
 
     def test_script_upload_unexpected_error(self, rf, staff_user):
         from cms.experiments.views import script_upload
@@ -258,23 +266,43 @@ class TestExperimentViewFlows:
 
 
 class TestDownloadAjaxFlows:
-    @pytest.mark.parametrize("side", [None, ArtifactError("x"), RuntimeError("boom")])
-    def test_experiment_download(self, rf, staff_user, side):
+    # Every branch of the download views returns a 302, so status_code alone
+    # cannot tell a correct success redirect (to the presigned URL) from an
+    # error-fallback redirect (to a detail/list page). Each branch therefore
+    # asserts resp["Location"] to pin which URL the user is actually sent to.
+    @pytest.mark.parametrize(
+        ("side", "expected_location"),
+        [
+            (None, "https://x/bundle"),
+            (ArtifactError("x"), reverse("experiments:experiment_detail", kwargs={"experiment_id": 1})),
+            (RuntimeError("boom"), reverse("experiments:experiment_list")),
+        ],
+    )
+    def test_experiment_download(self, rf, staff_user, side, expected_location):
         from cms.experiments.views import experiment_download
 
         kw = {"return_value": "https://x/bundle"} if side is None else {"side_effect": side}
         with patch(f"{SVC}.get_bundle_download_url", **kw):
             resp = experiment_download(_get(rf, staff_user), experiment_id=1)
         assert resp.status_code == 302
+        assert resp["Location"] == expected_location
 
-    @pytest.mark.parametrize("side", [None, ArtifactError("x"), RuntimeError("boom")])
-    def test_artifact_download(self, rf, staff_user, side):
+    @pytest.mark.parametrize(
+        ("side", "expected_location"),
+        [
+            (None, "https://x/a"),
+            (ArtifactError("x"), reverse("experiments:experiment_detail", kwargs={"experiment_id": 1})),
+            (RuntimeError("boom"), reverse("experiments:experiment_list")),
+        ],
+    )
+    def test_artifact_download(self, rf, staff_user, side, expected_location):
         from cms.experiments.views import artifact_download
 
         kw = {"return_value": "https://x/a"} if side is None else {"side_effect": side}
         with patch(f"{SVC}.get_artifact_download_url", **kw):
             resp = artifact_download(_get(rf, staff_user), experiment_id=1, run_number=1, artifact_id=2)
         assert resp.status_code == 302
+        assert resp["Location"] == expected_location
 
     def test_scenario_instances_success(self, rf, staff_user):
         from cms.experiments.views import scenario_instances

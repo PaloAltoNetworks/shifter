@@ -87,6 +87,9 @@ The first slice intentionally stays small:
   the silent-bypass and prefix-selector cases through `subTest()` loops
   so adding a new bypass shape (for example, `extend-select`-side variants) is
   one row in the cases tuple, not a new test method.
+  The `uat/event-load-harness` UAT load harness (#926) is a registered
+  package under this gate, with matching `Lint`/`SAST`/`Tests
+  (event-load-harness)` jobs in `.github/workflows/_quality.yml`.
 
 - `boundary-mock-policy`
   Enforces ADR-019-R1: new Python tests may patch real process, network,

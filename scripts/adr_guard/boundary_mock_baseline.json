@@ -2801,16 +2801,6 @@
       "target": "engine.ecs.get_task_runner"
     },
     {
-      "count": 4,
-      "path": "shifter/shifter_platform/tests/engine/services/test_cancel_range.py",
-      "target": "engine.models.Range.objects.filter"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/engine/services/test_cancel_range.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
       "count": 18,
       "path": "shifter/shifter_platform/tests/engine/services/test_connect_ngfw_terminal.py",
       "target": "engine.models.Instance.objects.select_related"
@@ -2829,36 +2819,6 @@
       "count": 15,
       "path": "shifter/shifter_platform/tests/engine/services/test_connect_terminal.py",
       "target": "engine.secrets.get_ssh_key"
-    },
-    {
-      "count": 10,
-      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
-      "target": "engine.ecs.start_range_provisioning"
-    },
-    {
-      "count": 13,
-      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
-      "target": "engine.interpreter.interpret"
-    },
-    {
-      "count": 12,
-      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
-      "target": "engine.models.Range.allocate_subnet_index"
-    },
-    {
-      "count": 11,
-      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
-      "target": "engine.models.Range.objects.create"
-    },
-    {
-      "count": 10,
-      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
-      "target": "engine.models.Subnet"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/engine/services/test_create_range.py",
-      "target": "engine.services.transaction"
     },
     {
       "count": 4,

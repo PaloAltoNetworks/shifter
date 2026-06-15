@@ -30,6 +30,12 @@ variable "enable_network_firewall" {
   default     = true
 }
 
+variable "network_firewall_delete_protection" {
+  description = "Enable AWS Network Firewall delete protection. Mirrors the `enable_deletion_protection` (ALB) / `db_deletion_protection` (RDS) convention: secure default is `true` in prod; dev environments that need intentional teardown set this to `false` and re-apply before destroying. This is a Terraform lifecycle setting only — it governs whether Terraform may delete the firewall and does not change egress filtering, routing, or logging."
+  type        = bool
+  default     = true
+}
+
 variable "firewall_log_retention_days" {
   description = "CloudWatch log retention for firewall logs (minimum 365 per ADR-004-R11 / Checkov CKV_AWS_338)"
   type        = number

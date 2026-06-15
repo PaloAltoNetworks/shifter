@@ -2841,16 +2841,6 @@
       "target": "engine.models.Request.objects.get"
     },
     {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/engine/services/test_get_instance_ips_by_uuid.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
-      "count": 7,
-      "path": "shifter/shifter_platform/tests/engine/services/test_get_range_status.py",
-      "target": "engine.models.Range.objects.get"
-    },
-    {
       "count": 8,
       "path": "shifter/shifter_platform/tests/engine/services/test_get_rdp_connection_info.py",
       "target": "engine.models.Range.get_active_for_user"

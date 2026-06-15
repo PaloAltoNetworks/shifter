@@ -99,6 +99,13 @@ repos:
       - id: ruff-format
         name: ruff-format (installation)
         files: ^shifter/installation/
+      - id: ruff
+        name: ruff (event-load-harness)
+        args: [--fix]
+        files: ^uat/event-load-harness/
+      - id: ruff-format
+        name: ruff-format (event-load-harness)
+        files: ^uat/event-load-harness/
 
   # JavaScript/CSS linting
   - repo: local
@@ -334,6 +341,12 @@ repos:
         args: [-r, --skip, B101]
         files: ^shifter/installation/
         exclude: ^shifter/installation/(tests|\.venv)/
+      - id: bandit
+        name: bandit (event-load-harness)
+        # B101 assert; B311 random (load distribution); B404/B603/B607 subprocess (git rev-parse).
+        args: [-r, --skip, "B101,B311,B404,B603,B607"]
+        files: ^uat/event-load-harness/
+        exclude: ^uat/event-load-harness/(tests|\.venv)/
 
   # IaC Security (Terraform). Blocking gate per ADR-004-R11.
   # Config (skip-check / framework / soft-fail) lives in
@@ -540,6 +553,14 @@ repos:
           bash -c 'cd scripts/check_rds_pending_modifications && uv run pytest tests/ -q'
         language: system
         files: ^scripts/check_rds_pending_modifications/
+        pass_filenames: false
+
+      - id: pytest-event-load-harness
+        name: pytest (event-load-harness)
+        entry: >-
+          bash -c 'cd uat/event-load-harness && uv run pytest tests/ -q'
+        language: system
+        files: ^uat/event-load-harness/
         pass_filenames: false
 
   # Installation config tests

@@ -22,7 +22,7 @@ def _install_destroy_fakes(monkeypatch, *, status="ready", variables=None):
     mock_mark = MagicMock()
     monkeypatch.setattr("terraform_ops.get_range_data_by_request_id", mock_get_data)
     monkeypatch.setattr("terraform_ops.range_terraform_runner", mock_tf_runner)
-    monkeypatch.setattr("terraform_ops._build_range_terraform_variables", mock_build_vars)
+    monkeypatch.setattr("terraform_ops.build_range_variables", mock_build_vars)
     monkeypatch.setattr("terraform_ops.publish_destroyed", mock_publish)
     monkeypatch.setattr("terraform_ops.mark_range_instances_destroyed", mock_mark)
     monkeypatch.setattr("terraform_ops.remove_ngfw_subnets", MagicMock())
@@ -107,7 +107,7 @@ class TestAutoCleanupPassesVariables:
             "terraform_ops._run_terraform_provision", MagicMock(side_effect=RuntimeError("NGFW config failed"))
         )
         monkeypatch.setattr("terraform_ops.range_terraform_runner", mock_tf_runner)
-        monkeypatch.setattr("terraform_ops._build_range_terraform_variables", mock_build_vars)
+        monkeypatch.setattr("terraform_ops.build_range_variables", mock_build_vars)
         monkeypatch.setattr("terraform_ops.publish_failed", MagicMock())
 
         with pytest.raises(RuntimeError, match="NGFW config failed"):
@@ -138,7 +138,7 @@ class TestAutoCleanupPassesVariables:
         )
         monkeypatch.setattr("terraform_ops.range_terraform_runner", MagicMock())
         monkeypatch.setattr(
-            "terraform_ops._build_range_terraform_variables",
+            "terraform_ops.build_range_variables",
             MagicMock(side_effect=ValueError("NGFW missing")),
         )
         monkeypatch.setattr("terraform_ops.publish_failed", MagicMock())

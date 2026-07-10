@@ -261,7 +261,7 @@ def _resolve_target(hostname: str, port: int, challenge_id: Any) -> list[str] | 
     try:
         addresses = _resolve_and_validate(hostname, port)
     except _BlockedDestinationError:
-        logger.error(
+        logger.exception(
             "HTTP validator URL blocked (DNS answer in restricted range) for challenge %s",
             safe_log(challenge_id),
         )

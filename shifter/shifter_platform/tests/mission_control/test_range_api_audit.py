@@ -82,5 +82,5 @@ class TestRangeLifecycleAudit:
             data="{}",
             content_type="application/json",
         )
-        assert response.status_code == 302
+        assert response.status_code == 401
         assert not _range_audit(AuditLog.Action.PROVISION).exists()

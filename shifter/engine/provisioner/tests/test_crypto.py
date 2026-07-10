@@ -70,3 +70,88 @@ class TestGenerateRdpPassword:
 
         with pytest.raises(ValueError, match="length must be >= 4"):
             generate_rdp_password(length=3)
+
+
+class TestGenerateSshHostKeypair:
+    """generate_ssh_host_keypair yields a cloud-init-installable Ed25519 host
+    key plus a known_hosts-ready public key (D31)."""
+
+    def test_returns_openssh_ed25519_private_and_public(self):
+        from utils.crypto import generate_ssh_host_keypair
+
+        private_key, public_key = generate_ssh_host_keypair()
+        assert private_key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+        assert private_key.rstrip().endswith("-----END OPENSSH PRIVATE KEY-----")
+        assert public_key.startswith("ssh-ed25519 ")
+
+    def test_public_key_matches_private_key(self):
+        from cryptography.hazmat.primitives import serialization
+
+        from utils.crypto import generate_ssh_host_keypair
+
+        private_key, public_key = generate_ssh_host_keypair()
+        loaded = serialization.load_ssh_private_key(private_key.encode(), password=None)
+        derived = (
+            loaded.public_key()
+            .public_bytes(
+                encoding=serialization.Encoding.OpenSSH,
+                format=serialization.PublicFormat.OpenSSH,
+            )
+            .decode()
+        )
+        assert derived.strip() == public_key.strip()
+
+    def test_calls_are_unique(self):
+        from utils.crypto import generate_ssh_host_keypair
+
+        first, _ = generate_ssh_host_keypair()
+        second, _ = generate_ssh_host_keypair()
+        assert first != second
+
+
+class TestGenerateSshHostKeypairFailureModes:
+    """Defensive error paths in generate_ssh_host_keypair."""
+
+    class _FakePub:
+        def __init__(self, pub):
+            self._pub = pub
+
+        def public_bytes(self, **_kwargs):
+            return self._pub
+
+    class _FakeKey:
+        def __init__(self, priv, pub):
+            self._priv = priv
+            self._pub = pub
+
+        def private_bytes(self, **_kwargs):
+            return self._priv
+
+        def public_key(self):
+            return TestGenerateSshHostKeypairFailureModes._FakePub(self._pub)
+
+    def test_raises_when_generation_fails(self, monkeypatch):
+        import utils.crypto as crypto
+
+        def _boom():
+            raise RuntimeError("entropy pool exhausted")
+
+        monkeypatch.setattr(crypto.ed25519.Ed25519PrivateKey, "generate", staticmethod(_boom))
+        with pytest.raises(crypto.KeyGenerationError, match="Failed to generate"):
+            crypto.generate_ssh_host_keypair()
+
+    def test_raises_on_malformed_private_key(self, monkeypatch):
+        import utils.crypto as crypto
+
+        fake = self._FakeKey(b"NOT-A-PEM-KEY", b"ssh-ed25519 AAAApub")
+        monkeypatch.setattr(crypto.ed25519.Ed25519PrivateKey, "generate", staticmethod(lambda: fake))
+        with pytest.raises(crypto.KeyGenerationError, match="private key has unexpected format"):
+            crypto.generate_ssh_host_keypair()
+
+    def test_raises_on_malformed_public_key(self, monkeypatch):
+        import utils.crypto as crypto
+
+        fake = self._FakeKey(b"-----BEGIN OPENSSH PRIVATE KEY-----\nx\n", b"NOT-A-PUBKEY")
+        monkeypatch.setattr(crypto.ed25519.Ed25519PrivateKey, "generate", staticmethod(lambda: fake))
+        with pytest.raises(crypto.KeyGenerationError, match="public key has unexpected format"):
+            crypto.generate_ssh_host_keypair()

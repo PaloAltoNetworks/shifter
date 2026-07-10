@@ -142,7 +142,7 @@ class SetupOrchestrator(_SetupOrchestratorPanOSMixin, _SetupOrchestratorLoggingM
                         )
                         logger.debug("orchestrate: reboot completed")
                     except ExecutorError as e:
-                        logger.error("orchestrate: reboot failed step=%s", step.name)
+                        logger.exception("orchestrate: reboot failed step=%s", step.name)
                         raise SetupError(
                             f"Reboot failed after step '{step.name}': {e}",
                             step_name=step.name,
@@ -150,7 +150,7 @@ class SetupOrchestrator(_SetupOrchestratorPanOSMixin, _SetupOrchestratorLoggingM
                         ) from e
 
             except ExecutorError as e:
-                logger.error("orchestrate: step failed step=%s error=%s", step.name, e)
+                logger.exception("orchestrate: step failed step=%s error=%s", step.name, e)
                 raise SetupError(
                     f"Step '{step.name}' failed: {e}",
                     step_name=step.name,
@@ -164,7 +164,7 @@ class SetupOrchestrator(_SetupOrchestratorPanOSMixin, _SetupOrchestratorLoggingM
             try:
                 verify_result = self._execute_step(instance_id, plan.verify_step, context, document_name)
             except ExecutorError as e:
-                logger.error("orchestrate: verification failed error=%s", e)
+                logger.exception("orchestrate: verification failed error=%s", e)
                 raise SetupError(
                     f"Verification failed: {e}",
                     step_name=plan.verify_step.name,

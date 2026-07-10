@@ -58,14 +58,25 @@ def find_range_instance_id_by_request(request_id: str | UUID) -> int | None:
 
 
 def get_range_target_instances(user_id: int) -> list[dict[str, str]]:
-    """Get non-attacker provisioned instances for a user's ready range.
+    """Get the accessible provisioned instances for a user's ready range.
+
+    Normally these are the non-attacker targets: multi-node scenarios (e.g.
+    POLARIS) hide the attacker workstation and expose the targets the
+    participant works against. A single-seat purple-team lab (e.g. TechVault),
+    however, provisions only the attacker-tagged seat host that the participant
+    works *from* (VS Code Desktop over RDP). In that case there are no
+    non-attacker instances, so fall back to returning the seat host(s) —
+    otherwise the participant's range page renders empty with no way to reach
+    their environment.
 
     Args:
         user_id: PK of the user.
 
     Returns:
-        List of dicts with name, private_ip, os_type for each target instance.
+        List of dicts with name, private_ip, os_type for each accessible instance.
     """
     from engine.services import get_user_ready_range_instances
 
-    return [inst for inst in get_user_ready_range_instances(user_id) if inst.get("role") != "attacker"]
+    instances = list(get_user_ready_range_instances(user_id))
+    targets = [inst for inst in instances if inst.get("role") != "attacker"]
+    return targets if targets else instances

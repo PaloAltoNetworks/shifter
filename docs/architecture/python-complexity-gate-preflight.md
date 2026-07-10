@@ -20,7 +20,8 @@ This is a guardrail change, not a new domain abstraction.
 - `.pre-commit-config.yaml`: local Ruff hooks for `shifter/shifter_platform`,
   `shifter/engine/provisioner`, `shifter/packer`, `scripts/bootstrap`,
   `scripts/gcp`, `scripts/check_layer_imports`,
-  `scripts/check_rds_pending_modifications`, and `shifter/installation`.
+  `scripts/check_rds_pending_modifications`,
+  `scripts/assert_portal_inspection`, and `shifter/installation`.
 - `.github/workflows/_quality.yml`: required CI lint jobs that run
   `uv run ruff check .` and `uv run ruff format --check .` per Python package.
 - Package-local `pyproject.toml` files: current Ruff settings live next to each

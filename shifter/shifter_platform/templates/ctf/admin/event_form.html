@@ -10,69 +10,7 @@
     {% endif %}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.event-form {
-    max-width: 720px;
-}
-
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-}
-
-.form-help {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-    margin-top: 4px;
-}
-
-.field-error {
-    font-size: 12px;
-    color: #ff4d4f;
-    margin-top: 4px;
-}
-
-.form-alert {
-    padding: 12px 16px;
-    border: 1px solid #ff4d4f;
-    border-radius: 4px;
-    background: rgba(255, 77, 79, 0.08);
-    color: #ff4d4f;
-    font-size: 13px;
-    margin-bottom: 16px;
-    display: none;
-}
-
-.form-alert.visible {
-    display: block;
-}
-
-.form-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 16px;
-    border-top: 1px solid var(--theme-border);
-    margin-top: 8px;
-}
-
-.btn-cancel {
-    background: transparent;
-    color: var(--theme-text-secondary);
-    border: 1px solid var(--theme-border);
-}
-
-textarea.form-input {
-    resize: vertical;
-    min-height: 80px;
-}
-
-/* datetime-local inputs need color-scheme for dark mode */
-input[type="datetime-local"] {
-    color-scheme: dark;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-event_form.css' %}">
 {% endblock %}
 {% block content %}
     <div class="event-form">
@@ -265,7 +203,7 @@ input[type="datetime-local"] {
                     </label>
                 </div>
             </div>
-            <div class="form-group" style="max-width: 340px;">
+            <div class="form-group max-w-340">
                 <label class="form-label" for="field-cleanup_delay_hours">
                     {% trans "Cleanup Delay (hours)" %}
                 </label>
@@ -286,7 +224,7 @@ input[type="datetime-local"] {
             <div class="card-title">
                 {% trans "Participant Settings" %}
             </div>
-            <div class="form-group" style="max-width: 340px;">
+            <div class="form-group max-w-340">
                 <label class="form-label" for="field-max_participants">
                     {% trans "Maximum Participants" %}
                 </label>
@@ -407,6 +345,21 @@ input[type="datetime-local"] {
                     <div class="field-error" id="error-rating_visibility">
                     </div>
                 </div>
+                <div class="form-group">
+                    <label class="form-label" for="field-scoring_mode">
+                        {% trans "Scoring Mode" %}
+                    </label>
+                    <select id="field-scoring_mode" class="form-input">
+                        <option value='{% trans "standard" %}'>
+                            {% trans "Standard (fixed challenge points)" %}
+                        </option>
+                    </select>
+                    <div class="form-help">
+                        {% trans "How points are awarded for a solve. Standard uses each challenge's fixed value." %}
+                    </div>
+                    <div class="field-error" id="error-scoring_mode">
+                    </div>
+                </div>
             </div>
         </div>
         <!-- Actions -->
@@ -455,7 +408,7 @@ document.addEventListener('DOMContentLoaded', function() {
         'cleanup_delay_hours', 'max_participants', 'team_mode',
         'team_size_limit', 'submission_cooldown_seconds',
         'attempt_limit_mode', 'attempt_limit_cooldown_seconds',
-        'rating_visibility'
+        'rating_visibility', 'scoring_mode'
     ];
 
     // --- Helpers ---
@@ -555,6 +508,8 @@ document.addEventListener('DOMContentLoaded', function() {
         data.attempt_limit_cooldown_seconds = attemptCooldown ? parseInt(attemptCooldown, 10) : 300;
 
         data.rating_visibility = getField('rating_visibility').value;
+
+        data.scoring_mode = getField('scoring_mode').value;
 
         // Pack ngfw_enabled into range_config
         data.range_config = {
@@ -720,6 +675,7 @@ document.addEventListener('DOMContentLoaded', function() {
             getField('attempt_limit_mode').value = event.attempt_limit_mode || 'lockout';
             getField('attempt_limit_cooldown_seconds').value = event.attempt_limit_cooldown_seconds || 300;
             getField('rating_visibility').value = event.rating_visibility || 'public';
+            getField('scoring_mode').value = event.scoring_mode || 'standard';
             toggleCooldownVisibility();
 
             // ngfw_enabled from range_config

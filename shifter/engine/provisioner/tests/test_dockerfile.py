@@ -23,6 +23,7 @@ import pytest
 
 DOCKERFILE_PATH = Path(__file__).resolve().parent.parent / "Dockerfile"
 PROVISIONER_DIR = DOCKERFILE_PATH.parent
+SHIFTER_DIR = PROVISIONER_DIR.parent.parent
 TERRAFORM_RC_PATH = PROVISIONER_DIR / "terraform.tfrc"
 
 
@@ -227,8 +228,7 @@ class TestDockerfileRuntimeSmoke:
     def built_image(self):
         docker = self._docker_bin()
         result = subprocess.run(  # noqa: S603 — absolute docker path, list args, no shell
-            [docker, "build", "-t", self.IMAGE_TAG, "."],
-            cwd=PROVISIONER_DIR,
+            [docker, "build", "-f", str(DOCKERFILE_PATH), "-t", self.IMAGE_TAG, str(SHIFTER_DIR)],
             capture_output=True,
             text=True,
             timeout=900,

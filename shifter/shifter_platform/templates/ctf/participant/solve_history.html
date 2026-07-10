@@ -1,0 +1,93 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% extends "ctf/base.html" %}
+{% load i18n %}
+{% block ctf_title %}
+    Solve History
+{% endblock %}
+{% block ctf_content %}
+    <div class="container-fluid py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h3 mb-0">
+                {% blocktrans with v1=participant.name %}
+                    Solve History — {{ v1 }}
+                {% endblocktrans %}
+            </h1>
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'ctf:scoreboard' %}">
+                {% trans "Back to Scoreboard" %}
+            </a>
+        </div>
+        {% if scoreboard_hidden %}
+            <div class="card">
+                <div class="card-body text-center py-5">
+                    <h5 class="text-muted mb-2">
+                        {% trans "Scoreboard Hidden" %}
+                    </h5>
+                    <p class="text-muted mb-0">
+                        {% blocktrans trimmed %}
+                            The scoreboard is not yet available. The organizer will make it visible when ready.
+                        {% endblocktrans %}
+                    </p>
+                </div>
+            </div>
+        {% else %}
+            {% if frozen %}
+                <div class="alert alert-info mb-4">
+                    {% blocktrans trimmed %}
+                        The scoreboard is frozen. Solves recorded after the freeze are not shown here.
+                    {% endblocktrans %}
+                </div>
+            {% endif %}
+            <div class="card">
+                <div class="card-body p-0">
+                    {% if solves %}
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>
+                                            {% trans "Challenge" %}
+                                        </th>
+                                        <th>
+                                            {% trans "Category" %}
+                                        </th>
+                                        <th>
+                                            {% trans "Points" %}
+                                        </th>
+                                        <th>
+                                            {% trans "Solved At" %}
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for solve in solves %}
+                                        <tr>
+                                            <td>
+                                                <strong>{{ solve.challenge_name }}</strong>
+                                            </td>
+                                            <td>
+                                                {{ solve.category }}
+                                            </td>
+                                            <td>
+                                                {{ solve.points }}
+                                            </td>
+                                            <td>
+                                                {{ solve.solved_at }}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="p-4 text-center text-muted">
+                            <p class="mb-0">
+                                {% trans "No solves yet." %}
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

@@ -27,7 +27,6 @@ Run XDR/XSIAM demos without installing tools on your laptop.
 - [Basic Range](scenarios/basic-range) - Kali + victim (fastest)
 - [AD Attack Lab](scenarios/ad-attack-lab) - Active Directory environment
 - [Basic Range with NGFW](scenarios/ngfw-range) - Basic + network visibility
-- [Cortex BYOT](scenarios/cortex-byot) - Full enterprise simulation
 
 ## Reference
 

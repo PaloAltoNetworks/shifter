@@ -10,11 +10,16 @@ Infrastructure lifecycle models for Shifter platform.
 """
 
 import uuid
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.db import models, transaction
 
 from shared.enums import RequestType
+from shared.schemas.persistence import unwrap_persisted_spec
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
 
 
 class Request(models.Model):
@@ -283,9 +288,21 @@ class Range(models.Model):
     )
     chat_url = models.URLField(max_length=500, blank=True, default="")
 
-    # Step Functions tracking
+    # Step Functions tracking (legacy — prefer provisioning_task_arn / teardown_task_arn)
     step_function_execution_arn = models.CharField(
-        max_length=500, blank=True, default="", help_text="Step Functions execution ARN"
+        max_length=500, blank=True, default="", help_text="Legacy ECS task ARN (deprecated)"
+    )
+    provisioning_task_arn = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="ECS/GCP task identifier for the provisioning operation",
+    )
+    teardown_task_arn = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="ECS/GCP task identifier for the teardown operation",
     )
 
     # Shifter Engine fields (v2)
@@ -325,7 +342,8 @@ class Range(models.Model):
         db_table = "mission_control_range"
 
     def __str__(self):
-        scenario = self.range_config.get("scenario_id", "unknown") if self.range_config else "unknown"
+        config = unwrap_persisted_spec(self.range_config) if self.range_config else {}
+        scenario = config.get("scenario_id", "unknown")
         return f"Range {self.id} ({scenario}) - {self.status}"
 
     @property
@@ -381,6 +399,42 @@ class Range(models.Model):
                 cls.Status.FAILED,
             ],
         ).first()
+
+    @classmethod
+    def resolve_active_for_instance(cls, user: "User", instance_uuid: str) -> "Range | None":
+        """Return the user's active range that contains instance_uuid, or None.
+
+        Iterates the user's active ranges (same status set as get_active_for_user)
+        and returns the first one whose get_instance_by_uuid(instance_uuid) is
+        non-None. Pure-Python iteration avoids provider-specific JSON DB lookups
+        (e.g. ``provisioned_instances__contains``) that are not portable across
+        SQLite and Postgres. Returns None if no active range contains the UUID.
+
+        Used by terminal helpers (get_rdp_connection_info, get_ssh_connection_info)
+        to resolve the correct range when a user holds multiple simultaneous
+        active ranges (e.g. one Mission Control + one CTF range, #450).
+
+        Args:
+            user: The user whose active ranges to search.
+            instance_uuid: The instance UUID to look up.
+
+        Returns:
+            Range if found, None otherwise.
+        """
+        active_ranges = cls.objects.filter(
+            user=user,
+            status__in=[
+                cls.Status.PENDING,
+                cls.Status.PROVISIONING,
+                cls.Status.READY,
+                cls.Status.PAUSED,
+                cls.Status.RESUMING,
+            ],
+        )
+        for range_obj in active_ranges:
+            if range_obj.get_instance_by_uuid(instance_uuid) is not None:
+                return range_obj
+        return None
 
     # Subnet index allocation constants
     # Range VPC uses 10.1.0.0/16 with /28 subnets (16 IPs each)
@@ -564,7 +618,8 @@ class Subnet(Instantiation):
         """
         if not self.spec:
             return []
-        instances = self.spec.get("instances", [])
+        spec_payload = unwrap_persisted_spec(self.spec)
+        instances = spec_payload.get("instances", [])
         return [inst.get("uuid") for inst in instances if inst.get("uuid")]
 
 
@@ -578,7 +633,10 @@ class SubnetAllocation(models.Model):
     but not in this table, it's inserted (drift repair).
     """
 
-    vpc_id = models.CharField(max_length=30)
+    vpc_id = models.CharField(
+        max_length=255,
+        help_text="AWS vpc-id, GDC network name, or GCE network self-link (projects/<p>/global/networks/<n>)",
+    )
     cidr = models.CharField(max_length=20, help_text="e.g. 10.1.2.16/28")
     subnet_size = models.IntegerField(help_text="Prefix length: 24 or 28")
     range_id = models.IntegerField(default=0)
@@ -596,3 +654,123 @@ class SubnetAllocation(models.Model):
 
     def __str__(self):
         return f"{self.cidr} in {self.vpc_id}"
+
+
+class OutboxStatus(models.TextChoices):
+    """Valid lifecycle values for RangeEventOutbox.status."""
+
+    PENDING = "PENDING", "Pending"
+    PUBLISHED = "PUBLISHED", "Published"
+    FAILED = "FAILED", "Failed"
+    DLQ = "DLQ", "Dead Letter Queue"
+
+
+class RangeEventOutbox(models.Model):
+    """Transactional outbox for range and experiment events.
+
+    The provisioner writes a row here inside the same DB transaction as the
+    authoritative state change (e.g. update_range_status).  A separate drainer
+    process reads PENDING rows, publishes them to the event bus, and marks them
+    PUBLISHED.  Failures retry up to max_attempts before being moved to DLQ.
+
+    Payload must be notification-shaped: IDs only, no secrets or instance state.
+    last_error must be bounded/sanitised by the writer before storing.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    event_id = models.UUIDField(unique=True, db_index=True)
+    event_type = models.CharField(max_length=64)
+    payload = models.JSONField()
+    status = models.CharField(
+        max_length=16,
+        default=OutboxStatus.PENDING,
+        db_index=True,
+        choices=OutboxStatus.choices,
+    )
+    attempts = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=10)
+    next_attempt_at = models.DateTimeField(db_index=True)
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        """Table configuration for the range event outbox."""
+
+        db_table = "engine_range_event_outbox"
+        indexes = [
+            models.Index(fields=["status", "next_attempt_at"], name="engine_rang_status_6f706a_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"RangeEventOutbox {self.event_id} ({self.status})"
+
+
+class AcesImageMapping(models.Model):
+    """Tenant-managed mapping from an authored ACES image identity to a concrete provider image.
+
+    The ADR-032-R2 realization seam. An ACES scenario names an image via its
+    ``source`` (name + optional version); a tenant operator maps that authored
+    identity to a concrete provider image (and optional sizing defaults) here, on
+    the running tenant. This is deliberately data, not code/config: new images are
+    added to a deployed tenant at runtime and survive redeploys (the deployment
+    model is updatable tenants, not repo-based config). The provisioner resolves
+    against these rows at realization; the platform only manages them.
+
+    A blank ``source_version`` is the any-version fallback for a ``source_name``.
+    Retire a mapping with ``enabled=False`` -- which preserves audit history and
+    makes realization fail loud -- rather than deleting it.
+    """
+
+    class Provider(models.TextChoices):
+        """Cloud provider a mapping targets (ACES-scoped; extensible)."""
+
+        GCE = "gce", "Google Compute Engine"
+        AWS = "aws", "AWS EC2"
+
+    provider = models.CharField(max_length=16, choices=Provider.choices)
+    source_name = models.CharField(max_length=200, help_text="Authored ACES image source name (for example 'kali').")
+    source_version = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Authored source version; blank matches any version for this source_name.",
+    )
+    image_ref = models.CharField(
+        max_length=500,
+        help_text="Concrete provider image (GCE source_image / family URL, AWS AMI id, ...).",
+    )
+    machine_type = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Optional provider machine type; blank lets the backend size from resources/defaults.",
+    )
+    disk_size_gb = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Optional boot disk size (GB); blank uses the backend default."
+    )
+    disk_type = models.CharField(
+        max_length=100, blank=True, default="", help_text="Optional provider disk type; blank uses the backend default."
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text="Disabled mappings do not resolve (realization fails loud); use instead of deleting to keep audit.",
+    )
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Table + uniqueness (one mapping per provider/source_name/source_version)."""
+
+        db_table = "engine_aces_image_mapping"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "source_name", "source_version"],
+                name="unique_aces_image_mapping",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        version = self.source_version or "*"
+        return f"{self.provider}:{self.source_name}@{version} -> {self.image_ref}"

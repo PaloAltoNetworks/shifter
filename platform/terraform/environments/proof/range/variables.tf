@@ -1,0 +1,96 @@
+# Environment variables - NO DEFAULTS
+
+variable "environment" {
+  description = "Environment name (e.g., prod, dev)"
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for the Range VPC (e.g., 10.1.0.0/16)"
+  type        = string
+}
+
+variable "portal_vpc_cidr" {
+  description = "CIDR block for the Portal VPC (for SSH access from browser terminal)"
+  type        = string
+}
+
+variable "tags" {
+  description = "Common tags to apply to all resources"
+  type        = map(string)
+}
+
+# ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+variable "enable_flow_logs" {
+  description = "Enable VPC flow logs"
+  type        = bool
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+  default     = 30
+}
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+variable "agent_s3_bucket" {
+  description = "S3 bucket name for agent installers (for range instance S3 read access)"
+  type        = string
+}
+
+# ------------------------------------------------------------------------------
+# VM-Series NGFW Configuration
+# ------------------------------------------------------------------------------
+
+variable "vm_series_ami_id" {
+  description = "VM-Series AMI ID. Empty string disables NGFW provisioning."
+  type        = string
+  default     = ""
+}
+
+variable "vm_series_instance_type" {
+  description = "EC2 instance type for VM-Series NGFW"
+  type        = string
+  default     = "m5.xlarge"
+}
+
+# ------------------------------------------------------------------------------
+# Persistent NGFW Infrastructure
+# ------------------------------------------------------------------------------
+
+variable "enable_ngfw_infrastructure" {
+  description = "Enable persistent NGFW infrastructure (subnet, security groups, IAM role)"
+  type        = bool
+}
+
+# ------------------------------------------------------------------------------
+# Network Firewall IP Allowlist
+# ------------------------------------------------------------------------------
+
+variable "victim_allowed_cidrs" {
+  description = "IP CIDR allowlist for Victim egress (GCP/PANW ranges for XDR)"
+  type        = list(string)
+  default     = []
+}
+
+variable "range_egress_mode" {
+  description = "Runtime route-table egress posture for participant subnets (bridge for shifter.yaml settings.range_egress.mode). One of allowlist, none."
+  type        = string
+  default     = "allowlist"
+
+  validation {
+    condition     = contains(["allowlist", "none"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: allowlist, none."
+  }
+}

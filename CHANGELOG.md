@@ -1205,7 +1205,7 @@ the marker is the historical hand-written record and stays as-is.
 - **Bucket name mismatch in `polaris_range_bootstrap.py`'s
   `polaris_fetch_tests` step.** `BUCKET="shifter-dev-user-storage-e3462f0c"`
   is the dev bucket from a previous AWS account. This account uses
-  `shifter-dev-user-storage-788327019743`, so range provisioning got
+  `shifter-dev-user-storage-<redacted-account-id>`, so range provisioning got
   403 on `s3://shifter-dev-user-storage-e3462f0c/polaris/tests/...`
   and the engine marked the range failed even though everything else
   had succeeded. Updated to the correct bucket; matches the
@@ -1465,14 +1465,14 @@ the marker is the historical hand-written record and stays as-is.
 ### Fixed
 
 - **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
-  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  non-existent table** (`dev-range-pulumi-state-<redacted-account-id>-locks`).
   `shifter/engine/provisioner/terraform_base.py` derives the lock
   table name from the state bucket: it stripped `-pulumi-state` and
   replaced with `-pulumi-locks`, otherwise fell through to
   `<bucket>-locks`. The 3.95.6 bucket-name fix added a
   `-<account_id>` suffix, breaking the `endswith("-pulumi-state")`
   check, so the fallback computed
-  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  `dev-range-pulumi-state-<redacted-account-id>-locks` — which doesn't exist
   (the actual table from the engine-state module is still
   `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
   regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
@@ -1487,13 +1487,13 @@ the marker is the historical hand-written record and stays as-is.
 ### Fixed
 
 - **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
-  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  non-existent table** (`dev-range-pulumi-state-<redacted-account-id>-locks`).
   `shifter/engine/provisioner/terraform_base.py` derives the lock table
   name from the state bucket: it stripped `-pulumi-state` and replaced
   with `-pulumi-locks`, otherwise fell through to `<bucket>-locks`. The
   3.95.6 bucket-name fix added a `-<account_id>` suffix, breaking the
   `endswith("-pulumi-state")` check, so the fallback computed
-  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  `dev-range-pulumi-state-<redacted-account-id>-locks` — which doesn't exist
   (the actual table from the engine-state module is still
   `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
   regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
@@ -1510,7 +1510,7 @@ the marker is the historical hand-written record and stays as-is.
   `platform/terraform/environments/dev/portal/terraform.tfvars` to a
   UUID-suffixed name from the previous dev account; that name remains
   globally claimed (S3 namespace is shared across all accounts).
-  Switched to `shifter-dev-user-storage-788327019743` (account-id
+  Switched to `shifter-dev-user-storage-<redacted-account-id>` (account-id
   suffix) — same pattern as `engine-state` / `log-aggregation` in 3.95.6.
 
 ## [3.95.9] - 2026-05-03
@@ -1549,7 +1549,7 @@ the marker is the historical hand-written record and stays as-is.
 ### Changed
 
 - **`shifter/packer/dev.pkrvars.hcl`** updated for the fresh aws-dev
-  account `788327019743`: `vpc_id`/`subnet_id` were hardcoded to the
+  account `<redacted-account-id>`: `vpc_id`/`subnet_id` were hardcoded to the
   previous dev account and packer aborted immediately with
   `InvalidSubnetID.NotFound`. Same fix as the github-runner `dev.tfvars`
   in 3.95.3.
@@ -1618,8 +1618,8 @@ the marker is the historical hand-written record and stays as-is.
 ### Changed
 
 - **`platform/terraform/global/github-runner/dev.tfvars`** updated for
-  the fresh aws-dev account `788327019743`: VPC `vpc-07d0a461204c02a06`,
-  public subnet `subnet-0e7da35c92d13cd1d` (us-east-2a). Was pointing
+  the fresh aws-dev account `<redacted-account-id>`: VPC `<redacted-vpc-id>`,
+  public subnet `<redacted-subnet-id>` (us-east-2a). Was pointing
   at IDs from the previous dev account.
 - **`scripts/runner-deploy.sh`** cleaned up. Stale `Prerequisites` block
   about a GitHub App + `/shifter/github-runner/key-base64` /
@@ -2125,7 +2125,7 @@ the marker is the historical hand-written record and stays as-is.
   the polaris VM with an attacker (kali) instance spec. Runs inside the
   portal docker container via SSM Run Command so no portal code change
   is needed to turn a hand-built range into a portal-visible one.
-- **S3 bucket** `shifter-polaris-bake-158151907940` — byte-stable
+- **S3 bucket** `shifter-polaris-bake-<redacted-account-id>` — byte-stable
   `polaris/build-v1.tar.gz` of the `scenario-dev/polaris/build/` tree
   (includes `_shared/` GPG chain and research-analyst keypair so flag 30
   stays deterministic across rebuilds).

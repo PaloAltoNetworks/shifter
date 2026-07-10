@@ -43,6 +43,9 @@ dev = [
     "ruff",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["../.."]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120
@@ -73,14 +76,23 @@ exclude_lines = [
     "raise NotImplementedError",
 ]
 
+# Type-check policy (#564). This package is an ENFORCED, blocking mypy scope:
+# the `provisioner-typecheck` CI job and the `mypy-provisioner` pre-commit hook
+# both run `mypy .` here and fail on any error. The enforced scope is the whole
+# package minus the TRANSITIONAL / out-of-scope dirs listed in `exclude` below.
+# Strictness is intentionally permissive and tightened incrementally via
+# per-module `[[tool.mypy.overrides]]`. To temporarily exempt a module that
+# cannot yet pass, add an explicit per-module override with
+# `ignore_errors = true` here - never reintroduce `|| true` or
+# `continue-on-error` in the workflow.
 [tool.mypy]
 python_version = "3.12"
+# Transitional / out-of-scope: not part of the enforced type-check estate.
 exclude = [
     "venv/",
     ".venv/",
     "tests/",
 ]
-# Start permissive, tighten over time (matches shifter-platform)
 ignore_missing_imports = true
 warn_return_any = false
 warn_unused_ignores = true

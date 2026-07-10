@@ -187,7 +187,7 @@ class TestSoftDeleteCascadesAndAuditPaths:
         instance_type = InstanceType.objects.create(
             name="Reverse-Test Type",
             slug="reverse-test-type",
-            spec_class="shared.schemas.SCMCredentialSpec",
+            spec_slug="credential.scm",
         )
 
         active_child = Instance.objects.create(

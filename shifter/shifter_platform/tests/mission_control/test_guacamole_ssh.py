@@ -1,8 +1,20 @@
-"""Tests for Guacamole SSH functions in mission_control/guacamole.py."""
+"""Behavior tests for Guacamole SSH functions in mission_control/guacamole.py.
 
+``create_guacamole_ssh_url`` is driven end to end: the real connection-params,
+payload-assembly and AES/HMAC sign-and-encrypt code runs, and only the urllib
+``/api/tokens`` POST is mocked (the real network boundary). Assertions read the
+returned URL and the decrypted payload that was actually POSTed, instead of
+patching the first-party ``create_guacamole_auth_payload`` /
+``sign_and_encrypt_payload`` / ``get_guacamole_auth_token`` helpers.
+"""
+
+import urllib.error
 from unittest.mock import patch
 
 import pytest
+
+# 32 hex chars = 16-byte AES-128 key (mirrors conftest.SECRET_KEY_128).
+SECRET_KEY_128 = "0123456789abcdef0123456789abcdef"  # nosec B105  # NOSONAR
 
 
 def _ssh_req(**overrides):
@@ -11,7 +23,7 @@ def _ssh_req(**overrides):
 
     defaults = {
         "base_url": "https://guac.example.com",
-        "secret_key": "0123456789abcdef0123456789abcdef",
+        "secret_key": SECRET_KEY_128,
         "username": "test@example.com",
         "connection_name": "ngfw-123",
         "hostname": "10.1.5.10",
@@ -138,67 +150,40 @@ class TestCreateSSHConnectionParams:
 
 
 class TestCreateGuacamoleSSHURL:
-    """Tests for create_guacamole_ssh_url()."""
+    """Tests for create_guacamole_ssh_url() (real crypto, mocked token POST)."""
 
-    def test_calls_auth_payload_with_correct_username(self):
-        """Function creates auth payload with provided username."""
+    def test_signs_payload_with_provided_username(self, guac_exchange):
         from mission_control.guacamole import create_guacamole_ssh_url
 
-        with (
-            patch("mission_control.guacamole.create_guacamole_auth_payload") as mock_payload,
-            patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
-            patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123"),
-        ):
-            mock_payload.return_value = {"username": "test@example.com"}
-
+        with guac_exchange() as exchange:
             create_guacamole_ssh_url(_ssh_req())
 
-            mock_payload.assert_called_once()
-            call_args = mock_payload.call_args
-            assert call_args[0][0] == "test@example.com"  # username
+        payload = exchange.posted_payload(SECRET_KEY_128)
+        assert payload["username"] == "test@example.com"
 
-    def test_creates_ssh_connection_in_payload(self):
-        """Function creates SSH protocol connection."""
+    def test_creates_ssh_connection_in_payload(self, guac_exchange):
         from mission_control.guacamole import create_guacamole_ssh_url
 
-        with (
-            patch("mission_control.guacamole.create_guacamole_auth_payload") as mock_payload,
-            patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
-            patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123"),
-        ):
-            mock_payload.return_value = {"username": "test@example.com"}
-
+        with guac_exchange() as exchange:
             create_guacamole_ssh_url(_ssh_req())
 
-            # Verify connections dict structure
-            call_args = mock_payload.call_args
-            connections = call_args[0][1]  # Second arg is connections dict
-            assert "ngfw-123" in connections
-            assert connections["ngfw-123"]["protocol"] == "ssh"
+        connections = exchange.posted_payload(SECRET_KEY_128)["connections"]
+        assert "ngfw-123" in connections
+        assert connections["ngfw-123"]["protocol"] == "ssh"
 
-    def test_returns_valid_url_format(self):
-        """Function returns properly formatted Guacamole URL."""
+    def test_returns_valid_url_format(self, guac_exchange):
         from mission_control.guacamole import create_guacamole_ssh_url
 
-        with (
-            patch("mission_control.guacamole.create_guacamole_auth_payload", return_value={}),
-            patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
-            patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123"),
-        ):
+        with guac_exchange():
             result = create_guacamole_ssh_url(_ssh_req())
 
-            assert result.startswith("https://guac.example.com/#/client/")
-            assert "token=token123" in result
+        assert result.startswith("https://guac.example.com/#/client/")
+        assert "token=token123" in result
 
-    def test_uses_api_base_url_for_token_exchange(self):
-        """Function uses api_base_url for token exchange when provided."""
+    def test_uses_api_base_url_for_token_exchange(self, guac_exchange):
         from mission_control.guacamole import create_guacamole_ssh_url
 
-        with (
-            patch("mission_control.guacamole.create_guacamole_auth_payload", return_value={}),
-            patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
-            patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123") as mock_token,
-        ):
+        with guac_exchange() as exchange:
             create_guacamole_ssh_url(
                 _ssh_req(
                     base_url="https://public.example.com",
@@ -206,60 +191,38 @@ class TestCreateGuacamoleSSHURL:
                 )
             )
 
-            # Should use internal URL for token exchange
-            mock_token.assert_called_once()
-            assert mock_token.call_args[0][0] == "https://internal.example.com"
+        # The token POST targets the internal API URL; the public URL is only
+        # used to build the returned browser URL.
+        assert exchange.requests[0].full_url == "https://internal.example.com/api/tokens"
 
-    def test_raises_on_token_exchange_failure(self):
-        """Function raises ValueError when token exchange fails."""
+    def test_raises_on_token_exchange_failure(self, settings):
         from mission_control.guacamole import create_guacamole_ssh_url
 
+        settings.GUACAMOLE_TOKEN_RETRY_ATTEMPTS = 1  # fail fast, no backoff retries
+
+        def _boom(req, timeout=None):
+            raise urllib.error.URLError("guacamole down")
+
         with (
-            patch("mission_control.guacamole.create_guacamole_auth_payload", return_value={}),
-            patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
-            patch(
-                "mission_control.guacamole.get_guacamole_auth_token",
-                side_effect=ValueError("Token exchange failed"),
-            ),
-            pytest.raises(ValueError, match="Token exchange failed"),
+            patch("urllib.request.urlopen", side_effect=_boom),
+            pytest.raises(ValueError, match="Failed to connect to Guacamole"),
         ):
             create_guacamole_ssh_url(_ssh_req())
 
-    def test_passes_ssh_private_key_to_connection_params(self, fake_private_key):
-        """Function includes SSH private key in connection parameters."""
+    def test_passes_ssh_private_key_to_connection_params(self, fake_private_key, guac_exchange):
         from mission_control.guacamole import create_guacamole_ssh_url
 
-        with (
-            patch("mission_control.guacamole.create_guacamole_auth_payload") as mock_payload,
-            patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
-            patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123"),
-        ):
-            mock_payload.return_value = {"username": "test@example.com"}
-
+        with guac_exchange() as exchange:
             create_guacamole_ssh_url(_ssh_req(ssh_private_key=fake_private_key))
 
-            # Verify private key is in connection params
-            call_args = mock_payload.call_args
-            connections = call_args[0][1]
-            params = connections["ngfw-123"]["parameters"]
-            assert "private-key" in params
-            assert params["private-key"] == fake_private_key
+        params = exchange.posted_payload(SECRET_KEY_128)["connections"]["ngfw-123"]["parameters"]
+        assert params["private-key"] == fake_private_key
 
-    def test_uses_custom_ssh_username(self):
-        """Function uses custom SSH username when provided."""
+    def test_uses_custom_ssh_username(self, guac_exchange):
         from mission_control.guacamole import create_guacamole_ssh_url
 
-        with (
-            patch("mission_control.guacamole.create_guacamole_auth_payload") as mock_payload,
-            patch("mission_control.guacamole.sign_and_encrypt_payload", return_value="encrypted"),
-            patch("mission_control.guacamole.get_guacamole_auth_token", return_value="token123"),
-        ):
-            mock_payload.return_value = {"username": "test@example.com"}
-
+        with guac_exchange() as exchange:
             create_guacamole_ssh_url(_ssh_req(ssh_username="custom-user"))
 
-            # Verify username in connection params
-            call_args = mock_payload.call_args
-            connections = call_args[0][1]
-            params = connections["ngfw-123"]["parameters"]
-            assert params["username"] == "custom-user"
+        params = exchange.posted_payload(SECRET_KEY_128)["connections"]["ngfw-123"]["parameters"]
+        assert params["username"] == "custom-user"

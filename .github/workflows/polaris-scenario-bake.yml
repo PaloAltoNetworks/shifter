@@ -26,10 +26,9 @@ on:
           - dev
           - main
       s3_bucket:
-        description: 'S3 bucket for the Polaris build tarball'
-        required: false
+        description: 'S3 bucket for the Polaris build tarball (e.g. shifter-polaris-bake-<account-id>)'
+        required: true
         type: string
-        default: 'shifter-polaris-bake-158151907940'
       s3_key:
         description: 'S3 key for the Polaris build tarball'
         required: false

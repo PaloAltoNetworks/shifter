@@ -19,6 +19,8 @@ Submodule layout:
 * ``rating``       — ``CTFChallengeRating``.
 * ``hint``         — ``CTFHint``, ``CTFHintUsage``.
 * ``notification`` — ``CTFNotification``, ``CTFEmailTemplate``, ``CTFScheduledTask``.
+* ``recovery``     — ``CTFRangeRecovery``.
+* ``spare_range``  — ``CTFSpareRange``.
 """
 
 from __future__ import annotations
@@ -37,6 +39,8 @@ from .flag import CTFFlag
 from .hint import CTFHint, CTFHintUsage
 from .notification import CTFEmailTemplate, CTFNotification, CTFScheduledTask
 from .rating import CTFChallengeRating
+from .recovery import CTFRangeRecovery
+from .spare_range import CTFSpareRange
 from .submission import CTFAward, CTFSubmission
 from .taxonomy import (
     CTFChallengeFile,
@@ -62,7 +66,9 @@ __all__ = [
     "CTFHintUsage",
     "CTFNotification",
     "CTFParticipant",
+    "CTFRangeRecovery",
     "CTFScheduledTask",
+    "CTFSpareRange",
     "CTFSubmission",
     "CTFTeam",
     "CTFTopic",

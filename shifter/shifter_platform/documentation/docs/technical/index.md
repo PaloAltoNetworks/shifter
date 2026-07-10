@@ -33,6 +33,7 @@ Platform architecture, infrastructure, and development documentation.
 - [Terraform](dev/terraform) - Infrastructure patterns
 - [CI/CD](dev/ci-cd) - Pipeline configuration
 - [Secrets](dev/secrets) - Secrets management
+- [Platform API Development](dev/api) - DRF endpoint, schema, scope, and error-envelope conventions
 - [Cloud Adapters](dev/cloud-adapters) - Cloud abstraction layer
 - [Principles](dev/principles) - Engineering philosophy
 - [ADR Enforcement](dev/adr-enforcement) - Architecture guardrails and policy checks

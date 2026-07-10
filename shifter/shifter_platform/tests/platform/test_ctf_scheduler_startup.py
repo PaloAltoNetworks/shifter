@@ -75,8 +75,21 @@ def test_local_compose_starts_ctf_scheduler_service() -> None:
 def test_aws_deploy_paths_start_ctf_scheduler_container(path: Path) -> None:
     deployment_text = path.read_text(encoding="utf-8")
 
-    assert f"docker stop portal worker-cms worker-engine worker-mc {SCHEDULER_NAME}" in deployment_text
-    assert f"docker rm portal worker-cms worker-engine worker-mc {SCHEDULER_NAME}" in deployment_text
+    # Containers are stopped gracefully with an explicit timeout (#931) so
+    # long-lived connections drain before SIGKILL; the timeout token differs
+    # between the templated user-data and the redeploy script.
+    assert "docker stop --time " in deployment_text
+    # All portal workers must appear in the stop/rm lists; the order is:
+    # portal, queue workers, outbox drainer, reconciler, ctf-scheduler, guacamole-prune.
+    container_rm_targets = (
+        f"portal worker-cms worker-engine worker-mc worker-outbox-drainer worker-reconciler "
+        f"{SCHEDULER_NAME} guacamole-bootstrap-prune"
+    )
+    assert container_rm_targets in deployment_text
+    assert (
+        f"docker rm {container_rm_targets}" in deployment_text
+        or f"docker rm -f {container_rm_targets}" in deployment_text
+    )
     assert "health-interval 30s" in deployment_text
     assert "health-timeout 5s" in deployment_text
     assert "health-start-period 90s" in deployment_text
@@ -85,6 +98,8 @@ def test_aws_deploy_paths_start_ctf_scheduler_container(path: Path) -> None:
         "worker-cms-heartbeat",
         "worker-engine-heartbeat",
         "worker-mc-heartbeat",
+        "worker-outbox-drainer-heartbeat",
+        "worker-reconciler-heartbeat",
         "ctf-scheduler-heartbeat",
     ):
         assert f"/tmp/{heartbeat} -mmin -2 | grep -q ." in deployment_text  # noqa: S108
@@ -108,7 +123,7 @@ def test_aws_workflow_runs_one_asg_migration_before_instance_refresh() -> None:
     assert migration_index < refresh_index
     assert "Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" in workflow_text
     assert "--migrate-only" in workflow_text
-    assert "Migration failed!" in workflow_text
+    assert "Migration failed (status=" in workflow_text
 
 
 @pytest.mark.parametrize(

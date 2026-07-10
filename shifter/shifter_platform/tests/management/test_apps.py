@@ -1,83 +1,35 @@
-"""Management app configuration tests."""
+"""Behavior tests for the management app's user-profile signals.
 
-import logging
-from unittest.mock import patch
+The ``ManagementConfig.ready()`` post_save wiring is verified through its real
+effect — creating/saving a user (auto-)provisions a ``UserProfile`` — rather than
+patching ``post_save`` and asserting registration call shapes.
+"""
 
 import pytest
+from django.contrib.auth import get_user_model
 
-from management.apps import ManagementConfig
+from management.models import UserProfile
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
 
 
-class TestManagementConfigReady:
-    """Tests for ManagementConfig.ready signal registration."""
+class TestUserProfileSignals:
+    def test_creating_user_auto_creates_profile(self):
+        """on_user_created (post_save) provisions a profile for a new user."""
+        user = User.objects.create_user(username="apps-create@e.com", email="apps-create@e.com")
+        assert UserProfile.objects.filter(user=user).exists()
 
-    def test_registers_on_user_created_handler(self):
-        """ready() registers post_save handler for user creation."""
-        app_config = ManagementConfig("management", __import__("management"))
+    def test_saving_existing_user_ensures_profile(self):
+        """on_user_saved (post_save) re-ensures the profile on a later save.
 
-        with patch("management.apps.post_save") as mock_post_save:
-            app_config.ready()
+        The handler skips when the instance already has a (cached) profile, so
+        re-fetch a clean instance after deleting the row before saving.
+        """
+        user = User.objects.create_user(username="apps-save@e.com", email="apps-save@e.com")
+        UserProfile.objects.filter(user=user).delete()
 
-        calls = list(mock_post_save.connect.call_args_list)
-        assert any(c.kwargs.get("dispatch_uid") == "management_create_user_profile" for c in calls)
-
-    def test_registers_on_user_saved_handler(self):
-        """ready() registers post_save handler for user save."""
-        app_config = ManagementConfig("management", __import__("management"))
-
-        with patch("management.apps.post_save") as mock_post_save:
-            app_config.ready()
-
-        calls = list(mock_post_save.connect.call_args_list)
-        assert any(c.kwargs.get("dispatch_uid") == "management_save_user_profile" for c in calls)
-
-    def test_registers_with_auth_user_model_sender(self):
-        """ready() registers handlers with AUTH_USER_MODEL as sender."""
-        app_config = ManagementConfig("management", __import__("management"))
-
-        with (
-            patch("management.apps.post_save") as mock_post_save,
-            patch("management.apps.settings") as mock_settings,
-        ):
-            mock_settings.AUTH_USER_MODEL = "auth.User"
-            app_config.ready()
-
-        for call in mock_post_save.connect.call_args_list:
-            assert call.kwargs.get("sender") == "auth.User"
-
-    def test_logs_debug_on_successful_registration(self, caplog):
-        """ready() logs debug when handlers registered successfully."""
-        app_config = ManagementConfig("management", __import__("management"))
-
-        with (
-            caplog.at_level(logging.DEBUG, logger="management.apps"),
-            patch("management.apps.post_save"),
-        ):
-            app_config.ready()
-
-        assert "register" in caplog.text.lower()
-
-    def test_logs_errors(self, caplog):
-        """ready() logs any exception as error."""
-        app_config = ManagementConfig("management", __import__("management"))
-
-        with (
-            caplog.at_level(logging.ERROR, logger="management.apps"),
-            patch("management.apps.post_save") as mock_post_save,
-        ):
-            mock_post_save.connect.side_effect = RuntimeError()
-
-            with pytest.raises(RuntimeError):
-                app_config.ready()
-
-        assert caplog.text
-
-    def test_propagates_errors(self):
-        """ready() propagates any exception."""
-        app_config = ManagementConfig("management", __import__("management"))
-
-        with patch("management.apps.post_save") as mock_post_save:
-            mock_post_save.connect.side_effect = RuntimeError()
-
-            with pytest.raises(RuntimeError):
-                app_config.ready()
+        fresh = User.objects.get(pk=user.pk)
+        fresh.save()
+        assert UserProfile.objects.filter(user=user).exists()

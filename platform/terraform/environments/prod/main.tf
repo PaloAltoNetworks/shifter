@@ -127,11 +127,14 @@ resource "aws_budgets_budget" "s3_cost_alert" {
     values = ["Amazon Simple Storage Service"]
   }
 
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 80
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = ["YOUR_EMAIL@example.com"] # TODO: Replace with your email for budget alerts
+  dynamic "notification" {
+    for_each = var.budget_alert_email != "" ? [1] : []
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = 80
+      threshold_type             = "PERCENTAGE"
+      notification_type          = "ACTUAL"
+      subscriber_email_addresses = [var.budget_alert_email]
+    }
   }
 }

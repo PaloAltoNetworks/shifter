@@ -12,9 +12,11 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from django.urls import reverse
+from django.utils import timezone
 
 from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus
-from ctf.models import CTFChallenge, CTFSubmission
+from ctf.models import CTFChallenge, CTFParticipant, CTFSubmission
 from ctf.services import (
     create_challenge,
     update_challenge,
@@ -143,6 +145,35 @@ class TestChallengeVisibility:
             flag_hash="x",
         )
         assert c.visibility == "visible"
+
+
+class TestChallengeDifficulty:
+    """Tests for challenge difficulty metadata (CTF-103)."""
+
+    def test_create_and_update_challenge_difficulty(self, ctf_event_draft):
+        """Challenge difficulty persists through service create/update flows."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Difficulty Challenge",
+                "description": "Uses difficulty metadata",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "difficulty": ChallengeDifficulty.HARD.value,
+                "flag": "FLAG{hard}",
+            },
+            actor_id=ctf_event_draft.created_by_id,
+        )
+
+        assert challenge.difficulty == ChallengeDifficulty.HARD.value
+
+        updated = update_challenge(
+            challenge.id,
+            {"difficulty": ChallengeDifficulty.MEDIUM.value},
+            actor_id=ctf_event_draft.created_by_id,
+        )
+
+        assert updated.difficulty == ChallengeDifficulty.MEDIUM.value
 
 
 class TestChallengeTags:
@@ -326,8 +357,8 @@ class TestChallengeSolutions:
         )
         assert "Updated solution" in updated.solution
 
-    def test_solution_visibility_by_event_status(self, ctf_event_draft):
-        """Solution visibility depends on event status."""
+    def test_solution_visibility_by_event_status(self, client, ctf_event_draft, participant_user):
+        """Participant challenge detail shows solutions only after the event."""
         challenge = create_challenge(
             ctf_event_draft.id,
             {
@@ -340,26 +371,34 @@ class TestChallengeSolutions:
             },
             actor_id=ctf_event_draft.created_by_id,
         )
-        event = ctf_event_draft
+        CTFParticipant.objects.create(
+            event=ctf_event_draft,
+            user=participant_user,
+            email=participant_user.email,
+            name="Solution Viewer",
+            status="active",
+            registered_at=timezone.now(),
+        )
+        from management.services import set_active_ctf_event
 
-        # show_solution logic mirrors the view: solution && status in (ended, archived)
-        def show_solution():
-            return bool(challenge.solution and event.status in ("ended", "archived"))
+        set_active_ctf_event(participant_user, ctf_event_draft.pk)
+        client.force_login(participant_user)
+        url = reverse("ctf:challenge_detail", kwargs={"challenge_id": challenge.pk})
 
-        event.status = "draft"
-        assert not show_solution()
+        for status, expected in (
+            (EventStatus.DRAFT.value, False),
+            (EventStatus.ACTIVE.value, False),
+            (EventStatus.PAUSED.value, False),
+            (EventStatus.ENDED.value, True),
+            (EventStatus.ARCHIVED.value, True),
+        ):
+            ctf_event_draft.status = status
+            ctf_event_draft.save(update_fields=["status", "updated_at"])
 
-        event.status = "active"
-        assert not show_solution()
+            response = client.get(url)
 
-        event.status = "paused"
-        assert not show_solution()
-
-        event.status = "ended"
-        assert show_solution()
-
-        event.status = "archived"
-        assert show_solution()
+            assert response.status_code == 200
+            assert response.context["show_solution"] is expected
 
     def test_solution_not_visible_when_empty(self, ctf_event_draft):
         """Empty solution is never shown even after event ends."""

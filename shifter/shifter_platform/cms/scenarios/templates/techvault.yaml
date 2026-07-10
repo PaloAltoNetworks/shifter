@@ -1,0 +1,33 @@
+id: techvault
+name: TechVault Purple-Team Lab
+description: >-
+  One Ubuntu host running the APTL TechVault (techvault-operational) docker
+  compose stack — 31 containers: a Kali attacker, enterprise targets
+  (Samba AD DC, Flask webapp, PostgreSQL, Samba file share, BIND DNS, a
+  developer workstation, a Rocky victim) and a full SOC (Wazuh SIEM,
+  Suricata, MISP, TheHive + Cortex, Shuffle SOAR, OTEL/Tempo/Grafana),
+  plus Claude Code and the APTL MCP servers on the host seat. Baked from
+  aptl-labs and driven through VS Code Desktop over RDP.
+enabled: true
+ngfw: false
+
+instances:
+  - name: techvault
+    role: attacker
+    # os_type kali selects the Guacamole RDP access path (same pattern as
+    # POLARIS: an Ubuntu docker host that presents as the "kali" attacker
+    # box). The seat user is `ubuntu` (uid 1000 — required so aptl's 0400
+    # wazuh certs are readable by the uid-1000 indexer/dashboard
+    # containers); the TechVault range bootstrap records ssh_username=ubuntu
+    # so Guacamole RDPs in as ubuntu rather than the os_type default.
+    os_type: kali
+    ami_key: techvault
+    # techvault-operational is ~31 containers incl. a heavy SOC. Idle
+    # footprint is ~9 GB RAM / ~4% CPU on this size, so it is comfortable
+    # (headroom for participant work + Claude Code). Overrides the global
+    # KALI_INSTANCE_TYPE default for this instance only.
+    instance_type: r5.2xlarge
+
+subnets:
+  - name: techvault
+    instances: [techvault]

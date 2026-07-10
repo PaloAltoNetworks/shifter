@@ -58,9 +58,10 @@ def _publish_from_child(group: str, notification_id: int) -> int:
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 async def test_cross_process_fanout_via_redis(
-    asgi_application, ws_user, ws_headers, registered_notification_type, redis_channel_layer
+    asgi_application, ws_user, ws_headers, registered_notification_type, redis_channel_layer, settings
 ):
     """A notification published by a separate process reaches the websocket."""
+    settings.WEBSOCKET_NOTIFICATIONS_ENABLED = True  # subsystem is off by default (#941)
     communicator = WebsocketCommunicator(asgi_application, NOTIFICATIONS_PATH, headers=ws_headers)
     connected, _ = await communicator.connect()
     assert connected is True

@@ -1,0 +1,167 @@
+/* CTF admin: participant detail page.
+   Extracted from templates/ctf/admin/participant_detail.html (issue #414). */
+
+.detail-layout {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+.breadcrumb {
+    display: flex;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+    margin-bottom: 8px;
+    list-style: none;
+    padding: 0;
+    margin-top: 0;
+}
+
+.breadcrumb a {
+    color: #94a3b8;
+}
+
+.breadcrumb li + li::before {
+    content: "/";
+    margin-right: 4px;
+    color: var(--theme-text-secondary);
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-danger {
+    background: transparent;
+    color: #ff4d4f;
+    border: 1px solid #ff4d4f;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+}
+
+.detail-row + .detail-row {
+    border-top: 1px solid var(--theme-border);
+}
+
+.detail-label {
+    color: var(--theme-text-secondary);
+}
+
+.detail-value {
+    font-weight: 600;
+    color: var(--theme-text);
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-invited {
+    background: #fef3c7;
+    color: #78350f; /* WCAG AAA on #fef3c7 */
+}
+
+.badge-registered {
+    background: #e2e8f0;
+    color: #1e293b; /* WCAG AAA on #e2e8f0 */
+}
+
+.badge-active {
+    background: #d1fae5;
+    color: #064e3b; /* WCAG AAA on #d1fae5 */
+}
+
+.badge-completed {
+    background: #e5e7eb;
+    color: #1f2937; /* WCAG AAA on #e5e7eb */
+}
+
+.badge-disqualified {
+    background: #fee2e2;
+    color: #7f1d1d; /* WCAG AAA on #fee2e2 */
+}
+
+.badge-correct {
+    background: #d1fae5;
+    color: #064e3b; /* WCAG AAA on #d1fae5 */
+}
+
+.badge-incorrect {
+    background: #fee2e2;
+    color: #7f1d1d; /* WCAG AAA on #fee2e2 */
+}
+
+.badge-warning {
+    background: #fef3c7;
+    color: #78350f; /* WCAG AAA on #fef3c7 */
+}
+
+.badge-secondary {
+    background: #e5e7eb;
+    color: #1f2937; /* WCAG AAA on #e5e7eb */
+}
+
+.badge-secondary--inline {
+    margin-left: 4px;
+}
+
+.card--gap {
+    margin-bottom: 16px;
+}
+
+.score-timeline-canvas-wrap {
+    position: relative;
+    height: 250px;
+    padding: 0 16px 16px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--theme-text);
+    line-height: 1;
+}
+
+.stat-value.stat-score { color: #94a3b8; }
+.stat-value.stat-solved { color: #22c55e; }
+.stat-value.stat-attempts { color: var(--theme-text-secondary); }
+
+.stat-label {
+    font-size: 12px;
+    color: var(--theme-text-secondary);
+    margin-top: 4px;
+}
+
+.empty-message {
+    padding: 24px;
+    text-align: center;
+    color: var(--theme-text-secondary);
+    font-size: 13px;
+}
+
+@media (max-width: 960px) {
+    .detail-layout {
+        grid-template-columns: 1fr;
+    }
+}

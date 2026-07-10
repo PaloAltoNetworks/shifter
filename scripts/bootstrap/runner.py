@@ -10,8 +10,9 @@ This module is called from deploy.py as part of the full deployment flow.
 import subprocess  # nosec B404
 from dataclasses import dataclass
 
-# Import shared utilities from deploy
-from deploy import (
+# Import shared utilities from the bootstrap support layer. `deploy.py` remains
+# the executable facade, but runner.py should not depend on that facade.
+from bootstrap_core import (
     Colors,
     code_block,
     confirm_or_manual,

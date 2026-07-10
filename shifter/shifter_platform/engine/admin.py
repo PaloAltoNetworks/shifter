@@ -3,6 +3,7 @@
 from django.contrib import admin
 
 from engine.models import Range, SubnetAllocation
+from shared.schemas.persistence import unwrap_persisted_spec
 
 
 @admin.register(Range)
@@ -15,7 +16,7 @@ class RangeAdmin(admin.ModelAdmin):
     @admin.display(description="Scenario")
     def scenario_id(self, obj):
         if obj.range_config:
-            return obj.range_config.get("scenario_id", "—")
+            return unwrap_persisted_spec(obj.range_config).get("scenario_id", "—")
         return "—"
 
 

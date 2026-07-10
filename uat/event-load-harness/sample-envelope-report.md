@@ -43,10 +43,22 @@ Gaps (signals not collected in this run):
 - ALB/ingress p95/p99 latency and 5xx counts (no provider adapter)
 - ALB active/rejected connection counts (no provider adapter)
 - Portal EC2/pod CPU and memory (no provider adapter)
-- RDS connections and CPU (no provider adapter)
+- RDS connections, connection churn proxy, and CPU (no provider adapter)
 - Redis CPU/memory/connections (no provider adapter)
 - Guacamole ECS/pod CPU and task/replica health (no provider adapter)
 - SQS backlog if worker paths were exercised (no provider adapter)
+
+## Database connection posture (#853)
+
+- Current Django posture: `CONN_MAX_AGE=0` (no persistent Django DB connections).
+- RDS average connections: not collected
+- RDS peak connections: not collected
+- RDS connection churn proxy: not collected
+- RDS CPU: not collected
+- Portal tail latency during this run: max route p95 442.0 ms / p99 448.0 ms
+- Capacity check: persistent connections must fit `portal replicas * worker/process count * Django connection contexts` under the database max-connection budget.
+- Recommendation: not enough RDS connection evidence to judge materiality. Run with `--metric-source aws --aws-rds <db-instance-id>` and compare stepped concurrency runs.
+- Exact opens/closes per second are not available from CloudWatch `DatabaseConnections`; the proxy is a lower bound and same-sample open/close cycles remain invisible.
 
 ## Conclusion
 

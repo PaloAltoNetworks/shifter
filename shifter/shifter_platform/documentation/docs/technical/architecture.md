@@ -94,7 +94,49 @@ sequenceDiagram
 
 - **Engine handlers**: Update `Range` status, timestamps
 - **CMS handlers**: Update `RangeInstance`, `Instance`, `App` status
-- **MC handlers**: Broadcast to WebSocket for real-time UI updates
+- **MC handlers**: Broadcast to WebSocket for real-time UI updates (advisory; see below)
+
+#### Consistency Model and Event-Loss Recovery
+
+PostgreSQL is the authoritative state store for range, request, instance,
+application, and experiment-run state. Range and experiment events are
+correctness-critical propagation signals, not a replacement state store and
+not best-effort UI-only notifications. Range state diverges when an event is
+lost; the platform makes every correctness-critical event recoverable through
+two complementary layers.
+
+**Layer 1—Transactional outbox.** The provisioner enqueues each event into
+`engine_range_event_outbox` (`RangeEventOutbox`) in the same DB transaction as
+the authoritative state write, so state and event-intent commit atomically. The
+`drain_range_event_outbox` portal management command reads PENDING outbox rows
+and publishes them to the SNS topic (AWS) or Pub/Sub topic (GCP) with
+exponential-backoff retry. After `max_attempts`, a row transitions to a DLQ
+terminal state and an operator-visible alert fires. Drained rows transition to
+PUBLISHED. PENDING rows can be replayed by re-running the drainer.
+
+**Layer 2—DB-authoritative reconciler.** The `reconcile_range_events` portal
+management command re-reads authoritative `engine.Range` state and
+idempotently re-drives stale CMS `RangeInstance` projections through the
+existing handler seam. It does not bypass domain invariants or write Engine
+models from CMS.
+
+**Consumer failure propagation.** Consumer handlers propagate transient DB or
+broker failures rather than swallowing them, so the worker ack-after-handler
+retry and the SQS/Pub/Sub dead-letter path engage for transient failures.
+Invalid, permanently unprocessable, or duplicate payloads are logged and
+deliberately acknowledged.
+
+**MC websocket fanout is advisory.** WebSocket delivery is a projection of
+authoritative state and is not a recovery path. Experiment continuation, CMS
+state convergence, and Engine status transitions do not depend on websocket
+delivery.
+
+**Messaging parity.** AWS SNS/SQS and GCP Pub/Sub maintain dead-letter,
+retry-policy, and operator-visible alerting parity (CloudWatch alarms on AWS;
+Cloud Monitoring alerts on GCP).
+
+See `docs/architecture/range-event-delivery-preflight-476.md` for the
+pre-implementation consistency model and cross-cutting constraints (ADR-025).
 
 ## Cloud Adapters
 

@@ -1,41 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     New Notification - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.notification-form {
-    max-width: 720px;
-}
-
-.form-alert {
-    padding: 12px 16px;
-    border: 1px solid #ff4d4f;
-    border-radius: 4px;
-    background: rgba(255, 77, 79, 0.08);
-    color: #ff4d4f;
-    font-size: 13px;
-    margin-bottom: 16px;
-}
-
-.form-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-textarea.form-input {
-    resize: vertical;
-    min-height: 120px;
-}
-
-input[type="datetime-local"] {
-    color-scheme: dark;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-notification_form.css' %}">
 {% endblock %}
 {% block content %}
     <div class="notification-form">
@@ -75,9 +46,7 @@ input[type="datetime-local"] {
                               required
                               placeholder='{% trans "Notification body (supports Markdown)" %}'></textarea>
                 </div>
-                <div class="form-group"
-                     id="schedule-group"
-                     style="display:none">
+                <div class="form-group d-none" id="schedule-group">
                     <label for="scheduled_at" class="form-label">
                         {% trans "Schedule For" %}
                     </label>
@@ -113,18 +82,18 @@ input[type="datetime-local"] {
     <script>
 document.getElementById('btn-toggle-schedule').addEventListener('click', function() {
     var group = document.getElementById('schedule-group');
-    if (group.style.display === 'none') {
-        group.style.display = 'block';
+    if (group.classList.contains('d-none')) {
+        group.classList.remove('d-none');
         this.textContent = 'Cancel Schedule';
     } else {
-        group.style.display = 'none';
+        group.classList.add('d-none');
         this.textContent = 'Schedule';
     }
 });
 
 document.querySelector('form').addEventListener('submit', function(e) {
     var scheduleGroup = document.getElementById('schedule-group');
-    if (scheduleGroup.style.display !== 'none') {
+    if (!scheduleGroup.classList.contains('d-none')) {
         var actionInput = document.querySelector('button[name="action"][value="send_now"]');
         if (e.submitter === actionInput) return;
         var hiddenInput = document.createElement('input');

@@ -1,0 +1,63 @@
+/* CTF admin: challenge form page.
+   Extracted from templates/ctf/admin/challenge_form.html (issue #414). */
+
+.challenge-form {
+    max-width: 720px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.form-help {
+    font-size: 12px;
+    color: var(--theme-text-secondary);
+    margin-top: 4px;
+}
+
+.field-error {
+    font-size: 12px;
+    color: #ff4d4f;
+    margin-top: 4px;
+}
+
+.form-alert {
+    padding: 12px 16px;
+    border: 1px solid #ff4d4f;
+    border-radius: 4px;
+    background: #28191a;
+    color: #ff4d4f;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 16px;
+    border-top: 1px solid var(--theme-border);
+    margin-top: 8px;
+}
+
+.btn-cancel {
+    background: transparent;
+    color: var(--theme-text-secondary);
+    border: 1px solid var(--theme-border);
+}
+
+textarea.form-input {
+    resize: vertical;
+    min-height: 80px;
+}
+
+select.form-input {
+    appearance: auto;
+}
+
+/* datetime-local inputs need color-scheme for dark mode */
+input[type="datetime-local"] {
+    color-scheme: dark;
+}

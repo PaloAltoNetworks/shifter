@@ -4,6 +4,10 @@
 # Distinct from the CloudWatch log groups CMK in kms.tf so the RDS service
 # grant doesn't bleed into the log-group surface.
 
+locals {
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
+}
+
 resource "aws_kms_key" "rds" {
   description             = "CMK for shifter portal-rds storage + Performance Insights (CKV_AWS_354)"
   enable_key_rotation     = true
@@ -86,7 +90,8 @@ resource "aws_db_parameter_group" "this" {
 
 # Enhanced monitoring role (CKV_AWS_118).
 resource "aws_iam_role" "enhanced_monitoring" {
-  name = "${var.name_prefix}-rds-enhanced-monitoring"
+  name                 = "${local.iam_name_prefix}-rds-enhanced-monitoring"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

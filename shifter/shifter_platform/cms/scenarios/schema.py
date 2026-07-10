@@ -6,9 +6,21 @@ cms/scenarios/templates/. They provide type validation and default values.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Discriminator, field_validator, model_validator
+
+from shared.schemas import (
+    AssetSpec,
+    DataSeedSpec,
+    DetectionStackSpec,
+    FlagSpec,
+    ForestSpec,
+    NetworkSpec,
+    ParticipantAccessSpec,
+    ServiceSpec,
+    ZoneSpec,
+)
 
 
 class DCConfig(BaseModel):
@@ -91,6 +103,7 @@ class ScenarioTemplate(BaseModel):
         name: Human-readable display name.
         description: User-facing description of the scenario.
         enabled: Whether scenario is visible in the UI (default True).
+        scenario_type: Discriminator — always 'demo' for legacy templates.
         ngfw: Whether scenario requires NGFW provisioning.
         instances: List of instance configurations.
         subnets: List of subnet configurations (optional).
@@ -100,6 +113,7 @@ class ScenarioTemplate(BaseModel):
     name: str
     description: str
     enabled: bool = True
+    scenario_type: Literal["demo"] = "demo"
     ngfw: bool = False
     instances: list[InstanceConfig]
     subnets: list[SubnetConfig] = []
@@ -153,11 +167,42 @@ class ScenarioTemplate(BaseModel):
             "has_from_agent": False,
         }
         for inst in self.instances:
-            if inst.xdr_agent:
-                if inst.os_type == "from_agent":
-                    result["has_from_agent"] = True
-                elif inst.os_type == "windows":
+            # `from_agent` derives the OS from the user-provided agent, so it
+            # always requires an agent regardless of `xdr_agent` (which gates
+            # fixed-OS agent installs). The dashboard relies on this to prompt
+            # for an agent on scenarios like `basic` whose victim is
+            # `from_agent` with `xdr_agent: false`.
+            if inst.os_type == "from_agent":
+                result["has_from_agent"] = True
+            elif inst.xdr_agent:
+                if inst.os_type == "windows":
                     result["requires_windows"] = True
                 elif inst.os_type in ("ubuntu", "kali"):
                     result["requires_linux"] = True
         return result
+
+
+class CTFScenarioTemplate(BaseModel):
+    """CTF-class scenario template validated against the CyberScript CTF surface."""
+
+    id: str
+    name: str
+    description: str
+    enabled: bool = True
+    scenario_type: Literal["ctf"] = "ctf"
+    cyberscript_version: Literal["v1"] = "v1"
+    zones: list[ZoneSpec]
+    networks: list[NetworkSpec]
+    forests: list[ForestSpec] = []
+    services: list[ServiceSpec] = []
+    assets: list[AssetSpec]
+    flags: list[FlagSpec] = []
+    data_seeds: list[DataSeedSpec] = []
+    detection: DetectionStackSpec | None = None
+    participant_access: ParticipantAccessSpec
+
+
+AnyScenarioTemplate = Annotated[
+    ScenarioTemplate | CTFScenarioTemplate,
+    Discriminator("scenario_type"),
+]

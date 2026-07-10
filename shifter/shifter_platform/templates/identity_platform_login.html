@@ -11,188 +11,7 @@
         <link rel="icon"
               type="image/svg+xml"
               href="{% static 'images/favicon.svg' %}">
-        <link rel="stylesheet"
-              href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css"
-              integrity="sha384-0Wcwu737HAMd4dc+eWTBlwaXSABrcAJUjPk7K58aPdKIR9y7gexKB+CGg/2C8U35"
-              crossorigin="anonymous">
-        <style>
-        :root {
-            --bg: #0f172a;
-            --panel: #111827;
-            --panel-border: #334155;
-            --text: #f8fafc;
-            --muted: #cbd5e1;
-            --accent: #0ea5e9;
-            --accent-hover: #0284c7;
-            --secondary: #1e293b;
-            --secondary-hover: #334155;
-            --error-bg: rgba(239, 68, 68, 0.14);
-            --error-border: rgba(248, 113, 113, 0.45);
-            --success-bg: rgba(34, 197, 94, 0.16);
-            --success-border: rgba(74, 222, 128, 0.45);
-        }
-
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            min-height: 100vh;
-            display: grid;
-            place-items: center;
-            background:
-                radial-gradient(circle at top left, rgba(14, 165, 233, 0.12), transparent 32%),
-                radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.08), transparent 35%),
-                var(--bg);
-            color: var(--text);
-            font-family: "Inter", "Segoe UI", sans-serif;
-            padding: 2rem;
-        }
-
-        .panel {
-            width: min(100%, 38rem);
-            background: var(--panel);
-            border: 1px solid var(--panel-border);
-            border-radius: 16px;
-            padding: 2rem;
-            box-shadow: 0 24px 80px rgba(15, 23, 42, 0.45);
-        }
-
-        h1 { margin: 0 0 0.75rem; font-size: 1.75rem; }
-        p { margin: 0 0 1rem; color: var(--muted); line-height: 1.5; }
-        code {
-            background: rgba(15, 23, 42, 0.9);
-            padding: 0.2rem 0.35rem;
-            border-radius: 6px;
-        }
-
-        .banner {
-            display: none;
-            margin-bottom: 1rem;
-            padding: 0.9rem 1rem;
-            border-radius: 10px;
-            border: 1px solid transparent;
-        }
-
-        .banner.visible { display: block; }
-        .banner.error {
-            background: var(--error-bg);
-            border-color: var(--error-border);
-        }
-
-        .banner.success {
-            background: var(--success-bg);
-            border-color: var(--success-border);
-        }
-
-        .section { display: none; }
-        .section.visible { display: block; }
-
-        .field {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-
-        label {
-            font-size: 0.95rem;
-            font-weight: 600;
-        }
-
-        input[type="text"] {
-            width: 100%;
-            border-radius: 10px;
-            border: 1px solid var(--panel-border);
-            background: rgba(15, 23, 42, 0.75);
-            color: var(--text);
-            padding: 0.85rem 1rem;
-            font-size: 1rem;
-        }
-
-        button {
-            width: 100%;
-            border: 0;
-            border-radius: 10px;
-            background: var(--accent);
-            color: white;
-            cursor: pointer;
-            font-size: 1rem;
-            font-weight: 600;
-            padding: 0.9rem 1rem;
-        }
-
-        button:hover { background: var(--accent-hover); }
-
-        .secondary-button {
-            background: var(--secondary);
-        }
-
-        .secondary-button:hover {
-            background: var(--secondary-hover);
-        }
-
-        .meta {
-            margin-top: 1rem;
-            font-size: 0.92rem;
-            color: var(--muted);
-        }
-
-        .secret-block {
-            margin: 1rem 0;
-            padding: 0.85rem 1rem;
-            border-radius: 10px;
-            border: 1px solid var(--panel-border);
-            background: rgba(15, 23, 42, 0.75);
-            word-break: break-word;
-        }
-
-        #firebaseui-auth-container {
-            min-height: 12rem;
-        }
-
-        .firebaseui-container {
-            background: transparent;
-            color: var(--text);
-            box-shadow: none;
-            max-width: 100%;
-        }
-
-        .firebaseui-card-content,
-        .firebaseui-card-header,
-        .firebaseui-card-footer {
-            background: transparent;
-        }
-
-        .firebaseui-title,
-        .firebaseui-subtitle,
-        .firebaseui-text,
-        .firebaseui-label,
-        .firebaseui-input,
-        .firebaseui-link {
-            color: var(--text);
-        }
-
-        .firebaseui-textfield.mdl-textfield .mdl-textfield__label,
-        .firebaseui-textfield.mdl-textfield .firebaseui-label {
-            color: var(--muted);
-        }
-
-        .firebaseui-button {
-            border-radius: 10px;
-            text-transform: none;
-            font-weight: 600;
-        }
-
-        #identity-auth-loader {
-            color: var(--muted);
-            margin-bottom: 1rem;
-        }
-
-        .help {
-            margin-top: 1rem;
-            font-size: 0.92rem;
-            color: var(--muted);
-        }
-        </style>
+        <link rel="stylesheet" href="{% static 'css/identity-platform-login.css' %}">
     </head>
     <body>
         <main class="panel">
@@ -208,16 +27,45 @@
                     {% blocktrans %}@{{ allowed_email_domain }}{% endblocktrans %}
                     </code>
                     {% blocktrans trimmed %}
-                        . Sign-in and registration use Google Identity Platform's prebuilt web UI. Shifter only
-                        creates an application session after the provider confirms the identity token, verified
-                        email, and enrolled MFA state.
+                        . Sign in or register with your corporate email and password. Shifter only creates an
+                        application session after Identity Platform confirms the identity token, verified email,
+                        and enrolled MFA state.
                     {% endblocktrans %}
                 </p>
-                <div id="identity-auth-loader">
-                    {% trans "Loading authentication\u2026" %}
-                </div>
-                <div id="firebaseui-auth-container">
-                </div>
+                <h2 id="identity-auth-title" class="form-title">
+                    {% trans "Sign in" %}
+                </h2>
+                <form id="identity-auth-form" novalidate>
+                    <div class="field">
+                        <label for="identity-email">
+                            {% trans "Corporate email" %}
+                        </label>
+                        <input id="identity-email"
+                               type="email"
+                               name="email"
+                               autocomplete="username"
+                               inputmode="email"
+                               autocapitalize="none"
+                               spellcheck="false">
+                    </div>
+                    <div class="field">
+                        <label for="identity-password">
+                            {% trans "Password" %}
+                        </label>
+                        <input id="identity-password"
+                               type="password"
+                               name="password"
+                               autocomplete="current-password">
+                    </div>
+                    <button id="identity-auth-submit" type="submit">
+                        {% trans "Sign in" %}
+                    </button>
+                </form>
+                <button id="identity-auth-mode-toggle"
+                        class="link-button"
+                        type="button">
+                    {% trans "Need an account? Create one" %}
+                </button>
                 <p class="help">
                     {% blocktrans trimmed %}
                         CTF participant access still uses range invitation magic links and does not go through
@@ -292,15 +140,9 @@
             </section>
         </main>
         {{ identity_platform_config_json|json_script:"identity-platform-config" }}
-        <script src="https://www.gstatic.com/firebasejs/12.12.0/firebase-app-compat.js"
-                integrity="sha384-BWLdxLZH5wCOzUfOIXVAUxPbSf0ufGVklbRP7rYw1K8t6xJkrTV6mRq3bD5IdSs2"
-                crossorigin="anonymous"></script>
-        <script src="https://www.gstatic.com/firebasejs/12.12.0/firebase-auth-compat.js"
-                integrity="sha384-CYdpfP3gOKgSLevsNvb4KfaGRzR6mjdBfJIYh7t7wgL3ytSv0uqWzDpLcupTgQNf"
-                crossorigin="anonymous"></script>
-        <script src="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.js"
-                integrity="sha384-O425GKlvfdVtWnpoZspwu5pNL0Jkn34NVeyhT7t+rBULDlHAqjf/na9J0fSkwo6J"
-                crossorigin="anonymous"></script>
-        <script src="{% static 'js/identity_platform_auth.js' %}"></script>
+        {# The auth module imports the Firebase modular SDK (version-pinned) from #}
+        {# gstatic; TOTP MFA is only available through the modular API, not compat. #}
+        <script type="module" src="{% static 'js/identity_platform_auth.js' %}"></script>
+        {% include "partials/cookie_notice.html" %}
     </body>
 </html>

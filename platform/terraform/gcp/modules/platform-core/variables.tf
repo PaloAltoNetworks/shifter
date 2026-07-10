@@ -258,14 +258,62 @@ variable "identity_allowed_emails" {
   default     = []
 }
 
+variable "enable_identity_blocking_function" {
+  description = <<-EOT
+    Deploy the gen1 beforeCreate blocking function enforcing the sign-up domain
+    allowlist at the Identity Platform layer. It requires an `allUsers` Cloud
+    Functions invoker binding, which a Domain Restricted Sharing org policy
+    forbids; set to false in such projects (the portal app still enforces the
+    allowlist fail-closed at login).
+  EOT
+  type        = bool
+  default     = true
+}
+
+# Transactional email (PLAT-002, #671). GCP has no native SES equivalent, so a
+# GCP deployment sends through an operator-chosen SaaS (SendGrid/Mailgun) via
+# django-anymail. Email is OPTIONAL: leave email_backend empty (the default) to
+# fall back to the console backend with no Secret Manager secret created. When
+# set, an unseeded Secret Manager secret is created for the ESP API key; the
+# operator populates it out-of-band (it is never committed). See the GCP
+# Terraform README.
+variable "email_backend" {
+  description = "Django EMAIL_BACKEND for GCP; empty = console fallback (no email secret created)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = contains(
+      ["", "anymail.backends.sendgrid.EmailBackend", "anymail.backends.mailgun.EmailBackend"],
+      var.email_backend,
+    )
+    error_message = "email_backend must be empty, the SendGrid, or the Mailgun anymail backend."
+  }
+}
+
+variable "email_from_address" {
+  description = "DEFAULT_FROM_EMAIL for outbound mail when email_backend is set."
+  type        = string
+  default     = ""
+}
+
+variable "email_sender_domain" {
+  description = "Mailgun sender domain (MAILGUN_SENDER_DOMAIN); ignored for SendGrid."
+  type        = string
+  default     = ""
+}
+
 variable "range_provisioner_ports" {
   description = "TCP ports the platform provisioner is allowed to reach on the range VPC. Used to construct the range-allow-platform-provisioner firewall rule. The range VPC otherwise denies all ingress (ADR-008-R4)."
   type        = list(number)
-  # Provisioner-to-range protocols today: SSH (22) for Linux range VMs,
-  # RDP (3389) for Windows DC, and Guacamole websocket port (8080) for
-  # remote display when proxied from the platform side. Update the list
-  # when a new provisioner protocol is introduced.
-  default = [22, 3389, 8080]
+  # Provisioner-to-range protocols today: SSH (22) for Linux range VMs and the
+  # Windows DC's setup SSH, RDP (3389) for Windows, Guacamole websocket port
+  # (8080) for remote display when proxied from the platform side, and 2222 —
+  # the Docker-host management sshd port (config.host_mgmt_ssh_port) used by
+  # Polaris range hosts, whose participant container binds host :22 and so
+  # forces the host sshd the provisioner drives onto a dedicated port. Update
+  # the list when a new provisioner protocol is introduced.
+  default = [22, 3389, 8080, 2222]
 
   validation {
     condition     = length(var.range_provisioner_ports) > 0
@@ -368,4 +416,68 @@ variable "range_egress_allowed_cidrs" {
     )
     error_message = "range_egress_allowed_cidrs must be a list of canonical CIDR network addresses (IPv4 or IPv6) with no duplicates; default-route prefixes (parsed prefix length 0, e.g. 0.0.0.0/0, ::/0, 0.0.0.0/00) and host-bits-set inputs are rejected (the platform contract; see docs/architecture/range-egress-ip-allowlist.md)."
   }
+}
+
+# ------------------------------------------------------------------------------
+# Messaging DLQ / Retry / Alerting (parity with AWS portal/messaging module)
+# ------------------------------------------------------------------------------
+
+variable "messaging_enable_dlq" {
+  description = "Enable dead-letter topic, retention subscription, and dead_letter_policy on platform event subscriptions."
+  type        = bool
+  default     = true
+}
+
+variable "messaging_max_delivery_attempts" {
+  description = "Number of delivery attempts before a message moves to the dead-letter topic. GCP minimum is 5."
+  type        = number
+  default     = 5
+}
+
+variable "messaging_dlq_retention" {
+  description = "Message retention duration for the dead-letter subscription (e.g. '1209600s' = 14 days)."
+  type        = string
+  default     = "1209600s"
+}
+
+variable "messaging_retry_min_backoff" {
+  description = "Minimum backoff for the subscription retry policy (e.g. '10s')."
+  type        = string
+  default     = "10s"
+}
+
+variable "messaging_retry_max_backoff" {
+  description = "Maximum backoff for the subscription retry policy (e.g. '600s')."
+  type        = string
+  default     = "600s"
+}
+
+variable "messaging_enable_alarms" {
+  description = "Enable Cloud Monitoring alert policies for platform event subscription monitoring."
+  type        = bool
+  default     = false
+}
+
+variable "messaging_alarm_queue_depth_threshold" {
+  description = "Alert threshold for num_undelivered_messages on source subscriptions."
+  type        = number
+  default     = 100
+}
+
+variable "messaging_alarm_message_age_threshold" {
+  description = "Alert threshold in seconds for oldest_unacked_message_age on source subscriptions."
+  type        = number
+  default     = 300
+}
+
+variable "messaging_alarm_dlq_threshold" {
+  description = "Alert threshold for messages visible in the dead-letter subscription."
+  type        = number
+  default     = 1
+}
+
+variable "messaging_notification_channels" {
+  description = "Cloud Monitoring notification channel resource IDs for messaging alerts."
+  type        = list(string)
+  default     = []
 }

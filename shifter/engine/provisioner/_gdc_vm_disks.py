@@ -80,13 +80,64 @@ def _build_vm_manifest(
     namespace: str,
     vm_name: str,
     disk_name: str,
-    user_data: str,
+    user_data_secret_name: str,
     labels: dict[str, str],
     network: _VMNetworkSpec,
     compute: _VMComputeSpec,
 ) -> dict[str, Any]:
     """Build the ``VirtualMachine`` custom resource manifest."""
     prefix_length = network.subnet_cidr.split("/", 1)[1]
+    spec: dict[str, Any] = {
+        "osType": compute.os_label,
+        "compute": {
+            "cpu": {"vcpus": compute.vcpus},
+            "memory": {"capacity": compute.memory},
+        },
+        "interfaces": [
+            {
+                "name": "eth0",
+                "networkName": network.network_name,
+                "ipAddresses": [f"{network.static_ip}/{prefix_length}"],
+                "default": True,
+            }
+        ],
+        "disks": [
+            {
+                "boot": True,
+                "autoDelete": False,
+                "virtualMachineDiskName": disk_name,
+            }
+        ],
+    }
+    # GDC's VM webhook forbids cloudInit on Windows VMs ("CloudInit is only
+    # supported for Linux VMs"). The NoCloud seed carries the Linux host-key /
+    # authorized_keys / first-boot script. Windows has no cloud-init, so the
+    # static IP from the interface spec is applied by the GDC guest agent (see
+    # autoInstallGuestAgent below), not by a seed.
+    if compute.os_label == "Linux":
+        spec["cloudInit"] = {
+            "noCloud": {
+                "secretRef": {"name": user_data_secret_name},
+            }
+        }
+    else:
+        # Windows guests need UEFI. The firmware bootloader defaults to legacy
+        # BIOS (SeaBIOS), which cannot boot the GCE Windows Server 2022 image
+        # (UEFI/GPT, no MBR boot code) -> "No bootable device". The Linux guest
+        # images support legacy BIOS, so only Windows opts into UEFI.
+        # Secure Boot is disabled: GDC's OVMF has no Microsoft UEFI CA keys
+        # enrolled, so with it on the firmware rejects the (MS-signed) Windows
+        # bootloader with "Access Denied" -> "No bootable option or device".
+        spec["firmware"] = {"bootloader": {"type": "uefi", "enableSecureBoot": False}}
+        # Windows has no cloud-init on GDC, so the assigned NIC IP (from the
+        # interface spec above) is applied by the GDC guest agent. Enabling
+        # autoInstallGuestAgent attaches the agent installer + config disks; the
+        # golden image's baked guest-agent-launcher task (registered by the
+        # agent install.ps1 during the image build) runs at each boot, copies
+        # the agent + range config off those disks, and applies the static IP.
+        # Without this the DC boots but is network-invisible (no IP on the vxlan),
+        # so LDAP/Kerberos/SMB are unreachable and AD attacks cannot run.
+        spec["autoInstallGuestAgent"] = True
     return {
         "apiVersion": f"{_VM_GROUP}/{_VM_VERSION}",
         "kind": "VirtualMachine",
@@ -95,31 +146,5 @@ def _build_vm_manifest(
             "namespace": namespace,
             "labels": labels,
         },
-        "spec": {
-            "osType": compute.os_label,
-            "compute": {
-                "cpu": {"vcpus": compute.vcpus},
-                "memory": {"capacity": compute.memory},
-            },
-            "interfaces": [
-                {
-                    "name": "eth0",
-                    "networkName": network.network_name,
-                    "ipAddresses": [f"{network.static_ip}/{prefix_length}"],
-                    "default": True,
-                }
-            ],
-            "disks": [
-                {
-                    "boot": True,
-                    "autoDelete": False,
-                    "virtualMachineDiskName": disk_name,
-                }
-            ],
-            "cloudInit": {
-                "noCloud": {
-                    "userData": user_data,
-                }
-            },
-        },
+        "spec": spec,
     }

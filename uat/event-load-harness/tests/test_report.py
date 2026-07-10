@@ -3,6 +3,7 @@
 import pytest
 
 from event_load_harness.config import RunConfig
+from event_load_harness.metrics.base import MetricsResult, MetricValue
 from event_load_harness.metrics.client_only import ClientOnlyAdapter
 from event_load_harness.report import (
     Conclusion,
@@ -54,6 +55,13 @@ def _stats():
     return agg.summary()
 
 
+def _high_http_latency_stats():
+    agg = Aggregator()
+    for i in range(20):
+        agg.add(RouteResult("page:dashboard", "http", ok=True, status_code=200, latency_ms=1000.0 + i))
+    return agg.summary()
+
+
 def _render(**overrides):
     args = {
         "config": _config(),
@@ -71,6 +79,45 @@ def _render(**overrides):
     }
     args.update(overrides)
     return render_envelope(**args)
+
+
+def _aws_metrics(**values):
+    metrics = {
+        "rds_instance.databaseconnections": MetricValue(
+            "rds_instance.databaseconnections",
+            values.get("avg_connections", 12.0),
+            "conn",
+            "AWS/RDS DatabaseConnections (Average)",
+            is_proxy=True,
+        ),
+        "rds_instance.databaseconnections_peak": MetricValue(
+            "rds_instance.databaseconnections_peak",
+            values.get("peak_connections", 30.0),
+            "conn",
+            "AWS/RDS DatabaseConnections (Maximum)",
+            is_proxy=True,
+        ),
+        "rds_instance.connection_churn_proxy": MetricValue(
+            "rds_instance.connection_churn_proxy",
+            values.get("churn", 0.8),
+            "conn/s",
+            "AWS/RDS DatabaseConnections (sample-to-sample absolute delta lower-bound proxy)",
+            is_proxy=True,
+        ),
+        "rds_instance.cpuutilization": MetricValue(
+            "rds_instance.cpuutilization",
+            values.get("cpu", 35.0),
+            "percent",
+            "AWS/RDS CPUUtilization (Average)",
+        ),
+    }
+    return MetricsResult(
+        provider="aws",
+        window_start="2026-06-14T00:00:00Z",
+        window_end="2026-06-14T00:05:00Z",
+        metrics=metrics,
+        gaps=[],
+    )
 
 
 def test_envelope_includes_run_parameters_and_target():
@@ -102,6 +149,39 @@ def test_envelope_lists_provider_gaps_explicitly():
     md = _render()
     assert "gap" in md.lower()
     assert "RDS" in md  # a named missing signal
+
+
+def test_envelope_includes_database_connection_posture_section():
+    md = _render(metrics=_aws_metrics())
+    assert "Database connection posture (#853)" in md
+    assert "Current Django posture: `CONN_MAX_AGE=0`" in md
+    assert "RDS average connections: 12.0 conn" in md
+    assert "RDS peak connections: 30.0 conn" in md
+    assert "RDS connection churn proxy: 0.8 conn/s" in md
+    assert "lower-bound proxy" in md
+
+
+def test_db_posture_recommends_no_change_when_evidence_is_not_material():
+    md = _render(metrics=_aws_metrics(churn=0.05, cpu=20.0, peak_connections=8.0))
+    assert "Recommendation: keep the current posture" in md
+
+
+def test_db_posture_requires_churn_rds_pressure_and_http_latency_together():
+    high_churn_and_cpu_only = _render(metrics=_aws_metrics(churn=2.0, cpu=80.0, peak_connections=100.0))
+    assert "Recommendation: keep the current posture" in high_churn_and_cpu_only
+
+    all_signals = _render(
+        stats_summary=_high_http_latency_stats(),
+        metrics=_aws_metrics(churn=2.0, cpu=80.0, peak_connections=100.0),
+    )
+    assert "material candidate contributor" in all_signals
+
+
+def test_db_posture_names_missing_metrics_instead_of_guessing():
+    md = _render()
+    assert "Database connection posture (#853)" in md
+    assert "not enough RDS connection evidence" in md
+    assert "Run with `--metric-source aws --aws-rds" in md
 
 
 def test_envelope_states_supported_concurrency_conclusion():

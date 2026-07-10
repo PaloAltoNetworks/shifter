@@ -13,6 +13,10 @@ Detailed guides for each Shifter feature.
 - [CTF](ctf) - Capture-the-flag events with scored challenges and automated provisioning
 - [CTF Organizer Guide](ctf-organizer-guide) - Run guide with walkthroughs, hints, and timing
 
+## Governance
+
+- [Risk Register](risk-register) - Track security risks with severity, status, comments, and audit history
+
 ## Advanced Features
 
 - [Credentials](credentials) - Manage SCM and deployment profile credentials

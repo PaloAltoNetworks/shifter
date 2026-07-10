@@ -49,12 +49,11 @@
             <div class="col-md-4 mb-4">
                 <!-- Countdown Timer -->
                 {% if event.event_start and event.event_end %}
-                    <div class="card mb-3"
+                    <div class="card mb-3 d-none"
                          id="ctf-countdown-card"
                          data-event-start="{{ event.event_start|date:'c' }}"
                          data-event-end="{{ event.event_end|date:'c' }}"
-                         data-event-status="{{ event.status }}"
-                         style="display:none">
+                         data-event-status="{{ event.status }}">
                         <div class="card-body text-center">
                             <div id="ctf-countdown-label" class="text-muted small mb-1">
                             </div>

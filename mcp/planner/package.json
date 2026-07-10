@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "start": "node index.js",
     "test": "node --test lib.test.js",
@@ -14,7 +17,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1"
   },
   "devDependencies": {
-    "eslint": "^9.39.2",
-    "eslint-plugin-security": "^3.0.1"
+    "eslint": "^10.3.0",
+    "eslint-plugin-security": "^4.0.0"
   }
 }

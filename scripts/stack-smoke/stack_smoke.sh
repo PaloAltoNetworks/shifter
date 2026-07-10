@@ -72,6 +72,8 @@ MIGRATE=shifter-smoke-migrate
 read -r -d '' SMOKE_WORKER_SPECS_DEFAULT <<'SPECS' || true
 worker-cms|/tmp/worker-cms-heartbeat|python manage.py run_worker --queue cms --wait-time 1
 ctf-scheduler|/tmp/ctf-scheduler-heartbeat|python manage.py run_ctf_scheduler --poll-interval 1
+guacamole-bootstrap-prune|/tmp/guacamole-bootstrap-prune-heartbeat|python manage.py run_guacamole_bootstrap_prune --poll-interval 1
+aces-operation-record-prune|/tmp/aces-operation-record-prune-heartbeat|python manage.py run_aces_operation_record_prune --poll-interval 1
 SPECS
 SMOKE_WORKER_SPECS="${SMOKE_WORKER_SPECS:-$SMOKE_WORKER_SPECS_DEFAULT}"
 
@@ -192,15 +194,27 @@ wait_for 60 "redis" docker exec "$REDIS" redis-cli ping
 # Common runtime env: enough to satisfy production settings import and the real
 # entrypoint without any cloud access. Mirrors deploy_portal.sh env names.
 declare -a common_env=(
+  -e ENVIRONMENT=production
   -e "DB_HOST=${PG}" -e DB_PORT=5432 -e "DB_NAME=${DB_NAME}" -e "DB_USER=${DB_USER}" -e "DB_PASSWORD=${DB_PASSWORD}"
   -e "DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}"
   -e "FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY}"
   -e "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,${WEB}"
   -e OIDC_RP_CLIENT_ID=stack-smoke-client
+  -e OIDC_RP_CLIENT_SECRET=stack-smoke-secret
   -e OIDC_ISSUER_URL=https://issuer.example.test
   -e OIDC_AUTH_DOMAIN=https://auth.example.test
+  # Production settings require EMAIL_BACKEND to be explicit (config/_email.py);
+  # real deploys pass it from rendered config. The smoke sends no mail, so use
+  # the console backend (the same value config/_email.py uses as its dev default)
+  # to satisfy the production import without any ESP/SES dependency.
+  -e EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
   -e "REDIS_HOST=${REDIS}" -e REDIS_PORT=6379
   -e CHANNEL_LAYER_BACKEND=redis
+  # The shared notification websocket (SMOKE_WS_PATH) is parked by default
+  # (#941); enable it here so the ws_handshake probe has a routed consumer to
+  # accept through the real ASGI stack. This exercises the enabled path in the
+  # built image, not the production default.
+  -e WEBSOCKET_NOTIFICATIONS_ENABLED=true
   -e "AWS_ENDPOINT_URL=http://${ELASTICMQ}:9324"
   -e AWS_ACCESS_KEY_ID=stack-smoke -e AWS_SECRET_ACCESS_KEY=stack-smoke -e AWS_DEFAULT_REGION=us-east-2
   -e "SQS_CMS_URL=http://${ELASTICMQ}:9324/000000000000/cms"

@@ -14,3 +14,13 @@ output "security_group_id" {
   description = "ID of the Redis security group"
   value       = aws_security_group.this.id
 }
+
+output "redis_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the Redis AUTH token. Empty on the single-node path (no AUTH); set on the replication-group / in-transit-encryption path (#938)."
+  value       = var.enable_replication ? aws_secretsmanager_secret.redis_auth[0].arn : ""
+}
+
+output "redis_tls_enabled" {
+  description = "Whether the active Redis path uses in-transit encryption + AUTH. True for the replication-group path (#938), false for the single-node plaintext path."
+  value       = var.enable_replication
+}

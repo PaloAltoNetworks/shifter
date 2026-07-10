@@ -182,16 +182,22 @@ def _verify_upload_token_or_raise(upload_token: str, user_id: int) -> dict[str, 
         raise CMSError("Invalid upload token") from e
 
 
-def _verify_upload_object_or_raise(s3_key: str, expected_size: int, user_id: int) -> None:
-    """Verify the S3 object exists and its byte length matches the signed expectation."""
+def _verify_upload_object_or_raise(s3_key: str, expected_size: int, user_id: int) -> dict[str, Any]:
+    """Verify the S3 object exists and its byte length matches the signed expectation.
+
+    Returns the captured object identity (``content_length`` + provider identity
+    fields such as ``etag`` / ``generation``) so completion can bind the later
+    immutable copy to the exact version validated here.
+    """
     from cms.assets.s3 import S3Error, verify_s3_object_exists
 
     try:
-        actual_size, _etag = verify_s3_object_exists(s3_key)
+        identity = verify_s3_object_exists(s3_key)
     except S3Error as e:
         logger.exception("complete_upload: S3 verification failed for user_id=%s", user_id)
         raise CMSError("Upload not found in storage") from e
 
+    actual_size = identity["content_length"]
     if actual_size != expected_size:
         logger.error(
             "complete_upload: size mismatch for user_id=%s - expected=%s, actual=%s",
@@ -200,6 +206,8 @@ def _verify_upload_object_or_raise(s3_key: str, expected_size: int, user_id: int
             actual_size,
         )
         raise CMSError(f"File size mismatch: expected {expected_size}, got {actual_size}")
+
+    return identity
 
 
 def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_id: int) -> None:
@@ -247,18 +255,65 @@ def _inspect_upload_header_or_raise(payload: dict[str, Any], s3_key: str, user_i
         raise CMSError("Uploaded content does not match the declared installer format") from exc
 
 
+def _install_validated_upload_or_raise(
+    staging_key: str,
+    filename: str,
+    identity: dict[str, Any],
+    user_id: int,
+) -> str:
+    """Copy the validated staging object to an immutable install key.
+
+    Closes the TOCTOU window (issue #1181): the still-valid presigned PUT can
+    overwrite the staging object after validation, so binding the installed
+    ``AgentConfig`` to the mutable staging key would let unvalidated bytes ship.
+    Instead, conditionally copy the exact validated version to a fresh
+    server-controlled install key and persist only that key. A precondition
+    failure means the bytes changed between check and use — a security signal, so
+    finalize nothing. Deleting the staging object afterwards is best-effort
+    hygiene (it removes the object the presigned PUT still targets).
+
+    Returns the install key on success.
+    """
+    from cms.assets.s3 import S3Error, delete_agent, generate_install_key, install_agent_object
+
+    install_key = generate_install_key(user_id, filename)
+    try:
+        install_agent_object(staging_key, install_key, identity)
+    except S3Error as exc:
+        logger.warning(
+            "complete_upload: immutable install failed for user_id=%s staging=%s install=%s",
+            user_id,
+            safe_log_value(staging_key),
+            safe_log_value(install_key),
+        )
+        raise CMSError("Upload could not be finalized; please re-upload") from exc
+
+    try:
+        delete_agent(staging_key)
+    except S3Error:
+        logger.warning(
+            "complete_upload: staging cleanup after install failed for user_id=%s staging=%s",
+            user_id,
+            safe_log_value(staging_key),
+        )
+
+    return install_key
+
+
 def complete_upload(user: User, upload_token: str) -> AgentConfig:
     """Verify and finalize upload after file has been uploaded to S3.
 
     Verifies the upload token, checks the S3 object exists with correct size,
-    runs server-side header inspection (issue #696), tags it as completed,
-    and creates the agent record.
+    runs server-side header inspection (issue #696), then copies the exact
+    validated bytes to an immutable install key (issue #1181) before tagging it
+    completed and creating the agent record bound to that install key.
 
     Raises:
         TypeError: If user is None or invalid type.
         ValueError: If user is unsaved or upload_token is empty.
         CMSError: If token is invalid/expired, S3 verification fails, size
-            mismatch, or header inspection rejects the upload.
+            mismatch, header inspection rejects the upload, or the validated
+            object changed before it could be immutably installed.
     """
     from cms.assets.s3 import tag_s3_object
     from cms.assets.services import AgentUploadSpec, create_agent
@@ -271,15 +326,16 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
         payload = _verify_upload_token_or_raise(upload_token, user.id)
         s3_key = str(payload["s3_key"])
         expected_size = int(payload["file_size"])
-        _verify_upload_object_or_raise(s3_key, expected_size, user.id)
+        identity = _verify_upload_object_or_raise(s3_key, expected_size, user.id)
         _inspect_upload_header_or_raise(payload, s3_key, user.id)
 
-        tag_s3_object(s3_key, {"status": "completed"})
+        install_key = _install_validated_upload_or_raise(s3_key, str(payload["filename"]), identity, user.id)
+        tag_s3_object(install_key, {"status": "completed"})
         agent = create_agent(
             user=user,
             spec=AgentUploadSpec(
                 name=payload["name"],
-                s3_key=s3_key,
+                s3_key=install_key,
                 filename=payload["filename"],
                 os_slug=payload["os_slug"],
                 file_size=expected_size,

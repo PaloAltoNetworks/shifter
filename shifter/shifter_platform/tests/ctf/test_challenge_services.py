@@ -316,6 +316,33 @@ class TestMultiFlagVerification:
         assert verify_flag(challenge, "FLAG{legacy}") is True
         assert verify_flag(challenge, "FLAG{wrong}") is False
 
+    def test_verify_flag_sentinel_hash_fails_loudly(self, ctf_event_draft, caplog):
+        """#1146: a multi-flag challenge whose flag rows are all gone leaves a
+        sentinel flag_hash; verify_flag must not silently treat it as a hash."""
+        import logging
+
+        challenge = CTFChallenge.objects.create(
+            event=ctf_event_draft,
+            name="Emptied Multi-flag",
+            description="All CTFFlag rows removed; sentinel flag_hash remains",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="multi-flag",
+        )
+        assert challenge.flags.count() == 0
+
+        # App loggers set propagate=False, so attach caplog's handler directly to
+        # the service logger to capture the loud error.
+        svc_logger = logging.getLogger("ctf.services.challenge")
+        svc_logger.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.ERROR, logger="ctf.services.challenge"):
+                assert verify_flag(challenge, "anything") is False
+        finally:
+            svc_logger.removeHandler(caplog.handler)
+        assert "every submission will be rejected" in caplog.text
+
     def test_verify_flag_static_case_insensitive(self, ctf_event_draft):
         """Static flag with case_sensitive=False normalizes to lowercase."""
         challenge = CTFChallenge.objects.create(
@@ -518,10 +545,8 @@ class TestFlagServiceFunctions:
                 actor_id=challenge.event.created_by_id,
             )
 
-    def test_add_flag_rejects_active_event(self, ctf_event_active):
-        """add_flag rejects adding to non-modifiable event."""
-        from ctf.exceptions import CTFStateError
-
+    def test_add_flag_allows_active_event(self, ctf_event_active):
+        """add_flag allows live flag repair on active events."""
         challenge = CTFChallenge.objects.create(
             event=ctf_event_active,
             name="Active Flag Test",
@@ -531,8 +556,12 @@ class TestFlagServiceFunctions:
             difficulty=ChallengeDifficulty.EASY.value,
             flag_hash="placeholder",
         )
-        with pytest.raises(CTFStateError):
-            add_flag(challenge.pk, {"flag": "FLAG{test}"}, actor_id=challenge.event.created_by_id)
+        flag_obj = add_flag(
+            challenge.pk,
+            {"flag": "FLAG{test}"},
+            actor_id=challenge.event.created_by_id,
+        )
+        assert flag_obj.pk is not None
 
     def test_add_flag_requires_flag_value(self, ctf_event_draft):
         """add_flag requires non-empty flag value."""
@@ -570,10 +599,8 @@ class TestFlagServiceFunctions:
         assert not CTFFlag.objects.filter(pk=flag_id).exists()
         assert CTFFlag.all_objects.filter(pk=flag_id).exists()
 
-    def test_remove_flag_rejects_active_event(self, ctf_event_draft):
-        """remove_flag rejects removing from non-modifiable event."""
-        from ctf.exceptions import CTFStateError
-
+    def test_remove_flag_allows_active_event(self, ctf_event_draft):
+        """remove_flag allows live flag repair after event goes active."""
         challenge = CTFChallenge.objects.create(
             event=ctf_event_draft,
             name="Remove Active Flag Test",
@@ -585,12 +612,11 @@ class TestFlagServiceFunctions:
         )
         flag_obj = add_flag(challenge.pk, {"flag": "FLAG{test}"}, actor_id=challenge.event.created_by_id)
 
-        # Change event to active
         ctf_event_draft.status = EventStatus.ACTIVE.value
         ctf_event_draft.save()
 
-        with pytest.raises(CTFStateError):
-            remove_flag(flag_obj.pk, actor_id=flag_obj.challenge.event.created_by_id)
+        remove_flag(flag_obj.pk, actor_id=flag_obj.challenge.event.created_by_id)
+        assert not CTFFlag.objects.filter(pk=flag_obj.pk).exists()
 
     def test_remove_flag_not_found(self, db):
         """remove_flag raises CTFNotFoundError for missing flag."""

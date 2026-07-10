@@ -15,3 +15,8 @@ output "ssm_commands" {
     "aws ssm start-session --target ${id} --region ${var.region}"
   ]
 }
+
+output "runner_alerts_topic_arn" {
+  description = "ARN of the SNS topic that receives runner-health alarm notifications. Subscribe email/Slack/Teams here."
+  value       = aws_sns_topic.runner_alerts.arn
+}

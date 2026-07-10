@@ -6,13 +6,17 @@ and scoring-related model edge cases. All ORM calls are mocked.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from django.utils import timezone
 
+from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus, ParticipantStatus
+from ctf.models import CTFChallenge, CTFEvent, CTFParticipant, CTFSubmission
 from ctf.services.scoring import (
+    get_challenge_statistics,
     get_event_statistics,
 )
 
@@ -97,6 +101,102 @@ def mock_team_objects():
 # -----------------------------------------------------------------------------
 # calculate_score tests
 # -----------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestGetChallengeStatistics:
+    """DB-backed tests for challenge statistics."""
+
+    def test_solve_rate_uses_event_roster_denominator(
+        self,
+        ctf_event,
+        ctf_challenge,
+        ctf_participant,
+        second_participant_user,
+        organizer_user,
+    ):
+        """Solve rate is correct solves divided by the challenge event roster."""
+        second_solver = CTFParticipant.objects.create(
+            event=ctf_event,
+            user=second_participant_user,
+            email=second_participant_user.email,
+            name="Second Solver",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+        invited_idle = CTFParticipant.objects.create(
+            event=ctf_event,
+            email="idle@example.com",
+            name="Idle Invitee",
+            status=ParticipantStatus.INVITED.value,
+            invited_at=timezone.now(),
+        )
+        other_event = CTFEvent.objects.create(
+            name="Other Event",
+            created_by=organizer_user,
+            status=EventStatus.ACTIVE.value,
+            event_start=timezone.now() - timedelta(hours=1),
+            event_end=timezone.now() + timedelta(hours=7),
+            scenario_id=ctf_event.scenario_id,
+        )
+        CTFParticipant.objects.create(
+            event=other_event,
+            email="other@example.com",
+            name="Other Event Participant",
+            status=ParticipantStatus.INVITED.value,
+            invited_at=timezone.now(),
+        )
+
+        first_submission = CTFSubmission.objects.create(
+            participant=second_solver,
+            challenge=ctf_challenge,
+            submitted_flag="FLAG{correct-two}",
+            is_correct=True,
+            points_awarded=ctf_challenge.points,
+            attempt_number=1,
+        )
+        later_submission = CTFSubmission.objects.create(
+            participant=ctf_participant,
+            challenge=ctf_challenge,
+            submitted_flag="FLAG{correct-one}",
+            is_correct=True,
+            points_awarded=ctf_challenge.points,
+            attempt_number=1,
+        )
+        CTFSubmission.objects.filter(pk=first_submission.pk).update(
+            submitted_at=timezone.now() - timedelta(minutes=5),
+        )
+        CTFSubmission.objects.filter(pk=later_submission.pk).update(
+            submitted_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        stats = get_challenge_statistics(ctf_challenge.id)
+
+        assert invited_idle.event_id == ctf_event.id
+        assert stats["total_attempts"] == 2
+        assert stats["solve_count"] == 2
+        assert stats["solve_rate"] == pytest.approx(2 / 3)
+        assert stats["first_blood"]["participant_name"] == "Second Solver"
+
+    def test_solve_rate_is_zero_without_event_participants(self, ctf_event):
+        """A challenge with no event roster has a zero solve rate."""
+        challenge = CTFChallenge.objects.create(
+            event=ctf_event,
+            name="Unplayed Challenge",
+            description="No participants",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder",
+            flag_format="FLAG{...}",
+        )
+        CTFParticipant.objects.filter(event=ctf_event).delete()
+
+        stats = get_challenge_statistics(challenge.id)
+
+        assert stats["total_attempts"] == 0
+        assert stats["solve_count"] == 0
+        assert stats["solve_rate"] == 0
 
 
 class TestGetEventStatistics:

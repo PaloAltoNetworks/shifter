@@ -119,9 +119,14 @@ Users copy-pasting magic-link URLs out of printouts/emails produced "invalid tok
 
 Keeping the magic links distributed early but gated until event start: add an ALB listener rule with a `path-pattern: /ctf/register*` condition and a `fixed-response` action returning 503 with a "opens at X" message. Takes seconds to add via CLI, same to remove. Clean, zero app-layer code.
 
-### Token TTL ceiling is `min(event_end, now + MAGIC_LINK_EXPIRY_HOURS)`
+### Magic-link expiry follows `event_end`
 
-Generated tokens have an expiry baked in at save time. Extending `event_end` after the fact doesn't extend already-issued tokens — you'd need `resend_invite` to mint fresh ones. Plan `event_end` generously upfront.
+Generated participant magic-link tokens are reusable and expire at the event end
+by default, not after the short fallback TTL. Operators can set
+`MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS` when an unusually long event needs a stricter
+bearer-token ceiling. The expiry is still baked into the participant row at save
+time, so extending `event_end` after links go out still requires `resend_invite`
+to mint fresh links with the new end time.
 
 ---
 
@@ -159,7 +164,7 @@ Building a participant→range→instance map once at the start (dumped to `/tmp
 2. **Scenario DNS:** forward unknown queries to `169.254.169.253` so AWS endpoints resolve privately.
 3. **Model onboarding preflight:** a script that assumes the range instance role and invokes every model your shard table references. Block go/no-go on it.
 4. **Shard table in code, not in a scratchpad:** current `SHARD_TABLE` in `apply_kali_bedrock_shard.py` should move to the provisioner's bootstrap plan so every new range is born with the right config.
-5. **Event-end + token TTL:** set `MAGIC_LINK_EXPIRY_HOURS` high (48+) and set `event_end` conservatively; makes links robust to schedule slips.
+5. **Event-end magic links:** set `event_end` conservatively before sending participant links; resending links after a schedule slip refreshes their baked-in expiry.
 6. **Orchestrator:** default to `--wave-ec2-gate` with `--final-wait` rather than sleep-only; makes timing predictable and minimizes wall clock.
 7. **Briefing deck:** auto-inject the range-link grid as the final slide at provisioning time; don't hand-paste tokens.
 8. **Health check runs real invokes:** `claude -p "reply ok"` across all ranges as the green/red signal, not config file inspection.

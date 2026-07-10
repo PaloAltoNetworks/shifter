@@ -23,7 +23,7 @@ set -euo pipefail
 # Extensibility seam: the monitored set, metric namespace, and restart grace are
 # named here so adding a worker is a one-line edit, not a new code path. The set
 # is the worker/scheduler containers only — never `portal`.
-MONITORED=(worker-cms worker-engine worker-mc ctf-scheduler)
+MONITORED=(worker-cms worker-engine worker-mc worker-outbox-drainer worker-reconciler ctf-scheduler guacamole-bootstrap-prune aces-operation-record-prune)
 NAMESPACE="Shifter/WorkerHealth"
 
 # Region + instance id from IMDSv2; no hard-coded environment-specific values.

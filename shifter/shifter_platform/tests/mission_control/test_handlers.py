@@ -8,6 +8,7 @@ boundary, so nothing first-party is patched.
 
 import asyncio
 import json
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -94,6 +95,9 @@ class TestProcessRangeEvent:
         assert msg["request_id"] == str(request_id)
         assert msg["new_status"] == ResourceStatus.PROVISIONING.value
         assert msg["error_message"] is None
+        assert msg["range_ref"]["request_id"] == str(request_id)
+        assert msg["range_ref"]["user_id"] == 42
+        assert msg["range_ref"]["status"] == ResourceStatus.PROVISIONING.value
 
     def test_includes_error_message_when_present(self):
         request_id = uuid4()
@@ -104,6 +108,7 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "request_id": str(request_id),
                     "new_status": ResourceStatus.FAILED.value,
+                    "user_id": 42,
                     "error_message": "Subnet exhausted",
                 }
             )
@@ -117,13 +122,118 @@ class TestProcessRangeEvent:
         assert _receive(layer, channel) is None
 
     def test_does_not_broadcast_when_request_id_missing(self):
-        # Subscribe broadly is not possible without a request_id group; assert the
-        # handler returns without raising and emits nothing on a fresh channel.
+        # No request_id → dropped. Spy on the channel-layer group_send (the
+        # external transport) and assert it is never called: the group name would
+        # be derived from the missing field (range_status_None), so listening on
+        # a hand-picked group could never catch a leaked broadcast.
         layer = get_channel_layer()
-        channel = f"recv-{uuid4()}"
-        async_to_sync(layer.group_add)("range_status_unknown", channel)
-        process_range_event(_sns({"event_type": "range.status.updated", "new_status": "ready"}))
+        with patch.object(layer, "group_send", wraps=layer.group_send) as spy:
+            process_range_event(_sns({"event_type": "range.status.updated", "new_status": "ready"}))
+        spy.assert_not_called()
+
+    def test_does_not_broadcast_when_user_id_missing(self):
+        request_id = uuid4()
+        layer, channel = _subscribe(range_event_group(str(request_id)))
+        process_range_event(
+            _sns(
+                {
+                    "event_type": "range.status.updated",
+                    "request_id": str(request_id),
+                    "new_status": ResourceStatus.READY.value,
+                }
+            )
+        )
         assert _receive(layer, channel) is None
+
+    def test_does_not_crash_on_non_string_request_id(self):
+        # A non-string request_id (numeric JSON, or a UUID object from a direct
+        # caller) must be dropped, not raise AttributeError from UUID(), and not
+        # broadcast (regression: codex review of #296, cycle 1).
+        layer = get_channel_layer()
+        with patch.object(layer, "group_send", wraps=layer.group_send) as spy:
+            process_range_event(
+                _sns(
+                    {
+                        "event_type": "range.status.updated",
+                        "request_id": 12345,
+                        "new_status": ResourceStatus.READY.value,
+                        "user_id": 42,
+                    }
+                )
+            )
+        spy.assert_not_called()
+
+    def test_does_not_broadcast_when_status_invalid(self):
+        request_id = uuid4()
+        layer, channel = _subscribe(range_event_group(str(request_id)))
+        process_range_event(
+            _sns(
+                {
+                    "event_type": "range.status.updated",
+                    "request_id": str(request_id),
+                    "new_status": "bogus_status",
+                    "user_id": 42,
+                }
+            )
+        )
+        assert _receive(layer, channel) is None
+
+
+class TestChannelLayerNoneGuard:
+    """MC fanout is advisory — a None channel layer must never crash the worker."""
+
+    def test_range_event_returns_without_crash_when_channel_layer_none(self):
+        """process_range_event returns (acks) when channel layer is not configured."""
+        from django.test import override_settings
+
+        request_id = uuid4()
+        with override_settings(CHANNEL_LAYERS={}):
+            # Must not raise AttributeError or any other exception
+            process_range_event(
+                _sns(
+                    {
+                        "event_type": "range.status.updated",
+                        "request_id": str(request_id),
+                        "new_status": ResourceStatus.READY.value,
+                        "user_id": 42,
+                    }
+                )
+            )
+
+    def test_ngfw_event_returns_without_crash_when_channel_layer_none(self):
+        """process_ngfw_event returns (acks) when channel layer is not configured."""
+        from django.test import override_settings
+
+        app_id = str(uuid4())
+        with override_settings(CHANNEL_LAYERS={}):
+            # Must not raise AttributeError or any other exception
+            process_ngfw_event(
+                _sns(
+                    {
+                        "event_type": EVENT_TYPE_NGFW,
+                        "app_id": app_id,
+                        "status": "ready",
+                    }
+                )
+            )
+
+    def test_range_event_still_broadcasts_when_channel_layer_configured(self):
+        """Normal path still group_sends when the channel layer is available."""
+        request_id = uuid4()
+        layer, channel = _subscribe(range_event_group(str(request_id)))
+        process_range_event(
+            _sns(
+                {
+                    "event_type": "range.status.updated",
+                    "request_id": str(request_id),
+                    "new_status": ResourceStatus.PROVISIONING.value,
+                    "user_id": 42,
+                }
+            )
+        )
+        msg = _receive(layer, channel)
+        assert msg is not None
+        assert msg["new_status"] == ResourceStatus.PROVISIONING.value
 
 
 class TestProcessNgfwEvent:
@@ -138,9 +248,13 @@ class TestProcessNgfwEvent:
         assert msg["status"] == "ready"
 
     def test_ignores_invalid_app_id(self):
-        layer, channel = _subscribe(ngfw_event_group("x"))
-        process_ngfw_event(_sns({"event_type": EVENT_TYPE_NGFW, "app_id": None}))
-        assert _receive(layer, channel) is None
+        # None app_id → dropped. Spy on group_send: the group name would be
+        # derived from the invalid field (ngfw_status_None), so a hand-picked
+        # group could never catch a leaked broadcast.
+        layer = get_channel_layer()
+        with patch.object(layer, "group_send", wraps=layer.group_send) as spy:
+            process_ngfw_event(_sns({"event_type": EVENT_TYPE_NGFW, "app_id": None}))
+        spy.assert_not_called()
 
 
 class TestProcessEventRouting:
@@ -153,6 +267,7 @@ class TestProcessEventRouting:
                     "event_type": "range.status.updated",
                     "request_id": str(request_id),
                     "new_status": ResourceStatus.READY.value,
+                    "user_id": 42,
                 }
             )
         )

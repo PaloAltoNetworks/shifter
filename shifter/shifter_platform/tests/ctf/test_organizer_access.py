@@ -9,12 +9,11 @@ All tests run WITHOUT @pytest.mark.django_db by mocking the ORM.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.http import HttpResponse
 from django.test import RequestFactory
+from django.urls import reverse
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -72,13 +71,6 @@ def _make_mock_user(*, pk: int = 1, email: str = "test@test.com", groups: set[st
     return user
 
 
-@dataclass(frozen=True)
-class _MockUserRole:
-    is_ctf_organizer: bool = False
-    is_ctf_participant: bool = False
-    active_ctf_event: object | None = None
-
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -127,29 +119,6 @@ def mock_event():
 
 
 @pytest.fixture
-def mock_participant_user():
-    """Mock user who is a CTF participant (not an organizer)."""
-    from shared.auth import CTF_PARTICIPANT_GROUP
-
-    return _make_mock_user(pk=30, email="participant@test.com", groups={CTF_PARTICIPANT_GROUP})
-
-
-@pytest.fixture
-def _patch_role_participant():
-    """Patch get_user_role to return participant role."""
-    role = _MockUserRole(is_ctf_participant=True)
-    with patch("ctf.views.get_user_role", return_value=role):
-        yield
-
-
-@pytest.fixture
-def _patch_no_brackets():
-    """Patch _resolve_bracket_filter to return empty bracket list (no DB)."""
-    with patch("ctf.views._resolve_bracket_filter", return_value=([], None, None)):
-        yield
-
-
-@pytest.fixture
 def _patch_empty_scoreboard():
     """Patch the scoreboard data accessors to return empty rankings (no DB)."""
     with (
@@ -185,21 +154,6 @@ def _patch_get_event(mock_event):
         yield m
 
 
-@pytest.fixture
-def _patch_role_organizer():
-    """Patch get_user_role to return organizer role."""
-    role = _MockUserRole(is_ctf_organizer=True)
-    with patch("ctf.views.get_user_role", return_value=role):
-        yield
-
-
-@pytest.fixture
-def _patch_render():
-    """Patch ctf.views.render to return a plain 200 response (skip template/context processors)."""
-    with patch("ctf.views.render", return_value=HttpResponse("ok", status=200)) as m:
-        yield m
-
-
 # ---------------------------------------------------------------------------
 # Helper to build an authenticated request
 # ---------------------------------------------------------------------------
@@ -218,7 +172,7 @@ def _get_request(rf: RequestFactory, user, path: str = "/fake/", method: str = "
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_patch_get_event", "_patch_role_organizer")
+@pytest.mark.usefixtures("_patch_get_event")
 class TestAdminViewOwnershipChecks:
     """Verify HTML admin views reject non-owning organizers with 403."""
 
@@ -270,7 +224,7 @@ class TestAdminViewOwnershipChecks:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_patch_get_event", "_patch_role_organizer")
+@pytest.mark.usefixtures("_patch_get_event")
 class TestAPIOwnershipChecks:
     """Verify API endpoints reject non-owning organizers with 403."""
 
@@ -328,55 +282,38 @@ class TestAPIOwnershipChecks:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_patch_get_event", "_patch_role_organizer", "_patch_render")
+@pytest.mark.django_db
 class TestOwnerCanAccess:
-    """Verify the owning organizer CAN access these views (not just that others can't)."""
+    """Verify the owning organizer CAN access these views (not just that others can't).
 
-    def test_range_list_allows_owner(self, rf, mock_owner_user):
-        from ctf.views import admin_range_list
+    Integration assertions (ADR-019): the owning ``organizer_user`` reaches each
+    surface for its own ``ctf_event`` through the test client and real template /
+    JSON rendering, instead of patching first-party ``render``/topology.
+    """
 
-        with patch("ctf.models.CTFParticipant.objects") as mock_objects:
-            mock_objects.filter.return_value.order_by.return_value = []
-            request = _get_request(rf, mock_owner_user)
-            response = admin_range_list(request, event_id=EVENT_ID)
-
+    def test_range_list_allows_owner(self, client, organizer_user, ctf_event):
+        client.force_login(organizer_user)
+        response = client.get(reverse("ctf:admin_range_list", kwargs={"event_id": ctf_event.id}))
         assert response.status_code == 200
 
-    def test_notification_list_allows_owner(self, rf, mock_owner_user):
-        from ctf.views import admin_notification_list
-
-        with patch("ctf.models.CTFNotification.objects") as mock_objects:
-            mock_objects.filter.return_value.order_by.return_value = []
-            request = _get_request(rf, mock_owner_user)
-            response = admin_notification_list(request, event_id=EVENT_ID)
-
+    def test_notification_list_allows_owner(self, client, organizer_user, ctf_event):
+        client.force_login(organizer_user)
+        response = client.get(reverse("ctf:admin_notification_list", kwargs={"event_id": ctf_event.id}))
         assert response.status_code == 200
 
-    def test_notification_create_allows_owner(self, rf, mock_owner_user):
-        from ctf.views import admin_notification_create
-
-        request = _get_request(rf, mock_owner_user)
-        response = admin_notification_create(request, event_id=EVENT_ID)
+    def test_notification_create_allows_owner(self, client, organizer_user, ctf_event):
+        client.force_login(organizer_user)
+        response = client.get(reverse("ctf:admin_notification_create", kwargs={"event_id": ctf_event.id}))
         assert response.status_code == 200
 
-    def test_api_range_list_allows_owner(self, rf, mock_owner_user):
-        from ctf.views import api_range_list
-
-        with patch("ctf.models.CTFParticipant.objects") as mock_objects:
-            mock_objects.filter.return_value.order_by.return_value = []
-            request = _get_request(rf, mock_owner_user)
-            response = api_range_list(request, event_id=EVENT_ID)
-
+    def test_api_range_list_allows_owner(self, client, organizer_user, ctf_event):
+        client.force_login(organizer_user)
+        response = client.get(reverse("ctf:api_range_list", kwargs={"event_id": ctf_event.id}))
         assert response.status_code == 200
 
-    def test_api_notification_list_allows_owner(self, rf, mock_owner_user):
-        from ctf.views import api_notification_list
-
-        with patch("ctf.models.CTFNotification.objects") as mock_objects:
-            mock_objects.filter.return_value.order_by.return_value = []
-            request = _get_request(rf, mock_owner_user)
-            response = api_notification_list(request, event_id=EVENT_ID)
-
+    def test_api_notification_list_allows_owner(self, client, organizer_user, ctf_event):
+        client.force_login(organizer_user)
+        response = client.get(reverse("ctf:api_notification_list", kwargs={"event_id": ctf_event.id}))
         assert response.status_code == 200
 
 
@@ -385,7 +322,7 @@ class TestOwnerCanAccess:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_patch_get_event", "_patch_role_organizer")
+@pytest.mark.usefixtures("_patch_get_event")
 class TestAPIChallengeOwnershipChecks:
     """Verify api_challenge_list and api_challenge_detail reject non-owners with 403.
 
@@ -480,7 +417,6 @@ class TestAPIScoreboardAuthorization:
         rf,
         mock_non_owner_user,
         _patch_get_event,
-        _patch_role_organizer,
         _patch_participant_membership_false,
     ):
         """A CTF organizer who does not own this event AND is not registered
@@ -493,52 +429,54 @@ class TestAPIScoreboardAuthorization:
         response = api_scoreboard(request, event_id=EVENT_ID)
         assert response.status_code == 403
 
+    @pytest.mark.django_db
     def test_denies_unrelated_participant(
         self,
         rf,
-        mock_participant_user,
+        participant_user,
         _patch_get_event,
-        _patch_role_participant,
         _patch_participant_membership_false,
     ):
+        # Real participant_user -> real get_user_role/profile (no first-party
+        # role patch); membership gate stays mocked at the service boundary.
         from ctf.views import api_scoreboard
 
-        request = _get_request(rf, mock_participant_user)
+        request = _get_request(rf, participant_user)
         response = api_scoreboard(request, event_id=EVENT_ID)
         assert response.status_code == 403
 
+    @pytest.mark.django_db
     def test_allows_owner_organizer(
         self,
         rf,
         mock_owner_user,
         _patch_get_event,
-        _patch_role_organizer,
-        _patch_no_brackets,
         _patch_empty_scoreboard,
     ):
+        # django_db lets the real _resolve_bracket_filter run (no brackets in DB)
+        # instead of patching first-party topology.
         from ctf.views import api_scoreboard
 
         request = _get_request(rf, mock_owner_user)
         response = api_scoreboard(request, event_id=EVENT_ID)
         assert response.status_code == 200
 
+    @pytest.mark.django_db
     def test_allows_assigned_participant(
         self,
         rf,
-        mock_participant_user,
+        participant_user,
         _patch_get_event,
-        _patch_role_participant,
         _patch_participant_membership_true,
-        _patch_no_brackets,
         _patch_empty_scoreboard,
     ):
         from ctf.views import api_scoreboard
 
-        request = _get_request(rf, mock_participant_user)
+        request = _get_request(rf, participant_user)
         response = api_scoreboard(request, event_id=EVENT_ID)
         assert response.status_code == 200
 
-    def test_returns_404_when_event_missing_before_403(self, rf, mock_non_owner_user, _patch_role_organizer):
+    def test_returns_404_when_event_missing_before_403(self, rf, mock_non_owner_user):
         """Probing UUIDs must not get a different shape after the fix.
 
         404 must come BEFORE the new 403 check so a stranger probing event UUIDs
@@ -569,36 +507,21 @@ class TestAPIUseHint:
     challenge_id to the service, and malformed body input gets a 400.
     """
 
-    def test_api_use_hint_passes_url_challenge_id_to_service(self, rf):
+    @pytest.mark.django_db
+    def test_api_use_hint_passes_url_challenge_id_to_service(
+        self, rf, participant_user, ctf_participant, ctf_challenge
+    ):
         """The view MUST forward the URL `challenge_id` as
         `expected_challenge_id` so the service-side coherence check fires.
 
-        If this wiring breaks, a hint_id pointing at a different challenge
-        in the same event would unlock without rejection.
+        Integration assertion (ADR-019): real participant + challenge drive the
+        real membership gate and participant resolver; only the ``use_hint``
+        service boundary is mocked, to capture the forwarded argument.
         """
         from ctf.views import api_use_hint
-        from shared.auth import CTF_PARTICIPANT_GROUP
 
-        url_challenge_id = uuid.uuid4()
         body_hint_id = uuid.uuid4()
-
-        user = _make_mock_user(pk=99, email="participant@test.com", groups={CTF_PARTICIPANT_GROUP})
-        mock_participant = MagicMock()
-        mock_participant.id = uuid.uuid4()
-        mock_participant.user = user
-
-        # Cycle 4 added a `get_challenge` lookup before participant
-        # resolution (so participants resolve scoped to the route's event);
-        # mock that and the participant resolver. `use_hint` is imported
-        # lazily inside `api_use_hint`, so patch at source
-        # (`ctf.services.hint.use_hint`).
-        mock_challenge = MagicMock(id=url_challenge_id, event_id=uuid.uuid4())
-        with (
-            patch("ctf.services.participant.is_active_participant", return_value=True),
-            patch("ctf.services.challenge.get_challenge", return_value=mock_challenge),
-            patch("ctf.views._get_participant_for_challenge", return_value=mock_participant),
-            patch("ctf.services.hint.use_hint") as mock_use_hint,
-        ):
+        with patch("ctf.services.hint.use_hint") as mock_use_hint:
             mock_use_hint.return_value = {
                 "text": "x",
                 "penalty": 0,
@@ -606,49 +529,38 @@ class TestAPIUseHint:
                 "total_penalty": 0,
                 "already_unlocked": False,
             }
-
             request = _get_request(
                 rf,
-                user,
+                participant_user,
                 method="post",
                 data=f'{{"hint_id": "{body_hint_id}"}}',
                 content_type="application/json",
             )
-            api_use_hint(request, challenge_id=url_challenge_id)
+            api_use_hint(request, challenge_id=ctf_challenge.id)
 
         mock_use_hint.assert_called_once()
         _args, kwargs = mock_use_hint.call_args
-        assert kwargs["expected_challenge_id"] == url_challenge_id
+        assert kwargs["expected_challenge_id"] == ctf_challenge.id
 
-    def test_api_use_hint_returns_400_for_malformed_body_uuid(self, rf):
+    @pytest.mark.django_db
+    def test_api_use_hint_returns_400_for_malformed_body_uuid(
+        self, rf, participant_user, ctf_participant, ctf_challenge
+    ):
         """A non-UUID `hint_id` in the body must produce a 400 with the
         standard JSON error envelope, never a 500. Closes the codex review
         finding (issue #769) about request-body UUID conversion leaking
         ValueError out of the view.
         """
         from ctf.views import api_use_hint
-        from shared.auth import CTF_PARTICIPANT_GROUP
 
-        url_challenge_id = uuid.uuid4()
-        user = _make_mock_user(pk=99, email="participant@test.com", groups={CTF_PARTICIPANT_GROUP})
-        mock_participant = MagicMock()
-        mock_participant.id = uuid.uuid4()
-        mock_participant.user = user
-
-        mock_challenge = MagicMock(id=url_challenge_id, event_id=uuid.uuid4())
-        with (
-            patch("ctf.services.participant.is_active_participant", return_value=True),
-            patch("ctf.services.challenge.get_challenge", return_value=mock_challenge),
-            patch("ctf.views._get_participant_for_challenge", return_value=mock_participant),
-        ):
-            request = _get_request(
-                rf,
-                user,
-                method="post",
-                data='{"hint_id": "not-a-uuid"}',
-                content_type="application/json",
-            )
-            response = api_use_hint(request, challenge_id=url_challenge_id)
+        request = _get_request(
+            rf,
+            participant_user,
+            method="post",
+            data='{"hint_id": "not-a-uuid"}',
+            content_type="application/json",
+        )
+        response = api_use_hint(request, challenge_id=ctf_challenge.id)
 
         assert response.status_code == 400, response.content
 
@@ -658,7 +570,7 @@ class TestAPIUseHint:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_patch_get_event", "_patch_role_organizer")
+@pytest.mark.usefixtures("_patch_get_event")
 class TestAPIEmailTemplateView:
     """Regression tests for ``api_event_email_template``.
 

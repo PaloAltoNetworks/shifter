@@ -12,6 +12,8 @@ from django.views.decorators.http import require_GET, require_POST
 
 from mission_control.utils import build_connection_urls
 from risk_register.models import AuditLog
+from shared.aces.presentation import build_range_aces_projection, build_range_participant_runtime_projection
+from shared.auth import block_ctf_participant_only
 from shared.errors import classify_user_message
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
@@ -49,13 +51,25 @@ def get_range(request: HttpRequest) -> JsonResponse:
     active_range = _pkg().get_active_range(_get_user(request))
 
     if not active_range:
-        return JsonResponse({"has_range": False, "range": None, "connection_urls": []})
+        return JsonResponse(
+            {
+                "has_range": False,
+                "range": None,
+                "connection_urls": [],
+                "aces_projection": None,
+                "aces_participant_runtime": None,
+            }
+        )
 
+    projection = build_range_aces_projection(active_range.request_id)
+    participant_runtime = build_range_participant_runtime_projection(active_range.request_id, active_range.instances)
     return JsonResponse(
         {
             "has_range": True,
             "range": active_range.model_dump(mode="json"),
             "connection_urls": build_connection_urls(active_range.instances),
+            "aces_projection": projection.to_payload() if projection else None,
+            "aces_participant_runtime": participant_runtime.to_payload() if participant_runtime else None,
         }
     )
 
@@ -82,6 +96,7 @@ def _resolve_launch_agents(user: User, data: dict[str, Any]) -> dict[str, int]:
 
 @login_required
 @require_POST
+@block_ctf_participant_only("launch")
 def launch_range(request: HttpRequest) -> JsonResponse:
     """
     Launch a new cyber range.
@@ -103,7 +118,7 @@ def launch_range(request: HttpRequest) -> JsonResponse:
     try:
         data = _parse_json_body(request)
         scenario = data.get("scenario", "basic")
-        valid_scenarios = {s["id"] for s in _pkg().cms_list_scenarios(user)}
+        valid_scenarios = {s["id"] for s in _pkg().cms_list_launchable_scenarios(user, "range_launch")}
         if scenario not in valid_scenarios:
             raise _RangeError(JsonResponse({"error": "Invalid scenario"}, status=400))
         agents_by_os = _resolve_launch_agents(user, data)
@@ -209,6 +224,7 @@ def _dispatch_range_lifecycle(
 
 @login_required
 @require_POST
+@block_ctf_participant_only("cancel")
 def cancel_range(request: HttpRequest) -> JsonResponse:
     """
     Cancel a provisioning range.
@@ -230,6 +246,7 @@ def cancel_range(request: HttpRequest) -> JsonResponse:
 
 @login_required
 @require_POST
+@block_ctf_participant_only("destroy")
 def destroy_range(request: HttpRequest) -> JsonResponse:
     """
     Destroy an active, paused, or failed range.
@@ -251,6 +268,7 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
 
 @login_required
 @require_POST
+@block_ctf_participant_only("pause")
 def pause_range(request: HttpRequest) -> JsonResponse:
     """
     Pause an active range.
@@ -272,6 +290,7 @@ def pause_range(request: HttpRequest) -> JsonResponse:
 
 @login_required
 @require_POST
+@block_ctf_participant_only("resume")
 def resume_range(request: HttpRequest) -> JsonResponse:
     """
     Resume a paused range.
@@ -316,5 +335,5 @@ def list_scenarios(request: HttpRequest) -> JsonResponse:
     Response (JSON):
         - scenarios: List of scenario dicts with agent_requirements field
     """
-    scenarios: list[dict[str, Any]] = _pkg().cms_list_scenarios(_get_user(request))
+    scenarios: list[dict[str, Any]] = _pkg().cms_list_launchable_scenarios(_get_user(request), "range_launch")
     return JsonResponse({"scenarios": scenarios})

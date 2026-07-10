@@ -68,7 +68,7 @@ def create_custom_scenario(
             except PydanticValidationError as e:
                 raise ScenarioEditorError(f"Invalid scenario definition: {e}") from e
     except IntegrityError:
-        logger.error(
+        logger.exception(
             "create_scenario: integrity error (race), scenario_id=%s, user_id=%s",
             safe_log_value(scenario_id),
             user.id,

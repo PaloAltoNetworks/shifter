@@ -66,3 +66,18 @@ identity_allowed_emails       = []
 # the actual list belongs to your deployment, not this committed file.
 range_egress_mode          = "status-quo"
 range_egress_allowed_cidrs = []
+
+# Messaging DLQ / retry / alerting (parity with AWS portal/messaging module, #476).
+# enable_dlq and retry_policy are on by default. Alarms require notification
+# channels populated via a sibling local.auto.tfvars; the committed baseline
+# keeps enable_alarms=false so the example deploys without a notification channel.
+messaging_enable_dlq                  = true
+messaging_max_delivery_attempts       = 5
+messaging_dlq_retention               = "1209600s"
+messaging_retry_min_backoff           = "10s"
+messaging_retry_max_backoff           = "600s"
+messaging_enable_alarms               = false
+messaging_alarm_queue_depth_threshold = 100
+messaging_alarm_message_age_threshold = 300
+messaging_alarm_dlq_threshold         = 1
+messaging_notification_channels       = []

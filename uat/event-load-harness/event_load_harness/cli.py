@@ -45,7 +45,14 @@ _STR_OPTS = (
     "confirm_host",
 )
 _NUM_OPTS = ("concurrency", "ramp_seconds", "duration_seconds")
-_AWS_TARGET_OPTS = (("alb", "aws_alb"), ("asg", "aws_asg"), ("rds_instance", "aws_rds"), ("redis_cluster", "aws_redis"))
+_AWS_TARGET_OPTS = (
+    ("alb", "aws_alb"),
+    ("target_group", "aws_target_group"),
+    ("asg", "aws_asg"),
+    ("rds_instance", "aws_rds"),
+    ("redis_cluster", "aws_redis"),
+    ("name_prefix", "aws_name_prefix"),
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,9 +98,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--region", help="Cloud region for the provider metric adapter.")
     p.add_argument("--report-path", dest="report_path", help="Where to write the envelope markdown.")
     p.add_argument("--aws-alb", dest="aws_alb", help="ALB LoadBalancer dimension (aws metric source).")
+    p.add_argument(
+        "--aws-target-group",
+        dest="aws_target_group",
+        help="ALB TargetGroup dimension for RequestCountPerTarget, the portal scale-out signal (aws metric source).",
+    )
     p.add_argument("--aws-asg", dest="aws_asg", help="AutoScalingGroupName (aws metric source).")
     p.add_argument("--aws-rds", dest="aws_rds", help="DBInstanceIdentifier (aws metric source).")
     p.add_argument("--aws-redis", dest="aws_redis", help="CacheClusterId (aws metric source).")
+    p.add_argument(
+        "--aws-name-prefix",
+        dest="aws_name_prefix",
+        help="Portal NamePrefix dimension for Shifter/PortalCapacity worker/terminal gauges (aws metric source).",
+    )
     p.add_argument(
         "--allow-insecure-localhost",
         dest="allow_insecure_localhost",

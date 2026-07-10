@@ -14,3 +14,7 @@ class SharedConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "shared"
     verbose_name = "Shared Contracts"
+
+    def ready(self) -> None:
+        """Register schema extensions for shared DRF integrations."""
+        import shared.api.schema  # noqa: F401

@@ -1,0 +1,93 @@
+# Path filter categories for _quality.yml subtree targeting (issue #774).
+# Consumed by the `paths` job in .github/workflows/_quality.yml via
+# dorny/paths-filter. A change under `.github/workflows/**` forces the
+# full matrix through the `ci_workflows` output combined with `run_all`.
+
+ci_workflows:
+  - '.github/workflows/**'
+  - '.github/quality-path-filters.yaml'
+
+shifter_platform:
+  - 'shifter/shifter_platform/**'
+  - '.importlinter'
+
+provisioner:
+  - 'shifter/engine/provisioner/**'
+
+cyberscript:
+  - 'shifter/cyberscript/**'
+
+packer:
+  - 'shifter/packer/**'
+
+bootstrap:
+  - 'scripts/bootstrap/**'
+
+gcp_scripts:
+  - 'scripts/gcp/**'
+
+check_layer_imports:
+  - 'scripts/check_layer_imports/**'
+
+check_rds_pending_modifications:
+  - 'scripts/check_rds_pending_modifications/**'
+
+handle_sd_replacement:
+  - 'scripts/handle_sd_replacement/**'
+
+assert_portal_inspection:
+  - 'scripts/assert_portal_inspection/**'
+
+installation:
+  - 'shifter/installation/**'
+
+event_load_harness:
+  - 'uat/event-load-harness/**'
+
+terraform:
+  - 'platform/terraform/**'
+  - '.tflint.hcl'
+  - 'scripts/check_tf_iam_ec2_scope/**'
+  - 'scripts/check_tf_iam_elb_scope/**'
+  - 'scripts/check_tf_sg_cidrs/**'
+  - 'scripts/check_tf_kms_secrets_grant/**'
+  - 'scripts/check_tf_rds_security/**'
+  - 'scripts/check_tf_iam_ssm_range_scope/**'
+  - 'scripts/check_portal_target_sg_sources/**'
+
+k8s:
+  - 'platform/k8s/**'
+  - '.kube-linter.yaml'
+
+mcp_ngfw:
+  - 'mcp/ngfw/**'
+
+mcp_ops:
+  - 'mcp/ops/**'
+
+mcp_planner:
+  - 'mcp/planner/**'
+
+mcp_shared:
+  - 'mcp/shared/**'
+
+adr_guard:
+  - 'scripts/adr_guard/**'
+  - 'docs/adr/**'
+  - '.pre-commit-config.yaml'
+  - 'AGENTS.md'
+  - '.ground-control.yaml'
+  - '.gc/plan-rules.md'
+  - '.shifter.yaml'
+
+ctfd_workshop:
+  - 'scripts/ctfd-workshop/**'
+
+polaris_aws_range:
+  - 'scripts/polaris-aws-range/**'
+
+scenario_smoketest:
+  - 'scenario-dev/polaris/tests/**'
+
+stack_smoke:
+  - 'scripts/stack-smoke/**'

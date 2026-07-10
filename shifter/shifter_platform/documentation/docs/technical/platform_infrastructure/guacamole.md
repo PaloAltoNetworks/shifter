@@ -1,451 +1,356 @@
-# Guacamole RDP Integration
+# Guacamole Remote-Desktop Integration
 
-Apache Guacamole provides browser-based RDP access to range instances (Kali Linux and Windows).
+Apache Guacamole provides browser-based RDP and SSH access to range instances and
+to NGFW management terminals. The Portal mints short-lived, signed Guacamole
+sessions on demand using the Guacamole JSON-auth extension, so no connection is
+ever pre-provisioned in the Guacamole database.
 
-## Architecture Overview
+This document is the canonical reference for the subsystem. The point-in-time
+design notes under `docs/architecture/guacamole-*-preflight-*.md` record the
+decisions that produced the current behaviour:
+
+- `docs/architecture/guacamole-first-click-rdp-preflight-395.md` (token-readiness retry)
+- `docs/architecture/guacamole-token-affinity-preflight-928.md` (single client replica)
+- `docs/architecture/guacamole-token-lifecycle-preflight-939.md` (at-rest token lifecycle)
+
+## Architecture overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Platform Network                               │
-│  ┌───────────┐    ┌────────────────┐    ┌─────────────────────────────────┐ │
-│  │           │    │                │    │      Guacamole Services         │ │
-│  │   Load    │    │    Portal      │    │  ┌───────────────────────────┐  │ │
-│  │  Balancer │───▶│    Django      │    │  │  guacamole-client (8080)  │  │ │
-│  │           │    │                │    │  │  - JSON Auth Extension    │  │ │
-│  │ /guacamole│───▶│────────────────│    │  │  - OIDC Extension         │  │ │
-│  │    path   │    │                │    │  └───────────┬───────────────┘  │ │
-│  └───────────┘    └────────────────┘    │              │ port 4822        │ │
-│       │                  │              │  ┌───────────▼───────────────┐  │ │
-│       │                  │              │  │     guacd (4822)          │  │ │
-│       │                  │              │  │  - Protocol translation   │  │ │
-│       │                  │              │  │  - RDP/VNC/SSH client     │  │ │
-│       │                  │              │  └───────────┬───────────────┘  │ │
-│       │                  │              └──────────────┼──────────────────┘ │
-│       │                  │                             │                    │
-│       │                  ▼                             │                    │
-│       │        ┌─────────────────┐                     │                    │
-│       │        │  Secret Store   │                     │                    │
-│       │        │ - JSON_SECRET   │                     │                    │
-│       │        │ - DB_CREDS      │                     │                    │
-│       │        └─────────────────┘                     │                    │
-│       │                                                │                    │
-│       │        ┌─────────────────┐                     │                    │
-│       │        │   PostgreSQL    │◀───────────────────▶│                    │
-│       │        │ (session state) │                     │                    │
-│       │        └─────────────────┘                     │                    │
-└───────│────────────────────────────────────────────────│────────────────────┘
-        │                                                │
-        │                   Network Peering              │
-        │                                                │
-┌───────│────────────────────────────────────────────────│────────────────────┐
-│       │                   Range Network                │                    │
-│       │                                                ▼                    │
-│       │     ┌──────────────────────────────────────────────────────┐       │
-│       │     │              Range Subnet                            │       │
-│       │     │  ┌────────────────────┐   ┌────────────────────┐     │       │
-│       │     │  │ Kali/Windows       │   │ Victim (Win/Linux) │     │       │
-│       │     │  │ - RDP: 3389        │   │ - RDP: 3389        │     │       │
-│       │     │  │ - SSH: 22          │   │ - SSH: 22          │     │       │
-│       │     │  └────────────────────┘   └────────────────────┘     │       │
-│       │     └──────────────────────────────────────────────────────┘       │
-└───────│────────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-   [ User Browser ]
+│                              Platform Network                                 │
+│  ┌───────────┐    ┌────────────────┐    ┌─────────────────────────────────┐  │
+│  │           │    │                │    │      Guacamole Services         │  │
+│  │   Load    │───▶│    Portal      │    │  ┌───────────────────────────┐  │  │
+│  │  Balancer │    │    Django      │───▶│  │  guacamole-client (8080)  │  │  │
+│  │           │    │  (+ bootstrap  │    │  │  - JSON Auth Extension    │  │  │
+│  │ /guacamole│───▶│    workers)    │    │  └───────────┬───────────────┘  │  │
+│  │    path   │    │                │    │              │ port 4822        │  │
+│  └───────────┘    └───────┬────────┘    │  ┌───────────▼───────────────┐  │  │
+│                           │             │  │     guacd (4822)          │  │  │
+│       ┌─────────────────┐ │             │  │  - Protocol translation   │  │  │
+│       │  Secret Store   │ │             │  │  - RDP/SSH/VNC client     │  │  │
+│       │ - JSON_SECRET   │◀┘             │  └───────────┬───────────────┘  │  │
+│       │ - DB_CREDS      │               └──────────────┼──────────────────┘  │
+│       └─────────────────┘                              │                     │
+│       ┌─────────────────┐    ┌─────────────────┐       │                     │
+│       │  Portal/App DB  │    │  Guacamole DB   │◀──────┘                     │
+│       │ (bootstrap rows)│    │ (session state) │                            │
+│       └─────────────────┘    └─────────────────┘                            │
+└───────────────────────────────────────────────────────────┼──────────────────┘
+                                                             │ Network peering
+┌────────────────────────────────────────────────────────────┼──────────────────┐
+│                           Range Network                     ▼                  │
+│        ┌──────────────────────────────────────────────────────┐               │
+│        │  Range instances: RDP 3389 / SSH 22 (Kali, Windows,   │               │
+│        │  Ubuntu, victim hosts) reached by guacd on private IP │               │
+│        └──────────────────────────────────────────────────────┘               │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-On AWS, Guacamole runs as ECS Fargate services with an RDS PostgreSQL backend. On GCP, it runs as Kubernetes deployments with Cloud SQL. The Django integration and JSON Auth flow are identical on both clouds.
+On AWS, `guacd` and `guacamole-client` run as ECS Fargate services with an RDS
+PostgreSQL backend; the Portal and the bootstrap prune worker run on EC2. On GCP,
+all of them run as Kubernetes Deployments with Cloud SQL. The Django integration
+and JSON-auth flow are identical on both clouds.
 
 ## Components
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **guacamole-client** | Container service (ECS on AWS, K8s pod on GCP) | Web application serving HTML5 interface |
-| **guacd** | Container service (ECS on AWS, K8s pod on GCP) | Protocol proxy (translates Guacamole protocol to RDP) |
-| **PostgreSQL** | Managed database (RDS on AWS, Cloud SQL on GCP) | Session state and connection history |
-| **JSON Auth Extension** | guacamole-client | Enables on-the-fly RDP connections via signed URLs |
-| **OIDC Extension** | guacamole-client | Identity provider authentication for direct access |
+| **guacamole-client** | ECS service (AWS) / K8s Deployment (GCP) | HTML5 web app; hosts the JSON-auth extension and serves `/guacamole`. |
+| **guacd** | ECS service (AWS) / K8s Deployment (GCP) | Protocol proxy; translates the Guacamole protocol to RDP/SSH/VNC and dials the range host. |
+| **Guacamole PostgreSQL** | RDS (AWS) / Cloud SQL (GCP) | Guacamole session and connection state. |
+| **Token broker** | Portal Django, `mission_control/guacamole.py` | Signs the JSON-auth payload, exchanges it at `/api/tokens`, builds the client URL. |
+| **Bootstrap runner** | Portal Django, `mission_control/guacamole_bootstrap.py` | Bounded worker pool that runs the blocking token exchange off the request thread and persists a pollable result. |
+| **Bootstrap prune worker** | `manage.py run_guacamole_bootstrap_prune` | Dedicated service that deletes expired bootstrap rows on a schedule. |
+| **`GuacamoleBootstrapRequest`** | Portal/App DB, `mission_control/models.py` | Pollable per-request state; holds the token-bearing URL only between mint and first delivery. |
 
-## Network Traffic Flow
+## Request flow
 
-### ALB Routing
-
-The Portal ALB routes based on path pattern:
-
-| Path Pattern | Target | Port |
-|--------------|--------|------|
-| `/guacamole/*`, `/guacamole` | guacamole-client containers | 8080 |
-| `/*` (default) | Portal Django | 443 |
-
-Configuration: [alb.tf](../../../platform/terraform/modules/guacamole/alb.tf)
-
-### Security Groups
+The Portal never returns the token URL directly from the launch request. Building
+a Guacamole session requires a blocking server-to-server call to
+`guacamole-client` `/api/tokens`, so that work runs asynchronously in a bounded
+worker pool and the browser polls for the result.
 
 ```
-Portal ALB ──────────────────▶ guacamole-client SG
-   (any)                           (8080/tcp)
-                                       │
-                                       ▼
-guacamole-client SG ────────────▶ guacd SG
-   (egress 4822)                   (4822/tcp)
-                                       │
-guacd SG ──────────────────────▶ Range VPC CIDR
-   (egress 3389, 22, 5900-5910)    (RDP, SSH, VNC)
-                                       │
-Range Instance SGs ◀───────────────────┘
-   - kali_rdp_from_portal (3389/tcp from Portal VPC CIDR)
-   - victim_rdp_from_portal (3389/tcp from Portal VPC CIDR)
+Browser                         Portal Django                     guacamole-client
+   │                                  │                                  │
+   │ 1. POST /api/guacamole/rdp-url/  │                                  │
+   │    {instance_uuid}  + CSRF       │                                  │
+   │─────────────────────────────────▶│                                  │
+   │                                  │ 2. authn, resolve range via      │
+   │                                  │    engine.services, enqueue a    │
+   │                                  │    GuacamoleBootstrapRequest      │
+   │ 3. 202 {request_id, status,      │                                  │
+   │    status_url, url}              │                                  │
+   │◀─────────────────────────────────│                                  │
+   │                                  │ 4. worker builds the signed      │
+   │                                  │    payload, POSTs /api/tokens ───▶│
+   │                                  │    receives authToken, stores    │
+   │                                  │    result_url on the row         │
+   │ 5. GET status_url (poll, 1s)     │                                  │
+   │─────────────────────────────────▶│                                  │
+   │ 6. 200 {url: ".../#/client/...?token=..."}  (once)                   │
+   │◀─────────────────────────────────│  result_url cleared on delivery  │
+   │                                  │                                  │
+   │ 7. open url ─────────────────────────────────────────────────────▶ guacamole-client
+   │    WebSocket tunnel ───▶ guacd ───▶ range host (RDP 3389 / SSH 22)   │
 ```
 
-### VPC Peering
+Key points:
 
-Portal VPC ↔ Range VPC peering enables guacd (in Portal VPC) to reach range instances (in Range VPC) on their private IPs.
+- **Launch request body is `{instance_uuid}`** for RDP and range SSH; the NGFW
+  SSH route takes the application id in the path. There is no `instance_type`
+  field.
+- **The launch response is `202 Accepted`** with `{request_id, status,
+  status_url, url}`, a `Location` header set to `status_url`, and `Retry-After:
+  1`. The `url` field is a compatibility opener page (see Frontend), not the
+  token URL.
+- **The token URL is delivered by the status endpoint, exactly once** (see Token
+  lifecycle). The final URL has the form
+  `{GUACAMOLE_BASE_URL}/#/client/{connection_id}?token={authToken}`, where
+  `connection_id` is `base64(connection_name + "\0c\0json")` with padding
+  stripped.
+- **Capacity is bounded.** If every worker slot is busy the launch returns `503`
+  with `Retry-After: 1`.
 
-Routes:
-- Portal private subnets → Range VPC CIDR via peering
-- Range private subnets → Portal VPC CIDR via peering
+## Token broker (`mission_control/guacamole.py`)
 
----
+The broker implements the Guacamole JSON-auth extension protocol.
 
-## Django Integration (JSON Auth)
+1. **Build the payload.** `create_guacamole_auth_payload(username, connections,
+   expires_minutes=5)` returns `{"username", "expires", "connections"}`, where
+   `expires` is a millisecond Unix timestamp `expires_minutes` in the future. The
+   default token validity is 5 minutes.
+2. **Sign and encrypt.** `sign_and_encrypt_payload(payload, secret_key)`:
+   - reads `secret_key` as hex; the key must be 16, 24, or 32 bytes (32, 48, or
+     64 hex characters), selecting AES-128/192/256. A 64-hex (256-bit) key is the
+     configured preference.
+   - `signature = HMAC-SHA256(key, json_bytes)`,
+   - `signed = signature || json_bytes`, PKCS7-padded to the AES block size,
+   - `AES-CBC(key, IV = 0x00 * 16, signed)`, then Base64.
 
-The Portal Django application generates signed Guacamole URLs for RDP connections without pre-configuring connections in the database.
+   The signature is prepended to the plaintext and the whole thing is encrypted;
+   the guacamole-client JSON-auth extension reverses this with the shared key.
+3. **Exchange for a token.** `get_guacamole_auth_token(api_base_url,
+   encrypted_data)` POSTs `data=<encrypted>` (form-encoded) to
+   `{api_base_url}/api/tokens` and returns `authToken` from the JSON response.
+   This call uses the **internal** API URL. It retries on transient failures
+   (HTTP 408/429/502/503/504 and connection errors) with exponential backoff
+   governed by `GUACAMOLE_TOKEN_RETRY_ATTEMPTS` and
+   `GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS`; malformed responses are fatal. The
+   retry exists for first-click reliability (issue #395).
+4. **Build the client URL.** `create_guacamole_rdp_url` and
+   `create_guacamole_ssh_url` assemble the connection map, sign/encrypt, exchange
+   for `authToken`, and return
+   `{public_base_url}/#/client/{connection_id}?token={authToken}` using the
+   **public** base URL for the browser.
 
-### Flow Diagram
+The public/internal split matters: `GUACAMOLE_API_BASE_URL` is the
+server-to-server address used to mint the token, while `GUACAMOLE_BASE_URL` is the
+browser-facing path baked into the returned URL.
 
-```
-┌────────────┐    ┌──────────────────┐    ┌─────────────────────┐
-│   User     │    │  Portal Django   │    │  guacamole-client   │
-│  Browser   │    │  (views.py)      │    │  (JSON Auth Ext)    │
-└─────┬──────┘    └────────┬─────────┘    └──────────┬──────────┘
-      │                    │                         │
-      │ 1. Click RDP btn   │                         │
-      │ POST /api/guacamole/rdp-url/                 │
-      │ {instance_type: "kali"}                      │
-      │───────────────────▶│                         │
-      │                    │                         │
-      │                    │ 2. Validate user's range│
-      │                    │    Get instance IP      │
-      │                    │    Get secret from env  │
-      │                    │                         │
-      │                    │ 3. Create JSON payload  │
-      │                    │    Sign with HMAC-SHA256│
-      │                    │    Encrypt with AES-128 │
-      │                    │    Base64 encode        │
-      │                    │                         │
-      │ 4. Return URL      │                         │
-      │ {url: "/guacamole/?data=..."}                │
-      │◀───────────────────│                         │
-      │                    │                         │
-      │ 5. Open new tab    │                         │
-      │ GET /guacamole/?data=<encrypted>             │
-      │─────────────────────────────────────────────▶│
-      │                    │                         │
-      │                    │         6. Decrypt data │
-      │                    │            Verify HMAC  │
-      │                    │            Check expiry │
-      │                    │            Create session
-      │                    │                         │
-      │ 7. Redirect to RDP client                    │
-      │◀─────────────────────────────────────────────│
-      │                    │                         │
-      │ 8. WebSocket ──────────────▶ guacd ─────────▶ Range Instance
-      │    (Guacamole protocol)       (RDP protocol)   (3389/tcp)
-```
+## Async bootstrap (`mission_control/guacamole_bootstrap.py`)
 
-### Data Field Definitions
+The token exchange is blocking, so it runs off the request thread:
 
-#### 1. RDP URL Request (Frontend → Django)
+- **Worker pool.** A process-local `ThreadPoolExecutor` plus a `BoundedSemaphore`
+  cap concurrent exchanges at `GUACAMOLE_BOOTSTRAP_WORKERS` (default 4). A launch
+  that cannot acquire a slot raises `BootstrapQueueFull`, surfaced as `503`.
+- **Enqueue.** `enqueue_guacamole_bootstrap` creates a `PENDING`
+  `GuacamoleBootstrapRequest` with `expires_at = now + GUACAMOLE_BOOTSTRAP_TTL_SECONDS`
+  (default 300, floor 30) and submits `_run_bootstrap`.
+- **Inline mode.** With `GUACAMOLE_BOOTSTRAP_INLINE` true the exchange runs
+  synchronously in-request. This is used by tests and single-threaded contexts.
+- **Worker.** `_run_bootstrap` marks the row `RUNNING`, calls the per-protocol
+  `build_url` callable, and on success stores `result_url` and `SUCCEEDED`. A
+  build that raises records a `FAILED` row with a sanitised error and HTTP-ish
+  status. A build that finishes after `expires_at` records expiry and **does not
+  persist a token URL** (see Token lifecycle).
 
-```json
-{
-  "instance_type": "kali"   // "kali" | "victim"
-}
-```
+The polling endpoints live in `mission_control/views/_guacamole_bootstrap.py`:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `instance_type` | string | Target instance: `"kali"` (attacker) or `"victim"` |
+- `GET api/guacamole/bootstrap/<request_id>/` returns the current state, owner-scoped
+  by `request_id + user_id`. `PENDING`/`RUNNING` return `Retry-After: 1`;
+  `FAILED` returns the recorded status and message; `SUCCEEDED` delivers the URL
+  once (then `410` on any later poll); an expired row returns `410`.
+- `GET api/guacamole/bootstrap/<request_id>/open/` serves a small HTML opener page
+  that polls the status endpoint and redirects when the URL is ready, for clients
+  that consume the opener `url` directly.
 
-#### 2. RDP URL Response (Django → Frontend)
+## Token lifecycle and at-rest security (issue #939)
 
-```json
-{
-  "url": "/guacamole/?data=<base64_encrypted_payload>"
-}
-```
+`result_url` carries the Guacamole `authToken`, so a database row is a live
+credential for the token's remaining validity. The subsystem holds that material
+at rest for the minimum possible window:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `url` | string | Signed Guacamole URL with encrypted `data` parameter |
+1. **Single-use delivery.** `consume_ready_url` runs inside a `select_for_update`
+   transaction: the first owner-scoped status poll that finds a ready URL returns
+   it, sets `delivered_at`, and clears `result_url` in the same transaction. A
+   second poll (a second tab, the opener plus the JS client, a retry) gets a
+   `410` and never the token again. `succeeded` keeps meaning "ready to deliver";
+   the separate `delivered_at` marker records that delivery happened, so lifecycle
+   state is never inferred from a blanked secret column.
+2. **No persist after expiry.** If a slow build finishes after `expires_at`, the
+   worker records the expiry and never writes `result_url`. The expired-poll path
+   also clears any URL still parked on a `succeeded` row.
+3. **Scheduled pruning.** `run_guacamole_bootstrap_prune` deletes rows with
+   `expires_at <= now` in bounded, oldest-first batches. This is the backstop for
+   `succeeded`-but-abandoned rows (built, never polled) and bounds table growth.
+   Pruning is the eventual cleanup; clearing on delivery is the immediate control.
 
-#### 3. JSON Auth Payload (Encrypted in `data` parameter)
+Encryption at rest was considered and deliberately not added: clearing on
+delivery plus no-persist-after-expiry plus pruning shrink the at-rest window to,
+at most, the sub-TTL gap between a successful mint and the first poll. An
+encrypted-but-undeleted row would still be a durable credential escrow.
 
-```json
-{
-  "username": "user@example.com",
-  "expires": 1704067200000,
-  "connections": {
-    "kali-42": {
-      "protocol": "rdp",
-      "parameters": {
-        "hostname": "10.1.5.10",
-        "port": "3389",
-        "ignore-cert": "true",
-        "security": "any",
-        "resize-method": "display-update",
-        "enable-font-smoothing": "true"
-      }
-    }
-  }
-}
-```
+## Persistence model (`GuacamoleBootstrapRequest`)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `username` | string | User's email (from Django session) |
-| `expires` | integer | Expiration timestamp in milliseconds (Unix epoch) |
-| `connections` | object | Map of connection_name → connection_definition |
-| `connections.*.protocol` | string | Always `"rdp"` for RDP connections |
-| `connections.*.parameters.hostname` | string | Range instance private IP |
-| `connections.*.parameters.port` | string | RDP port (always `"3389"`) |
-| `connections.*.parameters.ignore-cert` | string | Skip certificate validation (`"true"`) |
-| `connections.*.parameters.security` | string | Security mode: `"any"`, `"nla"`, `"tls"`, `"rdp"` |
-| `connections.*.parameters.resize-method` | string | Display resize method (`"display-update"`) |
-| `connections.*.parameters.enable-font-smoothing` | string | Font smoothing (`"true"`) |
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | UUID PK | |
+| `user_id` | big int, indexed | Owner; every read is scoped by it. |
+| `protocol` | choice | `rdp`, `range_ssh`, `ngfw_ssh`. |
+| `target_id` | char(200) | Instance UUID or NGFW app id. |
+| `status` | choice, indexed | `pending`, `running`, `succeeded`, `failed`. |
+| `result_url` | text | Token-bearing URL; secret; cleared on delivery. |
+| `error_message` / `error_status_code` | char / small int | Sanitised failure detail. |
+| `duration_ms` | int, nullable | Build duration. |
+| `created_at` / `updated_at` | datetime | Auto. |
+| `expires_at` | datetime, indexed | `created_at + TTL`; drives the prune. |
+| `delivered_at` | datetime, nullable | Set once on single-use delivery. |
 
-#### 4. Encryption Process
+Indexes: `(user_id, created_at)` for owner polling and `(status, expires_at)` for
+the prune query. The `is_expired` property is `expires_at <= now`.
 
-1. **Input**: JSON payload (above)
-2. **Secret Key**: 128-bit key (32 hex characters) from `GUACAMOLE_JSON_AUTH_SECRET`
-3. **Process**:
-   ```
-   json_bytes = JSON.stringify(payload)
-   signature = HMAC-SHA256(key, json_bytes)
-   signed_data = signature || json_bytes
-   padded_data = PKCS7_pad(signed_data, 16)
-   encrypted = AES-128-CBC(key, IV=0x00*16, padded_data)
-   data_param = base64_encode(encrypted)
-   ```
-4. **Output**: Base64-encoded encrypted blob for URL `data` parameter
+## Frontend
 
----
+`static/js/terminal-guacamole.js` drives the terminal page. It reads
+`{rdpUrl, sshUrl, csrfToken}` from a `json_script` block, POSTs `{instance_uuid}`
+with the CSRF token to the launch endpoint, then polls `status_url` once per
+second (up to 60 attempts) until it sees `data.url`, and opens the result in a new
+tab (with a same-tab fallback when the popup is blocked). It stops polling on the
+first delivered URL, so single-use delivery is transparent to the happy path.
 
-## Detailed Sequence: RDP Button Click to Session
+The CTF participant page (`templates/ctf/participant/range.html`) uses an older
+inline launcher that consumes the `url` field from the launch response directly
+(the opener page) rather than running the status-polling loop. Both paths funnel
+through the same status endpoint as the delivery boundary.
 
-```
-┌──────────┐     ┌─────────────┐     ┌───────────────┐     ┌────────────────┐     ┌─────────┐     ┌────────────┐
-│  Browser │     │terminal.html│     │ views.py      │     │ guacamole.py   │     │ guacd   │     │ Range Host │
-│  (User)  │     │ (Frontend)  │     │ (Django API)  │     │ (Crypto Utils) │     │         │     │ (RDP 3389) │
-└────┬─────┘     └──────┬──────┘     └───────┬───────┘     └───────┬────────┘     └────┬────┘     └─────┬──────┘
-     │                  │                    │                     │                   │                │
-     │ Click RDP button │                    │                     │                   │                │
-     │─────────────────▶│                    │                     │                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │ POST /api/guacamole/rdp-url/             │                   │                │
-     │                  │ {instance_type: "kali"}                  │                   │                │
-     │                  │ X-CSRFToken: <token>                     │                   │                │
-     │                  │───────────────────▶│                     │                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │ Validate:           │                   │                │
-     │                  │                    │ - User authenticated│                   │                │
-     │                  │                    │ - Range status=READY│                   │                │
-     │                  │                    │ - instance_type valid                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │ Get from Range:     │                   │                │
-     │                  │                    │ - attacker_instance │                   │                │
-     │                  │                    │   .private_ip       │                   │                │
-     │                  │                    │   .os_type          │                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │ Get from settings:  │                   │                │
-     │                  │                    │ - GUACAMOLE_JSON_AUTH_SECRET            │                │
-     │                  │                    │ - GUACAMOLE_BASE_URL│                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │ create_guacamole_rdp_url()              │                │
-     │                  │                    │────────────────────▶│                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │                     │ Build payload:    │                │
-     │                  │                    │                     │ - username (email)│                │
-     │                  │                    │                     │ - expires (+5min) │                │
-     │                  │                    │                     │ - connections{}   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │                     │ sign_and_encrypt: │                │
-     │                  │                    │                     │ - HMAC-SHA256     │                │
-     │                  │                    │                     │ - AES-128-CBC     │                │
-     │                  │                    │                     │ - Base64 encode   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │ url = /guacamole/?data=<b64>            │                │
-     │                  │                    │◀───────────────────│                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │ 200 OK {url: "..."} │                     │                   │                │
-     │                  │◀───────────────────│                     │                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │ window.open(url, '_blank')               │                   │                │
-     │                  │─────────────────────────────────────────▶│                   │                │
-     │                  │                    │                     │                   │                │
-     │◀─────────────────────────────────────── New Tab Opens ──────▶                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │        GET /guacamole/?data=<b64>        │                   │                │
-     │                  │        (ALB routes to guacamole-client)  │                   │                │
-     │ ────────────────────────────────────────────────────────────▶ (guacamole-client)│                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │       JSON Auth Extension:              │                │
-     │                  │                    │       - Base64 decode                   │                │
-     │                  │                    │       - AES decrypt                     │                │
-     │                  │                    │       - HMAC verify                     │                │
-     │                  │                    │       - Check expiry                    │                │
-     │                  │                    │       - Create session                  │                │
-     │                  │                    │                     │                   │                │
-     │◀──────────────────────────────────────────────────────────── Redirect to client │                │
-     │                  │                    │                     │                   │                │
-     │ WebSocket: /guacamole/websocket-tunnel                      │                   │                │
-     │ ═══════════════════════════════════════════════════════════▶│                   │                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │                     │ Guacamole Proto   │                │
-     │                  │                    │                     │══════════════════▶│                │
-     │                  │                    │                     │                   │                │
-     │                  │                    │                     │                   │ RDP Connect    │
-     │                  │                    │                     │                   │ 10.1.X.10:3389 │
-     │                  │                    │                     │                   │═══════════════▶│
-     │                  │                    │                     │                   │                │
-     │◀══════════════════════════ RDP Session Established ════════════════════════════════════════════▶│
-     │                  │                    │                     │                   │                │
-```
+## Settings
 
----
+Guacamole settings live in `config/_guacamole_settings.py` (re-exported by
+`config/settings.py` to keep that module under the 500-line cap); the two retry
+knobs live in `config/settings.py`.
 
-## Code References
+| Setting | Default | Controls |
+|---------|---------|----------|
+| `GUACAMOLE_JSON_AUTH_SECRET` | `""` | Hex HMAC/AES key; must equal guacamole-client `JSON_SECRET_KEY`. Empty means the feature returns `503`. |
+| `GUACAMOLE_BASE_URL` | `/guacamole` | Public browser base for the `#/client/...` URL. |
+| `GUACAMOLE_API_BASE_URL` | falls back to `GUACAMOLE_BASE_URL` | Internal `/api/tokens` address. |
+| `GUACAMOLE_BOOTSTRAP_WORKERS` | `4` | Per-process bounded worker/semaphore count. |
+| `GUACAMOLE_BOOTSTRAP_TTL_SECONDS` | `300` | Bootstrap row lifetime (floor 30). |
+| `GUACAMOLE_BOOTSTRAP_INLINE` | `False` | Run the exchange synchronously in-request. |
+| `GUACAMOLE_BOOTSTRAP_PRUNE_INTERVAL_SECONDS` | `60` | Prune cadence. |
+| `GUACAMOLE_BOOTSTRAP_PRUNE_BATCH_SIZE` | `500` | Bounded prune batch size. |
+| `GUACAMOLE_TOKEN_RETRY_ATTEMPTS` | `3` | `/api/tokens` retry attempts. |
+| `GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS` | `200` | `/api/tokens` backoff base. |
 
-### Django Application Layer
+## Deployment topology
 
-| File | Purpose |
-|------|---------|
-| [guacamole.py](../../../shifter_platform/mission_control/guacamole.py) | Crypto utilities for JSON auth signing/encryption |
-| [views.py:258-343](../../../shifter_platform/mission_control/views.py#L258-L343) | `guacamole_rdp_url()` API endpoint |
-| [urls.py:40](../../../shifter_platform/mission_control/urls.py#L40) | URL routing for RDP API |
-| [settings.py:307-314](../../../shifter_platform/config/settings.py#L307-L314) | `GUACAMOLE_JSON_AUTH_SECRET`, `GUACAMOLE_BASE_URL` settings |
+`guacd` and `guacamole-client` are pinned to a single `guacamole-client` replica
+so the in-memory token minted by `/api/tokens` is consumed by the same instance
+that issued it (issue #928); `guacd` scales independently. This is enforced by
+`tests/platform/test_guacamole_topology.py`.
 
-### Frontend
+### AWS
 
-| File | Purpose |
-|------|---------|
-| [terminal.html:34-43](../../../shifter_platform/templates/mission_control/terminal.html#L34-L43) | RDP button (Kali pane) |
-| [terminal.html:60-69](../../../shifter_platform/templates/mission_control/terminal.html#L60-L69) | RDP button (Victim pane) |
-| [terminal.html:113-149](../../../shifter_platform/templates/mission_control/terminal.html#L113-L149) | RDP button click handler |
-| [terminal.css:101-156](../../../shifter_platform/static/css/terminal.css#L101-L156) | Button styling |
+- `guacd` and `guacamole-client` run on ECS Fargate (`platform/terraform/modules/guacamole/`).
+  The client task's `desired_count` is hard-pinned to 1 with a validation block;
+  client autoscaling is removed; only `guacd` autoscales.
+- The ALB path-routes `/guacamole` to guacamole-client (8080) and everything else
+  to the Portal.
+- `JSON_SECRET_KEY` is injected from Secrets Manager into the client task; the
+  Portal reads the same value via `GUACAMOLE_JSON_AUTH_SECRET`.
+- The Portal and the `guacamole-bootstrap-prune` container run on EC2; the prune
+  container is launched from `platform/terraform/modules/portal/ec2/user_data.sh`
+  (and the SSM redeploy path `scripts/portal-deploy/deploy_portal.sh`) and is
+  supervised by the worker-health agent.
 
-### Infrastructure (AWS)
+### GCP
 
-| File | Purpose |
-|------|---------|
-| `platform/terraform/modules/guacamole/main.tf` | ECS cluster, CloudWatch logs, service discovery |
-| `platform/terraform/modules/guacamole/ecs.tf` | Task definitions, services, auto-scaling |
-| `platform/terraform/modules/guacamole/rds.tf` | PostgreSQL database, JSON auth secret |
-| `platform/terraform/modules/guacamole/security.tf` | Security groups |
-| `platform/terraform/modules/guacamole/alb.tf` | Target group, listener rule |
-| `platform/terraform/modules/range/vpc/main.tf` | Range SG rules for RDP ingress |
+- `guacd`, `guacamole-client`, and `guacamole-bootstrap-prune` are Kubernetes
+  Deployments (Helm chart `platform/charts/shifter/templates/` and the kustomize
+  base `platform/k8s/gcp/base/`). `guacamoleClient.replicas` is 1.
+- `JSON_SECRET_KEY` and DB credentials reach the client via the
+  `guacamole-runtime` Kubernetes Secret. That Secret is created **out of band**
+  by the deploy bootstrap (`kubectl apply` from GCP Secret Manager, before the
+  Helm release). The Helm chart never carries the secret values; it references
+  the Secret by name only (`envFrom.secretRef`), so credentials never enter
+  chart values or Helm release history. `scripts/gcp/render_runtime_env.py` sets
+  `GUACAMOLE_SECRET_ID`, `GUACAMOLE_BASE_URL`, and the in-cluster
+  `GUACAMOLE_API_BASE_URL`.
+- NetworkPolicies restrict `guacamole-client` to `guacd` on TCP 4822 and admit
+  GCLB ingress to the portal and guacamole-client backends on 8000/8080.
 
-### Infrastructure (GCP)
+### Local
 
-| File | Purpose |
-|------|---------|
-| `platform/charts/shifter/templates/guacd-deployment.yaml` | guacd deployment |
-| `platform/charts/shifter/templates/guacamole-client-deployment.yaml` | guacamole-client deployment |
-| `platform/charts/shifter/templates/guacamole-client-service.yaml` | public service wiring for `/guacamole` |
-| `platform/charts/shifter/templates/guacamole-backendconfig.yaml` | Cloud Armor attachment for the public Guacamole backend |
-| `platform/terraform/gcp/modules/platform-core/main.tf` | Cloud SQL (shared), Secret Manager |
+`docker-compose.yml` runs the `guacamole-bootstrap-prune` worker (the Django
+broker logic is identical across clouds); `guacd` and `guacamole-client` are
+exercised through the AWS or GCP stacks.
 
-### Docker
+### Secret injection
 
-| File | Purpose |
-|------|---------|
-| [engine/guacamole/Dockerfile](../../../engine/guacamole/Dockerfile) | Custom guacamole-client image with extensions |
+The Portal entrypoint (`entrypoint.sh`) resolves `GUACAMOLE_SECRET_ID` /
+`GUACAMOLE_SECRET_ARN` and exports `GUACAMOLE_JSON_AUTH_SECRET` from the secret
+store, failing closed if the fetch fails. The guacamole-client container receives
+the same key as `JSON_SECRET_KEY`. The two values must match, or every signature
+fails validation.
 
----
+## Configuration reference
 
-## Configuration
+### guacamole-client container
 
-### Environment Variables
+| Variable | Source | Notes |
+|----------|--------|-------|
+| `GUACD_HOSTNAME` / `GUACD_PORT` | deployment | `guacd` service / `4822`. |
+| `POSTGRESQL_HOSTNAME` / `PORT` / `DATABASE` | runtime config | Guacamole DB. |
+| `POSTGRESQL_USER` / `PASSWORD` | secret store | Guacamole DB creds. |
+| `POSTGRESQL_AUTO_CREATE_ACCOUNTS` | deployment | `true`. |
+| `JSON_ENABLED` / `OPENID_ENABLED` | deployment | `true` / `false`. |
+| `JSON_SECRET_KEY` | secret store | Must equal `GUACAMOLE_JSON_AUTH_SECRET`. |
 
-#### guacamole-client Container
+### Secrets
 
-| Variable | Source | Description |
-|----------|--------|-------------|
-| `GUACD_HOSTNAME` | Hardcoded | Service discovery hostname for guacd |
-| `GUACD_PORT` | Hardcoded | `4822` |
-| `POSTGRESQL_HOSTNAME` | Terraform | Database instance address (RDS or Cloud SQL) |
-| `POSTGRESQL_PORT` | Terraform | `5432` |
-| `POSTGRESQL_DATABASE` | Hardcoded | `guacamole` |
-| `POSTGRESQL_AUTO_CREATE_ACCOUNTS` | Hardcoded | `true` |
-| `POSTGRESQL_USER` | Secret store | From `db_credentials` secret |
-| `POSTGRESQL_PASSWORD` | Secret store | From `db_credentials` secret |
-| `JSON_SECRET_KEY` | Secret store | 128-bit hex key for JSON auth |
-| `OPENID_*` | Terraform | OIDC configuration (when enabled) |
-
-#### Portal Django
-
-| Variable | Source | Description |
-|----------|--------|-------------|
-| `GUACAMOLE_JSON_AUTH_SECRET` | Secret store | Must match `JSON_SECRET_KEY` above |
-| `GUACAMOLE_BASE_URL` | Environment | Default: `/guacamole` |
-
----
-
-## Secrets
-
-| Secret Name Pattern | Purpose |
+| Secret name pattern | Purpose |
 |---------------------|---------|
-| `shifter-{env}-guacamole-db` | PostgreSQL credentials |
-| `shifter-{env}-guacamole-json-auth` | JSON auth 128-bit key |
+| `shifter-{env}-guacamole-db` | Guacamole PostgreSQL credentials. |
+| `shifter-{env}-guacamole-json-auth` | JSON-auth signing key. |
 
-Stored in AWS Secrets Manager or GCP Secret Manager depending on the deployment target.
+## Code references
 
-**Important**: The JSON auth secret must be wired to the Portal Django application deployment to set `GUACAMOLE_JSON_AUTH_SECRET` environment variable.
-
----
-
-## Deployment Notes
-
-### Secret Key Sync
-
-The JSON auth secret must be identical in:
-1. **guacamole-client container** (injected from secret store)
-2. **Portal Django** (set as `GUACAMOLE_JSON_AUTH_SECRET` env var)
-
-If these don't match, URL signatures will fail validation.
-
-### RDP Button Visibility
-
-The RDP button only appears for instances with GUI support:
-- `os_type == "kali"` - Kali Linux (XFCE desktop)
-- `os_type == "windows"` - Windows Server
-
-Ubuntu instances (`os_type == "ubuntu"`) have no GUI, so no RDP button.
-
-### Session Stickiness
-
-The Guacamole target group has session stickiness enabled (24-hour cookie) to ensure WebSocket connections stay on the same guacamole-client task for the duration of an RDP session.
-
----
+| Area | Path |
+|------|------|
+| Token broker (crypto, `/api/tokens`, URL) | `shifter/shifter_platform/mission_control/guacamole.py` |
+| Launch endpoints (RDP / range SSH / NGFW SSH) | `shifter/shifter_platform/mission_control/views/_guacamole.py`, `views/_guacamole_builders.py` |
+| Async bootstrap + token lifecycle | `shifter/shifter_platform/mission_control/guacamole_bootstrap.py` |
+| Polling endpoints | `shifter/shifter_platform/mission_control/views/_guacamole_bootstrap.py` |
+| Persistence model | `shifter/shifter_platform/mission_control/models.py` |
+| Prune service | `shifter/shifter_platform/mission_control/management/commands/run_guacamole_bootstrap_prune.py` |
+| URL routes | `shifter/shifter_platform/mission_control/urls.py` |
+| Settings | `shifter/shifter_platform/config/_guacamole_settings.py` |
+| Frontend | `shifter/shifter_platform/static/js/terminal-guacamole.js` |
+| AWS infra | `platform/terraform/modules/guacamole/` |
+| GCP infra | `platform/charts/shifter/templates/guac*`, `platform/k8s/gcp/base/guac*` |
+| Topology invariant test | `shifter/shifter_platform/tests/platform/test_guacamole_topology.py` |
 
 ## Troubleshooting
 
-### Common Issues
-
-| Symptom | Likely Cause | Solution |
-|---------|--------------|----------|
-| "Failed to generate RDP URL" | `GUACAMOLE_JSON_AUTH_SECRET` not set | Verify Django env var from Secrets Manager |
-| "RDP not available for {os} instances" | Instance has no GUI | Expected for Ubuntu; check os_type in range_config |
-| "No active range available" | User has no READY range | Must launch range first |
-| Connection timeout in Guacamole | Security group missing | Verify `kali_rdp_from_portal` / `victim_rdp_from_portal` rules |
-| "Invalid signature" in Guacamole logs | Secret key mismatch | Ensure identical keys in Guacamole and Django |
-| "Token expired" | URL used after 5 minutes | Generate new URL (click RDP button again) |
-
-### Log Locations
-
-| Component | Log Group |
-|-----------|-----------|
-| guacd | `/ecs/{name_prefix}-guacd` |
-| guacamole-client | `/ecs/{name_prefix}-guacamole-client` |
-| RDS (PostgreSQL) | `/aws/rds/instance/{name_prefix}-guacamole-db/postgresql` |
-| Portal Django | Application logs |
+| Symptom | Likely cause | Resolution |
+|---------|--------------|------------|
+| Launch returns `503` | All bootstrap worker slots busy, or `GUACAMOLE_JSON_AUTH_SECRET` unset | Retry after the `Retry-After` interval; verify the Portal secret. |
+| Status poll returns `410` "no longer available" | The URL was already delivered (single-use) | Launch again; the first reader consumes the token. |
+| Status poll returns `410` "expired" | Polled after the bootstrap TTL | Launch again. |
+| "Invalid signature" in guacamole-client logs | Key mismatch | Ensure `JSON_SECRET_KEY` equals `GUACAMOLE_JSON_AUTH_SECRET`. |
+| Connection timeout after the client opens | guacd cannot reach the range host | Verify peering and the range RDP/SSH ingress rules. |
+| No RDP button | Instance has no GUI (`os_type == "ubuntu"`) | Expected; use SSH. |
+</content>

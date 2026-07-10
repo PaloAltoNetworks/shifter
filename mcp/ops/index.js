@@ -29,7 +29,16 @@ import {
   buildSsmSendCommandArgs,
   buildRunManageArgs,
   buildPoolConfig,
+  DEFAULT_GITHUB_REPO,
+  BASE_AMI_TYPES,
+  PROMOTE_AMI_REF,
+  GCE_IMAGE_TYPES,
+  PROMOTE_GCE_IMAGE_REF,
+  buildGhWorkflowRunArgs,
+  ghExec,
+  resolveGitRef,
 } from "./lib.js";
+import { installToolSchemaDialectNormalizer } from "../shared/tool-schema-dialect.js";
 import {
   loadPolicy,
   profileFromEnv,
@@ -37,6 +46,17 @@ import {
   consumeApexToken,
   validateApexCoverage,
 } from "./policy.js";
+
+// SonarCloud S1192: extracted duplicated string literals.
+const CMD_DESCRIBE_INSTANCES = "describe-instances";
+const ARG_INSTANCE_IDS = "--instance-ids";
+const FILTER_RUNNING_INSTANCES = "Name=instance-state-name,Values=running";
+const QUERY_FIRST_INSTANCE_ID = "Reservations[0].Instances[0].InstanceId";
+const ARG_LOG_GROUP_NAME = "--log-group-name";
+const DESC_COMPONENT = "Component shorthand or full log group path";
+const DESC_EC2_INSTANCE_ID = "EC2 instance ID";
+const DESC_ECS_CLUSTER = "ECS cluster name (defaults to {env}-portal)";
+const MSG_INVALID_CHARACTERS = "Contains invalid characters";
 
 // Spawn a long-running aws-cli process (e.g. an SSM port-forward that
 // must stay open). Uses the same argv-array discipline as the
@@ -48,6 +68,9 @@ function spawnAws(profile, args, options = {}) {
 }
 
 const { Pool } = pg;
+
+const _HERE = path.dirname(fileURLToPath(import.meta.url));
+const _REPO_ROOT = path.resolve(_HERE, "..", "..");
 
 const PROFILES = {
   dev: process.env.PANW_SHIFTER_DEV_PROFILE,
@@ -82,8 +105,8 @@ function getInstancePlatform(profile, instanceId) {
   // "windows" because the value starts with a `"` instead of `w`.
   return awsText(profile, [
     "ec2",
-    "describe-instances",
-    "--instance-ids",
+    CMD_DESCRIBE_INSTANCES,
+    ARG_INSTANCE_IDS,
     instanceId,
     "--query",
     "Reservations[0].Instances[0].PlatformDetails",
@@ -224,12 +247,12 @@ async function ensureTunnel(env) {
     profile,
     [
       "ec2",
-      "describe-instances",
+      CMD_DESCRIBE_INSTANCES,
       "--filters",
       `Name=tag:Name,Values=${env}-portal-ec2`,
-      "Name=instance-state-name,Values=running",
+      FILTER_RUNNING_INSTANCES,
       "--query",
-      "Reservations[0].Instances[0].InstanceId",
+      QUERY_FIRST_INSTANCE_ID,
       "--output",
       "text",
     ],
@@ -363,6 +386,250 @@ function installLiveProcessHandlers() {
 // module from a test is side-effect-free.
 // ==========================================================================
 
+// Resolve an orphan record for a running EC2 with no engine_instance match,
+// using its shifter:range_id tag. Returns null when the range is still active.
+async function resolveOrphanByRangeTag(client, ec2) {
+  const parsedRangeId = ec2.RangeId ? Number.parseInt(ec2.RangeId, 10) : null;
+  const rangeResult = await client.query(
+    `SELECT mcr.id AS range_id, mcr.status AS range_status,
+            mcr.request_id AS engine_request_id
+     FROM mission_control_range mcr
+     WHERE mcr.id = $1`,
+    [parsedRangeId]
+  );
+
+  if (rangeResult.rows.length === 0) {
+    // Range not found in DB at all - still an orphan EC2
+    return {
+      ec2_id: ec2.InstanceId,
+      ec2_name: ec2.Name,
+      reason: `no aws_instance_id match; range ${parsedRangeId} not found in DB`,
+      engine_instance_id: null,
+      engine_request_id: null,
+      range_id: null,
+    };
+  }
+
+  const range = rangeResult.rows[0];
+
+  // Only flag as orphan if range is in a terminal state
+  if (range.range_status !== "failed" && range.range_status !== "destroyed") {
+    return null;
+  }
+
+  // Find pending engine_instances for this range (stuck with null aws_instance_id)
+  const eiResult = range.engine_request_id
+    ? await client.query(
+        `SELECT ei.id AS engine_instance_id, ei.status, ei.role
+         FROM engine_instance ei
+         WHERE ei.request_id = $1 AND ei.deleted_at IS NULL`,
+        [range.engine_request_id]
+      )
+    : { rows: [] };
+
+  return {
+    ec2_id: ec2.InstanceId,
+    ec2_name: ec2.Name,
+    reason: `no aws_instance_id match; range ${parsedRangeId} status: ${range.range_status}`,
+    engine_instance_id: null,
+    engine_instance_ids: eiResult.rows.map((r) => r.engine_instance_id),
+    engine_request_id: range.engine_request_id,
+    range_id: range.range_id,
+    range_status: range.range_status,
+  };
+}
+
+// Classify an EC2 that DID match an engine_instance row (via LEFT JOIN).
+// Returns an orphan record, or null when the range is healthy.
+function classifyMatchedOrphan(ec2, db) {
+  if (db.range_status == null) {
+    // LEFT JOIN found engine_instance but no matching range — orphan
+    return {
+      ec2_id: ec2.InstanceId,
+      ec2_name: ec2.Name,
+      reason: "engine_instance exists but no associated range found",
+      engine_instance_id: db.engine_instance_id,
+      engine_request_id: db.engine_request_id,
+      range_id: null,
+      instance_status: db.instance_status,
+      role: db.role,
+    };
+  }
+  if (db.range_status === "failed" || db.range_status === "destroyed") {
+    return {
+      ec2_id: ec2.InstanceId,
+      ec2_name: ec2.Name,
+      reason: `range status: ${db.range_status}`,
+      engine_instance_id: db.engine_instance_id,
+      engine_request_id: db.engine_request_id,
+      range_id: db.range_id,
+      instance_status: db.instance_status,
+      role: db.role,
+    };
+  }
+  return null;
+}
+
+// Query DB for engine_instances matching the running EC2 IDs and return the
+// orphan records (instances whose range is missing or in a terminal state).
+async function findOrphanedInstances(client, runningEc2s, ec2Ids) {
+  const placeholders = ec2Ids.map((_, i) => `$${i + 1}`).join(", ");
+  const result = await client.query(
+    `SELECT
+      ei.id AS engine_instance_id,
+      ei.status AS instance_status,
+      ei.state->>'aws_instance_id' AS ec2_id,
+      ei.role,
+      ei.request_id AS engine_request_id,
+      mcr.id AS range_id,
+      mcr.status AS range_status
+    FROM engine_instance ei
+    LEFT JOIN mission_control_range mcr ON mcr.request_id = ei.request_id
+    WHERE ei.state->>'aws_instance_id' IN (${placeholders})
+      AND ei.deleted_at IS NULL`,
+    ec2Ids
+  );
+
+  const dbMap = {};
+  for (const row of result.rows) {
+    dbMap[row.ec2_id] = row;
+  }
+
+  const found = [];
+  for (const ec2 of runningEc2s) {
+    const db = dbMap[ec2.InstanceId];
+    const orphan = db
+      ? classifyMatchedOrphan(ec2, db)
+      : await resolveOrphanByRangeTag(client, ec2);
+    if (orphan) {
+      found.push(orphan);
+    }
+  }
+  return found;
+}
+
+// Terminate the orphaned EC2 instances and return per-instance termination state.
+function terminateOrphans(profile, orphans) {
+  const terminated = [];
+  for (const orphan of orphans) {
+    const termResult = aws(profile, [
+      "ec2",
+      "terminate-instances",
+      ARG_INSTANCE_IDS,
+      orphan.ec2_id,
+    ]);
+    const state = termResult.TerminatingInstances?.[0]?.CurrentState?.Name;
+    terminated.push({ ec2_id: orphan.ec2_id, state });
+  }
+  return terminated;
+}
+
+// Soft-delete the engine_instances, ranges, requests, and range instances
+// associated with the terminated orphans.
+async function markOrphansDestroyedInDb(client, orphans) {
+  // Collect all engine_instance IDs to mark destroyed
+  // - single engine_instance_id from direct aws_instance_id match
+  // - engine_instance_ids array from Name-tag-resolved orphans
+  const engineIds = [];
+  for (const o of orphans) {
+    if (o.engine_instance_id) {
+      engineIds.push(o.engine_instance_id);
+    }
+    if (o.engine_instance_ids) {
+      engineIds.push(...o.engine_instance_ids);
+    }
+  }
+  const uniqueEngineIds = [...new Set(engineIds)];
+
+  if (uniqueEngineIds.length > 0) {
+    const ph = uniqueEngineIds.map((_, i) => `$${i + 1}`).join(", ");
+    await client.query(
+      `UPDATE engine_instance
+       SET status = 'destroyed', destroyed_at = NOW(), deleted_at = NOW(), updated_at = NOW()
+       WHERE id IN (${ph})`,
+      uniqueEngineIds
+    );
+  }
+
+  const rangeIds = [
+    ...new Set(orphans.filter((o) => o.range_id).map((o) => o.range_id)),
+  ];
+  if (rangeIds.length > 0) {
+    const ph = rangeIds.map((_, i) => `$${i + 1}`).join(", ");
+    await client.query(
+      `UPDATE mission_control_range
+       SET status = 'destroyed', destroyed_at = NOW(), updated_at = NOW()
+       WHERE id IN (${ph}) AND status != 'destroyed'`,
+      rangeIds
+    );
+  }
+
+  const engineRequestIds = [
+    ...new Set(
+      orphans.filter((o) => o.engine_request_id).map((o) => o.engine_request_id)
+    ),
+  ];
+  if (engineRequestIds.length > 0) {
+    const ph = engineRequestIds.map((_, i) => `$${i + 1}`).join(", ");
+    await client.query(
+      `UPDATE cms_request SET deleted_at = NOW()
+       WHERE deleted_at IS NULL
+         AND request_id IN (
+           SELECT request_id FROM engine_request WHERE id IN (${ph})
+         )`,
+      engineRequestIds
+    );
+    await client.query(
+      `UPDATE cms_rangeinstance SET deleted_at = NOW()
+       WHERE deleted_at IS NULL
+         AND request_id IN (
+           SELECT cr.id FROM cms_request cr
+           JOIN engine_request er ON er.request_id = cr.request_id
+           WHERE er.id IN (${ph})
+         )`,
+      engineRequestIds
+    );
+  }
+}
+
+function triggerAmiWorkflow({ workflow, ami_type, ref, actionsPath }) {
+  const branch = ref ?? resolveGitRef(_REPO_ROOT);
+  ghExec(
+    buildGhWorkflowRunArgs({
+      workflow,
+      repo: DEFAULT_GITHUB_REPO,
+      ref: branch,
+      inputs: { ami_type },
+    }),
+  );
+  return (
+    `Triggered ${workflow} for ${ami_type} on ref ${branch}. ` +
+    `View at: https://github.com/${DEFAULT_GITHUB_REPO}/actions/workflows/${actionsPath}`
+  );
+}
+
+// GCE image build/promote (issue #505, PLAT-001.10). Parallel to
+// triggerAmiWorkflow but passes the GCP-scoped `image_type` workflow input
+// (the GCE workflows never use the AWS `ami_type` input name). The dispatch
+// `--ref` is the single source of truth for the built branch: the GCE
+// workflows check out the dispatched ref (github.sha) rather than a separate
+// free-form input, so the branch reported here is the branch actually built.
+function triggerGceImageWorkflow({ workflow, image_type, ref, actionsPath }) {
+  const branch = ref ?? resolveGitRef(_REPO_ROOT);
+  ghExec(
+    buildGhWorkflowRunArgs({
+      workflow,
+      repo: DEFAULT_GITHUB_REPO,
+      ref: branch,
+      inputs: { image_type },
+    }),
+  );
+  return (
+    `Triggered ${workflow} for ${image_type} on ref ${branch}. ` +
+    `View at: https://github.com/${DEFAULT_GITHUB_REPO}/actions/workflows/${actionsPath}`
+  );
+}
+
 export function registerAllOpsTools(ctx) {
   // `approve` is the operator-confirmation MCP tool. The agent reads
 // the token off the operator's terminal (which the server printed to
@@ -420,11 +687,17 @@ const SsmCommandId = z
   );
 const SafePath = z
   .string()
-  .regex(/^[\w\/.:\-\[\]#, ]+$/, "Contains invalid characters");
-const SafeName = z.string().regex(/^[\w.*?-]+$/, "Contains invalid characters");
+  .regex(/^[\w/.:\-[\]#, ]+$/, MSG_INVALID_CHARACTERS);
+const SafeName = z.string().regex(/^[\w.*?-]+$/, MSG_INVALID_CHARACTERS);
+const AmiTypeSchema = z
+  .enum(BASE_AMI_TYPES)
+  .describe("AMI type (kali, ubuntu, windows, dc, brokenbk)");
+const GceImageTypeSchema = z
+  .enum(GCE_IMAGE_TYPES)
+  .describe("GCE image type (ubuntu, brokenbk, kali, windows, dc)");
 const SecretIdSchema = z
   .string()
-  .regex(/^[\w/+=.@-]+$/, "Contains invalid characters");
+  .regex(/^[\w/+=.@-]+$/, MSG_INVALID_CHARACTERS);
 const ArnSchema = z
   .string()
   .regex(/^arn:aws[\w:*\/.-]+$/, "Must be a valid ARN");
@@ -457,7 +730,7 @@ registerTool(ctx, {
       const result = aws(profile, [
         "logs",
         "describe-log-streams",
-        "--log-group-name",
+        ARG_LOG_GROUP_NAME,
         logGroup,
         "--order-by",
         "LastEventTime",
@@ -485,7 +758,7 @@ registerTool(ctx, {
   description: "Get log events from a specific log stream",
   schema: {
     env: EnvSchema,
-    component: SafePath.describe("Component shorthand or full log group path"),
+    component: SafePath.describe(DESC_COMPONENT),
     stream_name: SafePath.describe("Log stream name"),
     limit: z
       .number()
@@ -502,7 +775,7 @@ registerTool(ctx, {
       const result = aws(profile, [
         "logs",
         "get-log-events",
-        "--log-group-name",
+        ARG_LOG_GROUP_NAME,
         logGroup,
         "--log-stream-name",
         stream_name,
@@ -526,7 +799,7 @@ registerTool(ctx, {
   description: "Search log events across streams using a CloudWatch filter pattern",
   schema: {
     env: EnvSchema,
-    component: SafePath.describe("Component shorthand or full log group path"),
+    component: SafePath.describe(DESC_COMPONENT),
     filter_pattern: z
       .string()
       .describe(
@@ -572,7 +845,7 @@ registerTool(ctx, {
   description: "Tail recent logs for a component (shortcut for describe_streams + get_log_events on the latest stream)",
   schema: {
     env: EnvSchema,
-    component: SafePath.describe("Component shorthand or full log group path"),
+    component: SafePath.describe(DESC_COMPONENT),
     limit: z
       .number()
       .int()
@@ -588,7 +861,7 @@ registerTool(ctx, {
       const streams = aws(profile, [
         "logs",
         "describe-log-streams",
-        "--log-group-name",
+        ARG_LOG_GROUP_NAME,
         logGroup,
         "--order-by",
         "LastEventTime",
@@ -603,7 +876,7 @@ registerTool(ctx, {
       const result = aws(profile, [
         "logs",
         "get-log-events",
-        "--log-group-name",
+        ARG_LOG_GROUP_NAME,
         logGroup,
         "--log-stream-name",
         streamName,
@@ -646,7 +919,7 @@ registerTool(ctx, {
       const filters = buildInstanceFilters({ name_filter, include_terminated });
       const result = aws(profile, [
         "ec2",
-        "describe-instances",
+        CMD_DESCRIBE_INSTANCES,
         "--filters",
         JSON.stringify(filters),
         "--query",
@@ -665,7 +938,7 @@ registerTool(ctx, {
   description: "Start a stopped EC2 instance",
   schema: {
     env: EnvSchema,
-    instance_id: Ec2Id.describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe(DESC_EC2_INSTANCE_ID),
   },
   handler: async ({ env, instance_id }) => {
     try {
@@ -673,7 +946,7 @@ registerTool(ctx, {
       const result = aws(profile, [
         "ec2",
         "start-instances",
-        "--instance-ids",
+        ARG_INSTANCE_IDS,
         instance_id,
       ]);
       const state = result.StartingInstances?.[0]?.CurrentState?.Name;
@@ -690,7 +963,7 @@ registerTool(ctx, {
   description: "Stop a running EC2 instance",
   schema: {
     env: EnvSchema,
-    instance_id: Ec2Id.describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe(DESC_EC2_INSTANCE_ID),
   },
   handler: async ({ env, instance_id }) => {
     try {
@@ -698,7 +971,7 @@ registerTool(ctx, {
       const result = aws(profile, [
         "ec2",
         "stop-instances",
-        "--instance-ids",
+        ARG_INSTANCE_IDS,
         instance_id,
       ]);
       const state = result.StoppingInstances?.[0]?.CurrentState?.Name;
@@ -715,7 +988,7 @@ registerTool(ctx, {
   description: "Terminate an EC2 instance (irreversible)",
   schema: {
     env: EnvSchema,
-    instance_id: Ec2Id.describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe(DESC_EC2_INSTANCE_ID),
   },
   handler: async ({ env, instance_id }) => {
     try {
@@ -723,7 +996,7 @@ registerTool(ctx, {
       const result = aws(profile, [
         "ec2",
         "terminate-instances",
-        "--instance-ids",
+        ARG_INSTANCE_IDS,
         instance_id,
       ]);
       const state =
@@ -746,7 +1019,7 @@ registerTool(ctx, {
   schema: {
     env: EnvSchema,
     cluster: SafeName.optional().describe(
-      "ECS cluster name (defaults to {env}-portal)"
+      DESC_ECS_CLUSTER
     ),
   },
   handler: async ({ env, cluster }) => {
@@ -791,7 +1064,7 @@ registerTool(ctx, {
     env: EnvSchema,
     service: SafeName.describe("ECS service name"),
     cluster: SafeName.optional().describe(
-      "ECS cluster name (defaults to {env}-portal)",
+      DESC_ECS_CLUSTER,
     ),
   },
   handler: async ({ env, service, cluster }) => {
@@ -846,7 +1119,7 @@ registerTool(ctx, {
     env: EnvSchema,
     service: SafeName.describe("ECS service name"),
     cluster: SafeName.optional().describe(
-      "ECS cluster name (defaults to {env}-portal)",
+      DESC_ECS_CLUSTER,
     ),
   },
   handler: async ({ env, service, cluster }) => {
@@ -949,7 +1222,7 @@ registerTool(ctx, {
   description: "Run a command on an EC2 instance via SSM. Auto-detects OS to use the correct shell (bash for Linux, PowerShell for Windows).",
   schema: {
     env: EnvSchema,
-    instance_id: Ec2Id.describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe(DESC_EC2_INSTANCE_ID),
     command: z.string().describe("Command to execute (shell for Linux, PowerShell for Windows)"),
   },
   handler: async ({ env, instance_id, command }) => {
@@ -1029,12 +1302,12 @@ registerTool(ctx, {
         profile,
         [
           "ec2",
-          "describe-instances",
+          CMD_DESCRIBE_INSTANCES,
           "--filters",
           `Name=tag:Name,Values=${env}-portal-ec2`,
-          "Name=instance-state-name,Values=running",
+          FILTER_RUNNING_INSTANCES,
           "--query",
-          "Reservations[0].Instances[0].InstanceId",
+          QUERY_FIRST_INSTANCE_ID,
           "--output",
           "text",
         ],
@@ -1435,7 +1708,7 @@ registerTool(ctx, {
       ];
       const ec2Result = aws(profile, [
         "ec2",
-        "describe-instances",
+        CMD_DESCRIBE_INSTANCES,
         "--filters",
         JSON.stringify(filters),
         "--query",
@@ -1453,124 +1726,8 @@ registerTool(ctx, {
       // 2. Query DB for engine_instances that map to these EC2 IDs
       const ec2Ids = runningEc2s.map((i) => i.InstanceId);
 
-      const orphans = await withClient(
-        env,
-        { readOnly: true },
-        async (client) => {
-          const placeholders = ec2Ids
-            .map((_, i) => `$${i + 1}`)
-            .join(", ");
-          const result = await client.query(
-            `SELECT
-              ei.id AS engine_instance_id,
-              ei.status AS instance_status,
-              ei.state->>'aws_instance_id' AS ec2_id,
-              ei.role,
-              ei.request_id AS engine_request_id,
-              mcr.id AS range_id,
-              mcr.status AS range_status
-            FROM engine_instance ei
-            LEFT JOIN mission_control_range mcr ON mcr.request_id = ei.request_id
-            WHERE ei.state->>'aws_instance_id' IN (${placeholders})
-              AND ei.deleted_at IS NULL`,
-            ec2Ids
-          );
-
-          const dbMap = {};
-          for (const row of result.rows) {
-            dbMap[row.ec2_id] = row;
-          }
-
-          const found = [];
-          for (const ec2 of runningEc2s) {
-            const db = dbMap[ec2.InstanceId];
-            if (!db) {
-              // No engine_instance matched by aws_instance_id.
-              // Use range_id from EC2 tag (set by Terraform on all range instances).
-              const parsedRangeId = ec2.RangeId
-                ? Number.parseInt(ec2.RangeId, 10)
-                : null;
-
-              // Look up the range and its engine_instances by parsed range_id
-              const rangeResult = await client.query(
-                `SELECT mcr.id AS range_id, mcr.status AS range_status,
-                        mcr.request_id AS engine_request_id
-                 FROM mission_control_range mcr
-                 WHERE mcr.id = $1`,
-                [parsedRangeId]
-              );
-
-              if (rangeResult.rows.length > 0) {
-                const range = rangeResult.rows[0];
-
-                // Only flag as orphan if range is in a terminal state
-                if (range.range_status !== "failed" && range.range_status !== "destroyed") {
-                  continue;
-                }
-
-                // Find pending engine_instances for this range (stuck with null aws_instance_id)
-                const eiResult = range.engine_request_id
-                  ? await client.query(
-                      `SELECT ei.id AS engine_instance_id, ei.status, ei.role
-                       FROM engine_instance ei
-                       WHERE ei.request_id = $1 AND ei.deleted_at IS NULL`,
-                      [range.engine_request_id]
-                    )
-                  : { rows: [] };
-
-                found.push({
-                  ec2_id: ec2.InstanceId,
-                  ec2_name: ec2.Name,
-                  reason: `no aws_instance_id match; range ${parsedRangeId} status: ${range.range_status}`,
-                  engine_instance_id: null,
-                  engine_instance_ids: eiResult.rows.map((r) => r.engine_instance_id),
-                  engine_request_id: range.engine_request_id,
-                  range_id: range.range_id,
-                  range_status: range.range_status,
-                });
-              } else {
-                // Range not found in DB at all - still an orphan EC2
-                found.push({
-                  ec2_id: ec2.InstanceId,
-                  ec2_name: ec2.Name,
-                  reason: `no aws_instance_id match; range ${parsedRangeId} not found in DB`,
-                  engine_instance_id: null,
-                  engine_request_id: null,
-                  range_id: null,
-                });
-              }
-            } else if (db.range_status == null) {
-              // LEFT JOIN found engine_instance but no matching range — orphan
-              found.push({
-                ec2_id: ec2.InstanceId,
-                ec2_name: ec2.Name,
-                reason:
-                  "engine_instance exists but no associated range found",
-                engine_instance_id: db.engine_instance_id,
-                engine_request_id: db.engine_request_id,
-                range_id: null,
-                instance_status: db.instance_status,
-                role: db.role,
-              });
-            } else if (
-              db.range_status === "failed" ||
-              db.range_status === "destroyed"
-            ) {
-              found.push({
-                ec2_id: ec2.InstanceId,
-                ec2_name: ec2.Name,
-                reason: `range status: ${db.range_status}`,
-                engine_instance_id: db.engine_instance_id,
-                engine_request_id: db.engine_request_id,
-                range_id: db.range_id,
-                instance_status: db.instance_status,
-                role: db.role,
-              });
-            }
-          }
-
-          return found;
-        }
+      const orphans = await withClient(env, { readOnly: true }, (client) =>
+        findOrphanedInstances(client, runningEc2s, ec2Ids)
       );
 
       if (orphans.length === 0) {
@@ -1589,90 +1746,11 @@ registerTool(ctx, {
       }
 
       // 3. Execute: terminate EC2s and update DB
-      const terminated = [];
-      for (const orphan of orphans) {
-        const termResult = aws(profile, [
-          "ec2",
-          "terminate-instances",
-          "--instance-ids",
-          orphan.ec2_id,
-        ]);
-        const state =
-          termResult.TerminatingInstances?.[0]?.CurrentState?.Name;
-        terminated.push({ ec2_id: orphan.ec2_id, state });
-      }
+      const terminated = terminateOrphans(profile, orphans);
 
-      await withClient(env, { readOnly: false }, async (client) => {
-        // Collect all engine_instance IDs to mark destroyed
-        // - single engine_instance_id from direct aws_instance_id match
-        // - engine_instance_ids array from Name-tag-resolved orphans
-        const engineIds = [];
-        for (const o of orphans) {
-          if (o.engine_instance_id) {
-            engineIds.push(o.engine_instance_id);
-          }
-          if (o.engine_instance_ids) {
-            engineIds.push(...o.engine_instance_ids);
-          }
-        }
-        const uniqueEngineIds = [...new Set(engineIds)];
-
-        if (uniqueEngineIds.length > 0) {
-          const ph = uniqueEngineIds.map((_, i) => `$${i + 1}`).join(", ");
-          await client.query(
-            `UPDATE engine_instance
-             SET status = 'destroyed', destroyed_at = NOW(), deleted_at = NOW(), updated_at = NOW()
-             WHERE id IN (${ph})`,
-            uniqueEngineIds
-          );
-        }
-
-        const rangeIds = [
-          ...new Set(
-            orphans.filter((o) => o.range_id).map((o) => o.range_id)
-          ),
-        ];
-        if (rangeIds.length > 0) {
-          const ph = rangeIds.map((_, i) => `$${i + 1}`).join(", ");
-          await client.query(
-            `UPDATE mission_control_range
-             SET status = 'destroyed', destroyed_at = NOW(), updated_at = NOW()
-             WHERE id IN (${ph}) AND status != 'destroyed'`,
-            rangeIds
-          );
-        }
-
-        const engineRequestIds = [
-          ...new Set(
-            orphans
-              .filter((o) => o.engine_request_id)
-              .map((o) => o.engine_request_id)
-          ),
-        ];
-        if (engineRequestIds.length > 0) {
-          const ph = engineRequestIds
-            .map((_, i) => `$${i + 1}`)
-            .join(", ");
-          await client.query(
-            `UPDATE cms_request SET deleted_at = NOW()
-             WHERE deleted_at IS NULL
-               AND request_id IN (
-                 SELECT request_id FROM engine_request WHERE id IN (${ph})
-               )`,
-            engineRequestIds
-          );
-          await client.query(
-            `UPDATE cms_rangeinstance SET deleted_at = NOW()
-             WHERE deleted_at IS NULL
-               AND request_id IN (
-                 SELECT cr.id FROM cms_request cr
-                 JOIN engine_request er ON er.request_id = cr.request_id
-                 WHERE er.id IN (${ph})
-               )`,
-            engineRequestIds
-          );
-        }
-      });
+      await withClient(env, { readOnly: false }, (client) =>
+        markOrphansDestroyedInDb(client, orphans)
+      );
 
       const allEngineIds = [];
       for (const o of orphans) {
@@ -2434,6 +2512,122 @@ registerTool(ctx, {
 });
 
 // ==========================================================================
+// GitHub Actions — AMI build / promote (issue #411)
+// ==========================================================================
+
+registerTool(ctx, {
+  name: "build_ami",
+  klass: "infra_mutation",
+  description:
+    "Trigger packer.yml to build an AMI in dev (equivalent to ./scripts/ami.sh -b <type>). Requires GH_TOKEN or GITHUB_TOKEN.",
+  schema: {
+    ami_type: AmiTypeSchema,
+    ref: SafePath.optional().describe(
+      "Branch to build from (default: current git branch, else dev)",
+    ),
+  },
+  handler: async ({ ami_type, ref }) => {
+    try {
+      return ok(
+        triggerAmiWorkflow({
+          workflow: "packer.yml",
+          ami_type,
+          ref,
+          actionsPath: "packer.yml",
+        }),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+});
+
+registerTool(ctx, {
+  name: "promote_ami",
+  klass: "infra_mutation",
+  description:
+    "Trigger packer-promote.yml to promote an AMI to prod (equivalent to ./scripts/ami.sh -p <type>). Requires GH_TOKEN or GITHUB_TOKEN.",
+  schema: {
+    env: z
+      .literal("prod")
+      .describe("Must be prod — promotion updates production AMIs."),
+    ami_type: AmiTypeSchema,
+  },
+  handler: async ({ ami_type }) => {
+    try {
+      return ok(
+        triggerAmiWorkflow({
+          workflow: "packer-promote.yml",
+          ami_type,
+          ref: PROMOTE_AMI_REF,
+          actionsPath: "packer-promote.yml",
+        }),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+});
+
+// ==========================================================================
+// GitHub Actions — GCE image build / promote (issue #505, PLAT-001.10)
+// ==========================================================================
+
+registerTool(ctx, {
+  name: "build_gce_image",
+  klass: "infra_mutation",
+  description:
+    "Trigger packer-gcp.yml to build a GCE guest image in dev (the GCP analog of build_ami). Requires GH_TOKEN or GITHUB_TOKEN.",
+  schema: {
+    image_type: GceImageTypeSchema,
+    ref: SafePath.optional().describe(
+      "Branch to build from (default: current git branch, else dev)",
+    ),
+  },
+  handler: async ({ image_type, ref }) => {
+    try {
+      return ok(
+        triggerGceImageWorkflow({
+          workflow: "packer-gcp.yml",
+          image_type,
+          ref,
+          actionsPath: "packer-gcp.yml",
+        }),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+});
+
+registerTool(ctx, {
+  name: "promote_gce_image",
+  klass: "infra_mutation",
+  description:
+    "Trigger packer-gcp-promote.yml to promote a GCE image to prod (the GCP analog of promote_ami). Requires GH_TOKEN or GITHUB_TOKEN.",
+  schema: {
+    env: z
+      .literal("prod")
+      .describe("Must be prod — promotion updates production GCE images."),
+    image_type: GceImageTypeSchema,
+  },
+  handler: async ({ image_type }) => {
+    try {
+      return ok(
+        triggerGceImageWorkflow({
+          workflow: "packer-gcp-promote.yml",
+          image_type,
+          ref: PROMOTE_GCE_IMAGE_REF,
+          actionsPath: "packer-gcp-promote.yml",
+        }),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+});
+
+// ==========================================================================
 // S3
 // ==========================================================================
 
@@ -2801,7 +2995,7 @@ registerTool(ctx, {
   },
   handler: async ({ env, command, instance_id }) => {
     try {
-      validateManageCommand(command);
+      const commandParts = validateManageCommand(command);
       const profile = getProfile(env);
 
       // Auto-detect portal instance if not provided
@@ -2809,12 +3003,12 @@ registerTool(ctx, {
       if (!targetId) {
         targetId = awsText(profile, [
           "ec2",
-          "describe-instances",
+          CMD_DESCRIBE_INSTANCES,
           "--filters",
           "Name=tag:Name,Values=*portal*",
-          "Name=instance-state-name,Values=running",
+          FILTER_RUNNING_INSTANCES,
           "--query",
-          "Reservations[0].Instances[0].InstanceId",
+          QUERY_FIRST_INSTANCE_ID,
           "--output",
           "text",
         ]);
@@ -2825,11 +3019,13 @@ registerTool(ctx, {
 
       const result = aws(
         profile,
-        buildRunManageArgs({ targetId, command })
+        buildRunManageArgs({ targetId, commandParts })
       );
       const cmdId = result.Command.CommandId;
+      // Echo the normalized (validated) command, never the raw input.
+      const normalizedCommand = commandParts.join(" ");
       return ok(
-        `Command sent: manage.py ${command}\nInstance: ${targetId}\nCommand ID: ${cmdId}\nUse ssm_get_command_output to check results.`,
+        `Command sent: manage.py ${normalizedCommand}\nInstance: ${targetId}\nCommand ID: ${cmdId}\nUse ssm_get_command_output to check results.`,
       );
     } catch (e) {
       return err(e);
@@ -3054,9 +3250,8 @@ registerTool(ctx, {
 // registered — fail closed is the only correct path.
 async function main() {
   installLiveProcessHandlers();
-  const _HERE = path.dirname(fileURLToPath(import.meta.url));
-  const _REPO_ROOT = path.resolve(_HERE, "..", "..");
   const server = new McpServer({ name: "shifter-ops", version: "1.0.0" });
+  installToolSchemaDialectNormalizer(server);
   const policy = loadPolicy({
     path: path.join(_REPO_ROOT, ".shifter.yaml"),
     profile: profileFromEnv(process.env),

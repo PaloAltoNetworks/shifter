@@ -216,6 +216,7 @@ class TestNGFWAppContext:
         ctx = NGFWAppContext(
             app_id=uuid4(),
             instance_id=uuid4(),
+            request_id=uuid4(),
             name="VM-Series",
             status="ready",
             created_at=datetime.now(UTC),
@@ -223,7 +224,7 @@ class TestNGFWAppContext:
         assert ctx.app_type == "ngfw"
 
     def test_required_fields(self):
-        """NGFWAppContext requires app_id, instance_id, name, status, created_at."""
+        """NGFWAppContext requires app_id, instance_id, request_id, name, status, created_at."""
         from uuid import uuid4
 
         import pytest
@@ -235,6 +236,7 @@ class TestNGFWAppContext:
             NGFWAppContext(app_id=uuid4(), instance_id=uuid4(), name="VM-Series")
         errors = exc_info.value.errors()
         error_fields = {e["loc"][0] for e in errors}
+        assert "request_id" in error_fields
         assert "status" in error_fields
         assert "created_at" in error_fields
 
@@ -248,6 +250,7 @@ class TestNGFWAppContext:
         ctx = NGFWAppContext(
             app_id=uuid4(),
             instance_id=uuid4(),
+            request_id=uuid4(),
             name="VM-Series",
             status="not_provisioned",
             created_at=datetime.now(UTC),
@@ -265,6 +268,7 @@ class TestNGFWAppContext:
         ctx = NGFWAppContext(
             app_id=app_id,
             instance_id=uuid4(),
+            request_id=uuid4(),
             name="VM-Series",
             status="ready",
             created_at=datetime.now(UTC),
@@ -328,6 +332,7 @@ class TestAppContext:
         data = {
             "app_id": str(uuid4()),
             "instance_id": str(uuid4()),
+            "request_id": str(uuid4()),
             "name": "VM-Series",
             "app_type": "ngfw",
             "status": "ready",

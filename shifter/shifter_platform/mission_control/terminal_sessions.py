@@ -16,9 +16,13 @@ import asyncio
 class TerminalSessionRegistry:
     """Track active terminal SSH sessions and enforce per-process caps.
 
-    Counts are per process, which matches how the portal is deployed (the cap
-    protects each ASGI process individually). Access is guarded by an asyncio
-    lock so concurrent connects/disconnects account accurately.
+    Counts are per process. The production portal runs Gunicorn with
+    ``PORTAL_WEB_WORKERS`` Uvicorn workers (``entrypoint.sh``), each importing
+    this module once, so there is one registry per worker and the cap protects
+    each worker process individually; the per-instance ceiling is
+    ``PORTAL_WEB_WORKERS * TERMINAL_MAX_SESSIONS`` (see
+    ``docs/architecture/terminal-websocket-capacity-847.md``). Access is guarded
+    by an asyncio lock so concurrent connects/disconnects account accurately.
     """
 
     def __init__(self) -> None:
@@ -56,5 +60,6 @@ class TerminalSessionRegistry:
         return {"active_sessions": self._total, "distinct_users": len(self._per_user)}
 
 
-# One registry per portal ASGI process. The cap is intentionally process-local.
+# One registry per portal worker process. The cap is intentionally
+# process-local; the per-instance ceiling is PORTAL_WEB_WORKERS * the cap.
 session_registry = TerminalSessionRegistry()

@@ -56,3 +56,33 @@ class TestRegistrationDeadlineEnforcement:
         csv_content = "Alice,alice@test.com"
         participants = bulk_import_participants(ctf_event.pk, csv_content)
         assert len(participants) == 1
+
+
+@pytest.mark.django_db
+class TestMaxParticipantsCap:
+    """#1145: invite/import enforce max_participants under the event row lock."""
+
+    def test_invite_rejects_when_at_capacity(self, ctf_event):
+        ctf_event.max_participants = 2
+        ctf_event.registration_deadline = None
+        ctf_event.save(update_fields=["max_participants", "registration_deadline"])
+
+        invite_participant(ctf_event.pk, "a@test.com", "A")
+        invite_participant(ctf_event.pk, "b@test.com", "B")
+        with pytest.raises(CTFValidationError) as exc:
+            invite_participant(ctf_event.pk, "c@test.com", "C")
+
+        assert exc.value.code == "CTF_MAX_PARTICIPANTS_REACHED"
+        assert ctf_event.participants.count() == 2
+
+    def test_bulk_import_rejects_when_exceeding_capacity(self, ctf_event):
+        ctf_event.max_participants = 2
+        ctf_event.registration_deadline = None
+        ctf_event.save(update_fields=["max_participants", "registration_deadline"])
+
+        invite_participant(ctf_event.pk, "a@test.com", "A")
+        with pytest.raises(CTFValidationError):
+            bulk_import_participants(ctf_event.pk, "B,b@test.com\nC,c@test.com")
+
+        # The over-cap import is rejected wholesale; only the single invite remains.
+        assert ctf_event.participants.count() == 1

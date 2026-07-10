@@ -1,8 +1,8 @@
 """Mission Control view package.
 
 The implementation is split across private submodules (``_pages``,
-``_uploads``, ``_guacamole``, ``_ranges``, ``_ngfw``, ``_credentials``,
-``_files``) and re-exported here so existing
+``_uploads``, ``_guacamole``, ``_ranges``, ``_ngfw``, ``_credentials``)
+and re-exported here so existing
 ``from mission_control.views import X`` and ``from mission_control import views;
 views.X`` call sites continue to work.
 
@@ -17,7 +17,10 @@ submodule code sees.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import Any
 
+from django.http import HttpResponseBase
 from django.shortcuts import render
 
 from cms.services import (
@@ -58,6 +61,9 @@ from cms.services import (
     list_credentials as cms_list_credentials,
 )
 from cms.services import (
+    list_launchable_scenarios as cms_list_launchable_scenarios,
+)
+from cms.services import (
     list_ngfws as cms_list_ngfws,
 )
 from cms.services import (
@@ -67,31 +73,11 @@ from risk_register.models import AuditLog
 from risk_register.services import audit_log_from_request
 
 from ._credentials import (
-    api_credential_create,
-    api_credential_delete,
     credential_add,
     credential_detail,
     credentials_list,
 )
-from ._files import (
-    api_list_scripts,
-    file_delete,
-    file_upload,
-    files,
-)
-from ._guacamole import (
-    api_ngfw_ssh_url,
-    guacamole_rdp_url,
-    guacamole_ssh_url,
-)
-from ._guacamole_bootstrap import (
-    guacamole_bootstrap_open,
-    guacamole_bootstrap_status,
-)
 from ._ngfw import (
-    api_ngfw_create,
-    api_ngfw_destroy,
-    api_ngfw_list,
     ngfw_deprovision,
     ngfw_detail,
     ngfw_list,
@@ -106,29 +92,47 @@ from ._pages import (
     terminal,
     walkthrough,
 )
-from ._ranges import (
-    cancel_range,
-    destroy_range,
-    get_range,
-    launch_range,
-    list_scenarios,
-    pause_range,
-    resume_range,
-)
-from ._ranges import (
-    list_agents as list_agents_api,
-)
-from ._uploads import (
-    cancel_upload,
-    complete_upload,
-    initiate_upload,
-)
 
-# ``list_agents`` exists as both the JSON API view (``_ranges.list_agents``)
-# and the imported ``cms.services.list_agents`` rebind above. The JSON view
-# is the public ``mission_control.views.list_agents`` per the urlconf; the
-# rebound CMS helper is exposed as ``cms_list_agents`` for the patch contract.
-list_agents = list_agents_api
+
+def _api_view(name: str) -> Callable[..., HttpResponseBase]:
+    """Lazily resolve Mission Control DRF view callables.
+
+    ``mission_control.api.views`` imports private helpers from this package, so
+    eager imports here create a circular import while Django is loading URL
+    modules. The wrapper preserves the legacy public names without importing
+    the DRF module until request dispatch or a direct test call.
+    """
+
+    def _wrapped(request: object, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        """Dispatch to the lazily imported DRF view callable."""
+        from mission_control.api import views as api_views
+
+        return getattr(api_views, name)(request, *args, **kwargs)
+
+    return _wrapped
+
+
+api_credential_create = _api_view("api_credential_create")
+api_credential_delete = _api_view("api_credential_delete")
+api_ngfw_create = _api_view("api_ngfw_create")
+api_ngfw_destroy = _api_view("api_ngfw_destroy")
+api_ngfw_list = _api_view("api_ngfw_list")
+api_ngfw_ssh_url = _api_view("api_ngfw_ssh_url")
+cancel_range = _api_view("cancel_range")
+cancel_upload = _api_view("cancel_upload")
+complete_upload = _api_view("complete_upload")
+destroy_range = _api_view("destroy_range")
+get_range = _api_view("get_range")
+guacamole_bootstrap_open = _api_view("guacamole_bootstrap_open")
+guacamole_bootstrap_status = _api_view("guacamole_bootstrap_status")
+guacamole_rdp_url = _api_view("guacamole_rdp_url")
+guacamole_ssh_url = _api_view("guacamole_ssh_url")
+initiate_upload = _api_view("initiate_upload")
+launch_range = _api_view("launch_range")
+list_agents = _api_view("list_agents")
+list_scenarios = _api_view("list_scenarios")
+pause_range = _api_view("pause_range")
+resume_range = _api_view("resume_range")
 
 # Shared logger. All submodules use ``_common._logger()`` which late-binds
 # through this module attribute so ``patch.object(views, "logger")`` works
@@ -140,7 +144,6 @@ __all__ = (
     "agents",
     "api_credential_create",
     "api_credential_delete",
-    "api_list_scripts",
     "api_ngfw_create",
     "api_ngfw_destroy",
     "api_ngfw_list",
@@ -159,6 +162,7 @@ __all__ = (
     "cms_get_ngfw",
     "cms_list_agents",
     "cms_list_credentials",
+    "cms_list_launchable_scenarios",
     "cms_list_ngfws",
     "cms_list_scenarios",
     "complete_upload",
@@ -168,9 +172,6 @@ __all__ = (
     "dashboard",
     "delete_agent",
     "destroy_range",
-    "file_delete",
-    "file_upload",
-    "files",
     "get_active_range",
     "get_allowed_extensions",
     "get_range",

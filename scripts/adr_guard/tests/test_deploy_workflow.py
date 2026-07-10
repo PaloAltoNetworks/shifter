@@ -330,6 +330,63 @@ class TestGithubEnvironmentBinding(unittest.TestCase):
                 )
 
 
+class TestProvisionerDeployTestGate(unittest.TestCase):
+    """#555: engine image build/deploy is gated by provisioner tests."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.engine = _load("_shifter-engine.yml")
+        cls.jobs = ADR_GUARD._dw_jobs(cls.engine, "_shifter-engine.yml")
+
+    @staticmethod
+    def _needs(job) -> set[str]:
+        needs = job.get("needs", [])
+        if isinstance(needs, str):
+            return {needs}
+        return set(needs)
+
+    def test_engine_workflow_has_hosted_provisioner_test_gate(self):
+        self.assertIn(
+            "test",
+            self.jobs,
+            "_shifter-engine.yml lost the provisioner test gate (#555)",
+        )
+        test_job = self.jobs["test"]
+        self.assertEqual(test_job.get("runs-on"), "ubuntu-latest")
+        self.assertEqual(test_job.get("permissions"), {"contents": "read"})
+        self.assertNotIn("environment", test_job)
+
+        steps = test_job.get("steps", [])
+        expected_commands = (
+            "uv sync --group dev",
+            "uv run --with pytest-cov pytest tests/ --cov=. --cov-report=xml:coverage.xml",
+        )
+        for command in expected_commands:
+            matching_steps = [
+                step for step in steps if command in str(step.get("run", ""))
+            ]
+            self.assertTrue(matching_steps, f"test job missing `{command}`")
+            for step in matching_steps:
+                self.assertEqual(
+                    step.get("working-directory"),
+                    "shifter/engine/provisioner",
+                    f"step running `{command}` must run from the provisioner directory",
+                )
+
+    def test_engine_build_and_deploy_depend_on_provisioner_tests(self):
+        for job_id in ("validate", "build", "deploy"):
+            self.assertIn(
+                job_id,
+                self.jobs,
+                f"_shifter-engine.yml lost job '{job_id}'",
+            )
+            self.assertIn(
+                "test",
+                self._needs(self.jobs[job_id]),
+                f"_shifter-engine.yml job '{job_id}' must depend on provisioner tests (#555)",
+            )
+
+
 class TestEngineImageDigest(unittest.TestCase):
     """#935: the engine deploy pins an immutable ECR digest, not a tag lookup."""
 

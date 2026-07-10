@@ -1,0 +1,1 @@
+Add a Vale prose-linting CI gate for Markdown docs. It runs the Google documentation style (`.vale.ini`) at error level against the Markdown files each pull request changes, finishing the previously half-wired Vale setup.

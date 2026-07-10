@@ -99,8 +99,13 @@ def challenge(active_event):
 
 
 def _submit(participant, challenge, correct, points):
-    """Helper to create a submission."""
-    return CTFSubmission.objects.create(
+    """Helper to create a submission, maintaining the materialized leaderboard.
+
+    Mirrors the production ``submit_flag`` path (issue #850): a correct
+    submission updates the participant's (and team's) materialized score, so the
+    live scoreboard reads reflect it.
+    """
+    submission = CTFSubmission.objects.create(
         participant=participant,
         challenge=challenge,
         submitted_flag="FLAG{test}",
@@ -109,6 +114,12 @@ def _submit(participant, challenge, correct, points):
         attempt_number=1,
         ip_address="10.0.0.1",
     )
+    if correct:
+        from ctf.services.scoring import recompute_participant_score, recompute_team_score
+
+        recompute_participant_score(participant.id)
+        recompute_team_score(participant.team_id)
+    return submission
 
 
 # -----------------------------------------------------------------------------

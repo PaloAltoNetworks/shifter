@@ -1,0 +1,7 @@
+# Example deployment override for the dev core environment.
+#
+# Copy to `local.auto.tfvars` (gitignored) or set the `TF_VARS_DEV_CORE` GitHub
+# Actions secret to this HCL before deploy. Terraform auto-loads `*.auto.tfvars`
+# over the committed baseline.
+
+budget_alert_email = "ops@your-domain.example"

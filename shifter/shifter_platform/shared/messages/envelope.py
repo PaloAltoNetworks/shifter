@@ -1,8 +1,8 @@
 """SNS/SQS envelope unwrapping.
 
 Shared by every subsystem that consumes SNS-wrapped events from SQS
-(`cms.handlers`, `engine.handlers`, `mission_control.handlers`,
-`cms.experiments.handlers`). One source of truth for the envelope shape.
+(`cms.handlers`, `engine.handlers`, `mission_control.handlers`). One source
+of truth for the envelope shape.
 """
 
 from __future__ import annotations

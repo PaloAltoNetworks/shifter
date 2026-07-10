@@ -1,55 +1,39 @@
 """Polaris-specific post-bootstrap helper for the Shifter Engine provisioner.
 
 Extracted from ``instance_setup.py`` (Sonar S104). Owns the post-Linux-
-bootstrap rewrite of the polaris-vm AMI's docker compose stack so each
+bootstrap rewrite of the polaris range host's docker compose stack so each
 range gets its own DC IP and per-instance kali pubkey instead of the
 bake-time defaults.
+
+Provider-neutral: the compose override rewrite, splice-watcher install, and
+verification steps are shared. The command transport is resolved through
+``build_guest_execution_context`` (AWS SSM vs GCE direct SSH), and the
+provider-specific steps (S3-vs-GCS artifact fetch, Bedrock-vs-Vertex agent
+credential shard) are selected by ``PolarisRangeBootstrapPlan``.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
-from executors.ssm_executor import SSMExecutor
+from executors.factory import build_guest_execution_context
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
 
 logger = logging.getLogger(__name__)
 
 
-def _run_polaris_range_bootstrap(
-    instance_id: str,
-    dc_ip: str,
-    public_key: str,
-) -> None:
-    """Run PolarisRangeBootstrapPlan against a polaris VM instance."""
-    if not dc_ip:
-        raise SetupError(
-            f"polaris range bootstrap for {instance_id}: dc_ip is empty "
-            "(scenario must include a role=dc instance so the DC's "
-            "private IP can be discovered)"
-        )
-    if not public_key:
-        raise SetupError(
-            f"polaris range bootstrap for {instance_id}: public_key is empty "
-            "(per-instance ssh key from tls_private_key.instance was not propagated)"
-        )
+def _set_aws_imds_hop_limit(instance_id: str) -> None:
+    """Raise the IMDSv2 hop limit so the a14-kali container can reach IMDS (AWS only).
 
-    logger.info(
-        "Running polaris range bootstrap on %s (dc_ip=%s, key length=%d)",
-        instance_id,
-        dc_ip,
-        len(public_key),
-    )
-
-    # Set IMDSv2 PutResponseHopLimit to 2 on the polaris-vm so the
-    # a14-kali container (one extra hop from the EC2 host's network
-    # namespace through the docker bridge) can reach IMDS at
-    # 169.254.169.254 and pick up the EC2 instance role's credentials.
-    # Default IMDS hop limit is 1. Without this, claude inside the kali
-    # container has no AWS creds at runtime.
-    # Idempotent: re-running on an already-2 instance is a no-op.
+    The container is one extra hop from the EC2 host's network namespace
+    through the docker bridge; the default hop limit of 1 blocks it from
+    reaching IMDS at 169.254.169.254 and picking up the instance role. GCP
+    has no equivalent (the Vertex shard uses the metadata server directly), so
+    this runs only on the AWS path. Idempotent.
+    """
     try:
         import boto3 as _boto3
 
@@ -66,24 +50,72 @@ def _run_polaris_range_bootstrap(
         # the loss of creds at runtime if this slip propagates that far.
         logger.warning("failed to set IMDS hop limit on %s: %s", instance_id, e)
 
-    executor = SSMExecutor()
-    orchestrator = SetupOrchestrator(executor=executor)
-    plan = PolarisRangeBootstrapPlan()
 
-    class _PolarisCtx:
-        """Local context shim for PolarisRangeBootstrapPlan template variables."""
+def _run_polaris_range_bootstrap(
+    instance_data: dict[str, Any],
+    instance_id: str,
+    dc_ip: str,
+    public_key: str,
+    *,
+    range_id: int = 0,
+    provider: str | None = None,
+) -> None:
+    """Run PolarisRangeBootstrapPlan against a polaris range host.
 
-        def __init__(self) -> None:
-            self.dc_ip = dc_ip
-            self.public_key = public_key
+    ``instance_data`` is the provisioner instance output; it selects the guest
+    transport (SSM for AWS, direct SSH for GCE). ``provider`` defaults to
+    ``CLOUD_PROVIDER`` and picks the S3/Bedrock (AWS) vs GCS/Vertex (GCP) steps.
+    """
+    if not dc_ip:
+        raise SetupError(
+            f"polaris range bootstrap for {instance_id}: dc_ip is empty "
+            "(scenario must include a role=dc instance so the DC's "
+            "private IP can be discovered)"
+        )
+    if not public_key:
+        raise SetupError(
+            f"polaris range bootstrap for {instance_id}: public_key is empty "
+            "(per-instance ssh public key was not propagated to instance output)"
+        )
 
-    context = plan.get_context(_PolarisCtx())
-    result = orchestrator.orchestrate(
+    resolved_provider = provider or os.environ.get("CLOUD_PROVIDER", "aws")
+    logger.info(
+        "Running polaris range bootstrap on %s provider=%s (dc_ip=%s, key length=%d)",
         instance_id,
-        plan,
-        context,
-        document_name="AWS-RunShellScript",
+        resolved_provider,
+        dc_ip,
+        len(public_key),
     )
+
+    if resolved_provider != "gcp":
+        _set_aws_imds_hop_limit(instance_id)
+
+    execution = build_guest_execution_context(
+        instance_data,
+        os_type=str(instance_data.get("os", "ubuntu")),
+        role=str(instance_data.get("role", "attacker")),
+    )
+    try:
+        orchestrator = SetupOrchestrator(executor=execution.executor)
+        plan = PolarisRangeBootstrapPlan(provider=resolved_provider)
+
+        class _PolarisCtx:
+            """Local context shim for PolarisRangeBootstrapPlan template variables."""
+
+            def __init__(self) -> None:
+                self.dc_ip = dc_ip
+                self.public_key = public_key
+                self.range_id = range_id
+
+        context = plan.get_context(_PolarisCtx())
+        result = orchestrator.orchestrate(
+            execution.target,
+            plan,
+            context,
+            document_name=execution.document_name,
+        )
+    finally:
+        execution.close()
     if not result.success:
         raise SetupError(f"polaris range bootstrap failed on {instance_id}: {result.error}")
     logger.info("polaris range bootstrap complete for %s", instance_id)

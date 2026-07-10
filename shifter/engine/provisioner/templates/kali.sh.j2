@@ -1,60 +1,120 @@
-#!/bin/bash
-set -euo pipefail
+#cloud-config
+# GDC VM Runtime accepts only `#cloud-config` user-data (it rejects bare
+# shell scripts with InvalidCloudInitUserdata). The original provisioning
+# script is embedded verbatim via write_files and executed once on first
+# boot via runcmd, preserving identical behavior to the AWS user-data path.
+#
+# The provisioner generates this guest's Ed25519 host key and installs it here
+# so the guest presents a host key the provisioner already knows (it seeds the
+# setup-runner's known_hosts with the matching public key). This lets the
+# runner keep StrictHostKeyChecking=yes with no trust-on-first-use window.
+ssh_keys:
+  ed25519_private: |
+    {{ host_private_key | indent(4) }}
+  ed25519_public: {{ host_public_key }}
+write_files:
+# Install the setup-runner's authorized key in the early cloud-init stage
+# (cc_write_files runs before the final-stage runcmd). The Kali image boots a
+# full graphical desktop and its cloud-init final stage can stall well past the
+# guest-setup SSH-ready window, so setting authorized_keys here (not in the
+# runcmd script below) lets the runner authenticate as soon as sshd is up,
+# independent of how long the final stage takes. cc_write_files creates the
+# parent .ssh directory; sshd StrictModes accepts a root-owned 0755 .ssh with a
+# kali-owned 0600 authorized_keys.
+- path: /home/kali/.ssh/authorized_keys
+  owner: kali:kali
+  permissions: '0600'
+  content: |
+    {{ public_key }}
+- path: /opt/shifter/gdc-user-data.sh
+  permissions: '0755'
+  owner: root:root
+  content: |
+    #!/bin/bash
+    set -euo pipefail
 
-# Log output
-exec > >(tee /var/log/user-data.log) 2>&1
-echo "Starting Kali headless setup..."
+    # Log output
+    exec > >(tee /var/log/user-data.log) 2>&1
+    echo "Starting Kali headless setup..."
 
-# Issue #762: the per-instance Kali desktop password is set by the
-# engine provisioner via SSH (using the per-instance SSH key already
-# baked into authorized_keys below) after this VM reaches a reachable
-# state — not in user_data. The password value never appears in the
-# rendered cloud-init payload. See
-# shifter/engine/provisioner/plans/set_local_password_plan.py.
+    # Issue #762: the per-instance Kali desktop password is set by the
+    # engine provisioner via SSH (using the per-instance SSH key already
+    # baked into authorized_keys below) after this VM reaches a reachable
+    # state — not in user_data. The password value never appears in the
+    # rendered cloud-init payload. See
+    # shifter/engine/provisioner/plans/set_local_password_plan.py.
 
-# Ensure the packages needed for SSH/RDP access exist on the VM Runtime image
-if command -v apt-get >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y openssh-server xrdp xorgxrdp || apt-get install -y openssh-server xrdp
-fi
+    # --- SSH-critical setup (must run before any apt operation) ---
+    # GDC range VMs sit on an isolated L2 segment with no egress to apt
+    # mirrors, so apt can hang or fail. Everything the setup-runner needs to
+    # connect (provisioner-issued host key, authorized_keys, password auth,
+    # a serving sshd) is established up front and never depends on apt. The
+    # cloud image already ships openssh-server, so sshd exists here.
 
-# Set hostname for XDR console visibility
-echo "Setting hostname to {{ hostname }}..."
-hostnamectl set-hostname {{ hostname }}
-echo "127.0.0.1 {{ hostname }}" >> /etc/hosts
-echo "Hostname set"
+    # Install the provisioner-issued Ed25519 host key so this guest presents
+    # a host key the setup-runner already trusts (StrictHostKeyChecking=yes).
+    # Done here, in addition to cloud-init ssh_keys:, so it is robust to sshd
+    # having already started with a boot-generated key and to the NoCloud
+    # datasource being detected after the cloud-init ssh module ran. The
+    # restart below makes sshd serve the installed key.
+    printf %s '{{ host_private_key_b64 }}' | base64 -d > /etc/ssh/ssh_host_ed25519_key
+    chmod 600 /etc/ssh/ssh_host_ed25519_key
+    chown root:root /etc/ssh/ssh_host_ed25519_key
+    ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub
+    chmod 644 /etc/ssh/ssh_host_ed25519_key.pub
 
-# Configure SSH access for MCP server
-echo "Configuring SSH access..."
-mkdir -p /home/kali/.ssh
-chmod 700 /home/kali/.ssh
-echo "{{ public_key }}" >> /home/kali/.ssh/authorized_keys
-chmod 600 /home/kali/.ssh/authorized_keys
-chown -R kali:kali /home/kali/.ssh
-echo "SSH access configured"
+    # Configure SSH access for MCP server
+    echo "Configuring SSH access..."
+    mkdir -p /home/kali/.ssh
+    chmod 700 /home/kali/.ssh
+    echo "{{ public_key }}" >> /home/kali/.ssh/authorized_keys
+    chmod 600 /home/kali/.ssh/authorized_keys
+    chown -R kali:kali /home/kali/.ssh
+    echo "SSH access configured"
 
-# Ensure SSH password auth is enabled for tooling that expects local login
-if [ -f /etc/ssh/sshd_config ]; then
-    sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-    if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
-        echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+    # Ensure SSH password auth is enabled for tooling that expects local login
+    if [ -f /etc/ssh/sshd_config ]; then
+        sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+        if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
+            echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+        fi
     fi
-fi
 
-# Ensure SSH service is running
-if systemctl list-unit-files | grep -q "^ssh.service"; then
-    systemctl enable --now ssh || true
-elif systemctl list-unit-files | grep -q "^sshd.service"; then
-    systemctl enable --now sshd || true
-fi
+    # Ensure SSH service is running and serving the installed host key
+    if systemctl list-unit-files | grep -q "^ssh.service"; then
+        systemctl enable ssh || true
+        systemctl restart ssh || true
+    elif systemctl list-unit-files | grep -q "^sshd.service"; then
+        systemctl enable sshd || true
+        systemctl restart sshd || true
+    fi
+    # --- end SSH-critical setup; the runner can connect from here on ---
 
-# Ensure xrdp is running for RDP access via Guacamole
-if systemctl list-unit-files | grep -q "^xrdp.service"; then
-    echo "Starting xrdp service..."
-    systemctl enable --now xrdp || true
-    systemctl status xrdp --no-pager || true
-    echo "xrdp service started"
-fi
+    # Set hostname for XDR console visibility
+    echo "Setting hostname to {{ hostname }}..."
+    hostnamectl set-hostname {{ hostname }}
+    echo "127.0.0.1 {{ hostname }}" >> /etc/hosts
+    echo "Hostname set"
 
-echo "Kali setup complete"
+    # Ensure the packages needed for RDP access exist on the VM Runtime image.
+    # Bounded and non-fatal: on the egress-less range segment apt may hang or
+    # fail, and SSH (configured above) must not be blocked by it.
+    if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        timeout 180 apt-get update || echo "apt-get update skipped (no egress?)"
+        timeout 300 apt-get install -y openssh-server xrdp xorgxrdp \
+            || timeout 300 apt-get install -y openssh-server xrdp \
+            || echo "apt-get install skipped (no egress?)"
+    fi
+
+    # Ensure xrdp is running for RDP access via Guacamole
+    if systemctl list-unit-files | grep -q "^xrdp.service"; then
+        echo "Starting xrdp service..."
+        systemctl enable --now xrdp || true
+        systemctl status xrdp --no-pager || true
+        echo "xrdp service started"
+    fi
+
+    echo "Kali setup complete"
+runcmd:
+- /opt/shifter/gdc-user-data.sh

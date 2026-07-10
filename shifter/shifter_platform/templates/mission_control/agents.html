@@ -159,7 +159,7 @@
                             <td class="text-right">
                                 <form method="post"
                                       action="{% url 'mission_control:delete_agent' agent.id %}"
-                                      style="display: inline"
+                                      class="d-inline"
                                       onsubmit="return confirm('Are you sure you want to delete this agent?');">
                                     {% csrf_token %}
                                     <button type="submit" class="btn btn-secondary btn-small">

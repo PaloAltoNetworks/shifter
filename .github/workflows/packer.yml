@@ -1,4 +1,4 @@
-name: Packer AMI Build (Dev)
+name: Packer AMI Build
 
 on:
   workflow_dispatch:
@@ -13,6 +13,19 @@ on:
           - windows
           - dc
           - brokenbk
+          - ctf-webshell
+          - ctf-mailroom
+          - ctf-helpdesk
+          - ctf-devbox
+          - ctf-vault
+      environment:
+        description: 'AWS environment to build in'
+        required: true
+        type: choice
+        options:
+          - dev
+          - proof
+        default: dev
       ref:
         description: 'Branch to build from'
         required: false
@@ -25,7 +38,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ inputs.ami_type }} AMI in dev
+    name: Build ${{ inputs.ami_type }} AMI in ${{ inputs.environment }}
     runs-on: self-hosted
     defaults:
       run:
@@ -53,33 +66,61 @@ jobs:
         with:
           version: latest
 
-      - name: Configure AWS credentials (dev)
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (${{ inputs.environment }})
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
 
       - name: Initialize Packer
         run: packer init .
 
       - name: Validate template
-        run: packer validate -var-file=dev.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
+        run: packer validate -var-file=${{ inputs.environment }}.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
 
       - name: Build AMI
         run: |
-          packer build -color=false -var-file=dev.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
+          packer build -color=false -var-file=${{ inputs.environment }}.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
 
           # Extract AMI ID from manifest
           AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' "${{ inputs.ami_type }}-manifest.json")
           echo "AMI_ID=$AMI_ID" >> "$GITHUB_ENV"
           {
-            echo "## Dev AMI Build Complete"
+            echo "## ${{ inputs.environment }} AMI Build Complete"
             echo "- **Type:** ${{ inputs.ami_type }}"
+            echo "- **Environment:** ${{ inputs.environment }}"
             echo "- **AMI ID:** \`$AMI_ID\`"
             echo "- **Region:** us-east-2"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Update dev SSM Parameter
+      - name: Update ${{ inputs.environment }} SSM Parameter
         run: |
           aws ssm put-parameter \
             --name "/shifter/ami/${{ inputs.ami_type }}" \
@@ -90,7 +131,7 @@ jobs:
           {
             echo "- **SSM Parameter:** \`/shifter/ami/${{ inputs.ami_type }}\` updated"
             echo ""
-            echo "**Next step:** Test in dev, then run 'Packer AMI Promote to Prod' workflow"
+            echo "**Next step:** Test in ${{ inputs.environment }} before deploying dependent portal/range infrastructure."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload manifest

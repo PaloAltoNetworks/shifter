@@ -74,6 +74,18 @@ class TestModeAllowlistMismatch:
             RangeEgressPolicy.model_validate({"mode": "deny-all", "allowed_cidrs": ["203.0.113.0/24"]})
         assert "allowlist" in str(exc.value)
 
+    def test_none_with_cidrs_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            RangeEgressPolicy.model_validate({"mode": "none", "allowed_cidrs": ["203.0.113.0/24"]})
+        assert "none" in str(exc.value)
+
+
+class TestNoneMode:
+    def test_none_accepts_empty_cidrs(self):
+        policy = RangeEgressPolicy.model_validate({"mode": "none"})
+        assert policy.mode == RangeEgressMode.NONE
+        assert policy.allowed_cidrs == []
+
 
 class TestCidrValidation:
     @pytest.mark.parametrize(

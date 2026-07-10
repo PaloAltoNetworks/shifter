@@ -488,3 +488,161 @@ class TestApiParticipantErrorPaths:
         client.force_login(second_participant_user)
         resp = _json(client, "get", "api_score_timeline", kwargs={"participant_id": ctf_participant.id})
         assert resp.status_code == 403
+
+
+class TestRecoverParticipantRangeErrorPaths:
+    """Organizer-gated range-recovery API (issue #1018): authz, validation, and error-mapping branches."""
+
+    def _recover(self, client: Client, participant_id, body):
+        return _json(
+            client,
+            "post",
+            "api_recover_participant_range",
+            kwargs={"participant_id": participant_id},
+            body=body,
+        )
+
+    def test_not_found(self, authenticated_organizer_client: Client):
+        resp = self._recover(authenticated_organizer_client, uuid4(), {"strategy": "rebuild"})
+        assert resp.status_code == 404
+
+    def test_forbidden_different_event_organizer(
+        self, client: Client, second_organizer_user, ctf_participant: CTFParticipant
+    ):
+        client.force_login(second_organizer_user)
+        resp = self._recover(client, ctf_participant.id, {"strategy": "rebuild"})
+        assert resp.status_code == 403
+
+    def test_forbidden_participant(self, authenticated_participant_client: Client, ctf_participant: CTFParticipant):
+        """A participant (non-organizer) may not recover their own or anyone's range."""
+        resp = self._recover(authenticated_participant_client, ctf_participant.id, {"strategy": "rebuild"})
+        assert resp.status_code == 403
+
+    def test_missing_strategy(self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant):
+        resp = self._recover(authenticated_organizer_client, ctf_participant.id, {})
+        assert resp.status_code == 400
+        assert "error" in resp.json()
+
+    def test_non_string_strategy(self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant):
+        resp = self._recover(authenticated_organizer_client, ctf_participant.id, {"strategy": 1})
+        assert resp.status_code == 400
+
+    @pytest.mark.parametrize("bad_spare_id", [0, -1, "not-an-int", 1.5, True])
+    def test_bad_spare_range_instance_id(
+        self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant, bad_spare_id
+    ):
+        resp = self._recover(
+            authenticated_organizer_client,
+            ctf_participant.id,
+            {"strategy": "reassign_spare", "spare_range_instance_id": bad_spare_id},
+        )
+        assert resp.status_code == 400
+
+    def test_invalid_strategy_choice_maps_to_400(
+        self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant
+    ):
+        """An unrecognized strategy is rejected by the real service (CTFValidationError -> 400)."""
+        ctf_participant.range_instance_id = 111
+        ctf_participant.save(update_fields=["range_instance_id"])
+
+        resp = self._recover(
+            authenticated_organizer_client,
+            ctf_participant.id,
+            {"strategy": "not-a-real-strategy"},
+        )
+        assert resp.status_code == 400
+        assert "error" in resp.json()
+
+    def test_no_range_to_recover_maps_to_400_without_leaking_internals(
+        self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant
+    ):
+        """Real, unmocked ``CTFRangeError`` (ADR-019: no first-party service patch).
+
+        ``ctf_participant`` has no ``range_instance_id`` by default, so the
+        real service raises ``CTFRangeError("Participant has no range
+        assigned to recover", ...)``; the response must carry only the
+        controlled envelope message, never the exception's own text.
+        """
+        assert ctf_participant.range_instance_id is None
+        resp = self._recover(
+            authenticated_organizer_client,
+            ctf_participant.id,
+            {"strategy": "rebuild"},
+        )
+        assert resp.status_code == 400
+        assert resp.json() == {"error": "Could not process range recovery request."}
+        assert "assigned" not in resp.content.decode()
+
+    def test_no_compatible_spare_maps_to_400_without_leaking_internals(
+        self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant
+    ):
+        """Real, unmocked ``CTFRangeError`` from the spare pool query (no spares exist for the event)."""
+        ctf_participant.range_instance_id = 987654321
+        ctf_participant.save(update_fields=["range_instance_id"])
+
+        resp = self._recover(
+            authenticated_organizer_client,
+            ctf_participant.id,
+            {"strategy": "reassign_spare"},
+        )
+        assert resp.status_code == 400
+        assert resp.json() == {"error": "Could not process range recovery request."}
+        assert "spare" not in resp.content.decode().lower()
+
+
+class TestSpareRangePoolApiErrorPaths:
+    """Organizer-gated spare-pool endpoint (issue #1018): authz + boundary validation."""
+
+    def _manage(self, client: Client, event_id, body):
+        return _json(
+            client,
+            "post",
+            "api_provision_event_spares",
+            kwargs={"event_id": event_id},
+            body=body,
+        )
+
+    def test_not_found(self, authenticated_organizer_client: Client):
+        resp = self._manage(authenticated_organizer_client, uuid4(), {"count": 1})
+        assert resp.status_code == 404
+
+    def test_forbidden_different_event_organizer(self, client: Client, second_organizer_user, ctf_event: CTFEvent):
+        client.force_login(second_organizer_user)
+        resp = self._manage(client, ctf_event.id, {"count": 1})
+        assert resp.status_code == 403
+
+    def test_forbidden_participant(self, authenticated_participant_client: Client, ctf_event: CTFEvent):
+        """A participant (non-organizer) may not manage any event's spare pool."""
+        resp = self._manage(authenticated_participant_client, ctf_event.id, {"count": 1})
+        assert resp.status_code == 403
+
+    def test_missing_count(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
+        resp = self._manage(authenticated_organizer_client, ctf_event.id, {})
+        assert resp.status_code == 400
+        assert "error" in resp.json()
+
+    @pytest.mark.parametrize("bad_count", ["not-an-int", 1.5, True, None, [1], {"n": 1}])
+    def test_bad_count_type(self, authenticated_organizer_client: Client, ctf_event: CTFEvent, bad_count):
+        resp = self._manage(authenticated_organizer_client, ctf_event.id, {"count": bad_count})
+        assert resp.status_code == 400
+
+    def test_negative_count(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
+        resp = self._manage(authenticated_organizer_client, ctf_event.id, {"count": -1})
+        assert resp.status_code == 400
+
+    def test_over_cap_count(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
+        resp = self._manage(authenticated_organizer_client, ctf_event.id, {"count": 10_000})
+        assert resp.status_code == 400
+        assert "error" in resp.json()
+
+    def test_zero_count_is_valid_and_returns_summary(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
+        """Zero is a legitimate target (empty pool); no provisioning is attempted."""
+        resp = self._manage(authenticated_organizer_client, ctf_event.id, {"count": 0})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {
+            "event_id": str(ctf_event.id),
+            "target_count": 0,
+            "existing": 0,
+            "created": 0,
+        }

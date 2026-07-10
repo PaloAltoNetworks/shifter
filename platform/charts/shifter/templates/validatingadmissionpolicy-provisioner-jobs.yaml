@@ -1,0 +1,129 @@
+# Issue #1177 — defense in depth at the Kubernetes admission boundary.
+#
+# RBAC cannot express "create Jobs, but not Jobs that run as the privileged
+# provisioner service account": permission to create a workload in a namespace
+# implicitly grants the API access of any service account in that namespace
+# (https://kubernetes.io/docs/concepts/security/rbac-good-practices/). The
+# shifter-jobs namespace already enforces the restricted Pod Security Standard,
+# which blocks privileged/root/cap-add/host-namespaces — but PSS does not pin
+# serviceAccountName, image, or the executable fields (command/args/env) that
+# decide what runs as the provisioner identity. This policy mirrors the full
+# canonical GCPTaskRunner provisioner Job contract so a compromised platform
+# token cannot submit a Job that runs as `provisioner` (Workload Identity ->
+# secretmanager.admin) outside that exact contract — pinning the image alone is
+# not enough, because the caller could otherwise keep the image and override
+# the entrypoint (command), args, env, or volumes.
+#
+# The canonical builder this mirrors is GCPTaskRunner._build_job in
+# shifter/shifter_platform/shared/cloud/gcp/task_runner.py (image ENTRYPOINT
+# "python main.py" is fixed; the builder sets ARGS only, never command; args
+# always start with the "range" or "ngfw" resource family; four emptyDir
+# volumes; the issue #1103 read-only/non-root/drop-ALL security context). It is
+# drift-guarded by tests/shared/cloud/test_gcp_task_runner.py +
+# tests/platform/test_gcp_job_launcher_manifests.py. Keep this file byte-identical
+# with platform/charts/shifter/templates/validatingadmissionpolicy-provisioner-jobs.yaml.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: restrict-provisioner-jobs
+  labels:
+    app.kubernetes.io/part-of: shifter
+spec:
+  # Fail closed: a CEL evaluation error denies the request rather than admitting it.
+  failurePolicy: Fail
+  # The allowed image is pinned to the live runtime contract (ENGINE_TASK_IMAGE
+  # in the platform-runtime ConfigMap), so the policy follows image rolls without
+  # a second source of truth.
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["jobs"]
+  variables:
+    - name: podSpec
+      expression: object.spec.template.spec
+    - name: targetsProvisioner
+      expression: has(variables.podSpec.serviceAccountName) && variables.podSpec.serviceAccountName == 'provisioner'
+    - name: containers
+      expression: "has(variables.podSpec.containers) ? variables.podSpec.containers : []"
+    - name: allowedImage
+      expression: "(has(params.data) && 'ENGINE_TASK_IMAGE' in params.data) ? params.data['ENGINE_TASK_IMAGE'] : ''"
+  validations:
+    # Only the canonical launcher (worker-engine, running as the workers KSA) may
+    # create provisioner Jobs. This blocks the portal and ctf-scheduler tokens
+    # outright, even though RBAC still lets them create their own non-provisioner Jobs.
+    - expression: "!variables.targetsProvisioner || request.userInfo.username == 'system:serviceaccount:shifter-platform:workers'"
+      message: "Jobs running as the provisioner service account may only be created by the workers service account."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || size(variables.containers) == 1"
+      message: "A provisioner Job must declare exactly one container."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, c.name == 'pulumi-provisioner')"
+      message: "A provisioner Job container must be named pulumi-provisioner."
+      reason: Forbidden
+    # Pin the image so a compromised workers token cannot run an attacker image
+    # as the privileged provisioner identity. Empty param (missing ConfigMap key)
+    # fails closed because allowedImage == ''.
+    - expression: "!variables.targetsProvisioner || (variables.allowedImage != '' && variables.containers.all(c, c.image == variables.allowedImage))"
+      message: "A provisioner Job must use the pinned ENGINE_TASK_IMAGE."
+      reason: Forbidden
+    # Forbid overriding the image ENTRYPOINT (python main.py). Without this the
+    # pinned image is meaningless: the caller could set command: [sh, -c, ...]
+    # and execute arbitrary code as the provisioner identity. The builder sets
+    # args only and never command.
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, !has(c.command))"
+      message: "A provisioner Job must not override the container command (entrypoint)."
+      reason: Forbidden
+    # Constrain the dispatch family. The provisioner CLI only accepts the range
+    # and ngfw resource families; this bounds what the fixed entrypoint can run.
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, has(c.args) && size(c.args) > 0 && (c.args[0] == 'range' || c.args[0] == 'ngfw'))"
+      message: "A provisioner Job command must be a range or ngfw operation."
+      reason: Forbidden
+    # The builder constructs an explicit env list; envFrom (bulk ConfigMap/Secret
+    # import) is never used and would let a caller inject arbitrary configuration.
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, !has(c.envFrom) || size(c.envFrom) == 0)"
+      message: "A provisioner Job must not use envFrom."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || !has(variables.podSpec.initContainers) || size(variables.podSpec.initContainers) == 0"
+      message: "A provisioner Job must not declare init containers."
+      reason: Forbidden
+    # The builder uses only emptyDir volumes. Denying every other volume source
+    # (secret, configMap, hostPath, csi, projected, ...) stops a caller from
+    # mounting cluster Secrets/ConfigMaps or host paths into the privileged Pod.
+    # At Job-CREATE admission the auto-mounted service-account token volume is
+    # not present yet (it is injected when the Job controller creates the Pod),
+    # so an emptyDir-only check does not reject legitimate provisioner Jobs.
+    - expression: "!variables.targetsProvisioner || !has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, has(v.emptyDir))"
+      message: "A provisioner Job may only declare emptyDir volumes."
+      reason: Forbidden
+    # Mirror the issue #1103 container security posture so it cannot be relaxed.
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, has(c.securityContext) && c.securityContext.readOnlyRootFilesystem == true && c.securityContext.allowPrivilegeEscalation == false && c.securityContext.runAsNonRoot == true && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && ('ALL' in c.securityContext.capabilities.drop) && (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0))"
+      message: "A provisioner Job container must keep the read-only, non-root, drop-ALL security context."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || variables.podSpec.restartPolicy == 'Never'"
+      message: "A provisioner Job must set restartPolicy: Never."
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: restrict-provisioner-jobs
+  labels:
+    app.kubernetes.io/part-of: shifter
+spec:
+  policyName: restrict-provisioner-jobs
+  validationActions: ["Deny"]
+  # platform-runtime is a hard dependency of every platform workload; a missing
+  # ConfigMap denies provisioner Job creation rather than failing open.
+  paramRef:
+    name: platform-runtime
+    namespace: shifter-platform
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: shifter-jobs

@@ -26,6 +26,7 @@ _NAD_GROUP = "k8s.cni.cncf.io"
 _NAD_VERSION = "v1"
 _NAD_PLURAL = "network-attachment-definitions"
 _MANAGED_BY_LABEL = "shifter-provisioner"
+_SUBNET_CIDR_ANNOTATION = "shifter.dev/subnet-cidr"
 
 
 def _import_kubernetes_modules() -> tuple[Any, Any, Any, Any]:
@@ -170,6 +171,9 @@ def _build_network_manifest(
         "metadata": {
             "name": network_name,
             "labels": labels,
+            "annotations": {
+                _SUBNET_CIDR_ANNOTATION: cidr,
+            },
         },
         "spec": {
             "type": "L2",
@@ -177,7 +181,11 @@ def _build_network_manifest(
                 "interfaceName": access.network_interface,
             },
             "gateway4": gateway_ip,
-            "routes": [{"to": cidr}],
+            # Do not add the local subnet CIDR to spec.routes. GDC VM Runtime
+            # translates Network routes into DHCP classless static routes for
+            # Windows guests; a route for the guest's own /28 via gateway4 makes
+            # same-subnet traffic go to the gateway instead of staying on-link.
+            "routes": [],
             "dnsConfig": {
                 "nameservers": list(access.dns_nameservers),
             },

@@ -87,6 +87,20 @@ class CTFSubmission(CTFBaseModel):
             models.Index(fields=["challenge", "is_correct"]),
             models.Index(fields=["participant", "is_correct"]),
         ]
+        constraints = [
+            # At most one active correct submission per (participant, challenge).
+            # DB-level backstop for the concurrent-submission double-score race
+            # (#1135): even if two requests pass the in-service already-solved
+            # check, the second correct INSERT fails and is surfaced as
+            # CTF_ALREADY_SOLVED. Scoped to non-soft-deleted rows so a correct
+            # submission removed on disqualification revert does not block a
+            # legitimate re-solve.
+            models.UniqueConstraint(
+                fields=["participant", "challenge"],
+                condition=models.Q(is_correct=True, deleted_at__isnull=True),
+                name="ctf_unique_correct_submission",
+            ),
+        ]
 
     def __str__(self) -> str:
         """Return submission description."""

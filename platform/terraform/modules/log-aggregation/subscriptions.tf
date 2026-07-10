@@ -11,7 +11,9 @@
 resource "aws_iam_role" "cloudwatch_to_firehose" {
   count = var.enable_log_aggregation && length(var.source_log_group_names) > 0 ? 1 : 0
 
-  name = "${var.name_prefix}-cw-to-firehose-${var.environment}"
+  name = "${local.iam_name_prefix}-cw-to-firehose-${var.environment}"
+
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

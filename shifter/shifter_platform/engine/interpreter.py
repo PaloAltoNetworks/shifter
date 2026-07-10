@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from django.db import transaction
 
+from shared.schemas.persistence import wrap_persisted_spec
+
 if TYPE_CHECKING:
     from engine.models import App, Instance, Request, Subnet
     from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
@@ -116,7 +118,7 @@ def _interpret_instance(instance_spec: InstanceSpec, request: Request, subnet: S
         subnet=subnet,
         role=instance_spec.role,
         os_type=instance_spec.os_type,
-        spec=instance_spec.model_dump(mode="json"),
+        spec=wrap_persisted_spec("instance_spec", instance_spec),
         status=ResourceStatus.PENDING.value,
     )
 
@@ -145,7 +147,7 @@ def _interpret_ngfw_app(ngfw_app_spec, instance: Instance, request: Request) -> 
         "request": request,
         "instance": instance,
         "app_type": App.AppType.NGFW,
-        "spec": ngfw_app_spec.model_dump(mode="json"),
+        "spec": wrap_persisted_spec("ngfw_app_spec", ngfw_app_spec),
         "status": ResourceStatus.PENDING.value,
     }
     if ngfw_app_spec.app_id:
@@ -185,7 +187,7 @@ def _interpret_subnet(subnet_spec: SubnetSpec, request: Request) -> Subnet:
         request=request,
         name=subnet_spec.name,
         connected_to=subnet_spec.connected_to,
-        spec=subnet_spec.model_dump(mode="json"),
+        spec=wrap_persisted_spec("subnet_spec", subnet_spec),
         status=ResourceStatus.PENDING.value,
     )
 

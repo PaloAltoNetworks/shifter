@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from plans.linux_bootstrap import LinuxBootstrapPlan
+from plans.linux_bootstrap import SET_HOSTNAME_SCRIPT, LinuxBootstrapPlan
 
 
 @dataclass
@@ -68,3 +68,27 @@ class TestLinuxBootstrapPlanContext:
         assert context["ssh_user"] == "kali"
         assert context["hostname"] == "shifter-kali-1"
         assert context["public_key"] == "ssh-rsa AAAA..."
+
+
+class TestSetHostnamePrivilegeEscalation:
+    """The set_hostname step must work on both remote-execution backends.
+
+    AWS SSM runs the script as root; the GDC in-range SSH path connects as an
+    unprivileged user (ubuntu/kali). ``hostnamectl set-hostname`` and writing
+    ``/etc/hosts`` both require root, so the script must escalate with
+    ``sudo -n`` when not already root (it failed on GDC with
+    "Could not set static hostname: Interactive authentication required").
+    """
+
+    def test_escalates_privilege_when_not_root(self):
+        # Resolves an empty SUDO as root and `sudo -n` otherwise.
+        assert 'if [ "$(id -u)" -eq 0 ]; then' in SET_HOSTNAME_SCRIPT
+        assert 'SUDO="sudo -n"' in SET_HOSTNAME_SCRIPT
+
+    def test_privileged_commands_run_through_sudo_wrapper(self):
+        # The root-only operations must go through $SUDO, not run bare.
+        assert "$SUDO hostnamectl set-hostname" in SET_HOSTNAME_SCRIPT
+        assert "| $SUDO tee -a /etc/hosts" in SET_HOSTNAME_SCRIPT
+        # No bare invocations that would fail as a non-root SSH user.
+        assert "\nhostnamectl set-hostname" not in SET_HOSTNAME_SCRIPT
+        assert ">> /etc/hosts" not in SET_HOSTNAME_SCRIPT

@@ -16,6 +16,8 @@ The implementation lives in `shifter/installation/`:
   backend checks.
 - `contract.py` defines the backend bundle contract.
 - `registry.py` contains the supported backend bundles.
+- `runtime_inventory.py` records checked-in runtime config surfaces and validates
+  env-key drift without reading values.
 - `cli.py` exposes `shifter-config validate`.
 - `examples/` contains validated AWS and GCP examples.
 
@@ -40,6 +42,12 @@ The root config owns:
 - logical secret references
 - backend-specific settings mapping
 
+`.shifter.yaml` is a separate checked-in policy namespace for `mcp/ops`. It is
+not the public installation config and must not become a deployment secret
+store. Gitignored `.env` files remain local/operator inputs only; checked-in
+runtime env files are either static non-secret overlays or generated
+placeholders validated by the runtime inventory.
+
 The root schema validates root shape. Backend bundles validate backend-owned
 settings and secret reference grammar when they declare those validators.
 
@@ -56,6 +64,7 @@ Run from the repository root:
 
 ```bash
 uv run --project shifter/installation shifter-config validate shifter.yaml
+uv run --project shifter/installation shifter-config runtime-inventory --check
 ```
 
 Validation rejects:
@@ -74,6 +83,9 @@ Validation rejects:
 - malformed secret names or references
 - missing required backend secrets
 - secret names not used by the selected backend
+- checked-in generated runtime env stubs with assignments
+- duplicate keys between static runtime env files and renderer-owned keys
+- unregistered checked-in runtime secret env assignments
 
 Validation errors are path-based and do not echo rejected input values.
 

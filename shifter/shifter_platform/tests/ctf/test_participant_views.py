@@ -11,11 +11,19 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from ctf.enums import ParticipantStatus
 from ctf.models import CTFParticipant
+
+# The team_join error path renders a template that uses {% static %}; force the
+# non-manifest static storage so the render does not require a built manifest.
+_SIMPLE_STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 
 
 class TestAdminParticipantListView:
@@ -196,7 +204,10 @@ class TestAdminParticipantImportView:
 
         # Should stay on page with errors
         assert response.status_code == 200
-        assert "errors" in response.context or "error" in response.content.decode().lower()
+        assert response.context["errors"] == [
+            "Line 1: Expected name,email format",
+            "Line 2: Expected name,email format",
+        ]
 
     def test_rejects_duplicate_emails_in_csv(self, authenticated_organizer_client, ctf_event):
         """POST with duplicate emails in CSV shows error."""
@@ -388,7 +399,9 @@ class TestAdminParticipantAddView:
         )
 
         assert response.status_code == 200
-        assert "error" in response.content.decode().lower() or response.context.get("form").errors
+        non_field_errors = response.context["form"].non_field_errors()
+        assert len(non_field_errors) == 1
+        assert "already exists in this event" in non_field_errors[0]
 
 
 class TestAPIParticipantList:
@@ -503,6 +516,24 @@ class TestAPIParticipantImport:
         assert CTFParticipant.objects.filter(event=ctf_event, email="one@example.com").exists()
         assert CTFParticipant.objects.filter(event=ctf_event, email="two@example.com").exists()
 
+    def test_non_object_elements_are_per_item_errors_not_500(self, authenticated_organizer_client, ctf_event):
+        """#1149: non-object array elements yield per-item errors, never a 500."""
+        url = reverse("ctf:api_participant_import", kwargs={"event_id": ctf_event.id})
+
+        import json
+
+        response = authenticated_organizer_client.post(
+            url,
+            data=json.dumps({"participants": ["notadict", 1, None]}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["imported"] == 0
+        assert len(data["errors"]) == 3
+        assert all("object" in e["error"] for e in data["errors"])
+
 
 class TestAPIParticipantResendInvite:
     """Tests for resending participant invites."""
@@ -528,10 +559,12 @@ class TestAPIParticipantResendInvite:
 
         participant.refresh_from_db()
         assert participant.invite_token != old_token
+        assert participant.invite_token_expires == ctf_event.event_end
 
     def test_resend_works_for_registered_participant(self, authenticated_organizer_client, ctf_participant):
         """Resend works for registered participants (sends magic link)."""
         # ctf_participant fixture has user linked (registered)
+        old_token = ctf_participant.invite_token
         url = reverse(
             "ctf:api_participant_resend_invite",
             kwargs={"participant_id": ctf_participant.id},
@@ -541,3 +574,61 @@ class TestAPIParticipantResendInvite:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
+        # The registered/ACTIVE path must still rotate the invite token, not
+        # just return success — otherwise a broken ACTIVE branch would pass.
+        ctf_participant.refresh_from_db()
+        assert ctf_participant.invite_token != old_token
+
+
+class TestTeamJoinCapacityGuard:
+    """#1140: team_join enforces team_size_limit under a team row lock — a full
+    team is rejected and the joining participant is not added."""
+
+    def _active_joiner(self, user, event):
+        from management.services import set_active_ctf_event
+
+        joiner = CTFParticipant.objects.create(
+            event=event,
+            user=user,
+            email=user.email,
+            name="Joiner",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+        set_active_ctf_event(user, event.pk)
+        return joiner
+
+    @override_settings(STORAGES=_SIMPLE_STORAGES)
+    def test_rejects_join_when_team_full(self, authenticated_participant_client, participant_user, ctf_event_team):
+        from ctf.models import CTFTeam
+
+        team = CTFTeam.objects.create(event=ctf_event_team, name="Full Team", invite_code="FULL01")
+        for i in range(ctf_event_team.team_size_limit):
+            CTFParticipant.objects.create(
+                event=ctf_event_team,
+                email=f"member{i}@test.com",
+                name=f"Member {i}",
+                team=team,
+                status=ParticipantStatus.ACTIVE.value,
+                registered_at=timezone.now(),
+            )
+        joiner = self._active_joiner(participant_user, ctf_event_team)
+
+        response = authenticated_participant_client.post(reverse("ctf:team_join"), {"invite_code": "FULL01"})
+
+        assert response.status_code == 200
+        assert "This team is full" in response.content.decode()
+        joiner.refresh_from_db()
+        assert joiner.team_id is None
+
+    def test_allows_join_when_not_full(self, authenticated_participant_client, participant_user, ctf_event_team):
+        from ctf.models import CTFTeam
+
+        team = CTFTeam.objects.create(event=ctf_event_team, name="Open Team", invite_code="OPEN01")
+        joiner = self._active_joiner(participant_user, ctf_event_team)
+
+        response = authenticated_participant_client.post(reverse("ctf:team_join"), {"invite_code": "OPEN01"})
+
+        assert response.status_code == 302
+        joiner.refresh_from_db()
+        assert joiner.team_id == team.id

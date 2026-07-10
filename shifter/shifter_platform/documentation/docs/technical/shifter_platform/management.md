@@ -17,3 +17,9 @@ Platform administration.
 | `get_user_profile(user)` | Get or create user profile |
 | `mark_user_deleted(user)` | Soft delete user |
 | `update_cognito_sub(user, cognito_sub)` | Update Cognito sub on profile |
+
+## Management commands
+
+| Command | Purpose |
+|---------|---------|
+| `delete_user <email>` | Hard-delete a user by email (testing utility; also invoked by `scripts/delete-user.sh`) |

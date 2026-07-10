@@ -211,6 +211,30 @@ def _sanitize_path(path: str) -> str:
     return clean_path
 
 
+def _doc_file_map(docs_root: Path = DOCS_ROOT) -> dict[str, Path]:
+    """Map each servable documentation slug to its real file under ``docs_root``.
+
+    The values come from a trusted directory walk of ``docs_root`` (never from
+    user input), so a request path is only ever used as a dict key — it never
+    flows into a filesystem operation. That is what keeps ``doc_page`` clear of
+    CodeQL ``py/path-injection``: the attacker-controlled value cannot reach a
+    path sink. Excluded folders and hidden files are skipped, and an
+    ``index.md`` is also reachable by its folder slug for landing pages.
+    ``docs_root`` is injectable for direct unit testing.
+    """
+    mapping: dict[str, Path] = {}
+    for md_path in docs_root.rglob("*.md"):
+        rel = md_path.relative_to(docs_root)
+        if any(part in EXCLUDED_FOLDERS or part.startswith(".") for part in rel.parts):
+            continue
+        mapping[rel.with_suffix("").as_posix()] = md_path
+        if rel.name == "index.md":
+            folder_slug = rel.parent.as_posix()
+            if folder_slug != ".":
+                mapping[folder_slug] = md_path
+    return mapping
+
+
 @login_required
 @require_GET
 def doc_index(request: HttpRequest) -> HttpResponse:
@@ -240,15 +264,12 @@ def doc_page(request: HttpRequest, path: str) -> HttpResponse:
     # Sanitize path to prevent directory traversal
     clean_path = _sanitize_path(path)
 
-    # Try to find the markdown file
-    # First try exact path + .md
-    file_path = DOCS_ROOT / f"{clean_path}.md"
-
-    # If not found, try path/index.md (for folder landing pages)
-    if not file_path.exists():
-        file_path = DOCS_ROOT / clean_path / "index.md"
-
-    if not file_path.exists():
+    # Look the request up in a map built from a trusted directory walk. The
+    # request path is only ever a dict key and never flows into a filesystem
+    # operation, so no attacker-controlled value reaches a path sink (CodeQL
+    # py/path-injection). _sanitize_path above is defence in depth.
+    file_path = _doc_file_map().get(clean_path)
+    if file_path is None:
         raise Http404("Document not found")
 
     content = _render_markdown(file_path)

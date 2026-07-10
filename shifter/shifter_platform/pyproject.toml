@@ -11,11 +11,19 @@ dependencies = [
     "channels-redis",
     "daphne",
     "django>=6.0.6",
+    # GCP transactional-email backends (SendGrid / Mailgun) for PLAT-002 parity;
+    # AWS continues to use django-ses. See config/_email.py.
+    "django-anymail",
     "django-encrypted-model-fields>=0.6.5",
     "django-health-check<5.0",
     "django-ses",
     "djangorestframework",
+    "drf-spectacular>=0.29.0",
+    "drf-spectacular-sidecar>=2026.6.1",
     "firebase-admin",
+    # GCP Cloud Monitoring publisher for the portal capacity emitter (PLAT-002);
+    # AWS uses boto3/CloudWatch. Lazy-imported so AWS flows never load it.
+    "google-cloud-monitoring",
     "gunicorn",
     "markdown",
     "mozilla-django-oidc",
@@ -24,7 +32,17 @@ dependencies = [
     "pycurl>=7.45.7",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
+    "regex>=2026.6.28",
     "requests",
+    # ACES contract/profile/conformance tooling + RuntimeTarget runtime (issue
+    # #1262). shared.aces.runtime_target imports the manifest builder and the
+    # aces_runtime/aces_backend_protocols/aces_contracts packages at runtime to
+    # construct a live RuntimeTarget. Installed from the published PyPI wheel so
+    # the hash-pinned portal image build (uv export --no-dev + --require-hashes)
+    # can integrity-verify it; a git source has no emittable hash and broke the
+    # build when this was promoted to a runtime dep (issue #1445). ACES is a
+    # deliberate, PyPI-pinned stack commitment (ADR-032-R4).
+    "aces-sdl>=0.19.1",
     "uvicorn-worker",
     # uvicorn's WebSocket protocol backend. Not imported directly: the
     # Gunicorn/Uvicorn ASGI workers (entrypoint.sh) need websockets (or wsproto)
@@ -48,6 +66,7 @@ dev = [
     "pre-commit>=4.5.0",
     "pytest-asyncio>=1.3.0",
     "pytest-xdist>=3.5.0",
+    "freezegun>=1.5.5",
     "mypy>=2.1.0",
     "django-stubs>=6.0.4",
     "types-requests>=2.33.0.20260513",
@@ -68,6 +87,7 @@ pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
 addopts = "-n auto --maxprocesses=4 --dist loadscope --reuse-db"
 markers = [
     "redis: integration tests requiring a real Redis channel layer (run with -m redis -n0; needs a Redis service)",
+    "postgres: integration tests requiring a real PostgreSQL backend (run with -m postgres; needs TEST_DB_BACKEND=postgres and a Postgres service)",
 ]
 
 [tool.coverage.run]
@@ -147,16 +167,30 @@ exclude_dirs = [".venv", "tests"]
 skips = ["B101"]  # assert OK in production code for this project
 
 # Mypy - static type checking
+#
+# Type-check policy (#564). This package is an ENFORCED, blocking mypy scope:
+# the `shifter-platform-typecheck` CI job and the `mypy-shifter-platform`
+# pre-commit hook both run `mypy .` here and fail on any error. The enforced
+# scope is the whole package minus the TRANSITIONAL / out-of-scope dirs listed
+# in `exclude` below (migrations, tests, the local venv). The strictness flags
+# are intentionally permissive and tightened incrementally via per-module
+# `[[tool.mypy.overrides]]` (see `cms.services` for the strict precedent);
+# tightening is enforced as it lands, not deferred behind a swallowed CI step.
+# To temporarily exempt a module that cannot yet pass, add an explicit
+# per-module override with `ignore_errors = true` here - never reintroduce
+# `|| true` or `continue-on-error` in the workflow. This keeps the
+# enforced/transitional boundary in one machine-readable place that CI and
+# pre-commit share.
 [tool.mypy]
 python_version = "3.12"
 mypy_path = ".."  # Add shifter/ to path so cyberscript is importable
 plugins = ["mypy_django_plugin.main"]
+# Transitional / out-of-scope: not part of the enforced type-check estate.
 exclude = [
     "migrations/",
     ".venv/",
     "tests/",
 ]
-# Start permissive, tighten over time
 ignore_missing_imports = true
 warn_return_any = false
 warn_unused_ignores = true

@@ -15,7 +15,6 @@ This decoupled design allows CMS to track:
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -106,23 +105,6 @@ def make_range_instance(RangeInstance):
     return _factory
 
 
-@pytest.fixture
-def mock_objects(RangeInstance):
-    """Patch RangeInstance.objects and return the mock manager."""
-    with patch.object(RangeInstance, "objects") as mock_mgr:
-        yield mock_mgr
-
-
-@pytest.fixture
-def mock_qs():
-    """Return a mock queryset with chainable methods."""
-    qs = MagicMock()
-    qs.filter.return_value = qs
-    qs.select_related.return_value = qs
-    qs.all.return_value = qs
-    return qs
-
-
 # ---------------------------------------------------------------------------
 # TestRangeInstanceModel
 # ---------------------------------------------------------------------------
@@ -137,17 +119,15 @@ class TestRangeInstanceModel:
 
         assert RangeInstance is not None
 
-    def test_can_create_range_instance(self, RangeInstance, mock_objects, make_range_instance):
+    @pytest.mark.django_db
+    def test_can_create_range_instance(self, RangeInstance):
         """RangeInstance can be created with required fields."""
-        ri = make_range_instance(id=10, range_id=1, scenario_id="basic", user_id=1)
-        mock_objects.create.return_value = ri
-
         result = RangeInstance.objects.create(range_id=1, scenario_id="basic", user_id=1)
         assert result.id is not None
         assert result.range_id == 1
         assert result.scenario_id == "basic"
         assert result.user_id == 1
-        mock_objects.create.assert_called_once_with(range_id=1, scenario_id="basic", user_id=1)
+        assert RangeInstance.objects.get(pk=result.pk).range_id == 1
 
     def test_range_id_is_integer_not_fk(self, make_range_instance):
         """range_id is an IntegerField, not a ForeignKey."""
@@ -217,33 +197,23 @@ class TestRangeInstanceModel:
         # Should contain scenario_id or range_id
         assert "basic" in str_repr or "123" in str_repr
 
-    def test_can_query_by_range_id(self, RangeInstance, mock_objects, mock_qs, make_range_instance):
+    @pytest.mark.django_db
+    def test_can_query_by_range_id(self, RangeInstance):
         """RangeInstance can be queried by range_id."""
-        make_range_instance(range_id=42)
-        mock_qs.count.return_value = 1
-        mock_objects.filter.return_value = mock_qs
+        RangeInstance.objects.create(range_id=42, scenario_id="basic", user_id=1)
+        assert RangeInstance.objects.filter(range_id=42).count() == 1
 
-        result = RangeInstance.objects.filter(range_id=42)
-        assert result.count() == 1
-        mock_objects.filter.assert_called_once_with(range_id=42)
-
-    def test_can_query_by_scenario_id(self, RangeInstance, mock_objects, mock_qs, make_range_instance):
+    @pytest.mark.django_db
+    def test_can_query_by_scenario_id(self, RangeInstance):
         """RangeInstance can be queried by scenario_id."""
-        mock_qs.count.return_value = 1
-        mock_objects.filter.return_value = mock_qs
+        RangeInstance.objects.create(range_id=7, scenario_id="ad_attack_lab", user_id=1)
+        assert RangeInstance.objects.filter(scenario_id="ad_attack_lab").count() == 1
 
-        result = RangeInstance.objects.filter(scenario_id="ad_attack_lab")
-        assert result.count() == 1
-        mock_objects.filter.assert_called_once_with(scenario_id="ad_attack_lab")
-
-    def test_can_query_by_user_id(self, RangeInstance, mock_objects, mock_qs, make_range_instance):
+    @pytest.mark.django_db
+    def test_can_query_by_user_id(self, RangeInstance):
         """RangeInstance can be queried by user_id."""
-        mock_qs.count.return_value = 1
-        mock_objects.filter.return_value = mock_qs
-
-        result = RangeInstance.objects.filter(user_id=99)
-        assert result.count() == 1
-        mock_objects.filter.assert_called_once_with(user_id=99)
+        RangeInstance.objects.create(range_id=8, scenario_id="basic", user_id=99)
+        assert RangeInstance.objects.filter(user_id=99).count() == 1
 
     def test_unique_range_id(self, RangeInstance):
         """Each range_id should be unique (one RangeInstance per Range)."""
@@ -304,19 +274,29 @@ class TestRangeInstanceAgentFK:
         agent_field = RangeInstance._meta.get_field("agent")
         assert agent_field.remote_field.related_name == "range_instances"
 
-    def test_agent_fk_select_related(
-        self, RangeInstance, mock_objects, mock_qs, make_range_instance, make_agent_config
-    ):
+    @pytest.mark.django_db
+    def test_agent_fk_select_related(self, RangeInstance):
         """RangeInstance.agent can be efficiently loaded with select_related."""
-        agent = make_agent_config(name="Select Related Agent")
+        from django.contrib.auth import get_user_model
 
-        ri = make_range_instance(range_id=105, agent=agent)
-        mock_qs.get.return_value = ri
-        mock_objects.select_related.return_value = mock_qs
+        from cms.models import AgentConfig, OperatingSystem
+
+        user = get_user_model().objects.create_user(username="ri-sr@e.com", email="ri-sr@e.com")
+        os_obj, _ = OperatingSystem.objects.get_or_create(
+            slug="linux-debian", defaults={"name": "Linux", "extensions": [".deb"]}
+        )
+        agent = AgentConfig.objects.create(
+            user=user,
+            os=os_obj,
+            name="Select Related Agent",
+            s3_key="agents/sr.deb",
+            original_filename="sr.deb",
+            file_size_bytes=1024,
+        )
+        RangeInstance.objects.create(range_id=105, scenario_id="basic", user_id=user.id, agent=agent)
 
         result = RangeInstance.objects.select_related("agent").get(range_id=105)
         assert result.agent.name == "Select Related Agent"
-        mock_objects.select_related.assert_called_once_with("agent")
 
 
 # ---------------------------------------------------------------------------
@@ -366,8 +346,9 @@ class TestRangeInstanceRangeSpec:
         assert len(ri.range_spec["instances"]) == 1
         assert ri.range_spec["instances"][0]["role"] == "attacker"
 
-    def test_range_spec_persists_after_refresh(self, RangeInstance, mock_objects, make_range_instance):
-        """range_spec data persists after refresh_from_db (mocked)."""
+    @pytest.mark.django_db
+    def test_range_spec_persists_after_refresh(self, RangeInstance):
+        """range_spec data round-trips through the DB (real refresh_from_db)."""
         spec = {
             "scenario_id": "ad_attack_lab",
             "user_id": 42,
@@ -378,13 +359,11 @@ class TestRangeInstanceRangeSpec:
             ],
         }
 
-        ri = make_range_instance(range_id=203, scenario_id="ad_attack_lab", user_id=42, range_spec=spec)
+        ri = RangeInstance.objects.create(range_id=203, scenario_id="ad_attack_lab", user_id=42, range_spec=spec)
 
-        # Mock refresh_from_db to be a no-op (data already set in memory)
-        with patch.object(ri, "refresh_from_db"):
-            ri.refresh_from_db()
-            assert ri.range_spec == spec
-            assert len(ri.range_spec["instances"]) == 3
+        ri.refresh_from_db()
+        assert ri.range_spec == spec
+        assert len(ri.range_spec["instances"]) == 3
 
     def test_range_spec_with_agent_details(self, make_range_instance):
         """range_spec can include agent details in instances."""

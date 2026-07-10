@@ -156,21 +156,85 @@ session. Three sources:
   ```sh
   uv run event-load-harness ... \
     --metric-source aws --region us-east-2 \
-    --aws-alb app/<portal-alb>/<id> --aws-asg <portal-asg> \
+    --aws-alb app/<portal-alb>/<id> --aws-target-group targetgroup/<portal-tg>/<id> \
+    --aws-asg <portal-asg> --aws-name-prefix <env>-portal \
     --aws-rds <portal-db> --aws-redis <portal-redis>
   ```
 
+  `--aws-target-group` (with `--aws-alb`) collects ALB `RequestCountPerTarget`
+  (the portal scale-out signal), which AWS publishes under the LoadBalancer +
+  TargetGroup dimension pair, and `--aws-name-prefix` collects the app-emitted
+  `Shifter/PortalCapacity` worker busy ratio and terminal-session gauges (#940).
+  All ARN suffixes are exposed as Terraform outputs of the portal `alb` module.
+
+  For #853, the AWS adapter records RDS `DatabaseConnections` average and peak
+  values, plus a lower-bound connection churn proxy derived from
+  sample-to-sample active-connection deltas. CloudWatch does not expose exact
+  opens/closes per second; short-lived open/close cycles between samples remain
+  invisible, so the report labels the value as a proxy.
+
 A GCP / Prometheus / OpenShift adapter is the next implementation of the same
 `MetricsAdapter` protocol.
+
+## Database connection churn (#853)
+
+The report includes a `Database connection posture (#853)` section. It keeps
+the current deployed Django posture visible (`CONN_MAX_AGE=0`) and compares it
+with same-window RDS metrics and client tail latency. The recommendation is
+evidence-based: keep the current posture when connection churn is not moving
+with RDS CPU or portal p95/p99 latency; treat DB connection lifecycle as a
+candidate contributor only when churn, RDS pressure, and user-visible latency
+move together during stepped-concurrency runs.
+
+Do not use the harness output alone to turn on persistent connections. First
+check the capacity math for the target runtime:
+
+```text
+portal replicas * worker/process count * Django connection contexts
+```
+
+That total must fit under the database max-connection budget with failover and
+background-worker headroom.
+
+## Portal autoscaling scale-out verification (#940)
+
+This is the documented acceptance run for #940: prove portal scale-out reacts to
+request-path saturation *before* average EC2 CPU pins. It needs an ASG-enabled
+environment (`enable_autoscaling = true` and `portal_capacity_metrics_enabled =
+true`, for example prod); the committed dev tfvars run a single instance and
+cannot scale out.
+
+1. Resolve the targets from the portal Terraform outputs: the `alb` module's
+   `alb_arn_suffix` / `target_group_arn_suffix`, the portal ASG name, and the
+   environment `name_prefix` (for example `prod-portal`).
+2. Run a stepped-concurrency profile that drives request-path saturation against
+   the deployed target, collecting AWS metrics for the run window:
+
+   ```sh
+   uv run event-load-harness --target-url https://<portal-host> \
+     --confirm-host <portal-host> --profile portal-core \
+     --concurrency <stepped> --ramp-seconds <r> --duration-seconds <d> \
+     --metric-source aws --region us-east-2 \
+     --aws-alb <alb_arn_suffix> --aws-target-group <target_group_arn_suffix> \
+     --aws-asg <portal-asg> --aws-name-prefix <env>-portal
+   ```
+
+3. Confirm in the report and the `<env>-portal-portal-capacity` CloudWatch
+   dashboard that `RequestCountPerTarget` / `TargetResponseTime` (and the
+   `WorkerBusyRatio` gauge) rise and the ASG adds capacity *before* `AWS/EC2`
+   `CPUUtilization` reaches the guardrail threshold. The target-tracking policies
+   own scale-out and scale-in; the worker-busy-ratio alarm adds an app-saturation
+   scale-out. Any unconfigured target is reported as a named gap, never a guess.
 
 ## Output
 
 The envelope report covers the preflight Evidence Bar: target environment and
 run parameters, deployment shape, per-route request/error counts and p50/p95/p99
 latency, websocket open/drop/close-code counts and reconnects, same-window
-provider metrics (or named gaps), first-mover attribution, and a
-supported-concurrency conclusion with limiting factor and a #910 sizing
-implication. Unknown fields render as `unknown` rather than a guess.
+provider metrics (or named gaps), DB connection posture, first-mover
+attribution, and a supported-concurrency conclusion with limiting factor and a
+#910 sizing implication. Unknown fields render as `unknown` rather than a
+guess.
 
 The conclusion is a heuristic first pass from a single run. Bounding the true
 ceiling and margin needs a stepped-concurrency sweep; re-run at increasing

@@ -38,6 +38,36 @@ variable "enable_stickiness" {
   type        = bool
 }
 
+variable "idle_timeout_seconds" {
+  description = <<-EOT
+    ALB idle timeout in seconds for long-lived WebSocket connections (terminal,
+    notification, and Guacamole RDP/SSH traffic share this ALB). Must exceed the
+    WebSocket keepalive interval (issue #931). AWS allows 1-4000.
+  EOT
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.idle_timeout_seconds >= 1 && var.idle_timeout_seconds <= 4000
+    error_message = "idle_timeout_seconds must be between 1 and 4000."
+  }
+}
+
+variable "deregistration_delay_seconds" {
+  description = <<-EOT
+    Portal target-group deregistration delay in seconds, allowing in-flight
+    terminal/WebSocket connections to drain when a target is removed during an
+    ASG instance refresh or scale-in (issue #931). AWS allows 0-3600.
+  EOT
+  type        = number
+  default     = 120
+
+  validation {
+    condition     = var.deregistration_delay_seconds >= 0 && var.deregistration_delay_seconds <= 3600
+    error_message = "deregistration_delay_seconds must be between 0 and 3600."
+  }
+}
+
 variable "enable_waf" {
   description = "Enable AWS WAF Web ACL for the ALB"
   type        = bool

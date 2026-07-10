@@ -86,6 +86,9 @@ class TestGetFileExtension:
     def test_compound_tar_gz(self):
         assert get_file_extension("agent.tar.gz") == ".tar.gz"
 
+    def test_compound_tgz(self):
+        assert get_file_extension("agent.tgz") == ".tgz"
+
     def test_case_insensitive(self):
         assert get_file_extension("FILE.MSI") == ".msi"
 

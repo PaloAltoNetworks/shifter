@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from typing import Any
@@ -15,6 +16,19 @@ from ._common import ScenarioEditorError
 
 logger = logging.getLogger(__name__)
 
+# Registry detail keys that are not persisted in Scenario.definition.
+_DETAIL_NON_DEFINITION_KEYS = frozenset(
+    {
+        "id",
+        "name",
+        "description",
+        "enabled",
+        "is_default",
+        "staff_only",
+        "agent_requirements",
+    }
+)
+
 # Regex for valid scenario IDs: lowercase alphanumeric, hyphens, underscores.
 # Must start and end with a letter or digit.
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
@@ -26,6 +40,11 @@ def validate_scenario_id(scenario_id: str) -> None:
         raise ScenarioEditorError(
             f"Invalid scenario ID '{scenario_id}': must be lowercase letters, numbers, hyphens, and underscores"
         )
+
+
+def structural_definition_from_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    """Return the persistable definition payload from a registry detail dict."""
+    return copy.deepcopy({key: value for key, value in detail.items() if key not in _DETAIL_NON_DEFINITION_KEYS})
 
 
 def build_full_definition(
@@ -94,7 +113,7 @@ def validate_yaml(yaml_content: str) -> tuple[dict | None, list[str]]:
         data = yaml.safe_load(yaml_content)
     except yaml.YAMLError as e:
         logger.warning("validate_yaml: YAML parse error: %s", e)
-        return None, [f"Invalid YAML: {e}"]
+        return None, ["Invalid YAML syntax"]
 
     if not isinstance(data, dict):
         logger.warning("validate_yaml: YAML is not a mapping")

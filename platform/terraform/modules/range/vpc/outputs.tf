@@ -15,6 +15,11 @@ output "vpc_cidr" {
   value       = aws_vpc.this.cidr_block
 }
 
+output "vpc_dns_server" {
+  description = "AmazonProvidedDNS address for the range VPC (VPC CIDR base + 2)"
+  value       = cidrhost(var.vpc_cidr, 2)
+}
+
 output "internet_gateway_id" {
   description = "ID of the internet gateway"
   value       = aws_internet_gateway.this.id

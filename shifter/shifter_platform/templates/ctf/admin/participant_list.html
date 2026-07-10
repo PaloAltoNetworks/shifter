@@ -1,64 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     Participants - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.breadcrumb {
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb .separator {
-    margin: 0 6px;
-    color: var(--theme-text-secondary);
-}
-
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-}
-
-.stat-card {
-    text-align: center;
-    padding: 16px;
-}
-
-.stat-card .stat-value {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--theme-text);
-}
-
-.stat-card .stat-label {
-    font-size: 11px;
-    text-transform: uppercase;
-    font-weight: 600;
-    color: var(--theme-text-secondary);
-    margin-top: 4px;
-}
-
-.filter-bar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.header-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-participant_list.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -119,14 +67,12 @@
     <!-- Filter -->
     <div class="card">
         <form method="get" class="filter-bar">
-            <label for="status" class="form-label" style="margin-bottom: 0;">
+            <label for="status" class="form-label mb-0">
                 {% trans "Filter by Status:" %}
             </label>
             <select name="status"
                     id="status"
-                    class="form-input"
-                    style="width: auto;
-                           min-width: 180px"
+                    class="form-input status-filter-select"
                     onchange="this.form.submit()">
                 <option value="">
                     {% trans "All Statuses" %}
@@ -147,7 +93,7 @@
         </form>
     </div>
     <!-- Participants Table -->
-    <div class="card" style="padding: 0;">
+    <div class="card p-0">
         {% if participants %}
             <table class="table">
                 <thead>
@@ -238,13 +184,14 @@
                             <td>
                                 <div class="flex-row gap-sm">
                                     <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}"
-                                       class="btn btn-secondary"
-                                       title='{% trans "View" %}'>{% trans "View" %}</a>
+                                       class="btn btn-secondary">
+                                        {% trans "View" %}<span class="visually-hidden"> {{ participant.name }}</span>
+                                    </a>
                                     <button type="button"
-                                            class="btn btn-secondary"
-                                            title='{% trans "Send Link" %}'
-                                            onclick="resendInvite('{{ participant.pk }}')">
+                                            class="btn btn-secondary js-resend-invite"
+                                            data-participant-id="{{ participant.pk }}">
                                         {% trans "Send Link" %}
+                                        <span class="visually-hidden"> {{ participant.name }}</span>
                                     </button>
                                 </div>
                             </td>
@@ -264,8 +211,7 @@
                     <p>
                         {% trans "No participants yet." %}
                     </p>
-                    <div class="flex-row gap-sm mt-md"
-                         style="justify-content: center">
+                    <div class="flex-row gap-sm mt-md justify-center">
                         <a href="{% url 'ctf:admin_participant_add' event_id=event.pk %}"
                            class="btn btn-primary">{% trans "Add Participant" %}</a>
                         <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}"
@@ -324,5 +270,11 @@ function resendInvite(participantId) {
         alert('Error resending invite: ' + err.message);
     });
 }
+
+document.querySelectorAll('.js-resend-invite').forEach(function(button) {
+    button.addEventListener('click', function() {
+        resendInvite(button.dataset.participantId);
+    });
+});
     </script>
 {% endblock %}

@@ -1,16 +1,16 @@
 output "network_name" {
   description = "Name of the platform VPC."
-  value       = google_compute_network.platform.name
+  value       = module.portal_vpc.network_name
 }
 
 output "range_network_name" {
   description = "Name of the dedicated range VPC."
-  value       = google_compute_network.range.name
+  value       = module.range_vpc.range_network_name
 }
 
 output "range_network_id" {
   description = "Identifier of the dedicated range VPC."
-  value       = google_compute_network.range.id
+  value       = module.range_vpc.range_network_id
 }
 
 output "range_network_cidr" {
@@ -35,38 +35,32 @@ output "gke_services_cidr" {
 
 output "gke_subnetwork_name" {
   description = "Name of the GKE subnetwork."
-  value       = google_compute_subnetwork.gke.name
+  value       = module.portal_vpc.gke_subnetwork_name
 }
 
 output "gke_cluster_name" {
   description = "Name of the GKE cluster."
-  value       = google_container_cluster.platform.name
+  value       = module.portal_gke.gke_cluster_name
 }
 
 output "gke_cluster_location" {
   description = "Location of the GKE cluster."
-  value       = google_container_cluster.platform.location
+  value       = module.portal_gke.gke_cluster_location
 }
 
 output "artifact_registry_repositories" {
   description = "Artifact Registry repositories by logical image role."
-  value = {
-    for name, repo in google_artifact_registry_repository.docker :
-    name => repo.repository_id
-  }
+  value       = module.portal_artifact_registry.artifact_registry_repositories
 }
 
 output "artifact_registry_image_roots" {
   description = "Artifact Registry image roots keyed by logical image role."
-  value = {
-    for name, repo in google_artifact_registry_repository.docker :
-    name => "${var.artifact_registry_location}-docker.pkg.dev/${var.project_id}/${repo.repository_id}/${name}"
-  }
+  value       = module.portal_artifact_registry.artifact_registry_image_roots
 }
 
 output "assets_bucket_name" {
   description = "GCS bucket for shared platform assets."
-  value       = google_storage_bucket.assets.name
+  value       = module.portal_gcs.assets_bucket_name
 }
 
 output "terraform_state_bucket_name" {
@@ -76,22 +70,22 @@ output "terraform_state_bucket_name" {
 
 output "public_ingress_ip_name" {
   description = "Reserved global static IP name for the platform ingress."
-  value       = google_compute_global_address.platform_ingress.name
+  value       = module.portal_ingress.public_ingress_ip_name
 }
 
 output "public_ingress_ip_address" {
   description = "Reserved global static IP address for the platform ingress."
-  value       = google_compute_global_address.platform_ingress.address
+  value       = module.portal_ingress.public_ingress_ip_address
 }
 
 output "cloud_armor_security_policy_name" {
   description = "Cloud Armor security policy attached to the public GKE ingress backends."
-  value       = google_compute_security_policy.platform_edge.name
+  value       = module.portal_ingress.cloud_armor_security_policy_name
 }
 
 output "identity_platform_api_key" {
   description = "Identity Platform web API key for the project."
-  value       = google_identity_platform_config.platform.client[0].api_key
+  value       = module.portal_identity_platform.identity_platform_api_key
   sensitive   = true
 }
 
@@ -127,69 +121,60 @@ output "dns_managed_zone_name" {
 
 output "platform_events_topic_id" {
   description = "Shared Pub/Sub topic for platform lifecycle and experiment events."
-  value       = google_pubsub_topic.platform_events.id
+  value       = module.portal_messaging.platform_events_topic_id
 }
 
 output "platform_event_subscriptions" {
   description = "Pub/Sub subscriptions keyed by worker role."
-  value = {
-    for name, subscription in google_pubsub_subscription.platform_events :
-    name => subscription.id
-  }
+  value       = module.portal_messaging.platform_event_subscriptions
 }
 
 output "runtime_secret_ids" {
   description = "Secret Manager secret resource IDs for runtime secret bundles."
-  value = {
-    for name, secret in google_secret_manager_secret.runtime :
-    name => secret.id
+  value       = module.portal_secrets.runtime_secret_ids
+}
+
+output "email_config" {
+  description = <<-EOT
+    Transactional-email runtime config consumed by scripts/gcp/render_runtime_env.py
+    (PLAT-002, #671). null when email_backend is empty (console fallback). When set,
+    api_key_secret_id references the unseeded Secret Manager secret the operator
+    populates with the ESP API key; the key value is never part of this output.
+  EOT
+  value = var.email_backend == "" ? null : {
+    backend           = var.email_backend
+    from_email        = var.email_from_address
+    sender_domain     = var.email_sender_domain
+    api_key_secret_id = module.portal_secrets.runtime_secret_ids["email"]
   }
 }
 
 output "workload_service_accounts" {
   description = "Workload service accounts by logical role."
-  value = {
-    for name, account in google_service_account.workload :
-    name => account.email
-  }
+  value       = module.portal_iam.workload_service_accounts
 }
 
 output "node_service_account_email" {
   description = "Service account email for GKE nodes."
-  value       = google_service_account.gke_nodes.email
+  value       = module.portal_iam.node_service_account_email
 }
 
 output "workload_identity_pool" {
   description = "GKE Workload Identity pool."
-  value       = "${var.project_id}.svc.id.goog"
+  value       = module.portal_gke.workload_identity_pool
 }
 
 output "control_plane_database" {
   description = "Control-plane database connection metadata."
-  value = {
-    instance_name = google_sql_database_instance.platform.name
-    private_ip    = google_sql_database_instance.platform.private_ip_address
-    port          = 5432
-    database_name = google_sql_database.platform.name
-    user_name     = google_sql_user.platform.name
-  }
+  value       = module.portal_cloud_sql.control_plane_database
 }
 
 output "control_plane_cache" {
   description = "Control-plane Redis connection metadata. tls_enabled signals to the runtime renderer that the channel layer must build a rediss:// host; the AUTH token itself is held in Secret Manager and surfaced via `runtime_secret_ids[\"redis\"]` (ADR-008-R6)."
-  value = {
-    host        = google_redis_instance.platform.host
-    port        = google_redis_instance.platform.port
-    tls_enabled = google_redis_instance.platform.transit_encryption_mode != "DISABLED"
-  }
+  value       = module.portal_redis.control_plane_cache
 }
 
 output "guacamole_database" {
   description = "Guacamole database connection metadata."
-  value = {
-    database_name = google_sql_database.guacamole.name
-    user_name     = google_sql_user.guacamole.name
-    host          = google_sql_database_instance.platform.private_ip_address
-    port          = 5432
-  }
+  value       = module.portal_cloud_sql.guacamole_database
 }

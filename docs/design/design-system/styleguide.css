@@ -1,0 +1,213 @@
+/*
+ * Living style guide — page scaffold only.
+ * Consumes design tokens; it does NOT define product component styles (those
+ * live in components.css). This file exists purely to lay out the reference
+ * page (index.html) and render token specimens (swatches, scales).
+ */
+
+body {
+  margin: 0;
+}
+
+.sg-header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--ds-z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding-inline: var(--ds-space-6);
+  padding-block: var(--ds-space-3);
+  background-color: var(--ds-color-surface);
+  border-block-end: var(--ds-border-width-thin) solid var(--ds-color-border);
+}
+
+.sg-header__title {
+  margin: 0;
+  font-size: var(--ds-font-size-md);
+  font-weight: var(--ds-font-weight-semibold);
+}
+
+.sg-header__tag {
+  color: var(--ds-color-fg-subtle);
+  font-size: var(--ds-font-size-2xs);
+}
+
+.sg-header__spacer {
+  flex: 1;
+}
+
+.sg-container {
+  max-inline-size: var(--ds-content-max-width);
+  margin-inline: auto;
+  padding-inline: var(--ds-space-6);
+  padding-block: var(--ds-space-8);
+}
+
+.sg-section {
+  margin-block-end: var(--ds-space-12);
+}
+
+.sg-section__title {
+  margin: 0 0 var(--ds-space-1);
+  font-size: var(--ds-font-size-xl);
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: var(--ds-letter-spacing-tight);
+}
+
+.sg-section__desc {
+  margin: 0 0 var(--ds-space-5);
+  max-inline-size: 70ch;
+  color: var(--ds-color-fg-muted);
+}
+
+.sg-subtitle {
+  margin: var(--ds-space-8) 0 var(--ds-space-3);
+  font-size: var(--ds-font-size-lg);
+  font-weight: var(--ds-font-weight-semibold);
+}
+
+/* Specimen: a labelled demo row for components. */
+.sg-specimen {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-4);
+  background-color: var(--ds-color-surface);
+  border: var(--ds-border-width-thin) solid var(--ds-color-border);
+  border-radius: var(--ds-radius-md);
+}
+
+.sg-specimen + .sg-specimen {
+  margin-block-start: var(--ds-space-3);
+}
+
+.sg-specimen--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sg-specimen--pad {
+  padding: var(--ds-space-6);
+}
+
+.sg-caption {
+  margin: 0 0 var(--ds-space-2);
+  font-size: var(--ds-font-size-2xs);
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: var(--ds-letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--ds-color-fg-subtle);
+}
+
+/* Swatch grid for color tokens. */
+.sg-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--ds-space-3);
+}
+
+.sg-swatch {
+  border: var(--ds-border-width-thin) solid var(--ds-color-border);
+  border-radius: var(--ds-radius-md);
+  overflow: hidden;
+}
+
+.sg-swatch__chip {
+  block-size: var(--ds-space-12);
+}
+
+.sg-swatch__meta {
+  padding: var(--ds-space-2);
+  font-size: var(--ds-font-size-2xs);
+  background-color: var(--ds-color-surface);
+}
+
+.sg-swatch__name {
+  font-family: var(--ds-font-mono);
+  color: var(--ds-color-fg);
+}
+
+.sg-swatch__role {
+  color: var(--ds-color-fg-subtle);
+}
+
+/* Type scale specimen. */
+.sg-type-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ds-space-4);
+  padding-block: var(--ds-space-2);
+  border-block-end: var(--ds-border-width-thin) solid var(--ds-color-border-subtle);
+}
+
+.sg-type-row__token {
+  flex: none;
+  inline-size: 12ch;
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-font-size-2xs);
+  color: var(--ds-color-fg-subtle);
+}
+
+/* Spacing / radius specimen. */
+.sg-scale {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+
+.sg-scale-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-font-size-2xs);
+  color: var(--ds-color-fg-subtle);
+}
+
+.sg-scale-row__bar {
+  block-size: var(--ds-space-4);
+  background-color: var(--ds-color-accent);
+  border-radius: var(--ds-radius-sm);
+}
+
+.sg-radius-box {
+  inline-size: var(--ds-space-12);
+  block-size: var(--ds-space-12);
+  background-color: var(--ds-color-accent-subtle);
+  border: var(--ds-border-width-thin) solid var(--ds-color-accent);
+}
+
+.sg-elevation-box {
+  inline-size: var(--ds-space-16);
+  block-size: var(--ds-space-12);
+  background-color: var(--ds-color-surface-raised);
+  border-radius: var(--ds-radius-md);
+}
+
+.sg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--ds-space-4);
+}
+
+.sg-grid--wide {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.sg-note {
+  padding: var(--ds-space-3);
+  font-size: var(--ds-font-size-xs);
+  color: var(--ds-color-fg-muted);
+  background-color: var(--ds-color-bg-subtle);
+  border-inline-start: var(--ds-border-width-thick) solid var(--ds-color-accent);
+  border-radius: var(--ds-radius-sm);
+}
+
+.sg-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  margin-block-end: var(--ds-space-8);
+}

@@ -20,10 +20,12 @@ import signal
 import tempfile
 import time
 from argparse import ArgumentParser
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -35,8 +37,11 @@ logger = logging.getLogger(__name__)
 
 HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "ctf-scheduler-heartbeat"
 
-# Tasks running longer than this are considered stale and marked FAILED.
-STALE_TASK_MINUTES = 30
+# Handler callbacks supplied by the executor: ``shutdown_check`` returns True
+# when a graceful shutdown has been requested; ``heartbeat`` touches the
+# scheduler liveness file so long-running work does not look stale.
+ShutdownCheck = Callable[[], bool]
+Heartbeat = Callable[[], None]
 
 
 class Command(BaseCommand):
@@ -118,15 +123,36 @@ class Command(BaseCommand):
         return tasks
 
     def _recover_stale_tasks(self) -> None:
-        """Mark RUNNING tasks older than STALE_TASK_MINUTES as FAILED."""
-        cutoff = timezone.now() - timedelta(minutes=STALE_TASK_MINUTES)
-        stale = CTFScheduledTask.objects.filter(
-            status=ScheduledTaskStatus.RUNNING.value,
-            updated_at__lt=cutoff,
+        """Mark genuinely stale RUNNING tasks FAILED, heartbeat-aware and node-safe.
+
+        The stale window is settings-driven (``CTF_SCHEDULER_STALE_TASK_MINUTES``)
+        and set above the legitimate spin-up duration; long-running handlers
+        heartbeat ``updated_at`` so an in-flight task is not swept. The transition
+        is a conditional compare-and-swap ``UPDATE`` filtered on the still-stale
+        condition, so on the multi-node portal two schedulers cannot both recover
+        the same row and a task that heartbeats between the read and the write is
+        left alone (#942).
+        """
+        stale_minutes = settings.CTF_SCHEDULER_STALE_TASK_MINUTES
+        cutoff = timezone.now() - timedelta(minutes=stale_minutes)
+        stale_pks = list(
+            CTFScheduledTask.objects.filter(
+                status=ScheduledTaskStatus.RUNNING.value,
+                updated_at__lt=cutoff,
+            ).values_list("pk", flat=True)
         )
-        for task in stale:
-            task.mark_failed(f"Stale: running for over {STALE_TASK_MINUTES} minutes")
-            logger.warning("Recovered stale task %s (%s)", task.pk, task.task_type)
+        for pk in stale_pks:
+            recovered = CTFScheduledTask.objects.filter(
+                pk=pk,
+                status=ScheduledTaskStatus.RUNNING.value,
+                updated_at__lt=cutoff,
+            ).update(
+                status=ScheduledTaskStatus.FAILED.value,
+                executed_at=timezone.now(),
+                error_message=f"Stale: running for over {stale_minutes} minutes",
+            )
+            if recovered:
+                logger.warning("Recovered stale task %s", pk)
 
     def _execute_task(self, task: CTFScheduledTask) -> None:
         """Dispatch a task to its handler and record the outcome."""
@@ -140,8 +166,15 @@ class Command(BaseCommand):
             handler = TASK_HANDLERS.get(task.task_type)
             if handler is None:
                 raise ValueError(f"No handler for task type: {task.task_type}")
-            handler(task, shutdown_check=lambda: self.shutdown)
-            task.mark_completed()
+            result = handler(task, shutdown_check=lambda: self.shutdown, heartbeat=self._touch_heartbeat)
+            # A handler interrupted by shutdown returns a result flagged
+            # interrupted; the work is recoverable, so requeue rather than
+            # record it as completed.
+            if isinstance(result, dict) and result.get("interrupted"):
+                logger.info("Task %s interrupted; requeuing for resume", task.pk)
+                task.requeue_for_resume()
+            else:
+                task.mark_completed()
         except Exception as exc:
             logger.exception("Task %s failed: %s", task.pk, exc)
             task.mark_failed(str(exc)[:1000])
@@ -163,31 +196,66 @@ class Command(BaseCommand):
 # ---------------------------------------------------------------------------
 
 
-def _handle_spin_up_ranges(task: CTFScheduledTask, shutdown_check=None) -> None:
+def _handle_spin_up_ranges(
+    task: CTFScheduledTask,
+    shutdown_check: ShutdownCheck | None = None,
+    heartbeat: Heartbeat | None = None,
+) -> dict[str, Any]:
+    """Provision all event ranges via the throttled loop.
+
+    Returns the throttled result so the executor can requeue the task when the
+    run was interrupted by shutdown instead of marking it completed.
+    """
     from ctf.services.range import provision_event_ranges_throttled
 
     event = task.event
     spinup_window = event.range_spinup_minutes * 60  # convert to seconds
+
+    def task_heartbeat() -> None:
+        """Keep both the claimed task and the scheduler liveness file fresh.
+
+        Bumps only this task's ``updated_at`` via a targeted UPDATE that avoids
+        ``CTFBaseModel.save()``/``full_clean()`` so the stale-recovery sweep does
+        not mark an in-flight spin-up FAILED (#942), and touches the scheduler
+        liveness file (via the executor-supplied ``heartbeat``) so a long run is
+        not restarted by the container healthcheck (#943).
+        """
+        CTFScheduledTask.objects.filter(pk=task.pk).update(updated_at=timezone.now())
+        if heartbeat is not None:
+            heartbeat()
+
     result = provision_event_ranges_throttled(
         event_id=event.pk,
         spinup_window_seconds=spinup_window,
         shutdown_check=shutdown_check,
+        heartbeat=task_heartbeat,
     )
     logger.info(
         "SPIN_UP_RANGES result for event %s: %s",
         event.pk,
         result,
     )
+    return result
 
 
-def _handle_cleanup_ranges(task: CTFScheduledTask, shutdown_check=None) -> None:
+def _handle_cleanup_ranges(
+    task: CTFScheduledTask,
+    shutdown_check: ShutdownCheck | None = None,
+    heartbeat: Heartbeat | None = None,
+) -> None:
+    """Destroy all provisioned ranges for the event."""
     from ctf.services.range import cleanup_event_ranges
 
     result = cleanup_event_ranges(task.event_id)
     logger.info("CLEANUP_RANGES result for event %s: %s", task.event_id, result)
 
 
-def _handle_event_start(task: CTFScheduledTask, shutdown_check=None) -> None:
+def _handle_event_start(
+    task: CTFScheduledTask,
+    shutdown_check: ShutdownCheck | None = None,
+    heartbeat: Heartbeat | None = None,
+) -> None:
+    """Activate the event and notify the organizer on success."""
     from ctf.services.event import activate_event
 
     if activate_event(task.event):
@@ -196,23 +264,47 @@ def _handle_event_start(task: CTFScheduledTask, shutdown_check=None) -> None:
         notify_organizer_event_start(task.event_id)
 
 
-def _handle_event_end(task: CTFScheduledTask, shutdown_check=None) -> None:
+def _handle_event_end(
+    task: CTFScheduledTask,
+    shutdown_check: ShutdownCheck | None = None,
+    heartbeat: Heartbeat | None = None,
+) -> None:
+    """Complete the event, notify the organizer, and auto-clean ranges if enabled."""
+    from ctf.models import CTFEvent
     from ctf.services.event import complete_event
 
-    if complete_event(task.event):
+    event = CTFEvent.objects.get(pk=task.event_id)
+    now = timezone.now()
+    if now < event.event_end:
+        logger.info(
+            "Skipping stale EVENT_END task %s for event %s: event_end=%s now=%s",
+            task.pk,
+            event.pk,
+            event.event_end,
+            now,
+        )
+        task.mark_cancelled()
+        return
+
+    if complete_event(event):
         from ctf.services.notification import notify_organizer_event_end
 
-        notify_organizer_event_end(task.event_id)
+        notify_organizer_event_end(event.pk)
 
     # Also trigger cleanup if auto_cleanup is enabled
-    if task.event.auto_cleanup:
+    if event.auto_cleanup:
         from ctf.services.range import cleanup_event_ranges
 
-        result = cleanup_event_ranges(task.event_id)
-        logger.info("EVENT_END cleanup for event %s: %s", task.event_id, result)
+        result = cleanup_event_ranges(event.pk)
+        logger.info("EVENT_END cleanup for event %s: %s", event.pk, result)
 
 
-def _handle_send_reminder(task: CTFScheduledTask, shutdown_check=None) -> None:
+def _handle_send_reminder(
+    task: CTFScheduledTask,
+    shutdown_check: ShutdownCheck | None = None,
+    heartbeat: Heartbeat | None = None,
+) -> None:
+    """Send the event reminder for the interval recorded in task metadata."""
     from ctf.services.notification import send_reminder
 
     hours_before = task.metadata.get("hours_before", 24) if task.metadata else 24
@@ -226,7 +318,12 @@ def _handle_send_reminder(task: CTFScheduledTask, shutdown_check=None) -> None:
     )
 
 
-def _handle_release_challenge(task: CTFScheduledTask, shutdown_check=None) -> None:
+def _handle_release_challenge(
+    task: CTFScheduledTask,
+    shutdown_check: ShutdownCheck | None = None,
+    heartbeat: Heartbeat | None = None,
+) -> None:
+    """Release the hidden challenge named in task metadata."""
     from ctf.services.challenge import release_challenge
 
     challenge_id = task.metadata.get("challenge_id")

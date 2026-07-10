@@ -1,613 +1,297 @@
-"""Tests for CMS handlers."""
+"""Behavior tests for CMS event handlers.
+
+The CMS handlers consume range/ngfw events published by the Engine
+and update real CMS rows: ``process_range_event`` updates ``RangeInstance`` and
+fires the ``range_status_changed`` signal (the CTF decoupling bridge);
+``process_event`` routes by event-type prefix. These tests drive the handlers
+against real ``RangeInstance``/``Request``/``Instance``/``App`` rows and assert
+the persisted effect (and the real signal firing), instead of patching
+``RangeInstance``, the sub-handlers, or the bridge functions.
+"""
 
 import json
-from unittest.mock import patch
+from uuid import uuid4
 
-from shared.enums import ResourceStatus
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+
+from cms.handlers import parse_sns_message, process_event, process_range_event
+from cms.models import App, AppType, Instance, InstanceType, RangeInstance, Request
+from cms.signals import range_status_changed
+from shared.enums import RequestType, ResourceStatus
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
 
 
-class TestProcessEvent:
-    """Tests for process_event dispatcher."""
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(username="cms-handlers@example.com", email="cms-handlers@example.com")
 
-    def test_routes_range_events_to_range_handler(self):
-        """Dispatcher routes range.* events to process_range_event."""
-        from cms.handlers import process_event
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
+def _sns(payload: dict) -> dict:
+    """Wrap an event payload in the SNS envelope the worker delivers."""
+    return {"Message": json.dumps(payload)}
 
-        with patch("cms.handlers.process_range_event") as mock_range_handler:
-            process_event(message)
-            mock_range_handler.assert_called_once_with(message)
 
-    def test_routes_ngfw_events_to_ngfw_handler(self):
-        """Dispatcher routes ngfw.* events to process_ngfw_event."""
-        from cms.handlers import process_event
+def _range_event(*, new_status, user_id, range_id=None, request_id=None, **extra) -> dict:
+    payload = {"event_type": "range.status.updated", "new_status": new_status, "user_id": user_id, **extra}
+    if range_id is not None:
+        payload["range_id"] = range_id
+    if request_id is not None:
+        payload["request_id"] = str(request_id)
+    return _sns(payload)
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "ngfw.status.updated",
-                    "ngfw_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
 
-        with patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler:
-            process_event(message)
-            mock_ngfw_handler.assert_called_once_with(message)
+def _range_instance(user, *, range_id=None, request=None, status=ResourceStatus.PENDING.value, scenario_id="basic"):
+    return RangeInstance.objects.create(
+        user_id=user.id, range_id=range_id, request=request, status=status, scenario_id=scenario_id
+    )
 
-    def test_routes_experiment_events_to_experiments_handler(self):
-        """Dispatcher routes experiment.* events to cms.experiments.handlers."""
-        from cms.handlers import process_event
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "experiment.run.started",
-                    "experiment_id": 7,
-                }
-            )
-        }
+def _request(user) -> Request:
+    return Request.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
 
-        with patch("cms.experiments.handlers.process_event") as mock_exp_handler:
-            process_event(message)
-            mock_exp_handler.assert_called_once_with(message)
 
-    def test_ignores_unknown_event_types(self):
-        """Dispatcher ignores events with unknown event_type prefix."""
-        from cms.handlers import process_event
+@pytest.fixture
+def ctf_signal():
+    """Record ``range_status_changed`` deliveries (the real CTF bridge signal)."""
+    received: list[dict] = []
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "unknown.event",
-                    "some_id": 1,
-                }
-            )
-        }
+    def receiver(sender, **kwargs):
+        received.append(kwargs)
 
-        with (
-            patch("cms.handlers.process_range_event") as mock_range_handler,
-            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
-            patch("cms.experiments.handlers.process_event") as mock_exp_handler,
-        ):
-            process_event(message)
-            mock_range_handler.assert_not_called()
-            mock_ngfw_handler.assert_not_called()
-            mock_exp_handler.assert_not_called()
+    range_status_changed.connect(receiver, weak=False)
+    try:
+        yield received
+    finally:
+        range_status_changed.disconnect(receiver)
 
-    def test_handles_missing_event_type(self):
-        """Dispatcher handles messages without event_type gracefully."""
-        from cms.handlers import process_event
 
-        message = {"Message": json.dumps({"range_id": 1})}
+# -----------------------------------------------------------------------------
+# Dispatcher routing (process_event)
+# -----------------------------------------------------------------------------
 
-        with (
-            patch("cms.handlers.process_range_event") as mock_range_handler,
-            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
-            patch("cms.experiments.handlers.process_event") as mock_exp_handler,
-        ):
-            process_event(message)
-            mock_range_handler.assert_not_called()
-            mock_ngfw_handler.assert_not_called()
-            mock_exp_handler.assert_not_called()
+
+class TestProcessEventRouting:
+    def test_routes_range_events_to_range_handler(self, user):
+        ri = _range_instance(user, range_id=1)
+        process_event(_range_event(range_id=1, new_status=ResourceStatus.PROVISIONING.value, user_id=user.id))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PROVISIONING.value
+
+    def test_routes_ngfw_events_to_ngfw_handler(self, user):
+        instance, app = _make_instance_and_app(user)
+        message = _sns(
+            {
+                "event_type": "ngfw.event",
+                "instance_id": str(instance.id),
+                "app_id": str(app.id),
+                "status": ResourceStatus.READY.value,
+            }
+        )
+        process_event(message)
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.READY.value
+        assert app.status == ResourceStatus.READY.value
+
+    def test_ignores_unknown_event_types(self, user):
+        ri = _range_instance(user, range_id=2)
+        process_event(_sns({"event_type": "unknown.event", "range_id": 2, "user_id": user.id}))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PENDING.value
+
+    def test_handles_missing_event_type(self, user):
+        ri = _range_instance(user, range_id=3)
+        process_event(_sns({"range_id": 3, "user_id": user.id}))  # must not raise
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PENDING.value
+
+
+# -----------------------------------------------------------------------------
+# SNS envelope parsing (parse_sns_message) — pure helper, no boundaries
+# -----------------------------------------------------------------------------
 
 
 class TestParseSnsMessage:
-    """Tests for parse_sns_message helper."""
-
-    def test_parses_sns_wrapped_message(self):
-        """Function unwraps SNS envelope to get event payload."""
-        from cms.handlers import parse_sns_message
-
-        sns_message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        result = parse_sns_message(sns_message)
-
+    def test_unwraps_sns_envelope(self):
+        result = parse_sns_message(_sns({"event_type": "range.status.updated", "range_id": 1, "user_id": 42}))
         assert result["event_type"] == "range.status.updated"
         assert result["range_id"] == 1
         assert result["user_id"] == 42
 
     def test_parses_string_input(self):
-        """Function parses string JSON input."""
-        from cms.handlers import parse_sns_message
-
-        sns_message = json.dumps(
-            {
-                "Message": json.dumps(
-                    {
-                        "event_type": "range.status.updated",
-                        "range_id": 1,
-                    }
-                )
-            }
-        )
-
-        result = parse_sns_message(sns_message)
-
+        raw = json.dumps(_sns({"event_type": "range.status.updated", "range_id": 1}))
+        result = parse_sns_message(raw)
         assert result["event_type"] == "range.status.updated"
         assert result["range_id"] == 1
 
     def test_handles_non_wrapped_message(self):
-        """Function handles direct event payload (no SNS wrapper)."""
-        from cms.handlers import parse_sns_message
-
-        direct_message = {
-            "event_type": "range.status.updated",
-            "range_id": 1,
-            "user_id": 42,
-        }
-
-        result = parse_sns_message(direct_message)
-
-        # When no "Message" key, should return the body itself
+        direct = {"event_type": "range.status.updated", "range_id": 1, "user_id": 42}
+        result = parse_sns_message(direct)
         assert result["event_type"] == "range.status.updated"
         assert result["range_id"] == 1
 
 
+# -----------------------------------------------------------------------------
+# process_range_event — status updates
+# -----------------------------------------------------------------------------
+
+
 class TestProcessRangeEventStatusUpdates:
-    """Status update tests for process_range_event()."""
+    def test_updates_range_instance_status(self, user, ctf_signal):
+        ri = _range_instance(user, range_id=1, status=ResourceStatus.PENDING.value)
+        process_range_event(_range_event(range_id=1, new_status=ResourceStatus.PROVISIONING.value, user_id=user.id))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PROVISIONING.value
+        # CTF bridge fired once with the real before/after statuses.
+        assert len(ctf_signal) == 1
+        assert ctf_signal[0]["range_instance_id"] == ri.pk
+        assert ctf_signal[0]["new_status"] == ResourceStatus.PROVISIONING.value
+        assert ctf_signal[0]["previous_status"] == ResourceStatus.PENDING.value
 
-    def test_updates_range_instance_status(self):
-        """Handler updates RangeInstance.status from event."""
-        from unittest.mock import MagicMock
+    def test_handles_ready_status(self, user):
+        ri = _range_instance(user, range_id=2, status=ResourceStatus.PROVISIONING.value)
+        process_range_event(_range_event(range_id=2, new_status=ResourceStatus.READY.value, user_id=user.id))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.READY.value
 
-        from cms.handlers import process_range_event
+    def test_terminal_status_soft_deletes_instance(self, user):
+        """DESTROYED is terminal: status persists and the row is soft-deleted."""
+        ri = _range_instance(user, range_id=3, status=ResourceStatus.DESTROYING.value)
+        process_range_event(_range_event(range_id=3, new_status=ResourceStatus.DESTROYED.value, user_id=user.id))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.DESTROYED.value
+        assert ri.deleted_at is not None
+        # Soft-deleted: the active manager no longer surfaces it.
+        assert not RangeInstance.objects.filter(pk=ri.pk).exists()
+        assert RangeInstance.all_objects.filter(pk=ri.pk).exists()
 
-        mock_instance = MagicMock()
-        mock_instance.range_id = 1
-        mock_instance.user_id = 42
-        mock_instance.status = ResourceStatus.PENDING.value
-        mock_instance.pk = 1
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 1,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-        ):
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            MockRI.objects.get.assert_called_once_with(range_id=1)
-            assert mock_instance.status == ResourceStatus.PROVISIONING.value
-            mock_instance.save.assert_called_once_with(update_fields=["status"])
-
-    def test_handles_ready_status(self):
-        """Handler correctly handles READY status."""
-        from unittest.mock import MagicMock
-
-        from cms.handlers import process_range_event
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 2
-        mock_instance.user_id = 42
-        mock_instance.status = ResourceStatus.PROVISIONING.value
-        mock_instance.pk = 2
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 2,
-                    "new_status": ResourceStatus.READY.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-            patch("cms.handlers.range_events.notify_experiment_on_range_ready"),
-        ):
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            assert mock_instance.status == ResourceStatus.READY.value
-            mock_instance.save.assert_called_once_with(update_fields=["status"])
-
-    def test_handles_terminal_status_sets_deleted_at(self):
-        """Handler sets deleted_at when status is terminal (DESTROYED).
-
-        Note: deleted_at is set by EntityBase.save() in the model layer.
-        We verify the handler calls save() with the correct status; the
-        model's save() behaviour is tested elsewhere.
-        """
-        from unittest.mock import MagicMock
-
-        from cms.handlers import process_range_event
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 3
-        mock_instance.user_id = 42
-        mock_instance.status = ResourceStatus.DESTROYING.value
-        mock_instance.pk = 3
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 3,
-                    "new_status": ResourceStatus.DESTROYED.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-        ):
-            MockRI.all_objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            MockRI.all_objects.get.assert_called_once_with(range_id=3)
-            assert mock_instance.status == ResourceStatus.DESTROYED.value
-            mock_instance.save.assert_called_once_with(update_fields=["status"])
-
-    def test_succeeds_with_minimum_required_input(self):
-        """Handler works with minimal event fields."""
-        from unittest.mock import MagicMock
-
-        from cms.handlers import process_range_event
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 8
-        mock_instance.user_id = 42
-        mock_instance.status = ResourceStatus.PENDING.value
-        mock_instance.pk = 8
-
-        # Minimal SNS message - no error_message
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 8,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-        ):
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            assert mock_instance.status == ResourceStatus.PROVISIONING.value
-            mock_instance.save.assert_called_once_with(update_fields=["status"])
+# -----------------------------------------------------------------------------
+# process_range_event — ignored / invalid inputs
+# -----------------------------------------------------------------------------
 
 
 class TestProcessRangeEventInvalidInputs:
-    """Ignored and invalid input tests for process_range_event()."""
+    def test_ignores_non_status_events(self, user, ctf_signal):
+        ri = _range_instance(user, range_id=4, status=ResourceStatus.PENDING.value)
+        process_range_event(_sns({"event_type": "range.provisioned", "range_id": 4, "user_id": user.id}))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PENDING.value
+        assert ctf_signal == []
 
-    def test_ignores_non_status_events(self):
-        """Handler ignores events that are not range.status.updated."""
-        from cms.handlers import process_range_event
+    def test_handles_missing_range_instance(self, user, ctf_signal):
+        """No matching RangeInstance: nothing changes and the bridge does not fire."""
+        process_range_event(_range_event(range_id=999, new_status=ResourceStatus.READY.value, user_id=user.id))
+        assert ctf_signal == []
 
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.provisioned",
-                    "range_id": 4,
-                    "user_id": 42,
-                }
-            )
-        }
+    def test_handles_user_id_mismatch(self, user, ctf_signal):
+        ri = _range_instance(user, range_id=5, status=ResourceStatus.PENDING.value)
+        process_range_event(_range_event(range_id=5, new_status=ResourceStatus.READY.value, user_id=999))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PENDING.value
+        assert ctf_signal == []
 
-        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
-            process_range_event(message)
+    def test_rejects_invalid_status_value(self, user, ctf_signal):
+        ri = _range_instance(user, range_id=50, status=ResourceStatus.PENDING.value)
+        process_range_event(_range_event(range_id=50, new_status="bogus_status", user_id=user.id))
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PENDING.value
+        assert ctf_signal == []
 
-            # Should return early without any DB lookup
-            MockRI.objects.get.assert_not_called()
 
-    def test_handles_missing_range_instance(self):
-        """Handler returns early when RangeInstance lookup fails — no save, no bridge."""
-        from cms.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 999,
-                    "new_status": ResourceStatus.READY.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status") as mock_ctf,
-            patch("cms.handlers.range_events.notify_experiment_on_range_ready") as mock_exp,
-        ):
-            MockRI.DoesNotExist = Exception
-            MockRI.objects.get.side_effect = MockRI.DoesNotExist("not found")
-
-            process_range_event(message)
-
-            # Lookup attempted exactly once with the event's range_id.
-            MockRI.objects.get.assert_called_once_with(range_id=999)
-            # On miss, no save and no downstream bridge calls.
-            assert not MockRI.return_value.save.called
-            mock_ctf.assert_not_called()
-            mock_exp.assert_not_called()
-
-    def test_handles_user_id_mismatch(self):
-        """Handler rejects events when user_id doesn't match instance."""
-        from unittest.mock import MagicMock
-
-        from cms.handlers import process_range_event
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 5
-        mock_instance.user_id = 42
-        mock_instance.status = ResourceStatus.PENDING.value
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 5,
-                    "new_status": ResourceStatus.READY.value,
-                    "user_id": 999,  # Wrong user
-                }
-            )
-        }
-
-        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            # Status should be unchanged - save should NOT be called
-            assert mock_instance.status == ResourceStatus.PENDING.value
-            mock_instance.save.assert_not_called()
-
-    def test_rejects_invalid_status_value(self):
-        """Handler rejects events with invalid status values."""
-        from cms.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 50,
-                    "new_status": "bogus_status",
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
-            # Should return early before any DB lookup
-            process_range_event(message)
-
-            MockRI.objects.get.assert_not_called()
+# -----------------------------------------------------------------------------
+# process_range_event — request_id correlation
+# -----------------------------------------------------------------------------
 
 
 class TestProcessRangeEventRequestLookup:
-    """Request id lookup tests for process_range_event()."""
+    def test_lookup_by_request_id_when_range_id_is_none(self, user):
+        """Resolves via Request.request_id and persists the event's range_id."""
+        req = _request(user)
+        ri = _range_instance(user, request=req, range_id=None, status=ResourceStatus.PENDING.value)
+        process_range_event(
+            _range_event(
+                request_id=req.request_id, range_id=57, new_status=ResourceStatus.FAILED.value, user_id=user.id
+            )
+        )
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.FAILED.value
+        assert ri.range_id == 57  # was None, now set from the event
 
-    def test_lookup_by_request_id_when_range_id_is_none(self):
-        """Handler finds RangeInstance via request_id when range_id is None.
+    def test_range_id_not_overwritten_if_already_set(self, user):
+        req = _request(user)
+        ri = _range_instance(user, request=req, range_id=10, status=ResourceStatus.PENDING.value)
+        process_range_event(
+            _range_event(
+                request_id=req.request_id, range_id=99, new_status=ResourceStatus.PROVISIONING.value, user_id=user.id
+            )
+        )
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.PROVISIONING.value
+        assert ri.range_id == 10  # existing value preserved
 
-        This is the new pattern where RangeInstance.range_id is None and
-        correlation happens via Request.request_id (UUID).
+    def test_request_id_lookup_preferred_over_range_id(self, user):
+        """When both ids are present, the row correlated by request_id wins.
+
+        The event's ``range_id`` points at a decoy row; only the request-linked
+        target is updated, proving the lookup is by request_id.
         """
-        from unittest.mock import MagicMock
-        from uuid import uuid4
+        req = _request(user)
+        target = _range_instance(user, request=req, range_id=77, status=ResourceStatus.PENDING.value)
+        decoy = _range_instance(user, range_id=55, status=ResourceStatus.PENDING.value)
+        process_range_event(
+            _range_event(request_id=req.request_id, range_id=55, new_status=ResourceStatus.READY.value, user_id=user.id)
+        )
+        target.refresh_from_db()
+        decoy.refresh_from_db()
+        assert target.status == ResourceStatus.READY.value
+        assert decoy.status == ResourceStatus.PENDING.value
 
-        from cms.handlers import process_range_event
+    def test_destroyed_event_can_update_soft_deleted_request_range(self, user):
+        """Destroy hides the CMS row early; the final DESTROYED event still lands.
 
-        request_uuid = uuid4()
-        user_id = 42
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = None  # New pattern: no legacy range_id
-        mock_instance.user_id = user_id
-        mock_instance.status = ResourceStatus.PENDING.value
-        mock_instance.pk = 10
-
-        # Event with request_id (UUID) - the way Engine publishes events
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(request_uuid),
-                    "range_id": 57,  # Engine Range.id (not used for lookup in new pattern)
-                    "new_status": ResourceStatus.FAILED.value,
-                    "user_id": user_id,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-        ):
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            # Verify lookup was by request_id
-            MockRI.objects.get.assert_called_once_with(request__request_id=str(request_uuid))
-            assert mock_instance.status == ResourceStatus.FAILED.value
-            # range_id from event should be persisted (was None, now set)
-            assert mock_instance.range_id == 57
-            mock_instance.save.assert_called_once_with(update_fields=["status", "range_id"])
-
-    def test_range_id_not_overwritten_if_already_set(self):
-        """Handler does not overwrite an existing range_id with a different value from the event."""
-        from unittest.mock import MagicMock
-        from uuid import uuid4
-
-        from cms.handlers import process_range_event
-
-        request_uuid = uuid4()
-        user_id = 42
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 10  # Already has a range_id
-        mock_instance.user_id = user_id
-        mock_instance.status = ResourceStatus.PENDING.value
-        mock_instance.pk = 11
-
-        # Event carries a different range_id
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(request_uuid),
-                    "range_id": 99,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": user_id,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-        ):
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            assert mock_instance.status == ResourceStatus.PROVISIONING.value
-            # Original range_id preserved, not overwritten
-            assert mock_instance.range_id == 10
-            # save should only update status (not range_id)
-            mock_instance.save.assert_called_once_with(update_fields=["status"])
-
-    def test_request_id_lookup_preferred_over_range_id(self):
-        """Handler prefers request_id lookup over range_id when both present.
-
-        Ensures events with both identifiers use request_id for lookup,
-        maintaining proper service layer boundaries.
+        The row is soft-deleted at ``destroying`` time, so the active manager
+        cannot see it. The destroyed event resolves it through the unfiltered
+        manager and marks it destroyed.
         """
-        from unittest.mock import MagicMock
-        from uuid import uuid4
+        req = _request(user)
+        ri = _range_instance(user, request=req, range_id=14, status=ResourceStatus.DESTROYING.value)
+        ri.deleted_at = timezone.now()
+        ri.save(update_fields=["deleted_at"])
+        assert not RangeInstance.objects.filter(pk=ri.pk).exists()  # hidden from active manager
 
-        from cms.handlers import process_range_event
-
-        request_uuid = uuid4()
-        user_id = 42
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 100
-        mock_instance.user_id = user_id
-        mock_instance.status = ResourceStatus.PENDING.value
-        mock_instance.pk = 12
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(request_uuid),
-                    "range_id": 100,
-                    "new_status": ResourceStatus.READY.value,
-                    "user_id": user_id,
-                }
+        process_range_event(
+            _range_event(
+                request_id=req.request_id, range_id=14, new_status=ResourceStatus.DESTROYED.value, user_id=user.id
             )
-        }
+        )
 
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-            patch("cms.handlers.range_events.notify_experiment_on_range_ready"),
-        ):
-            MockRI.objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
+        ri.refresh_from_db()
+        assert ri.status == ResourceStatus.DESTROYED.value
 
-            process_range_event(message)
 
-            # Verify lookup was by request_id, NOT range_id
-            MockRI.objects.get.assert_called_once_with(request__request_id=str(request_uuid))
-            assert mock_instance.status == ResourceStatus.READY.value
+# -----------------------------------------------------------------------------
+# Shared builders for the ngfw routing test
+# -----------------------------------------------------------------------------
 
-    def test_destroyed_event_can_update_soft_deleted_request_range(self):
-        """Destroyed events resolve RangeInstance through the unfiltered manager.
 
-        Destroy requests hide the CMS row at ``destroying`` time, so the final
-        provisioner event must still be able to mark it destroyed.
-        """
-        from unittest.mock import MagicMock
-        from uuid import uuid4
-
-        from cms.handlers import process_range_event
-
-        request_uuid = uuid4()
-        user_id = 42
-
-        mock_instance = MagicMock()
-        mock_instance.range_id = 14
-        mock_instance.user_id = user_id
-        mock_instance.status = ResourceStatus.DESTROYING.value
-        mock_instance.pk = 14
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "request_id": str(request_uuid),
-                    "range_id": 14,
-                    "new_status": ResourceStatus.DESTROYED.value,
-                    "user_id": user_id,
-                }
-            )
-        }
-
-        with (
-            patch("cms.handlers.range_events.RangeInstance") as MockRI,
-            patch("cms.handlers.range_events.notify_ctf_range_status"),
-        ):
-            MockRI.all_objects.get.return_value = mock_instance
-            MockRI.DoesNotExist = Exception
-
-            process_range_event(message)
-
-            MockRI.objects.get.assert_not_called()
-            MockRI.all_objects.get.assert_called_once_with(request__request_id=str(request_uuid))
-            assert mock_instance.status == ResourceStatus.DESTROYED.value
-            mock_instance.save.assert_called_once_with(update_fields=["status"])
+def _make_instance_and_app(user, *, status=ResourceStatus.PROVISIONING.value):
+    req = _request(user)
+    instance_type = InstanceType.objects.create(
+        name="Handler Test Instance Type",
+        slug=f"handler-it-{uuid4().hex[:8]}",
+        spec_slug="credential.scm",
+    )
+    app_type = AppType.objects.create(
+        name="Handler Test App Type",
+        slug=f"handler-at-{uuid4().hex[:8]}",
+        spec_slug="credential.scm",
+    )
+    instance = Instance.objects.create(request=req, name="ngfw-instance", instance_type=instance_type, status=status)
+    app = App.objects.create(name="ngfw-app", app_type=app_type, instance=instance, status=status)
+    return instance, app

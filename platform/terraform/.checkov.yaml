@@ -5,6 +5,15 @@
 # (.github/workflows/_quality.yml). soft-fail is OFF: first-party
 # Terraform under platform/terraform/ is a blocking Checkov path.
 #
+# Module inline skips (issue #147): place `# checkov:skip=CKV_X:reason`
+# on the resource block inside `platform/terraform/modules/**`. Checkov
+# honors those comments when the module file is loaded into the scan
+# graph. Both surfaces pass `--download-external-modules` so relative
+# module sources from environment roots resolve the same way as in CI.
+# When Checkov still flags a finding at a module call site, use a
+# repo-wide `skip-check` entry here plus ADR-004-R11 exception metadata
+# — not `--soft-fail`.
+#
 # Every skip-check entry below MUST point to a matching ADR exception
 # in docs/adr/exceptions.yaml (rule_id: ADR-004-R11) with owner,
 # reason, expires_on, and the relevant Checkov policy identifier.

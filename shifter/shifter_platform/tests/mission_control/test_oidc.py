@@ -4,9 +4,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import SuspiciousOperation
 from django.test import override_settings
+from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
-from config.oidc import OIDCAuthenticationBackend, ShifterOIDCBackend, generate_username, provider_logout_url
+from config.oidc import ShifterOIDCBackend, provider_logout_url
+from config.username import generate_username
+from management.services import get_user_profile
+from risk_register.models import AuditLog
 
 User = get_user_model()
 
@@ -284,57 +289,55 @@ class TestProviderLogoutUrl:
         assert provider_logout_url(request) == "/"
 
 
+@pytest.mark.django_db
 class TestShifterOIDCBackendBootstrapAdmin:
-    """Tests for OIDC bootstrap staff/superuser elevation."""
+    """OIDC bootstrap staff/superuser elevation, driven through the real backend.
+
+    Drives the real ``create_user`` / ``update_user`` (the mozilla base really
+    creates/updates the Django user from claims), the real
+    ``apply_bootstrap_admin_flags``, the real ``update_cognito_sub`` management
+    service, and the real ``audit_auth_event`` — asserting persisted state
+    (flags, profile, audit row) instead of patching them.
+    """
 
     @override_settings(
         PLATFORM_BOOTSTRAP_STAFF_EMAILS=["admin@example.com"],
         PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=["admin@example.com"],
     )
-    def test_create_user_applies_bootstrap_admin_flags(self, db):
+    def test_create_user_applies_bootstrap_admin_flags(self):
         """OIDC first login elevates configured bootstrap admin emails."""
         backend = ShifterOIDCBackend()
-        user = User.objects.create_user(
-            username="admin@example.com",
-            email="admin@example.com",
-        )
         claims = {"email": "admin@example.com", "sub": "cognito-sub-123"}
 
-        with (
-            patch.object(OIDCAuthenticationBackend, "create_user", return_value=user),
-            patch("config.oidc.update_cognito_sub"),
-            patch("config.oidc.audit_auth_event"),
-        ):
-            created_user = backend.create_user(claims)
+        created_user = backend.create_user(claims)
 
-        assert created_user == user
-        user.refresh_from_db()
-        assert user.is_staff is True
-        assert user.is_superuser is True
+        created_user.refresh_from_db()
+        assert created_user.email == "admin@example.com"
+        assert created_user.is_staff is True
+        assert created_user.is_superuser is True
+        # cognito_sub persisted via the real management service.
+        assert get_user_profile(created_user).cognito_sub == "cognito-sub-123"
+        # New-user audit row written via the real audit service.
+        assert AuditLog.objects.filter(
+            entity_type=AuditLog.EntityType.USER, action=AuditLog.Action.CREATE, actor_type=AuditLog.ActorType.COGNITO
+        ).exists()
 
     @override_settings(
         PLATFORM_BOOTSTRAP_STAFF_EMAILS=["ops@example.com"],
         PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=[],
     )
-    def test_update_user_applies_bootstrap_staff_flags(self, db):
+    def test_update_user_applies_bootstrap_staff_flags(self):
         """Returning OIDC users are elevated when bootstrap settings change."""
         backend = ShifterOIDCBackend()
-        user = User.objects.create_user(
-            username="ops@example.com",
-            email="ops@example.com",
-        )
+        user = User.objects.create_user(username="ops@example.com", email="ops@example.com")
         claims = {"email": "ops@example.com", "sub": "cognito-sub-456"}
 
-        with (
-            patch.object(OIDCAuthenticationBackend, "update_user", return_value=user),
-            patch("config.oidc.update_cognito_sub"),
-        ):
-            updated_user = backend.update_user(user, claims)
+        updated_user = backend.update_user(user, claims)
 
-        assert updated_user == user
-        user.refresh_from_db()
-        assert user.is_staff is True
-        assert user.is_superuser is False
+        updated_user.refresh_from_db()
+        assert updated_user.is_staff is True
+        assert updated_user.is_superuser is False
+        assert get_user_profile(updated_user).cognito_sub == "cognito-sub-456"
 
 
 # =============================================================================
@@ -342,88 +345,94 @@ class TestShifterOIDCBackendBootstrapAdmin:
 # =============================================================================
 
 
+@pytest.mark.django_db
 class TestShifterOIDCBackendUpdateCognitoSub:
-    """Tests for ShifterOIDCBackend._update_cognito_sub method."""
+    """``_update_cognito_sub`` against the real management service + UserProfile."""
 
-    # -------------------------------------------------------------------------
-    # Happy path
-    # -------------------------------------------------------------------------
+    def _user(self):
+        return User.objects.create_user(username="cogsub@example.com", email="cogsub@example.com")
 
-    def test_calls_update_cognito_sub_service(self):
-        """_update_cognito_sub calls management service with user and sub."""
+    def test_persists_cognito_sub_from_claims(self):
+        """The sub from claims is stored on the user's profile."""
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": "abc-123-cognito-sub"}
+        user = self._user()
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        backend._update_cognito_sub(user, {"sub": "abc-123-cognito-sub", "email": user.email})
 
-        mock_update.assert_called_once_with(user, "abc-123-cognito-sub")
+        assert get_user_profile(user).cognito_sub == "abc-123-cognito-sub"
 
-    def test_extracts_sub_from_claims(self):
-        """_update_cognito_sub extracts sub value from claims dict."""
+    @pytest.mark.parametrize("claims", [{}, {"sub": None}, {"sub": ""}], ids=["missing", "none", "empty"])
+    def test_no_op_when_sub_absent(self, claims):
+        """A missing/blank sub leaves the profile's cognito_sub unset."""
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": "xyz-789", "email": "test@example.com", "name": "Test"}
+        user = self._user()
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        backend._update_cognito_sub(user, claims)
 
-        mock_update.assert_called_once_with(user, "xyz-789")
+        assert not get_user_profile(user).cognito_sub
 
-    # -------------------------------------------------------------------------
-    # Input validation - missing sub
-    # -------------------------------------------------------------------------
 
-    def test_logs_warning_when_sub_missing(self):
-        """_update_cognito_sub logs warning when claims has no sub."""
+# =============================================================================
+# ShifterOIDCBackend.authenticate audit coverage (OIDC callback events)
+# =============================================================================
+
+
+def _audit_request():
+    """A minimal request with the fields the audit path reads."""
+    request = MagicMock()
+    request.META = {"REMOTE_ADDR": "10.0.0.5", "HTTP_USER_AGENT": "Browser/1.0"}
+    return request
+
+
+@pytest.mark.django_db
+class TestShifterOIDCBackendAuthenticateAudit:
+    """``authenticate`` writes durable audit rows for OIDC callback outcomes.
+
+    Drives the real ``authenticate`` wrapper and the real ``audit_auth_event``,
+    stubbing only the mozilla base ``authenticate`` (the provider/token exchange
+    boundary) to force success, ``None``, and raising outcomes.
+    """
+
+    def test_successful_auth_writes_login_row(self):
+        user = User.objects.create_user(username="oidc-ok@example.com", email="oidc-ok@example.com")
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"email": "test@example.com"}  # no sub
 
-        with patch("config.oidc.logger") as mock_logger:
-            backend._update_cognito_sub(user, claims)
+        with patch.object(OIDCAuthenticationBackend, "authenticate", return_value=user):
+            result = backend.authenticate(_audit_request())
 
-        mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args
-        assert "missing 'sub'" in call_args[0][0]
-        assert "test@example.com" in str(call_args)
+        assert result == user
+        row = AuditLog.objects.get(action=AuditLog.Action.LOGIN, entity_type=AuditLog.EntityType.USER)
+        assert row.new_state["email"] == "oidc-ok@example.com"
+        assert row.source_ip == "10.0.0.5"
 
-    def test_does_not_call_service_when_sub_missing(self):
-        """_update_cognito_sub does not call service when sub is missing."""
+    def test_none_result_writes_login_failed_row(self):
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {}  # no sub
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        with patch.object(OIDCAuthenticationBackend, "authenticate", return_value=None):
+            result = backend.authenticate(_audit_request())
 
-        mock_update.assert_not_called()
+        assert result is None
+        row = AuditLog.objects.get(action=AuditLog.Action.LOGIN_FAILED)
+        assert row.source_ip == "10.0.0.5"
 
-    def test_does_not_call_service_when_sub_is_none(self):
-        """_update_cognito_sub does not call service when sub is None."""
+    def test_exception_writes_login_failed_with_bounded_reason_and_reraises(self):
+        """Token/validation errors raised before the ``None`` branch are audited.
+
+        The reason must be the bounded exception *type*, never ``str(exc)``,
+        which can carry token endpoint URLs, response bodies, codes, or client
+        ids. The original exception must propagate so mozilla's callback failure
+        handling is unchanged.
+        """
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": None}
+        leaky = SuspiciousOperation("JWT signature invalid token=eyJraWQ-secret code=abc123")
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        with (
+            patch.object(OIDCAuthenticationBackend, "authenticate", side_effect=leaky),
+            pytest.raises(SuspiciousOperation),
+        ):
+            backend.authenticate(_audit_request())
 
-        mock_update.assert_not_called()
-
-    def test_does_not_call_service_when_sub_is_empty_string(self):
-        """_update_cognito_sub does not call service when sub is empty."""
-        backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": ""}
-
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
-
-        mock_update.assert_not_called()
+        row = AuditLog.objects.get(action=AuditLog.Action.LOGIN_FAILED)
+        assert "SuspiciousOperation" in row.context
+        assert "secret" not in row.context
+        assert "abc123" not in row.context

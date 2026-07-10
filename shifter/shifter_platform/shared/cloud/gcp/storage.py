@@ -6,7 +6,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, BinaryIO
 
-from shared.cloud.exceptions import CloudStorageError
+from shared.cloud.exceptions import CloudStorageError, ObjectPreconditionError
 from shared.cloud.gcp.base import import_google_module
 from shared.log_sanitize import safe_log_value
 
@@ -28,6 +28,33 @@ class GCPObjectStorage:
             return storage.Client()
         except ImportError as e:
             raise CloudStorageError("GCP storage support requires google-cloud-storage") from e
+
+    @staticmethod
+    def _iam_signing_kwargs() -> dict[str, str]:
+        """Return ``generate_signed_url`` kwargs for IAM-based V4 signing.
+
+        Under Workload Identity the active credentials are compute-metadata
+        credentials that carry only an access token and have no private key, so
+        the client cannot sign a URL locally (it raises "you need a private key
+        to sign credentials"). Passing ``service_account_email`` +
+        ``access_token`` makes the client sign via the IAM credentials
+        ``signBlob`` API instead, which only needs the service account to hold
+        ``roles/iam.serviceAccountTokenCreator`` on itself.
+
+        Credentials that can sign locally (a service-account JSON key, e.g. some
+        dev setups) expose a ``signer`` and return an empty dict so the library
+        keeps signing with the key.
+        """
+        google_auth = import_google_module("google.auth")
+        auth_requests = import_google_module("google.auth.transport.requests")
+        credentials, _ = google_auth.default()
+        if getattr(credentials, "signer", None) is not None and getattr(credentials, "signer_email", None):
+            return {}
+        credentials.refresh(auth_requests.Request())
+        return {
+            "service_account_email": credentials.service_account_email,
+            "access_token": credentials.token,
+        }
 
     def upload_file(
         self,
@@ -78,6 +105,55 @@ class GCPObjectStorage:
             raise CloudStorageError(f"Failed to copy GCS object: {e}") from e
         logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
 
+    def copy_object_conditional(
+        self,
+        bucket: str,
+        src_key: str,
+        dst_key: str,
+        *,
+        expected_identity: dict[str, Any],
+    ) -> None:
+        """Copy a blob gated on the source generation and destination absence.
+
+        ``if_source_generation_match`` binds the copy to the exact validated
+        object generation, so an overwrite after validation (which mints a new
+        generation) makes the copy fail. ``if_generation_match=0`` refuses the
+        copy if the destination already exists. Both surface as
+        ``ObjectPreconditionError`` (fail closed).
+        """
+        generation = expected_identity.get("generation")
+        if not generation:
+            raise CloudStorageError("conditional copy requires a source generation")
+        safe_src = safe_log_value(src_key)
+        safe_dst = safe_log_value(dst_key)
+        logger.debug("copy_object_conditional: bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+        api_exceptions = import_google_module("google.api_core.exceptions")
+        try:
+            client = self._get_client()
+            source_bucket = client.bucket(bucket)
+            source_blob = source_bucket.blob(src_key)
+            source_bucket.copy_blob(
+                source_blob,
+                source_bucket,
+                dst_key,
+                if_source_generation_match=int(generation),
+                if_generation_match=0,
+            )
+        except api_exceptions.PreconditionFailed as e:
+            logger.warning(
+                "copy_object_conditional: precondition failed bucket=%s src=%s dst=%s",
+                bucket,
+                safe_src,
+                safe_dst,
+            )
+            raise ObjectPreconditionError(
+                "GCS conditional copy precondition failed (source changed or destination exists)"
+            ) from e
+        except Exception as e:
+            logger.exception("copy_object_conditional: failed bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+            raise CloudStorageError(f"Failed to conditionally copy GCS object: {e}") from e
+        logger.info("copy_object_conditional: success bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+
     def object_exists(self, bucket: str, key: str) -> bool:
         """Return True iff the blob exists.
 
@@ -107,6 +183,10 @@ class GCPObjectStorage:
             return {
                 "content_length": int(blob.size or 0),
                 "etag": str(blob.etag or ""),
+                # Generation is GCS's strongest object identity — monotonic and
+                # never reused — so it is the precondition of choice for
+                # ``copy_object_conditional``.
+                "generation": int(blob.generation or 0),
             }
         except CloudStorageError:
             raise
@@ -155,6 +235,7 @@ class GCPObjectStorage:
                 expiration=timedelta(seconds=expires_in),
                 method="PUT",
                 content_type=content_type,
+                **self._iam_signing_kwargs(),
             )
         except Exception as e:
             logger.exception(
@@ -179,6 +260,7 @@ class GCPObjectStorage:
                 version="v4",
                 expiration=timedelta(seconds=expires_in),
                 method="GET",
+                **self._iam_signing_kwargs(),
             )
         except Exception as e:
             logger.exception(

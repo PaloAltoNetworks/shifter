@@ -24,6 +24,13 @@ class DashboardManager {
 
         // State
         this.currentRange = null;
+        // Secondary, read-only ACES operation projection (#1276). Absent/null for
+        // legacy non-ACES ranges; never drives lifecycle, websocket, or polling.
+        this.currentAcesProjection = null;
+        // Secondary, read-only ACES participant/runtime + access-channel
+        // projection (#1290). Sibling to currentAcesProjection: absent/null for
+        // legacy non-ACES ranges; never drives lifecycle, websocket, or polling.
+        this.currentAcesParticipantRuntime = null;
         this.statusSocket = null;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
@@ -229,33 +236,38 @@ class DashboardManager {
         this._clearAgentSelections();
 
         // Show appropriate sections based on requirements
-        if (req.has_from_agent && !req.requires_windows && !req.requires_linux) {
-            // Only from_agent instances - show OS picker first
-            if (this.osSelectionSection) {
-                this.osSelectionSection.style.display = 'block';
-            }
-            // Agent dropdown shown after OS selection
-        } else {
-            // Fixed OS requirements
-            if (req.requires_windows) {
-                if (this.windowsAgentSection) {
-                    this.windowsAgentSection.style.display = 'block';
-                }
-            }
-            if (req.requires_linux) {
-                if (this.linuxAgentSection) {
-                    this.linuxAgentSection.style.display = 'block';
-                }
-            }
-            // If has_from_agent AND fixed requirements, show OS picker too
-            if (req.has_from_agent) {
-                if (this.osSelectionSection) {
-                    this.osSelectionSection.style.display = 'block';
-                }
-            }
-        }
+        this._showAgentSectionsForRequirements(req);
 
         this._updateLaunchButtonState();
+    }
+
+    /** Show a section element if it exists. */
+    _showSection(section) {
+        if (section) {
+            section.style.display = 'block';
+        }
+    }
+
+    /** Reveal the agent/OS sections implied by a scenario's requirements. */
+    _showAgentSectionsForRequirements(req) {
+        if (req.has_from_agent && !req.requires_windows && !req.requires_linux) {
+            // Only from_agent instances - show OS picker first; agent dropdown
+            // is shown after OS selection.
+            this._showSection(this.osSelectionSection);
+            return;
+        }
+
+        // Fixed OS requirements
+        if (req.requires_windows) {
+            this._showSection(this.windowsAgentSection);
+        }
+        if (req.requires_linux) {
+            this._showSection(this.linuxAgentSection);
+        }
+        // If has_from_agent AND fixed requirements, show OS picker too
+        if (req.has_from_agent) {
+            this._showSection(this.osSelectionSection);
+        }
     }
 
     /**
@@ -404,52 +416,60 @@ class DashboardManager {
         }
 
         // Cache agent requirements and scenario data, then populate dropdown
+        this._cacheScenarioData(data.scenarios);
+
         const scenarioItems = document.getElementById('scenario-items');
         if (scenarioItems && data.scenarios.length > 0) {
-            scenarioItems.innerHTML = '';
-
-            for (const scenario of data.scenarios) {
-                // Cache requirements and full scenario data
-                this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
-                this.scenarioData[scenario.id] = scenario;
-
-                // Create dropdown item - NAME ONLY (no description)
-                const li = document.createElement('li');
-                li.className = 'shifter-dropdown-item';
-                li.dataset.value = scenario.id;
-                li.textContent = scenario.name;
-
-                scenarioItems.appendChild(li);
-            }
-
-            // Select first scenario by default
-            const firstScenario = data.scenarios[0];
-            if (firstScenario && this.scenarioSelect) {
-                this.scenarioSelect.value = firstScenario.id;
-                // Update dropdown display
-                const trigger = this.scenarioDropdown?.querySelector('.shifter-dropdown-value');
-                if (trigger) {
-                    trigger.textContent = firstScenario.name;
-                    trigger.classList.remove('placeholder');
-                }
-                // Mark first item as selected
-                const firstItem = scenarioItems.querySelector('.shifter-dropdown-item');
-                if (firstItem) {
-                    firstItem.classList.add('selected');
-                }
-                // Update scenario info panel
-                this._updateScenarioInfoPanel(firstScenario.id);
-            }
-
+            this._populateScenarioDropdown(scenarioItems, data.scenarios);
             // Re-init dropdown to bind events to new items
             this._initDropdown(this.scenarioDropdown);
-        } else {
-            // Still cache requirements even if dropdown doesn't exist
-            for (const scenario of data.scenarios) {
-                this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
-                this.scenarioData[scenario.id] = scenario;
-            }
         }
+    }
+
+    /** Cache agent requirements and full scenario data keyed by scenario id. */
+    _cacheScenarioData(scenarios) {
+        for (const scenario of scenarios) {
+            this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+            this.scenarioData[scenario.id] = scenario;
+        }
+    }
+
+    /** Build the scenario dropdown items and select the first scenario. */
+    _populateScenarioDropdown(scenarioItems, scenarios) {
+        scenarioItems.innerHTML = '';
+
+        for (const scenario of scenarios) {
+            // Create dropdown item - NAME ONLY (no description)
+            const li = document.createElement('li');
+            li.className = 'shifter-dropdown-item';
+            li.dataset.value = scenario.id;
+            li.textContent = scenario.name;
+
+            scenarioItems.appendChild(li);
+        }
+
+        this._selectFirstScenario(scenarioItems, scenarios[0]);
+    }
+
+    /** Select the first scenario by default and update the dropdown display. */
+    _selectFirstScenario(scenarioItems, firstScenario) {
+        if (!firstScenario || !this.scenarioSelect) {
+            return;
+        }
+        this.scenarioSelect.value = firstScenario.id;
+        // Update dropdown display
+        const trigger = this.scenarioDropdown?.querySelector('.shifter-dropdown-value');
+        if (trigger) {
+            trigger.textContent = firstScenario.name;
+            trigger.classList.remove('placeholder');
+        }
+        // Mark first item as selected
+        const firstItem = scenarioItems.querySelector('.shifter-dropdown-item');
+        if (firstItem) {
+            firstItem.classList.add('selected');
+        }
+        // Update scenario info panel
+        this._updateScenarioInfoPanel(firstScenario.id);
     }
 
     _initScenarioDropdown() {
@@ -515,6 +535,8 @@ class DashboardManager {
         }
 
         this.currentRange = data.range;
+        this.currentAcesProjection = data.aces_projection || null;
+        this.currentAcesParticipantRuntime = data.aces_participant_runtime || null;
         this._updateUI();
 
         // Connect WebSocket if in a transitional state
@@ -640,6 +662,9 @@ class DashboardManager {
         if (pauseBtn) {
             pauseBtn.addEventListener('click', () => this.pauseRange());
         }
+
+        this._renderAcesProjection(tile);
+        this._renderAcesParticipantRuntime(tile);
     }
 
     /**
@@ -674,6 +699,85 @@ class DashboardManager {
         if (resumeBtn) {
             resumeBtn.addEventListener('click', () => this.resumeRange());
         }
+
+        this._renderAcesProjection(tile);
+        this._renderAcesParticipantRuntime(tile);
+    }
+
+    /**
+     * Render the secondary, read-only ACES operation projection into a tile (#1276).
+     *
+     * ACES-derived values are inserted with textContent only (never innerHTML),
+     * and the section stays hidden for legacy / non-ACES ranges (null projection).
+     * This is display-only: it does not affect range status, websocket, or polling.
+     */
+    _renderAcesProjection(tile) {
+        const section = tile.querySelector('.aces-projection');
+        if (!section) return;
+
+        const projection = this.currentAcesProjection;
+        if (!projection) {
+            section.hidden = true;
+            return;
+        }
+
+        const labelEl = section.querySelector('.aces-status-label');
+        if (labelEl) labelEl.textContent = projection.status_label || '';
+
+        const observedEl = section.querySelector('.aces-observed-at');
+        if (observedEl) {
+            observedEl.textContent = projection.observed_at
+                ? `Observed ${this._formatDate(projection.observed_at)}`
+                : '';
+        }
+
+        const snapshotEl = section.querySelector('.aces-snapshot-summary');
+        if (snapshotEl) {
+            const snapshot = projection.snapshot;
+            snapshotEl.textContent = snapshot ? `Snapshot: ${snapshot.resource_count} resource(s)` : '';
+        }
+
+        section.hidden = false;
+    }
+
+    /**
+     * Render the secondary, read-only ACES participant/runtime + access-channel
+     * projection into a tile (#1290). Sibling to _renderAcesProjection:
+     * ACES-derived values are inserted with textContent only (never innerHTML),
+     * and the section stays hidden for legacy / non-ACES ranges (null
+     * projection). This is display-only: it does not affect range status,
+     * websocket, or polling.
+     */
+    _renderAcesParticipantRuntime(tile) {
+        const section = tile.querySelector('.aces-participant-runtime');
+        if (!section) return;
+
+        const projection = this.currentAcesParticipantRuntime;
+        if (!projection) {
+            section.hidden = true;
+            return;
+        }
+
+        const participantsEl = section.querySelector('.aces-participant-runtime-participants');
+        if (participantsEl) {
+            participantsEl.textContent = '';
+            for (const participant of projection.participants || []) {
+                const runtimeStatus = participant.runtime ? participant.runtime.status : null;
+                const implementationStatus = participant.implementation ? participant.implementation.status : null;
+                const status = runtimeStatus || implementationStatus || 'unknown';
+                const line = document.createElement('div');
+                line.textContent = `${participant.participant_ref}: ${status}`;
+                participantsEl.appendChild(line);
+            }
+        }
+
+        const channelsEl = section.querySelector('.aces-participant-runtime-channels');
+        if (channelsEl) {
+            const labels = (projection.access_channels || []).map((channel) => channel.channel);
+            channelsEl.textContent = labels.join(', ');
+        }
+
+        section.hidden = false;
     }
 
     /**
@@ -765,6 +869,8 @@ class DashboardManager {
             }
 
             this.currentRange = data.range;
+            this.currentAcesProjection = data.aces_projection || null;
+            this.currentAcesParticipantRuntime = data.aces_participant_runtime || null;
             this._updateUI();
             this._connectStatusSocket(data.range.request_id);
 
@@ -800,6 +906,8 @@ class DashboardManager {
 
             this._closeStatusSocket();
             this.currentRange = null;
+            this.currentAcesProjection = null;
+            this.currentAcesParticipantRuntime = null;
             this._updateUI();
 
         } catch (error) {
@@ -831,6 +939,8 @@ class DashboardManager {
             // Range is destroyed immediately - show no-range state
             this._closeStatusSocket();
             this.currentRange = null;
+            this.currentAcesProjection = null;
+            this.currentAcesParticipantRuntime = null;
             this._updateUI();
 
         } catch (error) {
@@ -928,6 +1038,8 @@ class DashboardManager {
         // Clear the current range and show no-range state
         this._closeStatusSocket();
         this.currentRange = null;
+        this.currentAcesProjection = null;
+        this.currentAcesParticipantRuntime = null;
         this._updateUI();
     }
 
@@ -1104,6 +1216,8 @@ class DashboardManager {
             if (!this._isTransitionalState(polledStatus)) {
                 console.log(`Poll detected stable state: ${polledStatus}`);
                 this.currentRange = data.range;
+                this.currentAcesProjection = data.aces_projection || null;
+                this.currentAcesParticipantRuntime = data.aces_participant_runtime || null;
                 this._updateUI();
                 this._closeStatusSocket(); // This also stops polling
             }

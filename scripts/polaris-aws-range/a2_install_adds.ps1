@@ -11,7 +11,10 @@
 param(
     [string]$DsrmPassword       = "DsrmR3store!2026",
     [string]$AdminPassword      = "CortexSavesTheDay!",
-    [string]$SetupScriptUri     = "https://shifter-polaris-bake-158151907940.s3.us-east-2.amazonaws.com/polaris/a2_setup.ps1",
+    # Account-bound bake bucket URL: required, no committed default. Pass e.g.
+    # https://shifter-polaris-bake-<account-id>.s3.us-east-2.amazonaws.com/polaris/a2_setup.ps1
+    [Parameter(Mandatory = $true)]
+    [string]$SetupScriptUri,
     [string]$SetupScriptLocal   = "C:\polaris-a2-setup.ps1"
 )
 

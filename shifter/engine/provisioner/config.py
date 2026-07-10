@@ -13,6 +13,8 @@ from typing import Any
 
 from cryptography.fernet import Fernet
 
+from log_redact import safe_log_fingerprint
+
 logger = logging.getLogger(__name__)
 
 
@@ -328,6 +330,102 @@ class GDCScenarioPodConfig:
 
 
 @dataclass(frozen=True)
+class GCERangeImageProfile:
+    """Image and sizing contract for one Compute Engine range guest family."""
+
+    source_image: str = ""
+    machine_type: str = "e2-medium"
+    disk_size_gb: int = 30
+    disk_type: str = "pd-balanced"
+
+
+@dataclass(frozen=True)
+class GCERangeCellConfig:
+    """Configuration for the GCE-backed live-fire range-cell backend."""
+
+    project_id: str
+    region: str
+    zone: str
+    network_mode: str
+    # Self-link (or partial URL ``projects/<p>/global/networks/<name>``) of the
+    # shared range VPC used in ``shared-vpc`` mode. Range subnets are created in
+    # this pre-existing, platform-peered VPC (matching the AWS shared-VPC +
+    # per-range-subnet model) so the provisioner can reach guests. Empty in
+    # ``vpc-per-range`` mode, where each range mints its own VPC.
+    network_id: str = ""
+    service_account_email: str = ""
+    # OAuth scope for the range guest's attached service account. Use
+    # cloud-platform and let the host SA's IAM roles be the real access control
+    # (the modern GCP recommendation): scopes are a coarse legacy gate, IAM is
+    # fine-grained. cloud-platform is REQUIRED, not merely convenient — the
+    # Polaris range host must read Cloud Storage (the smoketest tarball) and
+    # Secret Manager (its per-range Vertex key), and Secret Manager has no
+    # narrower OAuth scope than cloud-platform, so narrow logging/monitoring
+    # scopes made both fail with a generic 403 regardless of IAM. The blast
+    # radius stays bounded by the host SA's minimal roles, and the
+    # participant-facing container is blocked from the metadata server so it can
+    # never read this token (see gcp_range_cell_resources + the Vertex shard).
+    service_account_scopes: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
+    linux: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
+    kali: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
+    windows: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
+    dc: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
+    portal_network_cidrs: tuple[str, ...] = ()
+    egress_allow_cidrs: tuple[str, ...] = ()
+    # Pre-provisioned Vertex-only service account. When set, the range-cell
+    # backend mints a per-range key on this SA (created and destroyed with the
+    # range), stores it by reference in Secret Manager, and the range bootstrap
+    # injects it into the participant agent container. This keeps the agent's
+    # cloud credential scoped to Vertex and per-range revocable, and the
+    # container is blocked from the metadata server so it can never mint the
+    # broader range-host SA token. Empty disables per-range agent credentials.
+    vertex_service_account_email: str = ""
+    # Private Google Access on the range subnet lets no-external-IP guests reach
+    # Google APIs (Vertex AI for the Polaris agent, GCS for the smoketest
+    # tarball, Secret Manager for the per-range Vertex key) over internal
+    # routing. When set, ``_firewall_plan`` automatically emits the matching
+    # egress-allow to the private.googleapis.com VIP (no need to hand-list it in
+    # ``egress_allow_cidrs``); the range VPC supplies the DNS zone + route. Off
+    # by default for maximum isolation.
+    private_google_access: bool = False
+    # Management SSH port for Docker-host range guests (e.g. the Polaris range
+    # host) whose participant container publishes host :22, forcing the host
+    # sshd the provisioner drives to a dedicated port. Native single-service
+    # guests keep :22.
+    host_mgmt_ssh_port: int = 2222
+    metadata_items: tuple[tuple[str, str], ...] = (
+        ("block-project-ssh-keys", "true"),
+        ("enable-oslogin", "false"),
+        ("serial-port-enable", "false"),
+    )
+
+    def get_profile(self, *, role: str, os_type: str, requested_type: str = "") -> GCERangeImageProfile:
+        """Return the image profile for a range guest, applying instance-type overrides."""
+        if role == "dc":
+            profile = self.dc
+        elif os_type == "kali" or role == "attacker":
+            profile = self.kali if self.kali.source_image else self.linux
+        elif os_type == "windows":
+            profile = self.windows
+        else:
+            profile = self.linux
+
+        if not profile.source_image:
+            raise RuntimeError(
+                f"Missing GCE range image for role={role!r} os_type={os_type!r}. "
+                "Set the corresponding GCP_RANGE_*_IMAGE environment variable."
+            )
+        if requested_type:
+            return GCERangeImageProfile(
+                source_image=profile.source_image,
+                machine_type=requested_type,
+                disk_size_gb=profile.disk_size_gb,
+                disk_type=profile.disk_type,
+            )
+        return profile
+
+
+@dataclass(frozen=True)
 class NGFWAttachmentConfig:
     """Provider-neutral attachment and access contract for an NGFW instance."""
 
@@ -354,8 +452,30 @@ def _parse_csv_env(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def get_gcp_range_backend() -> str:
+    """Return the selected GCP range backend.
+
+    GCE range cells are the default GCP path, so ``gce`` is assumed whenever
+    ``CLOUD_PROVIDER=gcp`` and no explicit backend is configured. The historical
+    GDC VM Runtime path remains fully supported and is selected explicitly with
+    ``GCP_RANGE_BACKEND=gdc`` (a one-line rollback for any environment).
+    """
+    if os.environ.get("CLOUD_PROVIDER", "aws") != "gcp":
+        return ""
+    backend = os.environ.get("GCP_RANGE_BACKEND") or os.environ.get("GCP_RANGE_PLANE") or "gce"
+    backend = backend.strip().lower()
+    if backend not in {"gdc", "gce"}:
+        raise RuntimeError(f"GCP_RANGE_BACKEND must be 'gdc' or 'gce', got {backend!r}")
+    return backend
+
+
 def _is_active_gdc_range_plane() -> bool:
-    return os.environ.get("CLOUD_PROVIDER", "aws") == "gcp"
+    return get_gcp_range_backend() == "gdc"
+
+
+def is_gce_range_cell_backend() -> bool:
+    """Return True when GCP ranges should be provisioned as GCE range cells."""
+    return get_gcp_range_backend() == "gce"
 
 
 def _first_non_empty_string(*values: Any) -> str:
@@ -391,11 +511,47 @@ def _get_ngfw_provider_metadata(state: dict[str, Any], cloud_provider: str) -> d
     return {}
 
 
+def _infer_ngfw_cloud_provider(data_attachment_id: str, route_next_hop_ip: str, env_default: str) -> str:
+    """Infer the cloud provider when state omits an explicit ``cloud_provider``.
+
+    GCP data attachments are namespaced KubeVirt references such as
+    ``"<namespace>/<vm>:eth1"``; AWS ENI ids (``"eni-..."``) never contain a
+    ``"/"`` or ``":"``. Inferring AWS from any ``data_attachment_id`` would
+    misclassify a GCP NGFW whose explicit ``cloud_provider`` was dropped.
+    """
+    if data_attachment_id:
+        return "gcp" if ("/" in data_attachment_id or ":" in data_attachment_id) else "aws"
+    if route_next_hop_ip:
+        return "gcp"
+    return env_default
+
+
+def _resolve_ngfw_attachment_mode(
+    payload: dict[str, Any],
+    provider_metadata: dict[str, Any],
+    cloud_provider: str,
+    data_attachment_id: str,
+    route_next_hop_ip: str,
+) -> str:
+    """Resolve the attachment mode, falling back to a provider-appropriate default."""
+    default_mode = ""
+    if cloud_provider == "gcp" and (route_next_hop_ip or data_attachment_id):
+        default_mode = "gdc-static-route"
+    elif cloud_provider == "aws" and data_attachment_id:
+        default_mode = "aws-route-table-eni"
+    return _first_non_empty_string(
+        payload.get("attachment_mode"),
+        provider_metadata.get("attachment_mode"),
+        default_mode,
+    )
+
+
 def resolve_ngfw_attachment_config(state: dict[str, Any] | None) -> NGFWAttachmentConfig:
     """Resolve provider-neutral NGFW attachment details from stored state."""
     payload = state if isinstance(state, dict) else {}
     explicit_provider = _first_non_empty_string(payload.get("cloud_provider")).lower()
-    cloud_provider = explicit_provider or os.environ.get("CLOUD_PROVIDER", "aws").lower()
+    env_default = os.environ.get("CLOUD_PROVIDER", "aws").lower()
+    cloud_provider = explicit_provider or env_default
     provider_metadata = _get_ngfw_provider_metadata(payload, cloud_provider)
 
     management_ip = _first_non_empty_string(
@@ -427,16 +583,10 @@ def resolve_ngfw_attachment_config(state: dict[str, Any] | None) -> NGFWAttachme
         provider_metadata.get("attachment_id"),
     )
     if not explicit_provider:
-        if data_attachment_id:
-            cloud_provider = "aws"
-        elif route_next_hop_ip:
-            cloud_provider = "gcp"
+        cloud_provider = _infer_ngfw_cloud_provider(data_attachment_id, route_next_hop_ip, env_default)
         provider_metadata = _get_ngfw_provider_metadata(payload, cloud_provider)
-    attachment_mode = _first_non_empty_string(
-        payload.get("attachment_mode"),
-        provider_metadata.get("attachment_mode"),
-        "aws-route-table-eni" if data_attachment_id else "",
-        "gdc-static-route" if route_next_hop_ip else "",
+    attachment_mode = _resolve_ngfw_attachment_mode(
+        payload, provider_metadata, cloud_provider, data_attachment_id, route_next_hop_ip
     )
 
     return NGFWAttachmentConfig(
@@ -461,6 +611,14 @@ def _get_int_env(name: str, default: int) -> int:
     return int(value) if value else default
 
 
+def _get_bool_env(name: str, default: bool) -> bool:
+    """Return a boolean env var, treating 1/true/yes/on as true."""
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    return value in ("1", "true", "yes", "on")
+
+
 def _load_gdc_vm_profile(
     prefix: str,
     *,
@@ -481,6 +639,21 @@ def _load_gdc_scenario_pod_profile(prefix: str, *, default_image: str) -> GDCSce
     """Load a role-specific scenario Pod profile from env vars."""
     return GDCScenarioPodProfile(
         image=os.environ.get(f"{prefix}_IMAGE", default_image).strip() or default_image,
+    )
+
+
+def _load_gce_range_profile(
+    prefix: str,
+    *,
+    default_machine_type: str,
+    default_disk_size_gb: int,
+) -> GCERangeImageProfile:
+    """Load one GCE range guest image/sizing profile."""
+    return GCERangeImageProfile(
+        source_image=os.environ.get(f"{prefix}_IMAGE", "").strip(),
+        machine_type=os.environ.get(f"{prefix}_MACHINE_TYPE", default_machine_type).strip() or default_machine_type,
+        disk_size_gb=_get_int_env(f"{prefix}_DISK_SIZE_GB", default_disk_size_gb),
+        disk_type=os.environ.get(f"{prefix}_DISK_TYPE", "pd-balanced").strip() or "pd-balanced",
     )
 
 
@@ -521,6 +694,25 @@ def _validate_gdc_access_fields(*, cluster_id: str, vxlan_cidr: str, region: str
         raise RuntimeError("GDC access secret must include region or RANGE_NETWORK_REGION/GCP_REGION must be set")
 
 
+def _resolve_gdc_network_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    """Resolve GDC network-access fields from the secret payload with env fallbacks."""
+    return {
+        "cluster_id": str(payload.get("cluster_id") or os.environ.get("GDC_CLUSTER_ID", "")).strip(),
+        "vxlan_cidr": str(payload.get("vxlan_cidr") or os.environ.get("GDC_VXLAN_CIDR", "")).strip(),
+        "region": _resolve_gdc_access_region(payload),
+        "namespace_prefix": str(
+            payload.get("range_namespace_prefix") or os.environ.get("GDC_RANGE_NAMESPACE_PREFIX", "range")
+        ),
+        "network_interface": str(payload.get("network_interface") or os.environ.get("GDC_NETWORK_INTERFACE", "vxlan0")),
+        "dns_nameservers": tuple(
+            payload.get("dns_nameservers") or _parse_csv_env(os.environ.get("GDC_NETWORK_DNS_NAMESERVERS", ""))
+        ),
+        "static_ip_reservation_count": int(
+            payload.get("static_ip_reservation_count") or os.environ.get("GDC_STATIC_IP_RESERVATION_COUNT", "4")
+        ),
+    }
+
+
 def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
     """Load the GDC access bundle from Secret Manager when configured."""
     secret_id = os.environ.get("GDC_ACCESS_SECRET_ID", "").strip()
@@ -531,32 +723,25 @@ def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
 
     raw_secret = get_secrets_store().get_secret(secret_id)
     payload, kubeconfig = _decode_gdc_access_secret(raw_secret)
-    cluster_id = str(payload.get("cluster_id") or os.environ.get("GDC_CLUSTER_ID", "")).strip()
-    vxlan_cidr = str(payload.get("vxlan_cidr") or os.environ.get("GDC_VXLAN_CIDR", "")).strip()
-    region = _resolve_gdc_access_region(payload)
-    namespace_prefix = str(
-        payload.get("range_namespace_prefix") or os.environ.get("GDC_RANGE_NAMESPACE_PREFIX", "range")
+    fields = _resolve_gdc_network_fields(payload)
+    _validate_gdc_access_fields(
+        cluster_id=fields["cluster_id"], vxlan_cidr=fields["vxlan_cidr"], region=fields["region"]
     )
-    network_interface = str(payload.get("network_interface") or os.environ.get("GDC_NETWORK_INTERFACE", "vxlan0"))
-    dns_nameservers = tuple(
-        payload.get("dns_nameservers") or _parse_csv_env(os.environ.get("GDC_NETWORK_DNS_NAMESERVERS", "8.8.8.8"))
-    )
-    static_ip_reservation_count = int(
-        payload.get("static_ip_reservation_count") or os.environ.get("GDC_STATIC_IP_RESERVATION_COUNT", "4")
-    )
-    _validate_gdc_access_fields(cluster_id=cluster_id, vxlan_cidr=vxlan_cidr, region=region)
 
-    return GDCNetworkAccessConfig(
-        access_secret_id=secret_id,
-        kubeconfig=kubeconfig,
-        cluster_id=cluster_id,
-        vxlan_cidr=vxlan_cidr,
-        region=region,
-        namespace_prefix=namespace_prefix.strip() or "range",
-        network_interface=network_interface.strip() or "vxlan0",
-        dns_nameservers=dns_nameservers or ("8.8.8.8",),
-        static_ip_reservation_count=static_ip_reservation_count,
-    )
+    config_kwargs: dict[str, Any] = {
+        "access_secret_id": secret_id,
+        "kubeconfig": kubeconfig,
+        "cluster_id": fields["cluster_id"],
+        "vxlan_cidr": fields["vxlan_cidr"],
+        "region": fields["region"],
+        "namespace_prefix": fields["namespace_prefix"].strip() or "range",
+        "network_interface": fields["network_interface"].strip() or "vxlan0",
+        "static_ip_reservation_count": fields["static_ip_reservation_count"],
+    }
+    # Only override the dataclass default ("8.8.8.8",) when nameservers were resolved.
+    if fields["dns_nameservers"]:
+        config_kwargs["dns_nameservers"] = fields["dns_nameservers"]
+    return GDCNetworkAccessConfig(**config_kwargs)
 
 
 def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
@@ -574,16 +759,10 @@ def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
     )
 
 
-def load_gdc_palo_alto_vmseries_config() -> GDCPaloAltoVMSeriesConfig:
-    """Load Palo Alto VM-Series VM Runtime configuration for the GCP NGFW path."""
-    if not _is_active_gdc_range_plane():
-        raise RuntimeError("GDC Palo Alto VM-Series config is only valid when CLOUD_PROVIDER=gcp")
-
-    image_url = os.environ.get("GDC_VMSERIES_IMAGE_URL", "").strip()
-    bootstrap_bucket = os.environ.get("GDC_VMSERIES_BOOTSTRAP_BUCKET", "").strip()
-    data_network_name = os.environ.get("GDC_VMSERIES_DATA_NETWORK_NAME", "").strip()
-    route_next_hop_ip = os.environ.get("GDC_VMSERIES_ROUTE_NEXT_HOP_IP", "").strip()
-
+def _require_vmseries_env(
+    *, image_url: str, bootstrap_bucket: str, data_network_name: str, route_next_hop_ip: str
+) -> None:
+    """Raise if any required VM-Series env var is empty."""
     missing = [
         name
         for name, value in (
@@ -597,14 +776,44 @@ def load_gdc_palo_alto_vmseries_config() -> GDCPaloAltoVMSeriesConfig:
     if missing:
         raise RuntimeError("Missing required GDC Palo Alto VM-Series configuration: " + ", ".join(missing))
 
+
+def _resolve_vmseries_storage_and_secret() -> tuple[str, str]:
+    """Resolve VM-Series storage class and image secret with VM-runtime fallbacks."""
+    storage_class_name = (
+        os.environ.get("GDC_VMSERIES_STORAGE_CLASS", "").strip()
+        or os.environ.get("GDC_VM_STORAGE_CLASS", "local-shared").strip()
+        or "local-shared"
+    )
+    image_gcs_secret_id = (
+        os.environ.get("GDC_VMSERIES_IMAGE_GCS_SECRET_ID", "").strip()
+        or os.environ.get("GDC_VM_IMAGE_GCS_SECRET_ID", "").strip()
+    )
+    return storage_class_name, image_gcs_secret_id
+
+
+def load_gdc_palo_alto_vmseries_config() -> GDCPaloAltoVMSeriesConfig:
+    """Load Palo Alto VM-Series VM Runtime configuration for the GCP NGFW path."""
+    if not _is_active_gdc_range_plane():
+        raise RuntimeError("GDC Palo Alto VM-Series config is only valid when CLOUD_PROVIDER=gcp")
+
+    image_url = os.environ.get("GDC_VMSERIES_IMAGE_URL", "").strip()
+    bootstrap_bucket = os.environ.get("GDC_VMSERIES_BOOTSTRAP_BUCKET", "").strip()
+    data_network_name = os.environ.get("GDC_VMSERIES_DATA_NETWORK_NAME", "").strip()
+    route_next_hop_ip = os.environ.get("GDC_VMSERIES_ROUTE_NEXT_HOP_IP", "").strip()
+
+    _require_vmseries_env(
+        image_url=image_url,
+        bootstrap_bucket=bootstrap_bucket,
+        data_network_name=data_network_name,
+        route_next_hop_ip=route_next_hop_ip,
+    )
+    storage_class_name, image_gcs_secret_id = _resolve_vmseries_storage_and_secret()
+
     return GDCPaloAltoVMSeriesConfig(
         image_url=image_url,
         bootstrap_bucket=bootstrap_bucket,
-        storage_class_name=os.environ.get("GDC_VMSERIES_STORAGE_CLASS", "").strip()
-        or os.environ.get("GDC_VM_STORAGE_CLASS", "local-shared").strip()
-        or "local-shared",
-        image_gcs_secret_id=os.environ.get("GDC_VMSERIES_IMAGE_GCS_SECRET_ID", "").strip()
-        or os.environ.get("GDC_VM_IMAGE_GCS_SECRET_ID", "").strip(),
+        storage_class_name=storage_class_name,
+        image_gcs_secret_id=image_gcs_secret_id,
         namespace_prefix=os.environ.get("GDC_VMSERIES_NAMESPACE_PREFIX", "ngfw").strip() or "ngfw",
         management_network_name=os.environ.get("GDC_VMSERIES_MGMT_NETWORK_NAME", "pod-network").strip()
         or "pod-network",
@@ -639,13 +848,169 @@ def load_gdc_scenario_pod_config() -> GDCScenarioPodConfig:
     )
 
 
-def load_range_network_config() -> RangeNetworkConfig:
-    """Load the active provider's range-network contract from environment variables."""
+def _resolve_gce_range_required_env() -> tuple[str, str, str, str]:
+    """Resolve required environment for the GCE range-cell backend.
+
+    ``GCP_RANGE_CELL_PROJECT_ID`` takes precedence so range cells can be
+    provisioned into a different project than the control plane's
+    ``GCP_PROJECT_ID`` (and so the range backend is unaffected when the
+    control-plane project is a deploy-overlay placeholder). It falls back to the
+    control-plane project keys, mirroring ``GCP_RANGE_VERTEX_PROJECT_ID``.
+    """
+    project_id = (
+        os.environ.get("GCP_RANGE_CELL_PROJECT_ID")
+        or os.environ.get("GCP_PROJECT_ID")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("CLOUD_PROJECT_ID")
+        or ""
+    ).strip()
+    region = (
+        os.environ.get("RANGE_NETWORK_REGION") or os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION") or ""
+    ).strip()
+    zone = get_range_availability_zone(default="").strip()
+    service_account_email = os.environ.get("GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL", "").strip()
+    return project_id, region, zone, service_account_email
+
+
+def _missing_gce_range_required_env(
+    *,
+    project_id: str,
+    region: str,
+    zone: str,
+    service_account_email: str,
+) -> list[str]:
+    """Return display names for missing GCE range-cell settings."""
+    return [
+        name
+        for name, value in (
+            ("GCP_RANGE_CELL_PROJECT_ID/GCP_PROJECT_ID", project_id),
+            ("RANGE_NETWORK_REGION/GCP_REGION", region),
+            ("RANGE_NETWORK_ZONE", zone),
+            ("GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL", service_account_email),
+        )
+        if not value
+    ]
+
+
+def load_gce_range_cell_config() -> GCERangeCellConfig:
+    """Load the live-fire GCE range-cell backend configuration."""
+    if not is_gce_range_cell_backend():
+        raise RuntimeError("GCE range-cell config is only valid when CLOUD_PROVIDER=gcp and GCP_RANGE_BACKEND=gce")
+
+    project_id, region, zone, service_account_email = _resolve_gce_range_required_env()
+    missing = _missing_gce_range_required_env(
+        project_id=project_id,
+        region=region,
+        zone=zone,
+        service_account_email=service_account_email,
+    )
+    if missing:
+        raise RuntimeError("Missing required GCE range-cell configuration: " + ", ".join(missing))
+
+    # Default: shared-vpc. Range subnets live in the pre-existing, platform-peered
+    # range VPC (RANGE_NETWORK_ID/RANGE_VPC_ID) so the provisioner can reach guests,
+    # matching the AWS shared-VPC + per-range-subnet model. vpc-per-range mints an
+    # isolated VPC per range; it currently has no provisioner reachability path
+    # (no peering/IAP), so it is selectable but not the default.
+    network_mode = os.environ.get("GCP_RANGE_CELL_NETWORK_MODE", "shared-vpc").strip().lower()
+    if network_mode not in ("shared-vpc", "vpc-per-range"):
+        raise RuntimeError("GCP_RANGE_CELL_NETWORK_MODE must be 'shared-vpc' or 'vpc-per-range'")
+
+    network_id = (os.environ.get("RANGE_NETWORK_ID") or os.environ.get("RANGE_VPC_ID", "")).strip()
+    if network_mode == "shared-vpc" and not network_id:
+        raise RuntimeError("shared-vpc range networking requires RANGE_NETWORK_ID or RANGE_VPC_ID")
+
+    return GCERangeCellConfig(
+        project_id=project_id,
+        region=region,
+        zone=zone,
+        network_mode=network_mode,
+        network_id=network_id,
+        service_account_email=service_account_email,
+        # cloud-platform, not narrow logging/monitoring: the range host must read
+        # Cloud Storage (smoketest tarball) and Secret Manager (per-range Vertex
+        # key), and Secret Manager has no narrower OAuth scope. IAM on the host SA
+        # is the real access control; the participant container is metadata-blocked
+        # so it can never read this token. See the service_account_scopes field.
+        service_account_scopes=_parse_csv_env(
+            os.environ.get(
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES",
+                "https://www.googleapis.com/auth/cloud-platform",
+            )
+        ),
+        linux=_load_gce_range_profile(
+            "GCP_RANGE_LINUX",
+            default_machine_type="e2-standard-2",
+            default_disk_size_gb=50,
+        ),
+        kali=_load_gce_range_profile(
+            "GCP_RANGE_KALI",
+            default_machine_type="e2-standard-4",
+            default_disk_size_gb=80,
+        ),
+        windows=_load_gce_range_profile(
+            "GCP_RANGE_WINDOWS",
+            default_machine_type="e2-standard-4",
+            # The shifter-windows image is a 100 GB disk; a boot disk cannot be
+            # smaller than its source image, so the default must be >= 100 or
+            # every Windows guest fails at create. Override via
+            # GCP_RANGE_WINDOWS_DISK_SIZE_GB for a larger image.
+            default_disk_size_gb=100,
+        ),
+        dc=_load_gce_range_profile(
+            "GCP_RANGE_DC",
+            default_machine_type="e2-standard-4",
+            default_disk_size_gb=100,
+        ),
+        portal_network_cidrs=_parse_csv_env(
+            os.environ.get("PORTAL_NETWORK_CIDRS", "") or os.environ.get("PORTAL_VPC_CIDR", "")
+        ),
+        egress_allow_cidrs=_parse_csv_env(os.environ.get("GCP_RANGE_EGRESS_ALLOW_CIDRS", "")),
+        vertex_service_account_email=os.environ.get("GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL", "").strip(),
+        private_google_access=_get_bool_env("GCP_RANGE_PRIVATE_GOOGLE_ACCESS", False),
+        host_mgmt_ssh_port=_get_int_env("GCP_RANGE_HOST_MGMT_SSH_PORT", 2222),
+    )
+
+
+def _load_portal_network_cidrs() -> tuple[str, ...]:
+    """Load portal CIDRs with the legacy single-CIDR fallback."""
     portal_network_cidrs = _parse_csv_env(os.environ.get("PORTAL_NETWORK_CIDRS", ""))
     legacy_portal_cidr = os.environ.get("PORTAL_VPC_CIDR", "")
     if not portal_network_cidrs and legacy_portal_cidr:
-        portal_network_cidrs = (legacy_portal_cidr,)
+        return (legacy_portal_cidr,)
+    return portal_network_cidrs
 
+
+def _resolve_range_project_id() -> str:
+    """Resolve the active cloud project id used by range networking."""
+    return (
+        os.environ.get("GCP_PROJECT_ID")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("CLOUD_PROJECT_ID")
+        or ""
+    ).strip()
+
+
+def _resolve_range_network_region() -> str:
+    """Resolve the range network region from current provider env."""
+    return (
+        os.environ.get("RANGE_NETWORK_REGION")
+        or os.environ.get("GCP_REGION")
+        or os.environ.get("CLOUD_REGION")
+        or os.environ.get("AWS_REGION", "")
+    )
+
+
+def _default_range_network_id(project_id: str) -> str:
+    """Return the provider-specific default range network id."""
+    if is_gce_range_cell_backend():
+        return f"gcp-range-cells:{project_id}"
+    return ""
+
+
+def load_range_network_config() -> RangeNetworkConfig:
+    """Load the active provider's range-network contract from environment variables."""
+    portal_network_cidrs = _load_portal_network_cidrs()
     gdc_access = load_gdc_network_access_config() if _is_active_gdc_range_plane() else None
     if gdc_access is not None:
         return RangeNetworkConfig(
@@ -655,15 +1020,13 @@ def load_range_network_config() -> RangeNetworkConfig:
             portal_network_cidrs=portal_network_cidrs,
         )
 
+    project_id = _resolve_range_project_id()
     return RangeNetworkConfig(
-        network_id=os.environ.get("RANGE_NETWORK_ID") or os.environ.get("RANGE_VPC_ID", ""),
+        network_id=os.environ.get("RANGE_NETWORK_ID")
+        or os.environ.get("RANGE_VPC_ID", "")
+        or _default_range_network_id(project_id),
         network_cidr=os.environ.get("RANGE_NETWORK_CIDR") or os.environ.get("RANGE_VPC_CIDR", ""),
-        network_region=(
-            os.environ.get("RANGE_NETWORK_REGION")
-            or os.environ.get("GCP_REGION")
-            or os.environ.get("CLOUD_REGION")
-            or os.environ.get("AWS_REGION", "")
-        ),
+        network_region=_resolve_range_network_region(),
         portal_network_cidrs=portal_network_cidrs,
     )
 
@@ -719,7 +1082,9 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             raise ValueError(f"Range {range_id} not found")
 
         user_id = row[1]
-        range_config = row[3] or {}
+        from cyberscript.persisted_envelope import unwrap_persisted_spec
+
+        range_config = unwrap_persisted_spec(row[3] or {})
 
         # Check if scenario requires NGFW (ngfw: true in range_config)
         ngfw_enabled = range_config.get("ngfw", False)
@@ -777,8 +1142,8 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
         }
 
         logger.debug(
-            "Loaded range %d: ngfw_enabled=%s, ngfw_attachment=%s",
-            range_id,
+            "Loaded range range_fp=%s: ngfw_enabled=%s, ngfw_attachment=%s",
+            safe_log_fingerprint(range_id),
             result["ngfw_enabled"],
             "present" if result["ngfw_attachment"] else "none",
         )

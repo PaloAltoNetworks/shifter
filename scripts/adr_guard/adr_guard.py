@@ -24,6 +24,11 @@ IMPORT_PATTERN = re.compile(
     r"^\s*(?:from|import)\s+((?:shared|engine|cms|management|mission_control|ctf)(?:\.\w+)*)",
     re.MULTILINE,
 )
+CYBERSCRIPT_IMPORT_PATTERN = re.compile(
+    r"^\s*(?:from|import)\s+(cyberscript(?:\.\w+)*)",
+    re.MULTILINE,
+)
+CYBERSCRIPT_ALLOWED_LAYER = "shared"
 REQUIRED_ADR_KEYS = {
     "id",
     "title",
@@ -61,6 +66,7 @@ GUARDRAIL_FILES = {
     # audit redaction, or prod-confirm policy without touching code, so
     # ADR enforcement watches the file.
     ".shifter.yaml",
+    ".cursor/cli.json",
 }
 DOC_PATHS = (
     "docs/adr/",
@@ -218,14 +224,25 @@ def load_allowed_imports(config_path: Path) -> dict[str, list[str]]:
 
 
 def is_import_allowed(from_layer: str, module_path: str, allowed: dict[str, list[str]]) -> bool:
-    """Check whether an import is allowed by the layer policy."""
+    """Check whether an import is allowed by the layer policy.
+
+    A dotted entry (e.g. ``cms.services``) is the public facade: the exact
+    facade and its public submodules are allowed, but a private split-package
+    submodule — any path component after the facade that starts with ``_``
+    (``cms.services._range_pause``) — is not a cross-layer seam (ADR-001-R1).
+    ``shared`` is the contracts layer and stays freely importable.
+    """
     for entry in allowed.get(from_layer, []):
         if entry == "shared":
             if module_path == "shared" or module_path.startswith("shared."):
                 return True
         elif "." in entry:
-            if module_path == entry or module_path.startswith(entry + "."):
+            if module_path == entry:
                 return True
+            if module_path.startswith(entry + "."):
+                remainder = module_path[len(entry) + 1 :]
+                if not any(part.startswith("_") for part in remainder.split(".")):
+                    return True
         elif module_path == entry:
             return True
     return False
@@ -364,6 +381,31 @@ def check_adr_registry(repo_root: Path, files: list[str] | None) -> list[Violati
     return violations
 
 
+def iter_private_facade_imports(text: str) -> set[str]:
+    """Return ``layer.path._private`` targets imported via ``from ... import``.
+
+    The ``IMPORT_PATTERN`` regex only captures the module path, so
+    ``from cms.services import _range_pause`` looks like an allowed
+    ``cms.services`` facade import. This AST pass recovers the imported name and,
+    when it is private (starts with ``_``) and the module belongs to one of our
+    layers, reconstructs the effective dotted target (``cms.services._range_pause``).
+    Relative imports (``from ._x import y``) and public names are ignored.
+    """
+    targets: set[str] = set()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return targets
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.level != 0 or not node.module:
+            continue
+        if node.module.split(".")[0] not in LAYERS:
+            continue
+        targets.update(f"{node.module}.{alias.name}" for alias in node.names if alias.name.startswith("_"))
+    return targets
+
+
 def check_layer_imports(repo_root: Path, files: list[str] | None) -> list[Violation]:
     """Check the layer import policy against selected files."""
     violations: list[Violation] = []
@@ -372,7 +414,11 @@ def check_layer_imports(repo_root: Path, files: list[str] | None) -> list[Violat
 
     for rel, from_layer in iter_layer_files(repo_root, files):
         text = (repo_root / rel).read_text(encoding="utf-8")
-        for module in sorted(set(IMPORT_PATTERN.findall(text))):
+        regex_modules = set(IMPORT_PATTERN.findall(text))
+        # AST recovers `from facade import _private`, which the regex sees only
+        # as the allowed facade module path.
+        private_modules = iter_private_facade_imports(text)
+        for module in sorted(regex_modules | private_modules):
             to_layer = module.split(".", 1)[0]
             if to_layer == from_layer:
                 continue
@@ -383,6 +429,16 @@ def check_layer_imports(repo_root: Path, files: list[str] | None) -> list[Violat
                         "ADR-001-R1",
                         rel,
                         f"{from_layer} may not import {module}",
+                    )
+                )
+        if from_layer != CYBERSCRIPT_ALLOWED_LAYER:
+            for module in sorted(set(CYBERSCRIPT_IMPORT_PATTERN.findall(text))):
+                violations.append(
+                    Violation(
+                        "layer-imports",
+                        "ADR-001-R1",
+                        rel,
+                        f"{from_layer} may not import {module}; use shared shims",
                     )
                 )
 
@@ -442,6 +498,209 @@ def check_guardrail_docs(repo_root: Path, files: list[str] | None) -> list[Viola
             "Guardrail changes must update docs/adr or the developer ADR enforcement docs in the same change",
         )
     ]
+
+
+def check_no_agent_attribution(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Reject AI/agent marketing or co-author attribution in tracked text."""
+    from agent_attribution import find_agent_attribution_matches
+
+    candidates = files
+    if candidates is None:
+        candidates = [
+            rel
+            for rel in subprocess.check_output(["git", "ls-files"], cwd=repo_root, text=True).splitlines()
+            if rel
+        ]
+
+    violations: list[Violation] = []
+    for rel in candidates:
+        if rel in _AGENT_ATTRIBUTION_SCAN_SKIP:
+            continue
+        path = repo_root / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        matches = find_agent_attribution_matches(text)
+        if not matches:
+            continue
+        first = matches[0]
+        violations.append(
+            Violation(
+                "no-agent-attribution",
+                "ADR-002-R2",
+                rel,
+                f"Prohibited AI/agent attribution ({first.rule}): {first.excerpt}",
+            )
+        )
+    return violations
+
+
+DOCS_COVERAGE_MANIFEST = "docs/adr/documentation-coverage.yaml"
+DOCS_COVERAGE_RULE_ID = "ADR-022-R1"
+_AGENT_ATTRIBUTION_SCAN_SKIP = {
+    "scripts/adr_guard/agent_attribution.py",
+    "scripts/adr_guard/block_agent_attribution_commit_msg.py",
+    "scripts/adr_guard/tests/test_agent_attribution.py",
+}
+_DOCS_EXCLUDED_PART = "_deprecated"
+_MARKDOWN_LINK_PATTERN = re.compile(r"\]\(([^)\s]+)")
+
+
+def _normalize_doc_slug(value: str) -> str:
+    """Normalize a posix doc slug, resolving ``.``/``..`` segments."""
+    segments: list[str] = []
+    for segment in value.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if segments:
+                segments.pop()
+            continue
+        segments.append(segment)
+    return "/".join(segments)
+
+
+def _doc_path_is_excluded(slug: str) -> bool:
+    """A doc under a ``_deprecated`` or hidden path part is not serveable."""
+    return any(part == _DOCS_EXCLUDED_PART or part.startswith(".") for part in slug.split("/") if part)
+
+
+def _collect_index_link_slugs(docs_root: Path) -> set[str]:
+    """Return the set of docs-root-relative slugs linked from any index.md."""
+    linked: set[str] = set()
+    if not docs_root.is_dir():
+        return linked
+    for index_file in docs_root.rglob("index.md"):
+        rel_parts = index_file.relative_to(docs_root).parts
+        if any(part == _DOCS_EXCLUDED_PART or part.startswith(".") for part in rel_parts):
+            continue
+        index_dir = "/".join(rel_parts[:-1])
+        try:
+            text = index_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for target in _MARKDOWN_LINK_PATTERN.findall(text):
+            target = target.split("#", 1)[0].split("?", 1)[0]
+            if not target or "://" in target or target.startswith(("mailto:", "/")):
+                continue
+            if target.endswith(".md"):
+                target = target[: -len(".md")]
+            linked.add(_normalize_doc_slug(f"{index_dir}/{target}"))
+    return linked
+
+
+def check_documentation_coverage(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Require every major feature to carry user and technical documentation.
+
+    The coverage manifest (``docs/adr/documentation-coverage.yaml``) is the
+    source of truth, so the check validates the whole manifest on every run
+    regardless of ``files`` (like ``check_adr_registry``). Each feature must
+    declare at least one user doc and one technical doc; every referenced doc
+    must exist as a serveable file under the in-app docs tree (not under a
+    ``_deprecated``/hidden path) and be reachable from an ``index.md``.
+    """
+    manifest_path = repo_root / DOCS_COVERAGE_MANIFEST
+    try:
+        manifest = _load_json_yaml(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError) as err:
+        return [Violation("documentation-coverage", DOCS_COVERAGE_RULE_ID, DOCS_COVERAGE_MANIFEST, str(err))]
+
+    if not isinstance(manifest, dict):
+        return [
+            Violation(
+                "documentation-coverage",
+                DOCS_COVERAGE_RULE_ID,
+                DOCS_COVERAGE_MANIFEST,
+                "documentation coverage manifest must be a JSON object",
+            )
+        ]
+
+    docs_root_rel = manifest.get("docs_root")
+    features = manifest.get("features")
+    if not isinstance(docs_root_rel, str) or not isinstance(features, list):
+        return [
+            Violation(
+                "documentation-coverage",
+                DOCS_COVERAGE_RULE_ID,
+                DOCS_COVERAGE_MANIFEST,
+                "manifest must define a string 'docs_root' and a list of 'features'",
+            )
+        ]
+
+    docs_root = repo_root / docs_root_rel
+    linked_slugs = _collect_index_link_slugs(docs_root)
+    violations: list[Violation] = []
+
+    for feature in features:
+        if not isinstance(feature, dict):
+            violations.append(
+                Violation(
+                    "documentation-coverage",
+                    DOCS_COVERAGE_RULE_ID,
+                    DOCS_COVERAGE_MANIFEST,
+                    "each feature entry must be a JSON object",
+                )
+            )
+            continue
+        feature_id = feature.get("id") or "<unknown>"
+        user_docs = feature.get("user_docs") or []
+        technical_docs = feature.get("technical_docs") or []
+        if not user_docs:
+            violations.append(
+                Violation(
+                    "documentation-coverage",
+                    DOCS_COVERAGE_RULE_ID,
+                    DOCS_COVERAGE_MANIFEST,
+                    f"feature {feature_id} must declare at least one user doc",
+                )
+            )
+        if not technical_docs:
+            violations.append(
+                Violation(
+                    "documentation-coverage",
+                    DOCS_COVERAGE_RULE_ID,
+                    DOCS_COVERAGE_MANIFEST,
+                    f"feature {feature_id} must declare at least one technical doc",
+                )
+            )
+        for rel in list(user_docs) + list(technical_docs):
+            slug = _normalize_doc_slug(rel)
+            doc_path = f"{docs_root_rel}/{slug}"
+            if _doc_path_is_excluded(slug):
+                violations.append(
+                    Violation(
+                        "documentation-coverage",
+                        DOCS_COVERAGE_RULE_ID,
+                        doc_path,
+                        f"feature {feature_id} references a deprecated or hidden doc that is not served",
+                    )
+                )
+                continue
+            if not (docs_root / slug).is_file():
+                violations.append(
+                    Violation(
+                        "documentation-coverage",
+                        DOCS_COVERAGE_RULE_ID,
+                        doc_path,
+                        f"feature {feature_id} references a missing doc",
+                    )
+                )
+                continue
+            doc_slug = slug[: -len(".md")] if slug.endswith(".md") else slug
+            if doc_slug not in linked_slugs:
+                violations.append(
+                    Violation(
+                        "documentation-coverage",
+                        DOCS_COVERAGE_RULE_ID,
+                        doc_path,
+                        f"feature {feature_id} references an orphaned doc not linked from any index.md",
+                    )
+                )
+
+    return violations
 
 
 CLOUD_ROOTS = (
@@ -1882,10 +2141,17 @@ def check_no_plaintext_secrets_in_tfvars(repo_root: Path, files: list[str] | Non
 # `scenario-dev/polaris/build/`. That tree is generated/runtime material and
 # can carry challenge-local keys, tokens, database access files, and baked
 # runtime payloads. Source inputs live outside `build/`.
+#
+# Polaris AWS operator run outputs: machine-readable provisioning state and
+# human-readable status/health reports under `scripts/polaris-aws-range/`.
+# These are regenerated by orchestrate_provisioning.py and
+# check_range_health.py during live events and may contain participant or
+# infrastructure identifiers.
 _GENERATED_ARTIFACT_ROOTS: tuple[str, ...] = (
     "platform/terraform/environments/",
     "platform/terraform/gcp/environments/",
     "scenario-dev/polaris/build/",
+    "scripts/polaris-aws-range/",
     "temp/bootstrap/",
 )
 
@@ -1911,6 +2177,16 @@ def _is_bootstrap_authcode_artifact(basename: str) -> bool:
     return basename == "authcodes" or basename.endswith(".authcodes")
 
 
+def _is_polaris_operator_run_artifact(basename: str) -> bool:
+    """Return True for tracked Polaris AWS operator run outputs."""
+    return basename in (
+        "provisioning_state.json",
+        "provisioning_status.md",
+        "health_report.md",
+        "postprovision_status.md",
+    )
+
+
 def _generated_artifact_match(rel_path: str) -> bool:
     """Return True if a repo-relative path is a blocked generated artifact."""
     in_scope = any(rel_path.startswith(root) for root in _GENERATED_ARTIFACT_ROOTS)
@@ -1921,6 +2197,8 @@ def _generated_artifact_match(rel_path: str) -> bool:
         return _is_terraform_plan_artifact(basename)
     if rel_path.startswith("scenario-dev/polaris/build/"):
         return True
+    if rel_path.startswith("scripts/polaris-aws-range/"):
+        return _is_polaris_operator_run_artifact(basename)
     if rel_path.startswith("temp/bootstrap/"):
         return _is_bootstrap_authcode_artifact(basename)
     return False
@@ -2335,6 +2613,29 @@ _QUALITY_GUARDRAIL_DOCS_REQUIRED_GLOBS = (
 _PR_GATE_SKIPPED_QUALITY_GUARD = (
     '[ "$quality_result" = "skipped" ] && [ "$quality_relevant" != "false" ]'
 )
+_QUALITY_WORKFLOW_PATH = ".github/workflows/_quality.yml"
+_SKIP_TESTS_LITERAL = "skip_tests: false"
+_SKIP_TESTS_FORBIDDEN_MARKERS = (
+    "[skip tests]",
+    "[skip quality]",
+    "Check for skip flags",
+)
+# Lint / architecture / security jobs in _quality.yml that must never be gated
+# on inputs.skip_tests (ADR-003-R2 / issue #760).
+_QUALITY_SKIP_TESTS_IMMUNE_JOB_SUFFIXES = ("-lint", "-lint-js", "-sast", "-arch")
+_QUALITY_SKIP_TESTS_IMMUNE_JOB_NAMES = frozenset(
+    {
+        "adr-conformance",
+        "workflow-lint",
+        "terraform-lint",
+        "security-iac",
+        "security-k8s",
+        "secrets-gitleaks",
+        "k8s-lint",
+        "k8s-schema",
+        "mcp-lint",
+    }
+)
 _QUALITY_ONLY_OUTPUT = "quality_only: ${{ steps.filter.outputs.quality_only }}"
 _QUALITY_ONLY_REQUIRED_GLOBS = (
     "scripts/polaris-aws-range/**",
@@ -2359,6 +2660,7 @@ def _deploy_plan_scope_relevant(files: list[str] | None) -> bool:
         _CORE_WORKFLOW_PATH,
         _RANGE_WORKFLOW_PATH,
         _PLATFORM_WORKFLOW_PATH,
+        _QUALITY_WORKFLOW_PATH,
         _ADR_GUARD_SCRIPT_PATH,
     }
     return any(path in relevant for path in files)
@@ -2422,6 +2724,114 @@ def _filter_globs(block: list[str]) -> list[str]:
 
 def _active_line_contains(block: list[str], needle: str) -> bool:
     return any(needle in line for line in block if not line.lstrip().startswith("#"))
+
+
+def _extract_job_if(block: list[str]) -> str:
+    """Return the ``if:`` expression for a stripped workflow job block."""
+    active = [line for line in block if not line.lstrip().startswith("#")]
+    for idx, line in enumerate(active):
+        if not line.startswith("if:"):
+            continue
+        rest = line[3:].strip()
+        if rest == "|":
+            body: list[str] = []
+            for follow in active[idx + 1 :]:
+                if re.match(r"^[A-Za-z0-9_-]+:", follow):
+                    break
+                body.append(follow)
+            return " ".join(body)
+        return rest
+    return ""
+
+
+def _quality_job_is_skip_tests_immune(job_name: str) -> bool:
+    if job_name in _QUALITY_SKIP_TESTS_IMMUNE_JOB_NAMES:
+        return True
+    return any(job_name.endswith(suffix) for suffix in _QUALITY_SKIP_TESTS_IMMUNE_JOB_SUFFIXES)
+
+
+def _quality_workflow_job_names(quality_text: str) -> list[str]:
+    names: list[str] = []
+    in_jobs = False
+    for raw_line in quality_text.splitlines():
+        if raw_line.strip() == "jobs:":
+            in_jobs = True
+            continue
+        if not in_jobs:
+            continue
+        if raw_line and not raw_line.startswith(" "):
+            break
+        match = re.match(r"^  ([a-z0-9_-]+):\s*$", raw_line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def _check_deploy_workflow_skip_tests_policy(deploy_text: str) -> list[Violation]:
+    """ADR-003-R2: commit-message / dynamic test skips are not accepted."""
+    violations: list[Violation] = []
+    lowered = deploy_text.lower()
+    for marker in _SKIP_TESTS_FORBIDDEN_MARKERS:
+        if marker.lower() in lowered:
+            violations.append(
+                _plan_scope_violation(
+                    _DEPLOY_WORKFLOW_PATH,
+                    f"Commit-message or label-based test skips are not accepted; "
+                    f"remove `{marker}` handling from the deploy workflow",
+                )
+            )
+            break
+
+    quality_block = _workflow_job_block(deploy_text, "quality")
+    if not quality_block:
+        return violations
+    if not (
+        _active_line_contains(quality_block, "_quality.yml")
+        or _active_line_contains(quality_block, "./.github/workflows/_quality.yml")
+    ):
+        return violations
+    if not _active_line_contains(quality_block, _SKIP_TESTS_LITERAL):
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The Quality reusable-workflow call must pass "
+                f"`{_SKIP_TESTS_LITERAL}` literally so protected-branch CI "
+                "cannot bypass unit tests through commit-message flags",
+            )
+        )
+    if _active_line_contains(quality_block, "skip_tests: ${{") or _active_line_contains(
+        quality_block, "skip_tests:${{"
+    ):
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The Quality reusable-workflow call must not derive "
+                "`skip_tests` from step outputs or commit-message parsing",
+            )
+        )
+    return violations
+
+
+def _check_quality_workflow_skip_tests_contract(quality_text: str) -> list[Violation]:
+    """Architecture, lint, and security jobs must not honor ``inputs.skip_tests``."""
+    violations: list[Violation] = []
+    for job_name in _quality_workflow_job_names(quality_text):
+        if not _quality_job_is_skip_tests_immune(job_name):
+            continue
+        block = _workflow_job_block(quality_text, job_name)
+        if not block:
+            continue
+        if_expr = _extract_job_if(block)
+        if "skip_tests" in if_expr:
+            violations.append(
+                _plan_scope_violation(
+                    _QUALITY_WORKFLOW_PATH,
+                    f"Job `{job_name}` must not be gated on `inputs.skip_tests`; "
+                    "lint, architecture, and security checks run even when unit "
+                    "tests are skipped",
+                )
+            )
+    return violations
 
 
 def _terraform_plan_has_lock_timeout(stripped_line: str) -> bool:
@@ -2896,6 +3306,24 @@ def check_deploy_workflow_plan_scope(repo_root: Path, files: list[str] | None) -
         violations.extend(_check_deploy_workflow_plan_routing(deploy_text))
         violations.extend(_check_deploy_workflow_quality_only_routing(deploy_text))
         violations.extend(_check_deploy_workflow_portal_image_routing(deploy_text))
+        violations.extend(_check_deploy_workflow_skip_tests_policy(deploy_text))
+
+    quality_path = repo_root / _QUALITY_WORKFLOW_PATH
+    if files is None or _QUALITY_WORKFLOW_PATH in files or _ADR_GUARD_SCRIPT_PATH in files:
+        if not quality_path.exists():
+            violations.append(
+                _plan_scope_violation(
+                    _QUALITY_WORKFLOW_PATH,
+                    "Required workflow is missing; ADR-003-R2 cannot verify "
+                    "architecture/security independence from skip_tests",
+                )
+            )
+        else:
+            violations.extend(
+                _check_quality_workflow_skip_tests_contract(
+                    quality_path.read_text(encoding="utf-8")
+                )
+            )
 
     for path, workflow_path in (
         (_CORE_WORKFLOW_PATH, core_path),
@@ -3144,37 +3572,15 @@ def _writes_local_auto_tfvars(stripped_line: str) -> bool:
     return 0 <= redirect_pos < marker_pos
 
 
-def check_platform_renders_deploy_tfvars(repo_root: Path, files: list[str] | None) -> list[Violation]:
-    """Require AWS platform Terraform jobs to render local.auto.tfvars first.
-
-    The committed `terraform.tfvars` under `platform/terraform/environments/*/portal`
-    is an intentionally-broken `example.com` baseline. Each Terraform-running job
-    in `_shifter-platform.yml` must render the deployment-owned override into a
-    gitignored `local.auto.tfvars` before `terraform init/validate/plan/apply`
-    consumes variables, so deploys never apply the baseline (ADR-011-R7).
-    """
-    if files is not None and not any(
-        path in {_PLATFORM_WORKFLOW_PATH, _ADR_GUARD_SCRIPT_PATH} for path in files
-    ):
-        return []
-
-    platform_path = repo_root / _PLATFORM_WORKFLOW_PATH
-    if not platform_path.exists():
-        return [
-            _tfvars_render_violation(
-                _PLATFORM_WORKFLOW_PATH,
-                "Required workflow is missing; ADR-011-R7 cannot verify deploy tfvars rendering",
-            )
-        ]
-
-    text = platform_path.read_text(encoding="utf-8")
+def _tfvars_render_violations_for_workflow(workflow_path: str, text: str) -> list[Violation]:
+    """Return ADR-011-R7 violations for one reusable workflow file."""
     violations: list[Violation] = []
     for job in _TFVARS_RENDER_JOBS:
         block = _workflow_job_block(text, job)
         if not block:
             violations.append(
                 _tfvars_render_violation(
-                    _PLATFORM_WORKFLOW_PATH,
+                    workflow_path,
                     f"`{job}` job is missing; ADR-011-R7 expects it to render "
                     f"`{_LOCAL_AUTO_TFVARS}` before Terraform consumes variables",
                 )
@@ -3191,7 +3597,7 @@ def check_platform_renders_deploy_tfvars(repo_root: Path, files: list[str] | Non
         if render_idx is None:
             violations.append(
                 _tfvars_render_violation(
-                    _PLATFORM_WORKFLOW_PATH,
+                    workflow_path,
                     f"`{job}` job must render `{_LOCAL_AUTO_TFVARS}` from the deployment "
                     "secret (a step that writes the file, not merely names it) before "
                     "`terraform init/validate/plan/apply`, so the deploy never applies "
@@ -3201,11 +3607,40 @@ def check_platform_renders_deploy_tfvars(repo_root: Path, files: list[str] | Non
         elif tf_idx is not None and render_idx > tf_idx:
             violations.append(
                 _tfvars_render_violation(
-                    _PLATFORM_WORKFLOW_PATH,
+                    workflow_path,
                     f"`{job}` job renders `{_LOCAL_AUTO_TFVARS}` after a Terraform "
                     "command; the render must precede `terraform init/validate/plan/apply`",
                 )
             )
+    return violations
+
+
+def check_platform_renders_deploy_tfvars(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Require AWS Terraform deploy jobs to render local.auto.tfvars first.
+
+    The committed `terraform.tfvars` under `platform/terraform/environments/*`
+    is an intentionally-broken `example.com` baseline. Each Terraform-running
+    job in the AWS reusable workflows must render the deployment-owned override
+    into a gitignored `local.auto.tfvars` before `terraform init/validate/plan/apply`
+    consumes variables, so deploys never apply the baseline (ADR-011-R7).
+    """
+    workflow_paths = (_PLATFORM_WORKFLOW_PATH, _CORE_WORKFLOW_PATH, _RANGE_WORKFLOW_PATH)
+    if files is not None and not any(
+        path in {*workflow_paths, _ADR_GUARD_SCRIPT_PATH} for path in files
+    ):
+        return []
+
+    violations: list[Violation] = []
+    for workflow_path in workflow_paths:
+        workflow_file = repo_root / workflow_path
+        if not workflow_file.exists():
+            continue
+        violations.extend(
+            _tfvars_render_violations_for_workflow(
+                workflow_path,
+                workflow_file.read_text(encoding="utf-8"),
+            )
+        )
     return violations
 
 
@@ -3856,6 +4291,8 @@ PYTHON_COMPLEXITY_GATE_PYPROJECTS = (
     "scripts/gcp",
     "scripts/check_layer_imports",
     "scripts/check_rds_pending_modifications",
+    "scripts/assert_portal_inspection",
+    "scripts/handle_sd_replacement",
     "uat/event-load-harness",
 )
 
@@ -4804,6 +5241,419 @@ def check_deploy_runner_exposure(repo_root: Path, files: list[str] | None) -> li
     return violations
 
 
+# ---------------------------------------------------------------------------
+# ADR-004-R14: live cloud identifier hygiene.
+#
+# Strips reconnaissance-sensitive AWS infrastructure identifiers from tracked
+# files and blocks their reintroduction. This is the low-entropy complement to
+# gitleaks (which catches high-entropy secrets): account IDs, VPC/subnet IDs,
+# and account- or UUID-suffixed S3 buckets are not secret, but they aid an
+# attacker mapping a public-repo deployment's real infrastructure.
+#
+# Detection is by *pattern*, never by a denylist of real values - listing a
+# real identifier here would re-commit the very thing the check removes. Real
+# values that must stay committed (vendor connector templates whose account IDs
+# must be exact; backend/state buckets read directly by `terraform init`) are
+# retained via scoped `docs/adr/exceptions.yaml` entries (rule_id
+# ADR-004-R14), applied centrally by `filter_excepted_violations`.
+#
+# Allowlist: a small fixed set of synthetic example account IDs. Placeholder
+# and example forms (`vpc-xxxxxxxx`, `<your-account-id>`) are not matched at all
+# because the real-identifier patterns require hex / 12 literal digits, which
+# bracketed and `x`-filled placeholders cannot satisfy - so there is no
+# universal `<...>` wildcard a real value could hide behind.
+_IDENTIFIER_RULE_ID = "ADR-004-R14"
+_IDENTIFIER_CHECK = "no-live-cloud-identifiers"
+
+# 12-digit runs that are NOT reconnaissance-sensitive Shifter account IDs and
+# are allowed to remain in tracked files:
+#  - AWS documentation's canonical example account IDs + the all-zero
+#    placeholder.
+#  - Public AMI-publisher account IDs. These are well-known, documented AWS
+#    accounts (Canonical, OffSec/Kali) used as `owner` filters to resolve
+#    official base images; they are not Shifter infrastructure and changing
+#    them would break AMI lookups.
+_SYNTHETIC_ACCOUNT_IDS: frozenset[str] = frozenset(
+    {
+        "123456789012",  # AWS docs canonical example account
+        "111122223333",  # AWS docs secondary example account
+        "000000000000",  # explicit all-zero placeholder
+        "099720109477",  # Canonical (Ubuntu) - public AMI publisher
+        "679593333241",  # OffSec (Kali Linux) - public AMI publisher
+    }
+)
+
+# Generated / binary files that may carry incidental digit runs and never
+# carry hand-authored operational identifiers. Skipped wholesale.
+_IDENTIFIER_SKIP_SUFFIXES: tuple[str, ...] = (
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".pdf", ".zip", ".tar",
+    ".gz", ".tgz", ".bz2", ".xz", ".whl", ".woff", ".woff2", ".ttf", ".eot",
+    ".mo", ".pyc", ".so", ".dylib", ".class", ".jar", ".wasm",
+)
+_IDENTIFIER_SKIP_BASENAMES: frozenset[str] = frozenset(
+    {
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "Cargo.lock",
+        ".terraform.lock.hcl",
+    }
+)
+# Dependency lock files (uv.lock, requirements-*.lock, ...): autogenerated,
+# carry pinned sha256 hashes whose decimal runs are not infrastructure IDs.
+_IDENTIFIER_SKIP_SUFFIX_LOCK = ".lock"
+
+# A real AWS account ID is exactly 12 decimal digits. The lookarounds suppress
+# two false-positive shapes WITHOUT making `-` a universal account-ID boundary
+# (which would miss reintroduction shapes like `account-<id>`, `aws-dev-<id>`,
+# or a non-Shifter `bucket-<id>`):
+#  - `(?<![0-9a-fA-F])` / `(?![0-9a-fA-F])`: not bordered by a hex char, so a
+#    decimal run inside a longer hex hash is ignored.
+#  - `(?<![0-9a-fA-F]{4}-)`: not the trailing 12-digit group of a UUID, whose
+#    final group is preceded by `<4 hex>-` (e.g. `...-a716-446655440000`).
+# A hyphen-prefixed account ID such as `account-<id>` is still caught because
+# the chars before the digits (`ount-`) are not `<4 hex>-`.
+_ACCOUNT_ID_RE = re.compile(
+    r"(?<![0-9a-fA-F])(?<![0-9a-fA-F]{4}-)[0-9]{12}(?![0-9a-fA-F])"
+)
+# VPC / subnet IDs are `vpc-` / `subnet-` followed by 8 (legacy) or 17 (long)
+# hex chars. The hex requirement means `vpc-xxxxxxxx` placeholders never match.
+_VPC_ID_RE = re.compile(r"\bvpc-[0-9a-f]{8}(?:[0-9a-f]{9})?\b")
+_SUBNET_ID_RE = re.compile(r"\bsubnet-[0-9a-f]{8}(?:[0-9a-f]{9})?\b")
+# Account-ID-suffixed Shifter bucket (reveals the account): `shifter-...-<12d>`.
+_ACCT_BUCKET_RE = re.compile(r"\bshifter-[a-z0-9-]+-[0-9]{12}\b")
+# UUID-suffixed infra/state bucket: `shifter-[dev-]infra-<uuid>`. Retained for
+# `terraform init` via a scoped path exception, flagged so the retention is
+# explicit and auditable.
+_UUID_BUCKET_RE = re.compile(
+    r"\bshifter-[a-z0-9-]*infra-"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+)
+
+
+def _identifier_skip(rel: str) -> bool:
+    """True for paths that must not be scanned (binary / generated locks)."""
+    basename = rel.rsplit("/", 1)[-1]
+    if basename in _IDENTIFIER_SKIP_BASENAMES:
+        return True
+    if rel.endswith(_IDENTIFIER_SKIP_SUFFIX_LOCK):
+        return True
+    return rel.endswith(_IDENTIFIER_SKIP_SUFFIXES)
+
+
+def _identifier_violation(rel: str, lineno: int, kind: str) -> Violation:
+    """Build a violation that names the path, line, and identifier KIND only -
+    never the live value (preflight error-surface rule)."""
+    return Violation(
+        check=_IDENTIFIER_CHECK,
+        rule_id=_IDENTIFIER_RULE_ID,
+        path=rel,
+        message=(
+            f"line {lineno}: live AWS {kind} in a tracked file (value redacted); "
+            "move it to a deploy-time overlay/secret/env var or a placeholder, "
+            "or add a scoped docs/adr/exceptions.yaml entry if it must stay"
+        ),
+    )
+
+
+def _scan_identifier_line(line: str) -> list[str]:
+    """Return the identifier KINDs found on a line. Bucket patterns are matched
+    and masked first so the account-ID run they contain is not double-counted."""
+    kinds: list[str] = []
+    masked = line
+    for rx, kind in ((_ACCT_BUCKET_RE, "account-suffixed S3 bucket name"),
+                     (_UUID_BUCKET_RE, "infra/state S3 bucket name")):
+        if rx.search(masked):
+            kinds.append(kind)
+            masked = rx.sub(lambda m: " " * len(m.group(0)), masked)
+    for match in _ACCOUNT_ID_RE.finditer(masked):
+        if match.group(0) not in _SYNTHETIC_ACCOUNT_IDS:
+            kinds.append("account ID")
+    if _VPC_ID_RE.search(masked):
+        kinds.append("VPC id")
+    if _SUBNET_ID_RE.search(masked):
+        kinds.append("subnet id")
+    return kinds
+
+
+def _read_text_safe(path: Path) -> str | None:
+    """Read a file as UTF-8, returning None for unreadable or binary content."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if b"\x00" in data:
+        return None
+    return data.decode("utf-8", errors="ignore")
+
+
+def _scan_identifier_file(path: Path, rel: str) -> list[Violation]:
+    text = _read_text_safe(path)
+    if text is None:
+        return []
+    violations: list[Violation] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for kind in _scan_identifier_line(line):
+            violations.append(_identifier_violation(rel, lineno, kind))
+    return violations
+
+
+def _git_tracked_all(repo_root: Path) -> list[str] | None:
+    """All tracked + non-ignored untracked repo-relative paths, or None when
+    `repo_root` is not a git working tree (synthetic test mode)."""
+    if not (repo_root / ".git").exists():
+        return None
+    cmd = [
+        "git", "-C", str(repo_root), "ls-files", "-z",
+        "--cached", "--others", "--exclude-standard",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, check=False, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.decode("utf-8", errors="replace")
+    return [entry for entry in output.split("\0") if entry]
+
+
+def _walk_all_files(repo_root: Path) -> list[str]:
+    """Test-mode fallback: every file on disk under `repo_root`, skipping the
+    git dir. Only reached when there is no usable git index."""
+    candidates: list[str] = []
+    for path in repo_root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = _repo_relative(path, repo_root)
+        if rel.startswith(".git/"):
+            continue
+        candidates.append(rel)
+    return candidates
+
+
+def _iter_identifier_candidates(repo_root: Path, files: list[str] | None) -> list[str]:
+    if files is not None:
+        return list(files)
+    tracked = _git_tracked_all(repo_root)
+    if tracked is None:
+        return _walk_all_files(repo_root)
+    return tracked
+
+
+def check_no_terraform_operational_placeholders(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid operational placeholder strings in committed Terraform sources (ADR-004-R15).
+
+    Scans tracked ``platform/terraform/**/*.tf`` files for known non-operational
+    literals such as ``YOUR_EMAIL@example.com`` that must not ship in IaC. Real
+    alert recipients and similar values belong in gitignored ``local.auto.tfvars``
+    or deploy secrets, not hardcoded in ``.tf`` sources.
+    """
+    violations: list[Violation] = []
+    placeholder_patterns = (
+        re.compile(r"YOUR_EMAIL@example\.com", re.IGNORECASE),
+        re.compile(r"subscriber_email_addresses\s*=\s*\[[^\]]*@example\.com", re.IGNORECASE),
+    )
+    for rel in _iter_identifier_candidates(repo_root, files):
+        if not rel.startswith("platform/terraform/") or not rel.endswith(".tf"):
+            continue
+        path = repo_root / rel
+        if not path.is_file():
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for pattern in placeholder_patterns:
+                if pattern.search(line):
+                    violations.append(
+                        Violation(
+                            "no-terraform-operational-placeholders",
+                            "ADR-004-R15",
+                            rel,
+                            f"Operational placeholder detected in Terraform source (line {lineno}). "
+                            "Use a variable plus gitignored local.auto.tfvars or a deploy secret "
+                            "instead of committing example.com alert recipients.",
+                        )
+                    )
+                    break
+    return violations
+
+
+_GITHUB_OIDC_TF_PATH = "platform/terraform/global/iam/github-oidc.tf"
+
+
+def check_github_oidc_no_admin_access(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid AdministratorAccess attachment on the GitHub Actions OIDC role (ADR-004-R15)."""
+    if files is not None and _GITHUB_OIDC_TF_PATH not in files and not any(
+        path.endswith("adr_guard.py") for path in files
+    ):
+        return []
+
+    path = repo_root / _GITHUB_OIDC_TF_PATH
+    if not path.is_file():
+        return []
+
+    text = path.read_text(encoding="utf-8")
+    if re.search(
+        r'policy_arn\s*=\s*"arn:aws:iam::aws:policy/AdministratorAccess"',
+        text,
+    ):
+        return [
+            Violation(
+                "github-oidc-no-admin-access",
+                "ADR-004-R15",
+                _GITHUB_OIDC_TF_PATH,
+                "GitHub Actions OIDC role must not attach managed AdministratorAccess; "
+                "use scoped inline or managed policies required by CI workflows.",
+            )
+        ]
+    return []
+
+
+def check_no_live_cloud_identifiers(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid live AWS infrastructure identifiers in tracked files (ADR-004-R14).
+
+    Scans tracked files repo-wide (or the given `files`) for AWS account IDs,
+    VPC/subnet IDs, and account- or UUID-suffixed Shifter S3 buckets. Detection
+    is by pattern with a fixed synthetic-account allowlist; real values that
+    must stay committed are cleared via scoped exceptions.yaml entries. Messages
+    redact the matched value. Backstops gitleaks for low-entropy infrastructure
+    identifiers it ignores.
+    """
+    violations: list[Violation] = []
+    for rel in _iter_identifier_candidates(repo_root, files):
+        if _identifier_skip(rel):
+            continue
+        path = repo_root / rel
+        if not path.is_file():
+            continue
+        violations.extend(_scan_identifier_file(path, rel))
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# ADR-004-R16: no hardcoded CTF flag literals in Mission Control runtime code.
+#
+# The Mission Control walkthrough page is a thin handoff to the CTFd platform;
+# challenge answers and flag content belong to the CTF/Polaris content domain
+# (the native `ctf` app or the standalone CTFd sync path), never to Mission
+# Control Python or templates. This check is the regression backstop for #560:
+# it fails closed on answer-shaped `FLAG{...}` literals in MC runtime surfaces.
+# CTF flags are low-entropy and are not caught by gitleaks; this is the
+# complementary repo-specific rule, scoped by path so intentional flag content
+# in tests, docs, the `ctf` app, and Polaris scenario sources is not touched.
+#
+# Detection is by pattern, never by a denylist of real values, and violation
+# messages redact the matched value. Format-hint placeholders (`FLAG{...}`,
+# `FLAG{<16-hex>}`, `FLAG{}`) are intentionally NOT flagged: they describe the
+# answer shape rather than carrying one.
+_MC_FLAG_RULE_ID = "ADR-004-R16"
+_MC_FLAG_CHECK = "no-mission-control-flag-literals"
+
+# Mission Control runtime roots. The mission_control package is all runtime -
+# its tests live under shifter_platform/tests/mission_control/, outside these
+# roots - and the template tree covers inline <script> JavaScript.
+_MC_RUNTIME_ROOTS: tuple[str, ...] = (
+    "shifter/shifter_platform/mission_control/",
+    "shifter/shifter_platform/templates/mission_control/",
+)
+# Only hand-authored runtime text is scanned.
+_MC_FLAG_SCAN_SUFFIXES: tuple[str, ...] = (".py", ".html", ".js", ".txt")
+
+# An answer-shaped flag literal: `flag{...}` (case-insensitive) whose brace body
+# is captured so the placeholder predicate below can reject format-hint shapes.
+_MC_FLAG_RE = re.compile(r"(?i)\bflag\{([^}\n]*)\}")
+
+
+def _mc_flag_is_placeholder(inner: str) -> bool:
+    """True only for the explicit format-hint placeholder shapes documented in
+    ADR-004-R16: an empty body (``FLAG{}``), the ellipsis form (``FLAG{...}``),
+    and a single angle-bracket template token (``FLAG{<16-hex>}``).
+
+    The match is deliberately narrow so the guard fails closed: a body that
+    merely *contains* a dot, an angle bracket, or other punctuation alongside
+    real answer text (for example ``FLAG{my<answer>}`` or ``FLAG{real.answer.42}``)
+    is a concrete answer, not a placeholder, and is flagged."""
+    stripped = inner.strip()
+    if not stripped:  # FLAG{}
+        return True
+    if set(stripped) == {"."}:  # ellipsis form FLAG{...}
+        return True
+    # One <...> template token and nothing else (FLAG{<16-hex>}). An answer
+    # with any text outside the brackets does not match, so it stays flagged.
+    return re.fullmatch(r"<[^<>]*>", stripped) is not None
+
+
+def _is_mc_runtime_path(rel: str) -> bool:
+    """True for a Mission Control runtime file the flag check should scan."""
+    return (
+        rel.startswith(_MC_RUNTIME_ROOTS)
+        and rel.endswith(_MC_FLAG_SCAN_SUFFIXES)
+        and "/__pycache__/" not in rel
+    )
+
+
+def _mc_flag_violation(rel: str, lineno: int) -> Violation:
+    """Build a violation that names path + line only - never the flag value
+    (preflight error-surface rule)."""
+    return Violation(
+        check=_MC_FLAG_CHECK,
+        rule_id=_MC_FLAG_RULE_ID,
+        path=rel,
+        message=(
+            f"line {lineno}: hardcoded CTF flag literal in Mission Control "
+            "runtime code (value redacted); move challenge content to the "
+            "CTF/CTFd content domain instead of shipping it in the app path"
+        ),
+    )
+
+
+def _scan_mc_flag_file(path: Path, rel: str) -> list[Violation]:
+    text = _read_text_safe(path)
+    if text is None:
+        return []
+    violations: list[Violation] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for match in _MC_FLAG_RE.finditer(line):
+            if not _mc_flag_is_placeholder(match.group(1)):
+                violations.append(_mc_flag_violation(rel, lineno))
+    return violations
+
+
+def _iter_mc_flag_candidates(repo_root: Path, files: list[str] | None) -> list[str]:
+    if files is not None:
+        return [rel for rel in files if _is_mc_runtime_path(rel)]
+    candidates: list[str] = []
+    for root in _MC_RUNTIME_ROOTS:
+        base = repo_root / root
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = _repo_relative(path, repo_root)
+            if _is_mc_runtime_path(rel):
+                candidates.append(rel)
+    return candidates
+
+
+def check_mission_control_no_flag_literals(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid hardcoded CTF flag literals in Mission Control runtime code (ADR-004-R16).
+
+    Scans the mission_control package and the mission_control template tree for
+    answer-shaped ``FLAG{...}`` literals, skipping format-hint placeholders. The
+    path scope intentionally excludes tests, docs, the native ``ctf`` app, and
+    Polaris scenario sources, where flag content is legitimate. Detection is by
+    pattern and messages redact the matched value. Backstops gitleaks for
+    low-entropy CTF flags it ignores.
+    """
+    violations: list[Violation] = []
+    for rel in _iter_mc_flag_candidates(repo_root, files):
+        path = repo_root / rel
+        if not path.is_file():
+            continue
+        violations.extend(_scan_mc_flag_file(path, rel))
+    return violations
+
+
 CHECKS = {
     "adr-registry": check_adr_registry,
     "layer-imports": check_layer_imports,
@@ -4824,6 +5674,12 @@ CHECKS = {
     "aws-platform-renders-deploy-tfvars": check_platform_renders_deploy_tfvars,
     "deploy-verification-fail-loud": check_deploy_verification_fail_loud,
     "deploy-workflow-runner-exposure": check_deploy_runner_exposure,
+    "no-live-cloud-identifiers": check_no_live_cloud_identifiers,
+    "no-mission-control-flag-literals": check_mission_control_no_flag_literals,
+    "no-terraform-operational-placeholders": check_no_terraform_operational_placeholders,
+    "github-oidc-no-admin-access": check_github_oidc_no_admin_access,
+    "documentation-coverage": check_documentation_coverage,
+    "no-agent-attribution": check_no_agent_attribution,
 }
 CHECK_LEVELS = {
     "fast": [
@@ -4844,6 +5700,12 @@ CHECK_LEVELS = {
         "aws-platform-renders-deploy-tfvars",
         "deploy-verification-fail-loud",
         "deploy-workflow-runner-exposure",
+        "no-live-cloud-identifiers",
+        "no-mission-control-flag-literals",
+        "no-terraform-operational-placeholders",
+        "github-oidc-no-admin-access",
+        "documentation-coverage",
+        "no-agent-attribution",
     ],
     "ci": [
         "adr-registry",
@@ -4864,6 +5726,12 @@ CHECK_LEVELS = {
         "aws-platform-renders-deploy-tfvars",
         "deploy-verification-fail-loud",
         "deploy-workflow-runner-exposure",
+        "no-live-cloud-identifiers",
+        "no-mission-control-flag-literals",
+        "no-terraform-operational-placeholders",
+        "github-oidc-no-admin-access",
+        "documentation-coverage",
+        "no-agent-attribution",
     ],
     "all": list(CHECKS),
 }

@@ -80,7 +80,8 @@ resource "aws_db_parameter_group" "guacamole" {
 
 # Enhanced monitoring role (CKV_AWS_118).
 resource "aws_iam_role" "rds_enhanced_monitoring" {
-  name = "${var.name_prefix}-guacamole-rds-enhanced-monitoring"
+  name                 = "${local.iam_name_prefix}-guacamole-rds-enhanced-monitoring"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

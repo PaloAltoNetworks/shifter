@@ -150,13 +150,17 @@ class SSHExecutor:
                 look_for_keys=False,
             )
 
-            logger.info("Executing command: %s...", commands[:100])
+            # Do NOT log command text — PAN-OS commands the provisioner
+            # constructs can include passwords (set mgt-config users / api-key,
+            # request password-hash password ..., etc.). Log only the byte count
+            # to keep operator visibility without leaking sensitive material.
+            logger.info("Executing command (%d bytes)", len(commands))
             logger.info("Opening interactive shell with invoke_shell()")
             channel = client.invoke_shell()
             channel.settimeout(timeout_seconds)
 
             # Send commands
-            logger.info("Sending command: %s", commands[:100])
+            logger.info("Sending command (%d bytes)", len(commands))
             channel.send("set cli pager off\n")  # nosec B601  # NOSONAR — hardcoded operational command
             channel.send(commands + "\n")  # nosec B601  # NOSONAR — operational data, not user input
             channel.send("exit\n")
@@ -171,12 +175,10 @@ class SSHExecutor:
                 len(output),
                 chunk_count,
             )
-            logger.info("Raw output (first 1000 chars): %r", output[:1000])
 
             # Clean output
             cleaned = self._clean_output(output, commands)
             logger.info("Cleaned output: %d bytes", len(cleaned))
-            logger.info("Cleaned output (first 500 chars): %s", cleaned[:500])
 
             return CommandResult(
                 success=True,
@@ -212,7 +214,6 @@ class SSHExecutor:
                 chunk = channel.recv(4096).decode("utf-8", errors="replace")
                 chunk_count += 1
                 logger.info("Chunk %d: %d bytes", chunk_count, len(chunk))
-                logger.debug("Chunk %d content: %r", chunk_count, chunk)
                 output += chunk
             if channel.eof_received:
                 logger.info("Channel EOF received - draining remaining data")

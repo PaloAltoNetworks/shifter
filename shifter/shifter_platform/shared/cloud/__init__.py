@@ -28,6 +28,7 @@ PROVISIONER_CONTAINER_NAME = "pulumi-provisioner"
 
 if TYPE_CHECKING:
     from shared.cloud.types import (
+        EventBus,
         ObjectStorage,
         QueueConsumer,
         QueuePublisher,
@@ -107,4 +108,18 @@ def get_secrets_store() -> SecretsStore:
         from shared.cloud.gcp.secrets import GCPSecretsStore
 
         return GCPSecretsStore()
+    raise CloudProviderNotImplementedError(provider)
+
+
+def get_event_bus() -> EventBus:
+    """Return an EventBus implementation for the configured provider."""
+    provider = _get_provider()
+    if provider == "aws":
+        from shared.cloud.aws.event_bus import AWSEventBus
+
+        return AWSEventBus()
+    if provider == "gcp":
+        from shared.cloud.gcp.event_bus import GCPEventBus
+
+        return GCPEventBus()
     raise CloudProviderNotImplementedError(provider)

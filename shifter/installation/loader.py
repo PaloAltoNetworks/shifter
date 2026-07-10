@@ -85,6 +85,17 @@ def _reject_duplicate_keys(node: yaml.Node, _visited: set[int] | None = None) ->
             _reject_duplicate_keys(item, _visited)
 
 
+def _resolved_config_path(path: Path) -> Path:
+    """Validate and resolve a config path before filesystem access.
+
+    Rejects NUL bytes and collapses ``..`` traversal via ``Path.resolve()`` so the
+    target read is the normalized absolute path rather than the raw operator input.
+    """
+    if "\x00" in str(path):
+        raise InstallationConfigError([ConfigIssue(str(path), "config path contains a NUL byte")])
+    return Path(path).resolve()
+
+
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     """Read the YAML file at ``path`` and return the parsed top-level mapping.
 
@@ -94,8 +105,11 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     pre-pass so PyYAML's silent last-wins behavior cannot validate a config
     the operator did not author.
     """
+    # Normalize the operator-supplied path (collapsing any `..` traversal) before
+    # touching the filesystem so the bytes we parse come from the resolved target.
+    resolved = _resolved_config_path(path)
     try:
-        text = path.read_text(encoding="utf-8")
+        text = resolved.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
         raise InstallationConfigError(
             [

@@ -21,8 +21,10 @@ provider "aws" {
 }
 
 locals {
-  name_prefix                 = "${var.environment}-portal"
-  alb_access_logs_bucket_name = "${local.name_prefix}-alb-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
+  name_prefix                      = "${var.environment}-portal"
+  iam_name_prefix                  = "shifter-${var.environment}-portal"
+  ci_role_permissions_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/shifter-${var.environment}-ci-role-boundary"
+  alb_access_logs_bucket_name      = "${local.name_prefix}-alb-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
   # Add padding to field_encryption_key (b64_url doesn't include padding, but Fernet requires it)
   field_encryption_key_padded = "${random_id.field_encryption_key.b64_url}="
 }
@@ -34,9 +36,9 @@ locals {
 data "terraform_remote_state" "foundation" {
   backend = "s3"
   config = {
-    bucket = "shifter-dev-infra-1697b88e-01b3-424f-be63-8ab29df0ce39"
+    bucket = var.terraform_state_bucket
     key    = "shifter/dev/terraform.tfstate"
-    region = "us-east-2"
+    region = var.terraform_state_region
   }
 }
 
@@ -47,9 +49,9 @@ data "terraform_remote_state" "foundation" {
 data "terraform_remote_state" "range" {
   backend = "s3"
   config = {
-    bucket = "shifter-dev-infra-1697b88e-01b3-424f-be63-8ab29df0ce39"
+    bucket = var.terraform_state_bucket
     key    = "dev/range/terraform.tfstate"
-    region = "us-east-2"
+    region = var.terraform_state_region
   }
 }
 
@@ -217,6 +219,62 @@ resource "aws_kms_alias" "portal_s3" {
   target_key_id = aws_kms_key.portal_s3.key_id
 }
 
+resource "aws_kms_key" "redis_at_rest" {
+  description             = "CMK for portal Redis (ElastiCache) data-at-rest encryption (CKV_AWS_191) — see #1059"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAdmin"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        # Account-scoped use via ElastiCache only. ElastiCache uses this CMK on
+        # the account's behalf — creating grants for the replication group — to
+        # encrypt cache storage and the group's automated snapshots. kms:ViaService
+        # constrains every use/grant of this key to the ElastiCache service in
+        # this region, and kms:CallerAccount pins it to this account. No runtime
+        # EC2/ECS role needs a direct decrypt grant: at-rest encryption is
+        # provider-owned storage encryption, distinct from the Secrets Manager
+        # CMK that protects the Redis AUTH token.
+        Sid       = "AllowPortalElastiCacheUse"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*",
+          "kms:CreateGrant",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "elasticache.${var.aws_region}.amazonaws.com"
+          }
+        }
+      },
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-redis-at-rest"
+  })
+}
+
+resource "aws_kms_alias" "redis_at_rest" {
+  name          = "alias/shifter-${var.environment}-redis-at-rest"
+  target_key_id = aws_kms_key.redis_at_rest.key_id
+}
+
 # ------------------------------------------------------------------------------
 # VPC
 # ------------------------------------------------------------------------------
@@ -224,11 +282,13 @@ resource "aws_kms_alias" "portal_s3" {
 module "vpc" {
   source = "../../../modules/portal/vpc"
 
-  name_prefix        = local.name_prefix
-  vpc_cidr           = var.vpc_cidr
-  az_count           = var.az_count
-  enable_nat_gateway = var.enable_nat_gateway
-  tags               = var.tags
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  vpc_cidr                 = var.vpc_cidr
+  az_count                 = var.az_count
+  enable_nat_gateway       = var.enable_nat_gateway
+  tags                     = var.tags
 
   # Phase 5: VPC Flow Logs
   enable_flow_logs   = var.enable_vpc_flow_logs
@@ -251,6 +311,8 @@ module "rds" {
   source = "../../../modules/portal/rds"
 
   name_prefix                = local.name_prefix
+  iam_name_prefix            = local.iam_name_prefix
+  permissions_boundary_arn   = local.ci_role_permissions_boundary_arn
   secrets_kms_key_arn        = aws_kms_key.secrets_manager.arn
   vpc_id                     = module.vpc.vpc_id
   subnet_ids                 = module.vpc.private_subnet_ids
@@ -292,6 +354,11 @@ module "alb" {
   enable_stickiness          = var.enable_autoscaling
   enable_deletion_protection = false # dev: allow intentional teardown; matches db_deletion_protection=false convention
 
+  # Long-lived connection lifecycle (#931): explicit idle timeout + portal
+  # target drain.
+  idle_timeout_seconds         = var.alb_idle_timeout_seconds
+  deregistration_delay_seconds = var.portal_deregistration_delay_seconds
+
   # Phase 5: ALB Access Logs and WAF Logging
   enable_access_logs      = var.enable_alb_access_logs
   logs_bucket_name        = var.enable_alb_access_logs ? local.alb_access_logs_bucket_name : ""
@@ -310,12 +377,29 @@ module "redis" {
   source = "../../../modules/portal/redis"
 
   name_prefix                = local.name_prefix
+  iam_name_prefix            = local.iam_name_prefix
   vpc_id                     = module.vpc.vpc_id
   subnet_ids                 = module.vpc.private_subnet_ids
   allowed_security_group_ids = [module.ec2.security_group_id]
   node_type                  = var.redis_node_type
   engine_version             = var.redis_engine_version
   enable_replication         = var.redis_enable_replication
+  apply_immediately          = var.redis_apply_immediately
+
+  # AUTH + in-transit encryption (#938): the AUTH token secret is encrypted by
+  # the portal CMK. is_active_channel_backend rejects a live channel layer on
+  # the plaintext single-node path. redis_at_rest_kms_key_arn is the dedicated
+  # data-at-rest CMK for the replication group (#1059).
+  secrets_kms_key_arn         = aws_kms_key.secrets_manager.arn
+  redis_at_rest_kms_key_arn   = aws_kms_key.redis_at_rest.arn
+  cloudwatch_logs_kms_key_arn = aws_kms_key.cloudwatch_logs.arn
+  permissions_boundary_arn    = local.ci_role_permissions_boundary_arn
+  is_active_channel_backend   = var.enable_redis
+
+  # Automatic Redis AUTH rotation (#159): only where the portal runs on a
+  # refreshable ASG, so the rotation Lambda can roll consumers to the new token.
+  enable_auth_rotation = var.enable_autoscaling
+  portal_asg_name      = module.ec2.asg_name
 
   # CloudWatch Alarms
   enable_alarms = var.alarm_email != ""
@@ -331,17 +415,25 @@ module "redis" {
 module "cognito" {
   source = "../../../modules/portal/cognito"
 
-  name_prefix           = local.name_prefix
-  environment           = var.environment
-  aws_region            = var.aws_region
-  log_retention_days    = var.log_retention_days
-  secrets_kms_key_arn   = aws_kms_key.secrets_manager.arn
-  cognito_domain_prefix = var.cognito_domain_prefix
-  callback_urls         = ["https://${var.domain_name}/oidc/callback/"]
-  logout_urls           = ["https://${var.domain_name}/"]
-  allowed_email_domains = var.allowed_email_domains
-  allowed_emails        = var.allowed_emails
-  deletion_protection   = false
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  environment              = var.environment
+  aws_region               = var.aws_region
+  log_retention_days       = var.log_retention_days
+  secrets_kms_key_arn      = aws_kms_key.secrets_manager.arn
+  cognito_domain_prefix    = var.cognito_domain_prefix
+  callback_urls            = ["https://${var.domain_name}/oidc/callback/"]
+  logout_urls              = ["https://${var.domain_name}/"]
+  allowed_email_domains    = var.allowed_email_domains
+  allowed_emails           = var.allowed_emails
+
+  # Client-secret rotation (#159): operator-triggered Lambda + scheduled email reminder.
+  portal_asg_name          = module.ec2.asg_name
+  enable_autoscaling       = var.enable_autoscaling
+  alerts_topic_arn         = aws_sns_topic.alerts.arn
+  enable_rotation_reminder = var.alarm_email != ""
+  deletion_protection      = false
 
   # Dev: longer token validity for less frequent MFA prompts
   access_token_validity_hours = 8
@@ -366,6 +458,30 @@ resource "aws_sns_topic_subscription" "alerts_email" {
   topic_arn = aws_sns_topic.alerts.arn
   protocol  = "email"
   endpoint  = var.alarm_email
+}
+
+# ------------------------------------------------------------------------------
+# Backup-Failure Alerting (#160)
+# ------------------------------------------------------------------------------
+# RDS reports backup/snapshot failures as RDS events, delivered through an RDS
+# event subscription to a CMK-encrypted SNS topic. This cannot reuse the shared
+# `aws_sns_topic.alerts` above (AWS-managed key cannot grant the RDS service
+# principal), so the module owns a dedicated CMK + topic. See
+# docs/ops/disaster-recovery.md.
+
+module "backup_alerts" {
+  source = "../../../modules/portal/backup-alerts"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  alarm_email = var.alarm_email
+
+  db_instance_identifiers = compact([
+    module.rds.db_instance_id,
+    module.guacamole.db_instance_id,
+  ])
+
+  tags = var.tags
 }
 
 # ------------------------------------------------------------------------------
@@ -434,9 +550,16 @@ module "ssm" {
   sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]
   sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
+
+  range_events_topic_id = module.messaging.sns_topic_arn
   # Redis wiring is environment-owned and decoupled from autoscaling (ADR-018, #849).
   redis_endpoint = var.enable_redis ? module.redis.redis_endpoint : ""
   enable_redis   = var.enable_redis
+  # AUTH + in-transit encryption references (#938). Non-secret: the token stays
+  # in Secrets Manager and is hydrated into REDIS_PASSWORD by entrypoint.sh.
+  redis_secret_arn = module.redis.redis_secret_arn
+  redis_tls        = module.redis.redis_tls_enabled
+  redis_ca_mode    = "system"
 
   # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
   db_host_override        = module.rds.db_instance_address
@@ -448,6 +571,21 @@ module "ssm" {
   # Email configuration
   email_backend  = var.email_backend
   ctf_from_email = var.ctf_from_email
+
+  # Portal runtime capacity tunables (#930). Worker count is sized to the
+  # instance vCPU budget; terminal caps are process-local, so the per-instance
+  # ceiling is portal_web_workers * terminal_max_sessions.
+  portal_web_workers             = var.portal_web_workers
+  terminal_max_sessions          = var.terminal_max_sessions
+  terminal_max_sessions_per_user = var.terminal_max_sessions_per_user
+  terminal_idle_timeout_seconds  = var.terminal_idle_timeout_seconds
+  terminal_max_session_seconds   = var.terminal_max_session_seconds
+  terminal_read_poll_seconds     = var.terminal_read_poll_seconds
+
+  # Portal web capacity metrics (#940). Enable flag and busy-ratio denominator
+  # are env-owned and hydrated by both first-boot user_data and SSM redeploy.
+  portal_capacity_metrics_enabled = var.portal_capacity_metrics_enabled
+  portal_worker_soft_concurrency  = var.portal_worker_soft_concurrency
 }
 
 # ------------------------------------------------------------------------------
@@ -460,23 +598,33 @@ module "ec2" {
   # Worker-container health alarm (#953) notifies the shared alerts topic.
   worker_health_alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
 
-  aws_region            = var.aws_region
-  ec2_ami_id            = var.ec2_ami_id
-  name_prefix           = local.name_prefix
-  vpc_id                = module.vpc.vpc_id
-  subnet_id             = module.vpc.private_subnet_ids[0]
-  alb_security_group_id = module.alb.security_group_id
-  instance_type         = var.ec2_instance_type
-  ecr_repository_arn    = data.terraform_remote_state.foundation.outputs.portal_ecr_arn
-  ecr_repository_url    = data.terraform_remote_state.foundation.outputs.portal_ecr_url
-  secret_arns = [
-    module.rds.db_credentials_secret_arn,
-    aws_secretsmanager_secret.app.arn,
-    module.cognito.cognito_secret_arn,
-    module.guacamole.json_auth_secret_arn,
-    module.engine_provisioner.dc_domain_password_secret_arn,
-  ]
+  aws_region               = var.aws_region
+  environment              = var.environment
+  ec2_ami_id               = var.ec2_ami_id
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  vpc_id                   = module.vpc.vpc_id
+  subnet_id                = module.vpc.private_subnet_ids[0]
+  alb_security_group_id    = module.alb.security_group_id
+  instance_type            = var.ec2_instance_type
+  ecr_repository_arn       = data.terraform_remote_state.foundation.outputs.portal_ecr_arn
+  ecr_repository_url       = data.terraform_remote_state.foundation.outputs.portal_ecr_url
+  # The Redis AUTH token secret (#938) is included only on the in-transit-
+  # encryption path; the single-node path returns "" and must not reach the IAM
+  # Resource list (an empty ARN is invalid).
+  secret_arns = concat(
+    [
+      module.rds.db_credentials_secret_arn,
+      aws_secretsmanager_secret.app.arn,
+      module.cognito.cognito_secret_arn,
+      module.guacamole.json_auth_secret_arn,
+      module.engine_provisioner.dc_domain_password_secret_arn,
+    ],
+    module.redis.redis_secret_arn != "" ? [module.redis.redis_secret_arn] : [],
+  )
   secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
+  db_resource_id              = module.rds.db_resource_id
   s3_bucket_arn               = module.s3.bucket_arn
   app_port                    = var.app_port
   root_volume_size            = var.ec2_root_volume_size
@@ -488,23 +636,42 @@ module "ec2" {
   ecs_execution_role_arn     = module.engine_provisioner.ecs_execution_role_arn
 
   # Autoscaling configuration
-  enable_autoscaling     = var.enable_autoscaling
-  subnet_ids             = module.vpc.private_subnet_ids
-  target_group_arn       = module.alb.target_group_arn
-  asg_min_size           = var.asg_min_size
-  asg_max_size           = var.asg_max_size
-  asg_desired_capacity   = var.asg_desired_capacity
-  asg_warm_pool_min_size = var.asg_warm_pool_min_size
-  asg_warm_pool_state    = var.asg_warm_pool_state
-  redis_endpoint         = var.enable_redis ? module.redis.redis_endpoint : ""
-  scale_up_threshold     = var.scale_up_threshold
-  scale_down_threshold   = var.scale_down_threshold
-  log_retention_days     = var.log_retention_days
+  enable_autoscaling      = var.enable_autoscaling
+  subnet_ids              = module.vpc.private_subnet_ids
+  target_group_arn        = module.alb.target_group_arn
+  alb_arn_suffix          = module.alb.alb_arn_suffix
+  target_group_arn_suffix = module.alb.target_group_arn_suffix
+  asg_min_size            = var.asg_min_size
+  asg_max_size            = var.asg_max_size
+  asg_desired_capacity    = var.asg_desired_capacity
+  asg_warm_pool_min_size  = var.asg_warm_pool_min_size
+  asg_warm_pool_state     = var.asg_warm_pool_state
+
+  # App-saturation autoscaling + observability (#940). Scale-out tracks ALB
+  # request-path saturation, not average EC2 CPU; alarms/dashboard notify the
+  # shared alerts topic.
+  scale_target_requests_per_target             = var.scale_target_requests_per_target
+  scale_target_response_time_seconds           = var.scale_target_response_time_seconds
+  worker_busy_ratio_scale_out_threshold        = var.worker_busy_ratio_scale_out_threshold
+  target_response_time_alarm_threshold_seconds = var.target_response_time_alarm_threshold_seconds
+  enable_portal_capacity_alarms                = var.enable_portal_capacity_alarms
+  portal_capacity_alarm_actions                = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
+
+  # Connection-lifecycle drain (#931): bounded termination drain + graceful
+  # container stop, sized below the ALB idle timeout / target drain.
+  termination_drain_timeout               = var.termination_drain_timeout
+  docker_stop_timeout                     = var.docker_stop_timeout
+  instance_refresh_min_healthy_percentage = var.instance_refresh_min_healthy_percentage
+
+  redis_endpoint     = var.enable_redis ? module.redis.redis_endpoint : ""
+  scale_up_threshold = var.scale_up_threshold
+  log_retention_days = var.log_retention_days
 
   # Messaging (SQS queues for message consumers)
   sqs_queue_arns  = values(module.messaging.sqs_queue_arns)
   sqs_queue_urls  = module.messaging.sqs_queue_urls
   sqs_kms_key_arn = module.messaging.kms_key_arn
+  s3_kms_key_arn  = aws_kms_key.portal_s3.arn
 
   # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
@@ -530,10 +697,14 @@ module "ctfd" {
 
   source = "../../../modules/portal/ctfd"
 
-  aws_region  = var.aws_region
-  name_prefix = local.name_prefix
-  vpc_id      = module.vpc.vpc_id
-  subnet_id   = module.vpc.public_subnet_ids[0]
+  aws_region               = var.aws_region
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  vpc_id                   = module.vpc.vpc_id
+  # Public-workload tier, kept out of the ALB ingress CIDR so CTFd cannot
+  # reach Django:8000 / Guacamole:8080 directly (#911 NET-2 / #933).
+  subnet_id = module.vpc.public_workload_subnet_ids[0]
 
   ami_id                 = var.ctfd_ami_id
   instance_type          = var.ctfd_instance_type
@@ -677,6 +848,8 @@ module "engine_provisioner" {
   source = "../../../modules/engine-provisioner"
 
   name_prefix                 = local.name_prefix
+  iam_name_prefix             = local.iam_name_prefix
+  permissions_boundary_arn    = local.ci_role_permissions_boundary_arn
   environment                 = var.environment
   tags                        = var.tags
   log_retention_days          = var.log_retention_days
@@ -737,6 +910,7 @@ module "engine_provisioner" {
   agent_s3_bucket_arn       = module.s3.bucket_arn
   s3_endpoint_id            = try(data.terraform_remote_state.range.outputs.s3_endpoint_id, "")
   firewall_endpoint_id      = data.terraform_remote_state.range.outputs.firewall_endpoint_id != null ? data.terraform_remote_state.range.outputs.firewall_endpoint_id : ""
+  range_egress_mode         = try(data.terraform_remote_state.range.outputs.range_egress_mode, "allowlist")
   ssm_endpoints_subnet_cidr = try(data.terraform_remote_state.range.outputs.ssm_endpoints_subnet_cidr, "")
 
   # Portal VPC configuration (for terminal SSH routing)
@@ -772,10 +946,12 @@ moved {
 module "guacamole" {
   source = "../../../modules/guacamole"
 
-  name_prefix         = local.name_prefix
-  environment         = var.environment
-  tags                = var.tags
-  secrets_kms_key_arn = aws_kms_key.secrets_manager.arn
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  environment              = var.environment
+  tags                     = var.tags
+  secrets_kms_key_arn      = aws_kms_key.secrets_manager.arn
 
   # Networking (Portal VPC)
   vpc_id                   = module.vpc.vpc_id
@@ -787,6 +963,9 @@ module "guacamole" {
   # Shared ALB (from Portal ALB module)
   alb_listener_arn      = module.alb.https_listener_arn
   alb_security_group_id = module.alb.security_group_id
+
+  # Drain in-flight RDP/SSH browser sessions on target removal (#931).
+  target_deregistration_delay_seconds = var.guacamole_deregistration_delay_seconds
 
   # ECR (from foundation remote state)
   guacd_ecr_repository_url            = data.terraform_remote_state.foundation.outputs.guacd_ecr_url
@@ -838,18 +1017,23 @@ module "guacamole" {
   depends_on = [module.vpc]
 }
 
-# ALB health checks and user traffic are routed through the portal inspection
-# boundary before they reach private targets. Source security group references
-# do not survive that middlebox path reliably, so keep those existing SG rules
-# and add CIDR-scoped ingress from only the ALB public subnet CIDRs.
+# When portal inspection is enabled, ALB health checks and user traffic reach
+# the private targets through the Network Firewall endpoint. AWS documents that
+# security-group references do not allow traffic across a routed middlebox (the
+# flow is split source->middlebox and middlebox->destination), so the inspected
+# ALB->target path needs a CIDR rule in addition to the module SG-to-SG rules.
+# That CIDR is scoped to the ALB ingress tier ONLY (`alb_ingress_subnet_cidrs`),
+# never the whole public tier: CTFd lives in the separate public-workload tier,
+# so it cannot reach Django:8000 / Guacamole:8080 directly (#911 NET-2 / #933).
+# See https://aws.amazon.com/blogs/networking-and-content-delivery/deployment-models-for-aws-network-firewall-with-vpc-routing-enhancements/
 resource "aws_security_group_rule" "portal_app_from_alb_subnets" {
   type              = "ingress"
   from_port         = var.app_port
   to_port           = var.app_port
   protocol          = "tcp"
-  cidr_blocks       = module.vpc.public_subnet_cidrs
+  cidr_blocks       = module.vpc.alb_ingress_subnet_cidrs
   security_group_id = module.ec2.security_group_id
-  description       = "HTTP from ALB public subnets through inspection"
+  description       = "HTTP from ALB ingress subnets through inspection"
 }
 
 resource "aws_security_group_rule" "guacamole_client_from_alb_subnets" {
@@ -857,9 +1041,9 @@ resource "aws_security_group_rule" "guacamole_client_from_alb_subnets" {
   from_port         = 8080
   to_port           = 8080
   protocol          = "tcp"
-  cidr_blocks       = module.vpc.public_subnet_cidrs
+  cidr_blocks       = module.vpc.alb_ingress_subnet_cidrs
   security_group_id = module.guacamole.guacamole_client_security_group_id
-  description       = "HTTP from ALB public subnets through inspection"
+  description       = "HTTP from ALB ingress subnets through inspection"
 }
 
 # ------------------------------------------------------------------------------
@@ -880,11 +1064,13 @@ module "ses" {
 module "log_aggregation" {
   source = "../../../modules/log-aggregation"
 
-  name_prefix            = local.name_prefix
-  environment            = var.environment
-  aws_region             = var.aws_region
-  log_retention_days     = var.log_retention_days
-  enable_log_aggregation = var.enable_log_aggregation
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  environment              = var.environment
+  aws_region               = var.aws_region
+  log_retention_days       = var.log_retention_days
+  enable_log_aggregation   = var.enable_log_aggregation
 
   # Phase 5: ALB and WAF logging
   enable_alb_access_logs = var.enable_alb_access_logs
@@ -928,7 +1114,9 @@ resource "aws_cloudwatch_log_group" "bedrock" {
 resource "aws_iam_role" "bedrock_logging" {
   count = var.enable_bedrock_logging ? 1 : 0
 
-  name = "${local.name_prefix}-bedrock-logging"
+  name = "${local.iam_name_prefix}-bedrock-logging"
+
+  permissions_boundary = local.ci_role_permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

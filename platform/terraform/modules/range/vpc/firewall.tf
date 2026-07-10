@@ -291,50 +291,9 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
   })
 }
 
-# ------------------------------------------------------------------------------
-# DNS Allow Rule (8.8.8.8 only)
-# ------------------------------------------------------------------------------
-
-resource "aws_networkfirewall_rule_group" "allow_dns" {
-  encryption_configuration {
-    type   = "CUSTOMER_KMS"
-    key_id = aws_kms_key.range_vpc.arn
-  }
-
-  count = var.enable_network_firewall ? 1 : 0
-
-  capacity = 10
-  name     = "${var.name_prefix}-allow-dns"
-  type     = "STATEFUL"
-
-  rule_group {
-    rule_variables {
-      ip_sets {
-        key = "HOME_NET"
-        ip_set {
-          definition = [var.vpc_cidr]
-        }
-      }
-    }
-
-    rules_source {
-      # Allow DNS to Google Public DNS only
-      # Time sync: EC2 instances can use AWS Time Sync Service at 169.254.169.123 (no firewall rule needed)
-      rules_string = <<-EOT
-        pass udp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000020; rev:1;)
-        pass tcp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000021; rev:1;)
-      EOT
-    }
-
-    stateful_rule_options {
-      rule_order = "STRICT_ORDER"
-    }
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-allow-dns"
-  })
-}
+# DNS egress is handled in dns_resolver.tf: hosts use AmazonProvidedDNS inside
+# the VPC; Route 53 Resolver DNS Firewall allowlists scenario/bootstrap suffixes
+# and blocks unknown external names. No UDP/TCP 53 egress to public resolvers.
 
 # ------------------------------------------------------------------------------
 # NTP Allow Rule (UDP 123 - required for time sync)
@@ -459,8 +418,9 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     # Priority 2-N: Victim IPs - allow HTTPS to GCP/PANW IP ranges (chunked)
     # Priority N+1: Victim domains - allow listed domains (SNI-based)
     # Priority N+2: Kali domains - allow listed domains (if configured)
-    # Priority 99: DNS allow - allow DNS to 8.8.8.8 only
+    # Priority 98: NTP allow
     # Priority 100: Drop all - drop ALL unmatched traffic (default deny)
+    # DNS: no public-resolver egress rule; see dns_resolver.tf
 
     # NGFW bypass - allow all egress for SCM/licensing (priority 1)
     dynamic "stateful_rule_group_reference" {
@@ -499,12 +459,6 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.allow_ntp[0].arn
       priority     = 98
-    }
-
-    # DNS allow - allow DNS to 8.8.8.8 (priority 99 - just before drop all)
-    stateful_rule_group_reference {
-      resource_arn = aws_networkfirewall_rule_group.allow_dns[0].arn
-      priority     = 99
     }
 
     # Drop all unmatched traffic (priority 100 - last, default deny)

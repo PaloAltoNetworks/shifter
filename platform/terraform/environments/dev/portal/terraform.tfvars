@@ -52,6 +52,17 @@ ec2_ami_id           = "ami-00e428798e77d38d9"
 ec2_instance_type    = "t3.large"
 ec2_root_volume_size = 50
 
+# Portal runtime capacity tunables (#930). t3.large has 2 vCPUs, so size the
+# Gunicorn/Uvicorn pool to 2 workers (the image default of 4 oversubscribes a
+# 2-vCPU host). Terminal caps are process-local; per-instance terminal ceiling =
+# portal_web_workers * terminal_max_sessions = 2 * 200 = 400 sessions.
+portal_web_workers             = 2
+terminal_max_sessions          = 200
+terminal_max_sessions_per_user = 10
+terminal_idle_timeout_seconds  = 1800
+terminal_max_session_seconds   = 28800
+terminal_read_poll_seconds     = 30
+
 # Standalone CTFd host in the portal VPC
 enable_ctfd                 = true
 ctfd_ami_id                 = "ami-0b0b78dcacbab728f"
@@ -121,8 +132,20 @@ asg_max_size           = 2
 asg_desired_capacity   = 1
 asg_warm_pool_min_size = 0
 asg_warm_pool_state    = "Stopped"
-scale_up_threshold     = 70
-scale_down_threshold   = 30
+scale_up_threshold     = 70 # CPU guardrail notification only (#940)
+
+# Portal app-saturation autoscaling + observability (#940). dev runs a single
+# instance (enable_autoscaling = false), so the ASG-scoped scaling policies and
+# the PortalCapacity/CPU alarms + dashboard are not created; the ALB latency/5xx/
+# rejected/unhealthy observability alarms still are. The app emitter is enabled
+# in ASG-mode environments where the capacity alarms exist, so it stays off here.
+enable_portal_capacity_alarms                = true
+portal_capacity_metrics_enabled              = false
+portal_worker_soft_concurrency               = 6
+scale_target_requests_per_target             = 1000
+scale_target_response_time_seconds           = 0.5
+worker_busy_ratio_scale_out_threshold        = 0.8
+target_response_time_alarm_threshold_seconds = 1.0
 
 # Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
 # The committed OSS baseline is single-instance and uses the in-memory channel
@@ -136,6 +159,7 @@ enable_redis = false
 redis_node_type          = "cache.t3.micro"
 redis_engine_version     = "7.1"
 redis_enable_replication = false
+redis_apply_immediately  = true
 
 # ------------------------------------------------------------------------------
 # Logging
@@ -164,7 +188,13 @@ enable_waf_logging     = true
 # Portal east-west inspection (#122)
 # ------------------------------------------------------------------------------
 
-enable_portal_inspection    = true
+# Default-off baseline (#932). Enabling inspection removes the direct
+# private->NAT default route, so a misconfigured firewall endpoint blackholes
+# egress. A deploy opts in via the TF_VARS_*_PORTAL secret (local.auto.tfvars);
+# the post-apply assertion (scripts/assert_portal_inspection) then fails the
+# deploy if the route/endpoint wiring is unhealthy instead of shipping a
+# blackhole.
+enable_portal_inspection    = false
 firewall_log_retention_days = 365
 
 # dev: allow intentional teardown; apply once with this false before destroying

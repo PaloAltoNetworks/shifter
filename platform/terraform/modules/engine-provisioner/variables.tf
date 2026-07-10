@@ -7,6 +7,12 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "iam_name_prefix" {
+  description = "Prefix for IAM role and instance profile names (defaults to name_prefix)"
+  type        = string
+  default     = null
+}
+
 variable "environment" {
   description = "Environment name (dev, prod)"
   type        = string
@@ -259,6 +265,17 @@ variable "firewall_endpoint_id" {
   default     = ""
 }
 
+variable "range_egress_mode" {
+  description = "Runtime route-table egress posture for participant subnets (bridge for shifter.yaml settings.range_egress.mode)"
+  type        = string
+  default     = "allowlist"
+
+  validation {
+    condition     = contains(["allowlist", "none"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: allowlist, none."
+  }
+}
+
 variable "ssm_endpoints_subnet_cidr" {
   description = "CIDR block of the SSM/Bedrock endpoints subnet (for NGFW routing)"
   type        = string
@@ -360,5 +377,10 @@ variable "sns_topic_arn" {
 
 variable "sns_kms_key_arn" {
   description = "ARN of the CMK used by the encrypted SNS range-events topic"
+  type        = string
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary ARN required on CI-created shifter-* roles"
   type        = string
 }

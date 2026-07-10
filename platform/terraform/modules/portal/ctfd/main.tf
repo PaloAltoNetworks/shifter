@@ -3,7 +3,9 @@ locals {
     Module = "ctfd"
   })
 
-  instance_name = "${var.name_prefix}-ctfd"
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
+  instance_name   = "${var.name_prefix}-ctfd"
+  iam_role_name   = "${local.iam_name_prefix}-ctfd"
 }
 
 resource "aws_key_pair" "this" {
@@ -18,7 +20,8 @@ resource "aws_key_pair" "this" {
 }
 
 resource "aws_iam_role" "this" {
-  name = local.instance_name
+  name                 = local.iam_role_name
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -42,7 +45,7 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 }
 
 resource "aws_iam_instance_profile" "this" {
-  name = local.instance_name
+  name = local.iam_role_name
   role = aws_iam_role.this.name
 }
 

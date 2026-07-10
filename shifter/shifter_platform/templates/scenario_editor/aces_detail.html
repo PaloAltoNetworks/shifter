@@ -1,0 +1,224 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% extends "scenario_editor/base.html" %}
+{% load i18n %}
+{% block title %}
+    {{ scenario.name }}
+{% endblock %}
+{% block content %}
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                {{ scenario.name }}
+            </h1>
+            <p class="page-subtitle">
+                <span class="text-mono">{{ scenario.id }}</span>
+                <span class="badge badge-custom">{% trans "ACES" %}</span>
+                {% if not scenario.enabled %}
+                    <span class="badge badge-disabled">{% trans "Disabled" %}</span>
+                {% endif %}
+                {% if scenario.staff_only %}
+                    <span class="badge badge-staff-only">{% trans "Staff Only" %}</span>
+                {% endif %}
+            </p>
+        </div>
+    </div>
+    <div class="card">
+        <p class="text-muted">
+            {% blocktrans %}
+                This is a read-only ACES package-backed catalog entry. Authoring, YAML
+                editing, cloning, deletion, and export are not available for ACES
+                scenarios.
+            {% endblocktrans %}
+        </p>
+    </div>
+    <!-- Package Source + Access -->
+    <div class="grid-2 mb-lg">
+        <div class="card">
+            <div class="card-title">
+                {% trans "Package Source" %}
+            </div>
+            <table class="meta-table">
+                <tr>
+                    <th scope="row" class="text-muted label-col">
+                        {% trans "Source Kind" %}
+                    </th>
+                    <td>
+                        {{ scenario.aces.source_kind }}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted">
+                        {% trans "Contract" %}
+                    </th>
+                    <td class="text-mono-sm">
+                        {{ scenario.aces.contract_kind }} / {{ scenario.aces.contract_profile }}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted">
+                        {% trans "Package" %}
+                    </th>
+                    <td class="text-mono-sm">
+                        {{ scenario.aces.package_ref }}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted">
+                        {% trans "Version" %}
+                    </th>
+                    <td class="text-mono-sm">
+                        {{ scenario.aces.package_version }}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted">
+                        {% trans "Package Digest" %}
+                    </th>
+                    <td class="text-mono-sm">
+                        {{ scenario.aces.package_digest }}
+                    </td>
+                </tr>
+                {% if scenario.aces.lock_ref %}
+                    <tr>
+                        <th scope="row" class="text-muted">
+                            {% trans "Lock" %}
+                        </th>
+                        <td class="text-mono-sm">
+                            {{ scenario.aces.lock_ref }}
+                        </td>
+                    </tr>
+                {% endif %}
+                {% if scenario.aces.lock_digest %}
+                    <tr>
+                        <th scope="row" class="text-muted">
+                            {% trans "Lock Digest" %}
+                        </th>
+                        <td class="text-mono-sm">
+                            {{ scenario.aces.lock_digest }}
+                        </td>
+                    </tr>
+                {% endif %}
+            </table>
+        </div>
+        <div class="card">
+            <div class="card-title">
+                {% trans "Access Control" %}
+            </div>
+            <table class="meta-table">
+                <tr>
+                    <th scope="row" class="text-muted label-col">
+                        {% trans "Enabled" %}
+                    </th>
+                    <td>
+                        <form method="post"
+                              action="{% url 'scenario_editor:toggle_enabled' scenario_id=scenario.id %}"
+                              class="d-inline">
+                            {% csrf_token %}
+                            {% if scenario.enabled %}
+                                <button type="submit"
+                                        class="btn btn-sm toggle-btn toggle-btn-on"
+                                        onclick="return confirm('Toggle this setting?')">
+                                    {% trans "Enabled" %}
+                                </button>
+                            {% else %}
+                                <button type="submit"
+                                        class="btn btn-sm toggle-btn toggle-btn-off"
+                                        onclick="return confirm('Toggle this setting?')">
+                                    {% trans "Disabled" %}
+                                </button>
+                            {% endif %}
+                        </form>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted">
+                        {% trans "Access" %}
+                    </th>
+                    <td>
+                        <form method="post"
+                              action="{% url 'scenario_editor:toggle_staff_only' scenario_id=scenario.id %}"
+                              class="d-inline">
+                            {% csrf_token %}
+                            {% if scenario.staff_only %}
+                                <button type="submit"
+                                        class="btn btn-sm toggle-btn toggle-btn-staff"
+                                        onclick="return confirm('Toggle this setting?')">
+                                    {% trans "Staff Only" %}
+                                </button>
+                            {% else %}
+                                <button type="submit"
+                                        class="btn btn-sm toggle-btn toggle-btn-public"
+                                        onclick="return confirm('Toggle this setting?')">
+                                    {% trans "All Users" %}
+                                </button>
+                            {% endif %}
+                        </form>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted">
+                        {% trans "Launchable" %}
+                    </th>
+                    <td>
+                        {% if scenario.launchable %}
+                            {% trans "Yes" %}
+                        {% else %}
+                            {% trans "No (review only)" %}
+                        {% endif %}
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+    <!-- Conformance -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Conformance" %}
+        </div>
+        <table class="meta-table">
+            <tr>
+                <th scope="row" class="text-muted label-col">
+                    {% trans "Status" %}
+                </th>
+                <td>
+                    {{ scenario.aces.conformance_status }}
+                </td>
+            </tr>
+            {% if scenario.aces.conformance_report_ref %}
+                <tr>
+                    <th scope="row" class="text-muted">
+                        {% trans "Report" %}
+                    </th>
+                    <td class="text-mono-sm">
+                        {{ scenario.aces.conformance_report_ref }}
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+    <!-- Provenance -->
+    {% if scenario.aces.provenance_summary %}
+        <div class="card">
+            <div class="card-title">
+                {% trans "Provenance" %}
+            </div>
+            <table class="meta-table">
+                {% for key, value in scenario.aces.provenance_summary.items %}
+                    <tr>
+                        <th scope="row" class="text-muted">
+                            {{ key }}
+                        </th>
+                        <td class="text-mono-sm">
+                            {{ value }}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </table>
+        </div>
+    {% endif %}
+    <div class="mt-lg">
+        <a href="{% url 'scenario_editor:list' %}"
+           class="btn btn-secondary">{% trans "Back to Scenarios" %}</a>
+    </div>
+{% endblock %}

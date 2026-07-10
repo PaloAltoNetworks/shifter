@@ -65,7 +65,7 @@ class TestRenderUserData:
         # to SSM Run Command; different shapes per OS.
         import re
 
-        result = _render_user_data(
+        result, host_public_key = _render_user_data(
             {"role": role, "os_type": os_type},
             hostname="target-01",
             public_key=self._PUBLIC_KEY,
@@ -79,8 +79,38 @@ class TestRenderUserData:
         if os_type == "windows":
             assert "<powershell>" in result
             assert "administrators_authorized_keys" in result
+            # Windows (cloudbase-init) has no ssh_keys module; no host key.
+            assert host_public_key == ""
         else:
-            assert result.lstrip().startswith("#!/bin/bash"), result[:80]
+            # GDC VM Runtime only accepts #cloud-config user-data; the bash
+            # provisioning script is embedded via write_files/runcmd.
+            import yaml
+
+            assert result.startswith("#cloud-config\n"), result[:80]
+            doc = yaml.safe_load(result)
+            assert doc["runcmd"] == ["/opt/shifter/gdc-user-data.sh"]
+            script = next(e["content"] for e in doc["write_files"] if e["path"].endswith("gdc-user-data.sh"))
+            assert script.startswith("#!/bin/bash")
+            # The provisioner installs a known Ed25519 host key via cloud-init
+            # and returns the matching public key for known_hosts seeding.
+            assert host_public_key.startswith("ssh-ed25519 ")
+            assert doc["ssh_keys"]["ed25519_public"].strip() == host_public_key.strip()
+            assert doc["ssh_keys"]["ed25519_private"].startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+            # The setup script also installs the host key directly and restarts
+            # sshd (robust to the cloud-init ssh module's timing); the installed
+            # key must match the seeded public key.
+            script = next(e["content"] for e in doc["write_files"] if e["path"].endswith("gdc-user-data.sh"))
+            assert "/etc/ssh/ssh_host_ed25519_key" in script
+            assert "base64 -d > /etc/ssh/ssh_host_ed25519_key" in script
+            assert "systemctl restart ssh" in script
+            import base64 as _b64
+            import re as _re
+
+            m = _re.search(r"printf %s '([A-Za-z0-9+/=]+)' \| base64 -d", script)
+            assert m, "host key install line missing"
+            installed_priv = _b64.b64decode(m.group(1)).decode()
+            assert installed_priv.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+            assert installed_priv.strip() == doc["ssh_keys"]["ed25519_private"].strip()
 
         # Negative assertions: no password value rendered. The
         # ``chpasswd_pattern`` matches ``echo "<user>:<user>" |
@@ -104,7 +134,7 @@ class TestRenderUserData:
         # what env var is present.
         monkeypatch.setenv("DC_DOMAIN_PASSWORD", "DomainPass123!")
 
-        result = _render_user_data(
+        result, _host_public_key = _render_user_data(
             {"role": "dc", "os_type": "windows"},
             hostname="dc-01",
             public_key="ssh-rsa AAAA",
@@ -132,6 +162,8 @@ class TestApplyRangeAssets:
         fake_client_module = SimpleNamespace(
             CoreV1Api=MagicMock(return_value=core_api),
             CustomObjectsApi=MagicMock(return_value=custom_api),
+            V1Secret=MagicMock(),
+            V1ObjectMeta=MagicMock(),
         )
         fake_api_exception = type("ApiException", (Exception,), {"status": 500})
         mock_access.return_value = GDCNetworkAccessConfig(
@@ -169,7 +201,10 @@ class TestApplyRangeAssets:
                     "PerInstanceP4ss!",
                 ),
             ),
-            patch("gdc_vmruntime_assets._render_user_data", return_value="<powershell>userdata</powershell>"),
+            patch("gdc_vmruntime_assets._render_user_data", return_value=("<powershell>userdata</powershell>", "")),
+            # _ensure_cloudinit_secret runs for real against the MagicMock kube
+            # client above; it create-or-patches the Secret and returns
+            # "<vm_name>-cloudinit", asserted on the VM manifest's secretRef below.
             patch("gdc_vmruntime_assets._wait_for_disk_ready"),
             patch(
                 "gdc_vmruntime_assets._wait_for_vm_ready",
@@ -223,6 +258,11 @@ class TestApplyRangeAssets:
         assert disk_body["spec"]["source"]["gcs"]["secretRef"] == "gdc-vm-image-gcs"
         assert vm_body["kind"] == "VirtualMachine"
         assert vm_body["spec"]["interfaces"][0]["ipAddresses"] == ["10.200.0.104/28"]
+        # This is a Windows VM: GDC's VM webhook forbids cloudInit on Windows
+        # guests, so no NoCloud seed is attached (the guest self-configures from
+        # the baked image and takes its static IP from the interface spec).
+        assert vm_body["spec"]["osType"] == "Windows"
+        assert "cloudInit" not in vm_body["spec"]
 
         assert result == [
             {
@@ -236,6 +276,7 @@ class TestApplyRangeAssets:
                 "instance_id": "range-42-victims-victim-1234",
                 "private_ip": "10.200.0.104",
                 "public_key": "ssh-rsa AAAA",
+                "gdc_host_public_key": "",
                 "ssh_key_secret_arn": "projects/test/secrets/range-42-victim-ssh",
                 "rdp_password_secret_arn": "projects/test/secrets/range-42-victim-rdp",
                 "gdc_rdp_password_secret_ref": "projects/test/secrets/range-42-victim-rdp",
@@ -253,6 +294,78 @@ class TestApplyRangeAssets:
         ]
 
 
+class TestEnsureCloudInitSecret:
+    """Unit coverage for the per-VM cloud-init userData Secret helper."""
+
+    @staticmethod
+    def _client_module():
+        return SimpleNamespace(
+            V1Secret=lambda metadata, type, string_data: SimpleNamespace(
+                metadata=metadata, type=type, string_data=string_data
+            ),
+            V1ObjectMeta=lambda name, namespace: SimpleNamespace(name=name, namespace=namespace),
+        )
+
+    def test_creates_secret_with_userdata_key(self):
+        from _gdc_vm_secrets import _ensure_cloudinit_secret
+
+        core_api = MagicMock()
+        api_exception = type("ApiException", (Exception,), {"status": 500})
+
+        name = _ensure_cloudinit_secret(
+            core_api,
+            self._client_module(),
+            "range-42",
+            "range-42-victims-victim-1234-cloudinit",
+            "#cloud-config\nhostname: target\n",
+            api_exception,
+        )
+
+        assert name == "range-42-victims-victim-1234-cloudinit"
+        core_api.create_namespaced_secret.assert_called_once()
+        body = core_api.create_namespaced_secret.call_args.kwargs["body"]
+        assert body.string_data == {"userData": "#cloud-config\nhostname: target\n"}
+        assert body.metadata.name == "range-42-victims-victim-1234-cloudinit"
+
+    def test_patches_existing_secret_on_conflict(self):
+        from _gdc_vm_secrets import _ensure_cloudinit_secret
+
+        api_exception = type("ApiException", (Exception,), {"status": 409})
+        core_api = MagicMock()
+        core_api.create_namespaced_secret.side_effect = api_exception()
+
+        name = _ensure_cloudinit_secret(
+            core_api,
+            self._client_module(),
+            "range-42",
+            "range-42-victims-victim-1234-cloudinit",
+            "userdata",
+            api_exception,
+        )
+
+        assert name == "range-42-victims-victim-1234-cloudinit"
+        core_api.patch_namespaced_secret.assert_called_once()
+
+    def test_reraises_non_conflict_errors(self):
+        import pytest
+
+        from _gdc_vm_secrets import _ensure_cloudinit_secret
+
+        api_exception = type("ApiException", (Exception,), {"status": 500})
+        core_api = MagicMock()
+        core_api.create_namespaced_secret.side_effect = api_exception()
+
+        with pytest.raises(api_exception):
+            _ensure_cloudinit_secret(
+                core_api,
+                self._client_module(),
+                "range-42",
+                "range-42-victims-victim-1234-cloudinit",
+                "userdata",
+                api_exception,
+            )
+
+
 class TestDestroyRangeAssets:
     @patch("gdc_vmruntime_assets._build_kube_api_client", return_value=object())
     @patch("gdc_vmruntime_assets.load_gdc_vmruntime_config")
@@ -268,6 +381,8 @@ class TestDestroyRangeAssets:
         fake_client_module = SimpleNamespace(
             CoreV1Api=MagicMock(return_value=core_api),
             CustomObjectsApi=MagicMock(return_value=custom_api),
+            V1Secret=MagicMock(),
+            V1ObjectMeta=MagicMock(),
         )
         fake_api_exception = type("ApiException", (Exception,), {"status": 500})
         mock_access.return_value = GDCNetworkAccessConfig(
@@ -338,6 +453,8 @@ class TestDestroyRangeAssets:
         fake_client_module = SimpleNamespace(
             CoreV1Api=MagicMock(return_value=core_api),
             CustomObjectsApi=MagicMock(return_value=custom_api),
+            V1Secret=MagicMock(),
+            V1ObjectMeta=MagicMock(),
         )
         fake_api_exception = type("ApiException", (Exception,), {"status": 500})
         mock_access.return_value = GDCNetworkAccessConfig(
@@ -479,3 +596,38 @@ def test_run_power_operation_stops_vm_and_waits_for_stopped(mock_access, mock_cl
         "range-42-victims-victim-1234",
         fake_api_exception,
     )
+
+
+def test_build_vm_manifest_attaches_cloudinit_only_for_linux():
+    """GDC forbids cloudInit on Windows VMs; Linux gets the NoCloud seed."""
+    from _gdc_vm_disks import _build_vm_manifest, _VMComputeSpec, _VMNetworkSpec
+
+    network = _VMNetworkSpec(network_name="range-9-core", static_ip="10.200.0.10", subnet_cidr="10.200.0.0/28")
+
+    linux = _build_vm_manifest(
+        namespace="range-9",
+        vm_name="range-9-core-attacker",
+        disk_name="range-9-core-attacker-boot",
+        user_data_secret_name="range-9-core-attacker-cloudinit",
+        labels={},
+        network=network,
+        compute=_VMComputeSpec(os_label="Linux", vcpus=2, memory="4Gi"),
+    )
+    assert linux["spec"]["cloudInit"]["noCloud"] == {"secretRef": {"name": "range-9-core-attacker-cloudinit"}}
+
+    windows = _build_vm_manifest(
+        namespace="range-9",
+        vm_name="range-9-core-dc",
+        disk_name="range-9-core-dc-boot",
+        user_data_secret_name="range-9-core-dc-cloudinit",
+        labels={},
+        network=network,
+        compute=_VMComputeSpec(os_label="Windows", vcpus=2, memory="8Gi"),
+    )
+    assert "cloudInit" not in windows["spec"]
+    assert windows["spec"]["osType"] == "Windows"
+    # Windows must boot UEFI (GCE Windows Server 2022 is UEFI/GPT; SeaBIOS can't
+    # boot it -> "No bootable device"). Linux stays on the default legacy BIOS.
+    assert windows["spec"]["firmware"]["bootloader"]["type"] == "uefi"
+    assert windows["spec"]["firmware"]["bootloader"]["enableSecureBoot"] is False
+    assert "firmware" not in linux["spec"]

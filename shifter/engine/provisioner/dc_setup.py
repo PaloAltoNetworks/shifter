@@ -16,6 +16,7 @@ from typing import Any
 from components.instance import sanitize_hostname
 from executors.base import Executor
 from executors.factory import GuestExecutionContext, build_guest_execution_context
+from log_redact import safe_log_fingerprint
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.bootstrap import BootstrapPlan
 from plans.dc_setup import DCSetupPlan
@@ -71,7 +72,7 @@ def _run_dc_bootstrap_plan(
     )
     if not bootstrap_result.success:
         raise SetupError(f"DC bootstrap failed: {bootstrap_result.error}")
-    logger.info("DC bootstrap complete for %s", instance_id)
+    logger.info("DC bootstrap complete for instance_fp=%s", safe_log_fingerprint(instance_id))
 
 
 def _configure_dc_ssh_access(
@@ -83,10 +84,13 @@ def _configure_dc_ssh_access(
 ) -> None:
     """Write the per-instance SSH authorized key onto the DC and restart sshd."""
     if not public_key:
-        logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
+        logger.warning(
+            "No public key provided for DC instance_fp=%s, SSH key auth will not work",
+            safe_log_fingerprint(instance_id),
+        )
         return
 
-    logger.info("Configuring SSH key on DC %s...", instance_id)
+    logger.info("Configuring SSH key on DC instance_fp=%s...", safe_log_fingerprint(instance_id))
     ssh_key_script = f'''
 $ErrorActionPreference = "Stop"
 $publicKey = "{public_key}"
@@ -118,7 +122,7 @@ Write-Host "SSH key configured successfully"
     if not ssh_result.success:
         logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
         return
-    logger.info("SSH key configured on DC %s", instance_id)
+    logger.info("SSH key configured on DC instance_fp=%s", safe_log_fingerprint(instance_id))
 
 
 def _verify_dc_setup(
@@ -162,7 +166,7 @@ def _install_dc_xdr(
 ) -> None:
     """Install the XDR agent on the DC, or raise per the `xdr_required` policy."""
     if agent_presigned_url:
-        logger.info("Installing XDR agent on DC %s...", instance_id)
+        logger.info("Installing XDR agent on DC instance_fp=%s...", safe_log_fingerprint(instance_id))
         xdr_plan = XDRAgentInstallPlan()
         xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
         xdr_result = orchestrator.orchestrate(
@@ -190,7 +194,7 @@ def _run_dc_setup(
     xdr_required: bool = False,
 ) -> bool:
     """Run setup for a DC instance."""
-    logger.info("DC instance %s starting setup...", instance_id)
+    logger.info("DC instance_fp=%s starting setup...", safe_log_fingerprint(instance_id))
     domain_name = dc_config.get("domain_name", "")
     netbios_name = dc_config.get("netbios_name", "")
     logger.info("Domain: %s, NetBIOS: %s", domain_name, netbios_name)
@@ -203,7 +207,7 @@ def _run_dc_setup(
     # Wait up to 30 min for the DC AMI's sysprep reboot cycles to settle.
     logger.info("Waiting for %s connectivity on DC %s...", execution.transport_name, execution.target)
     execution.wait_for_ready(timeout_seconds=1800)
-    logger.info("DC %s ready via %s", instance_id, execution.transport_name)
+    logger.info("DC instance_fp=%s ready via %s", safe_log_fingerprint(instance_id), execution.transport_name)
 
     try:
         _run_dc_bootstrap_plan(

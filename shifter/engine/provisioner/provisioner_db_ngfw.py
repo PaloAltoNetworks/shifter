@@ -155,12 +155,14 @@ def get_ngfw_data_by_request_id(request_id: str) -> dict[str, Any]:
         row = cur.fetchone()
         if not row:
             raise ValueError(f"NGFW request not found: {request_id}")
+        from cyberscript.persisted_envelope import unwrap_persisted_spec
+
         return {
             "request_id": str(row[0]),
             "instance_id": str(row[1]),
             "app_id": str(row[2]) if row[2] else None,
-            "spec": row[3] if row[3] else {},
-            "app_spec": row[4] if row[4] else {},
+            "spec": unwrap_persisted_spec(row[3] if row[3] else {}),
+            "app_spec": unwrap_persisted_spec(row[4] if row[4] else {}),
             "state": row[5] if row[5] else {},
             "status": row[6],
         }

@@ -44,6 +44,11 @@ class UserProfile(models.Model):
         db_column="active_ctf_event_id",
         help_text="Active CTF event ID for participant users",
     )
+    cognito_groups = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Cognito group names captured from verified OIDC claims at login",
+    )
     deleted_at = models.DateTimeField(null=True, blank=True)
     anonymized_at = models.DateTimeField(null=True, blank=True)
 

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from shared.cloud import PROVISIONER_CONTAINER_NAME
 from shared.cloud.exceptions import CloudTaskError
 from shared.cloud.gcp.task_runner import GCPTaskRunner
 
@@ -177,6 +178,57 @@ class TestGCPTaskRunnerRunTask:
             "tf-plugin-cache": "/home/appuser/.terraform.d/plugin-cache",
             "pulumi-home": "/home/appuser/.pulumi",
         }
+
+    def test_canonical_provisioner_job_satisfies_admission_policy(self, settings) -> None:
+        """Drift guard for issue #1177.
+
+        The ``restrict-provisioner-jobs`` ValidatingAdmissionPolicy admits a
+        provisioner-SA Job only when it is the canonical builder output: a single
+        container named ``pulumi-provisioner``, image equal to the runtime
+        ENGINE_TASK_IMAGE, ``restartPolicy: Never``, and no extra (init)
+        containers running as the privileged SA. If the builder ever diverges
+        from that shape the policy would deny legitimate provisioning, so this
+        test pins the builder to the same contract the policy enforces. The
+        manifest-side of the contract is asserted in
+        tests/platform/test_gcp_job_launcher_manifests.py.
+        """
+        settings.ENGINE_TASK_SERVICE_ACCOUNT_NAME = "provisioner"
+
+        batch_api = MagicMock()
+        batch_api.create_namespaced_job.return_value = SimpleNamespace(metadata=SimpleNamespace(name="job-1177"))
+        core_api = MagicMock()
+        client = _make_fake_k8s_client()
+
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(return_value=(batch_api, core_api, client, _ApiException))
+
+        image = "us-central1-docker.pkg.dev/test/shifter/pulumi-provisioner:sha-abc123"
+        runner.run_task(
+            task_definition=image,
+            cluster="shifter-jobs",
+            command=["range", "provision", "--range-id", "42"],
+            container_name=PROVISIONER_CONTAINER_NAME,
+        )
+
+        pod_spec = batch_api.create_namespaced_job.call_args.kwargs["body"].spec.template.spec
+        assert pod_spec.service_account_name == "provisioner"
+        assert pod_spec.restart_policy == "Never"
+        # The policy keys on a single provisioner container so no sidecar or
+        # init container can run as the SA outside the pinned image.
+        assert len(pod_spec.containers) == 1
+        container = pod_spec.containers[0]
+        assert container.name == PROVISIONER_CONTAINER_NAME
+        assert container.image == image
+        assert getattr(pod_spec, "init_containers", None) in (None, [])
+        # The builder must keep the executable surface the policy pins: it sets
+        # args only (never command, so the image entrypoint is forced), the args
+        # start with an allowed resource family, and it never uses envFrom.
+        assert getattr(container, "command", None) is None
+        assert container.args[0] in ("range", "ngfw")
+        assert getattr(container, "env_from", None) in (None, [])
+        # Volumes are all emptyDir (the policy denies secret/configMap/hostPath
+        # mounts into the privileged Pod).
+        assert all(getattr(v, "empty_dir", None) is not None for v in pod_spec.volumes)
 
     def test_provisioner_container_name_lives_in_cloud_neutral_module(self) -> None:
         """The provisioner contract is cross-provider (AWS/ECS dispatch and GCP Job

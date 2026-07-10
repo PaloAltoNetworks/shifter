@@ -1,0 +1,28 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load static i18n %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        {# Defense in depth: never leak the address-bar fragment via outbound navigations. #}
+        <meta name="referrer" content="no-referrer">
+        <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
+        <title>{% trans "Signing you in" %}</title>
+    </head>
+    <body>
+        <h2>
+            {% trans "Signing you in…" %}
+        </h2>
+        <p id="ctf-register-status" data-exchange-url="{% url 'ctf:ctf_register_exchange' %}">
+            {% trans "Validating your invitation…" %}
+        </p>
+        <noscript>
+            <p>
+                {% trans "JavaScript is required to complete sign-in. Please enable JavaScript and reload this page." %}
+            </p>
+        </noscript>
+        <script src="{% static 'js/ctf-register.js' %}" defer></script>
+    </body>
+</html>

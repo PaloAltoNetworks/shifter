@@ -1,0 +1,70 @@
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+data "aws_caller_identity" "current" {}
+
+locals {
+  name_prefix                      = "${var.environment}-range"
+  iam_name_prefix                  = "shifter-${var.environment}-range"
+  ci_role_permissions_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/shifter-${var.environment}-ci-role-boundary"
+}
+
+# ------------------------------------------------------------------------------
+# Range VPC
+# ------------------------------------------------------------------------------
+
+module "vpc" {
+  source = "../../../modules/range/vpc"
+
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  vpc_cidr                 = var.vpc_cidr
+  portal_vpc_cidr          = var.portal_vpc_cidr
+  tags                     = var.tags
+
+  # Phase 5: VPC Flow Logs
+  enable_flow_logs = var.enable_flow_logs
+
+  # Range Instance IAM
+  agent_s3_bucket = var.agent_s3_bucket
+
+  # VM-Series NGFW
+  vm_series_ami_id        = var.vm_series_ami_id
+  vm_series_instance_type = var.vm_series_instance_type
+
+  # Persistent NGFW Infrastructure
+  enable_ngfw_infrastructure = var.enable_ngfw_infrastructure
+
+  # Network Firewall IP Allowlist
+  victim_allowed_cidrs = var.victim_allowed_cidrs
+}
+
+# ------------------------------------------------------------------------------
+# Engine State Backend (S3 + DynamoDB)
+# ------------------------------------------------------------------------------
+
+module "engine_state" {
+  source = "../../../modules/engine-state"
+
+  name_prefix        = local.name_prefix
+  environment        = var.environment
+  tags               = var.tags
+  log_retention_days = var.log_retention_days
+}
+
+moved {
+  from = module.pulumi_state
+  to   = module.engine_state
+}

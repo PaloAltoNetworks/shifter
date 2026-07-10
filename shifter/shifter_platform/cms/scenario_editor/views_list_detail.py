@@ -17,6 +17,7 @@ from cms.scenario_editor.view_support import (
     render_not_found,
     render_unexpected_error,
 )
+from cms.scenarios.catalog_presentation import ACES_SCENARIO_TYPE, get_catalog_presentation
 from cms.scenarios.registry import get_scenario_detail, list_all_scenarios
 from shared.auth import threat_research_required
 from shared.log_sanitize import safe_log_value
@@ -24,6 +25,7 @@ from shared.log_sanitize import safe_log_value
 logger = logging.getLogger(__name__)
 IS_DEFAULT_CONTEXT_KEY = "is_default"
 SCENARIOS_CONTEXT_KEY = "scenarios"
+ACES_DETAIL_TEMPLATE = "scenario_editor/aces_detail.html"
 
 
 @threat_research_required
@@ -33,25 +35,39 @@ def scenario_list(request: HttpRequest) -> HttpResponse:
     return render(request, "scenario_editor/list.html", {SCENARIOS_CONTEXT_KEY: list_all_scenarios(user=None)})
 
 
+def _render_scenario_detail(request: HttpRequest, scenario_id: str) -> HttpResponse:
+    """Render ACES read-only detail or the legacy authoring detail for a scenario."""
+    presentation = get_catalog_presentation(scenario_id)
+    if presentation is not None and presentation["scenario_type"] == ACES_SCENARIO_TYPE:
+        return render(request, ACES_DETAIL_TEMPLATE, {SCENARIO_CONTEXT_KEY: presentation})
+
+    try:
+        scenario = get_scenario_detail(scenario_id)
+    except ValueError:
+        return render_not_found(request, logger, "scenario_detail_view", scenario_id)
+
+    return render(
+        request,
+        "scenario_editor/detail.html",
+        {
+            SCENARIO_CONTEXT_KEY: scenario,
+            YAML_CONTENT_CONTEXT_KEY: export_scenario_yaml(scenario_id),
+            IS_DEFAULT_CONTEXT_KEY: scenario.get(IS_DEFAULT_CONTEXT_KEY, False),
+        },
+    )
+
+
 @threat_research_required
 @require_GET
 def scenario_detail_view(request: HttpRequest, scenario_id: str) -> HttpResponse:
-    """View scenario details."""
-    try:
-        try:
-            scenario = get_scenario_detail(scenario_id)
-        except ValueError:
-            return render_not_found(request, logger, "scenario_detail_view", scenario_id)
+    """View scenario details.
 
-        return render(
-            request,
-            "scenario_editor/detail.html",
-            {
-                SCENARIO_CONTEXT_KEY: scenario,
-                YAML_CONTENT_CONTEXT_KEY: export_scenario_yaml(scenario_id),
-                IS_DEFAULT_CONTEXT_KEY: scenario.get(IS_DEFAULT_CONTEXT_KEY, False),
-            },
-        )
+    ACES package-backed entries render read-only catalog metadata; legacy YAML
+    defaults and DB customs keep the full authoring detail (YAML preview, edit,
+    clone, delete, export).
+    """
+    try:
+        return _render_scenario_detail(request, scenario_id)
     except VIEW_RECOVERABLE_EXCEPTIONS:
         return render_unexpected_error(request, logger, "scenario_detail_view", scenario_id=scenario_id)
 

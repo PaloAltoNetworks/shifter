@@ -37,5 +37,5 @@ class ManagementConfig(AppConfig):
             )
             logger.debug("Registered user profile signal handlers")
         except Exception:
-            logger.error("Failed to register user profile signal handlers")
+            logger.exception("Failed to register user profile signal handlers")
             raise

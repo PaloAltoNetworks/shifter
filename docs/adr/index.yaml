@@ -8,7 +8,7 @@
     "rules": [
       {
         "id": "ADR-001-R1",
-        "description": "Cross-layer imports must conform to scripts/check_layer_imports/layer_imports.yaml.",
+        "description": "Cross-layer imports must conform to scripts/check_layer_imports/layer_imports.yaml; service-package imports expose only the public facade (for example, cms.services), not private split-package implementation submodules such as cms.services._range_pause or from cms.services import _range_pause; only shared may import cyberscript directly.",
         "checks": ["layer-imports"]
       },
       {
@@ -35,6 +35,11 @@
         "id": "ADR-002-R1",
         "description": "Guardrail file changes must update docs/adr or the developer ADR enforcement docs in the same change.",
         "checks": ["guardrail-docs"]
+      },
+      {
+        "id": "ADR-002-R2",
+        "description": "Commit messages and tracked text must not contain AI/agent attribution markers (Co-authored-by agent lines, Cursor marketing footers, Claude Code branding, etc.).",
+        "checks": ["no-agent-attribution"]
       }
     ],
     "exceptions": [],
@@ -58,13 +63,18 @@
       },
       {
         "id": "ADR-003-R2",
-        "description": "AWS Terraform plan routing must stay scoped to Terraform-consumed files, while Quality routing must run by exclusion for pull requests and dev pushes: a dedicated quality_relevant output runs Quality unless the diff is ordinary docs-only, and guardrail docs such as .github/pull_request_template.md, .github/copilot-instructions.md, docs/adr/**, and adr-enforcement.md must remain quality-relevant. Non-deploy support/test paths such as scripts/polaris-aws-range/** and scenario-dev/polaris/tests/** must stay categorized through a dedicated quality_only filter/output without launching Terraform plans, image builds, or environment deploys. Commit-message or label-based test skips are not accepted. AWS deploy runs that can apply infrastructure must queue instead of cancelling an in-flight apply. Core, range, and platform Terraform plan and apply commands must wait for the backend state lock. Their apply jobs must create a local saved tfplan and apply that exact file instead of uploading raw binary plans as artifacts or running a fresh unplanned apply; platform Service Discovery replacement handling must inspect that same saved plan before apply. Portal application changes must keep reaching the portal image build/deploy path through the dedicated portal_image filter wired into the shifter_platform job trigger and the platform build job's portal_image_changes input, without widening the Terraform-scoped plan trigger.",
+        "description": "AWS Terraform plan routing must stay scoped to Terraform-consumed files, while Quality routing must run by exclusion for pull requests and dev pushes: a dedicated quality_relevant output runs Quality unless the diff is ordinary docs-only, and guardrail docs such as .github/pull_request_template.md, .github/copilot-instructions.md, docs/adr/**, and adr-enforcement.md must remain quality-relevant. Non-deploy support/test paths such as scripts/polaris-aws-range/** and scenario-dev/polaris/tests/** must stay categorized through a dedicated quality_only filter/output without launching Terraform plans, image builds, or environment deploys. Commit-message or label-based test skips are not accepted. AWS deploy runs that can apply infrastructure must queue instead of cancelling an in-flight apply. Core, range, and platform Terraform plan and apply commands must wait for the backend state lock. Their apply jobs must create a local saved tfplan and apply that exact file instead of uploading raw binary plans as artifacts or running a fresh unplanned apply; platform Service Discovery replacement handling must inspect that same saved plan before apply. When the saved plan deletes an aws_service_discovery_service, the pre-apply handler must drain every ECS service registered against it (scale to desiredCount=0, wait for tasks to stop and Cloud Map to deregister all instances, failing the run on timeout rather than warning), snapshot the original desired counts, and restore them after apply; restoration is mandatory because aws_ecs_service.guacd sets lifecycle.ignore_changes=[desired_count], so Terraform will not bring the service back on its own. Portal application changes must keep reaching the portal image build/deploy path through the dedicated portal_image filter wired into the shifter_platform job trigger and the platform build job's portal_image_changes input, without widening the Terraform-scoped plan trigger.",
         "checks": ["deploy-workflow-plan-scope"]
       },
       {
         "id": "ADR-003-R3",
-        "description": "Deploy-verification steps must fail the run when the thing they verify did not happen, instead of warning and exiting 0. The Guacamole stabilization wait in _shifter-platform.yml must exit 1 on timeout (raise the timeout if first boot needs longer rather than downgrading the result). The engine ECS task-definition update in _shifter-engine.yml must exit 1 when the task-definition family cannot be described, with the only skip gated on the explicit first_deploy bootstrap input (surfaced as the aws_first_deploy workflow_dispatch input in deploy.yml, strict by default and settable only on manual dispatch).",
+        "description": "Deploy-verification steps must fail the run when the thing they verify did not happen, instead of warning and exiting 0. The Guacamole stabilization wait in _shifter-platform.yml must exit 1 on timeout (raise the timeout if first boot needs longer rather than downgrading the result). The engine ECS task-definition update in _shifter-engine.yml must exit 1 when the task-definition family cannot be described, with the only skip gated on the explicit first_deploy bootstrap input (surfaced as the aws_first_deploy workflow_dispatch input in deploy.yml, strict by default and settable only on manual dispatch). After portal deploy, the Verify job in _shifter-platform.yml must fail when portal ALB target health, /health/, Guacamole ECS rollouts, Guacamole target health, or /guacamole/ smoke probes are not satisfied; scripts/portal_deploy/portal_deploy.py verify-post-deploy must treat a non-ACTIVE Guacamole cluster as failure when Guacamole outputs are present.",
         "checks": ["deploy-verification-fail-loud"]
+      },
+      {
+        "id": "ADR-003-R6",
+        "description": "After successful AWS dev portal deploy verification, _shifter-platform.yml may run an advisory post-deploy range smoke job (post-deploy-smoke) that executes scripts/smoke-test.sh via scripts/portal_deploy/portal_deploy.py run-manage-on-portal. The job must remain dev-only (inputs.is_dev), continue-on-error so deploy success is not blocked, request issues: write only for failure issue creation, and declare SMOKE_* secrets on the reusable workflow. Long-running portal manage commands must poll SSM command status until the requested timeout rather than relying on the fixed-limit aws ssm wait command-executed waiter.",
+        "checks": ["deploy-verification-fail-loud", "deploy-workflow-runner-exposure"]
       },
       {
         "id": "ADR-003-R4",
@@ -137,7 +147,7 @@
       },
       {
         "id": "ADR-004-R8",
-        "description": "Generated and pre-staging sensitive artifacts must not be tracked in source: Terraform plan outputs (tfplan, tfplan.binary, plan.out, *.tfplan) under platform/terraform/environments/ and platform/terraform/gcp/environments/, Polaris range build output under scenario-dev/polaris/build/, and license/authcode bootstrap material (authcodes, *.authcodes) under temp/bootstrap/. The blocked path/name set is centralized in scripts/adr_guard/adr_guard.py; the guardrail fails closed and emits repo-relative paths only, never file contents.",
+        "description": "Generated and pre-staging sensitive artifacts must not be tracked in source: Terraform plan outputs (tfplan, tfplan.binary, plan.out, *.tfplan) under platform/terraform/environments/ and platform/terraform/gcp/environments/, Polaris range build output under scenario-dev/polaris/build/, Polaris AWS operator run outputs (provisioning_state.json, provisioning_status.md, health_report.md, postprovision_status.md) under scripts/polaris-aws-range/, and license/authcode bootstrap material (authcodes, *.authcodes) under temp/bootstrap/. The blocked path/name set is centralized in scripts/adr_guard/adr_guard.py; the guardrail fails closed and emits repo-relative paths only, never file contents.",
         "checks": ["no-tracked-generated-artifacts"]
       },
       {
@@ -159,6 +169,46 @@
         "id": "ADR-004-R12",
         "description": "First-party AWS RDS DB instances under `platform/terraform/modules/portal/rds/main.tf` and `platform/terraform/modules/guacamole/rds.tf` MUST keep `iam_database_authentication_enabled = true` and MUST explicitly set `ca_cert_identifier` to a non-empty expression. Checkov covers IAM authentication through CKV_AWS_161, but CKV_AWS_211 currently passes when the CA attribute is absent; the repo-native `scripts/check_tf_rds_security/check_tf_rds_security.py` checker closes that gap. The checker is wired as the `check-tf-rds-security` pre-commit hook and a CI step in `.github/workflows/_quality.yml`, and its unittest suite is included in the `check_tf_*` checker tests.",
         "checks": []
+      },
+      {
+        "id": "ADR-004-R13",
+        "description": "Portal target-service security groups MUST NOT admit ingress from the whole public subnet tier. Every `aws_security_group_rule` ingress in `platform/terraform/environments/{dev,prod}/portal/main.tf` whose `security_group_id` is the Django EC2 SG (`module.ec2.security_group_id`) or the Guacamole client SG (`module.guacamole.guacamole_client_security_group_id`) MUST source either from a security-group reference (`source_security_group_id`, the preferred posture on the inspection-off path) or from the ALB-only `module.vpc.alb_ingress_subnet_cidrs` output. `module.vpc.public_subnet_cidrs`, `module.vpc.public_workload_subnet_cidrs`, or any other CIDR source is rejected because those tiers contain or may contain workloads other than the ALB (the standalone CTFd instance lives in the public-workload tier). AWS Network Firewall breaks SG referencing across the routed inspection middlebox, so the inspected ALB->target path legitimately needs a CIDR rule; scoping it to the ALB-only tier keeps CTFd fenced off Django:8000 / Guacamole:8080 while preserving the inspection path. Backstops the #911 NET-2 / #933 segmentation regression where the CIDR rule was scoped to `public_subnet_cidrs` and gave CTFd direct L4 reach past the ALB/WAF/`/admin` deny. The checker is `scripts/check_portal_target_sg_sources/check_portal_target_sg_sources.py`, wired as the `check-portal-target-sg-sources` pre-commit hook and a CI step in `.github/workflows/_quality.yml`, with its unittest suite included in the `check_tf_*` checker tests.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R14",
+        "description": "Tracked files MUST NOT contain live AWS infrastructure identifiers: 12-digit AWS account IDs, VPC IDs (`vpc-<hex>`), subnet IDs (`subnet-<hex>`), or Shifter S3 bucket names that are account-ID-suffixed (`shifter-...-<12 digits>`) or UUID-suffixed infra/state buckets (`shifter-[dev-]infra-<uuid>`). These are low-entropy but reconnaissance-sensitive in a public repo and are not caught by gitleaks (which targets high-entropy secrets); this is the complementary backstop. Detection is by pattern in the centralized `no-live-cloud-identifiers` check in `scripts/adr_guard/adr_guard.py`, never by a denylist of real values. The allowlist is a small fixed set of 12-digit runs that are not Shifter accounts: AWS documentation example account IDs (123456789012, 111122223333), the all-zero placeholder, and public AMI-publisher account IDs (Canonical 099720109477, OffSec/Kali 679593333241). Placeholder and example forms (`vpc-xxxxxxxx`, `<your-account-id>`) are not matched because the patterns require hex / 12 literal digits, so there is no universal `<...>` wildcard a real value can hide behind. Real values that MUST stay committed are cleared via scoped `docs/adr/exceptions.yaml` entries with `rule_id: ADR-004-R14`, owner, reason, `expires_on`, and `paths`: vendor connector templates under `platform/cloudformation/` (Prisma Cloud account IDs must be exact), S3 backend/state buckets read directly by `terraform init` (`*.s3.tfbackend`, `platform/terraform/global/tssummit-ranges/*`, the remote-state data sources in `platform/terraform/environments/*/portal/main.tf`, and the operational state-bucket map in `mcp/ops/index.js`), and synthetic 12-digit PAN firewall serial-number fixtures in `shifter/engine/provisioner/tests/test_main.py`. `.lock` files and binary assets are skipped. Violation messages name the repo-relative path, line, and identifier kind only — never the value. Dependency lock files and binary assets are not scanned. The check runs at the `fast` and `ci` levels and is wired into `.pre-commit-config.yaml` and `.github/workflows/_quality.yml`. Closes the #911 SEC-2 / NET-10 / DP-7 identifier-strip gap and blocks reintroduction.",
+        "checks": ["no-live-cloud-identifiers"]
+      },
+      {
+        "id": "ADR-004-R15",
+        "description": "Committed Terraform under `platform/terraform/` must not ship operational placeholders in `.tf` sources: hardcoded `YOUR_EMAIL@example.com` budget-alert recipients, `subscriber_email_addresses` literals pointing at `@example.com`, or a managed `AdministratorAccess` attachment on the GitHub Actions OIDC role in `platform/terraform/global/iam/github-oidc.tf`. Real alert recipients belong in gitignored `local.auto.tfvars` or the per-environment `TF_VARS_<ENV>_CORE` / `TF_VARS_<ENV>_PORTAL` deploy secrets; CI OIDC permissions stay on scoped policies. Enforced by `no-terraform-operational-placeholders` and `github-oidc-no-admin-access` in `scripts/adr_guard/adr_guard.py` at the `fast` and `ci` levels.",
+        "checks": ["no-terraform-operational-placeholders", "github-oidc-no-admin-access"]
+      },
+      {
+        "id": "ADR-004-R16",
+        "description": "Mission Control runtime code MUST NOT contain hardcoded CTF challenge flag literals. The `no-mission-control-flag-literals` check in `scripts/adr_guard/adr_guard.py` scans the `shifter/shifter_platform/mission_control/` package (all runtime; its tests live under `shifter/shifter_platform/tests/mission_control/`, outside scope) and the `shifter/shifter_platform/templates/mission_control/` template tree (covering inline `<script>` JavaScript) for answer-shaped `FLAG{...}` literals (case-insensitive). Detection is by pattern, never by a denylist of real values. Format-hint placeholders that describe the answer shape rather than carry one are intentionally NOT flagged: an empty body (`FLAG{}`), the ellipsis form (`FLAG{...}`), and angle-bracket templates (`FLAG{<16-hex>}`). The path scope deliberately excludes tests, docs, the native `ctf` app (`CTFChallenge`/`CTFFlag` and `ctf.services`/templates, where `FLAG{...}` is a documented format hint), and Polaris scenario content under `scenario-dev/polaris/`, where flags are legitimate challenge content. Challenge answers belong to the CTF/CTFd content domain, not the Mission Control application path. CTF flags are low-entropy and are not caught by gitleaks (which targets high-entropy secrets); this is the complementary repo-specific backstop. Violation messages name the repo-relative path and line only — never the matched value. The check runs at the `fast` and `ci` levels via the existing `python3 scripts/adr_guard/adr_guard.py --all --level ci` invocation in pre-commit and `.github/workflows/_quality.yml`. Closes the #560 regression gap (the `box_info` literal-flag map removed during the mission_control views package split) and blocks reintroduction.",
+        "checks": ["no-mission-control-flag-literals"]
+      },
+      {
+        "id": "ADR-004-R17",
+        "description": "The shared range *guest* instance role (`aws_iam_role.range_instance` in `platform/terraform/modules/range/vpc/iam.tf`) MUST NOT be granted SSM Parameter Store access on a Resource that wildcards across the environment or range segment. Specifically, any `aws_iam_role_policy`/`aws_iam_policy` attached to a range-instance role whose statement carries an SSM parameter action (`ssm:PutParameter`/`GetParameter`/`GetParameters`/`GetParametersByPath`/`GetParameterHistory`/`DeleteParameter`/`DeleteParameters`/`LabelParameterVersion`, or a wildcard such as `ssm:*`/`ssm:Get*` covering them) MUST NOT use a Resource matching `parameter/shifter/*/range/...` (environment wildcard), `parameter/shifter/<env>/range/*` that is not bound to a concrete `${var.range_id}`/`${range_id}` token (range wildcard), or a full `*` Resource (which covers every environment and range). The checker is fail-closed for the all-wildcard shapes: a full wildcard `Action = \"*\"` is treated as granting SSM parameter access, and a full wildcard `Resource = \"*\"` is a violation, so a broad statement cannot slip past by omitting the literal `ssm:` action or `parameter/shifter` ARN. A correctly range-scoped grant `parameter/shifter/<env>/range/${var.range_id}/*` is allowed. The provisioner orchestrator role (`aws_iam_role.ecs_task` in `platform/terraform/modules/engine-provisioner/iam.tf`) legitimately holds an env-scoped `parameter/shifter/${var.environment}/range/*` grant and is NOT a range-instance role, so it is not inspected. Range guests do not use their instance role for Parameter Store at all: all range SSM access is brokered by the engine provisioner via Run Command (`{{ssm-secure:<name>}}` substitution and provisioner-side `ssm:GetParameter`), so a direct guest-role grant is both over-broad and unnecessary. Backstops the cross-tenant credential-access exposure resolved by #1178 (the role previously granted SSM Put/Get/Delete on `parameter/shifter/*/range/*`, wildcarded across every environment and range) and blocks reintroduction. Implemented in `scripts/check_tf_iam_ssm_range_scope/check_tf_iam_ssm_range_scope.py`, wired as the `check-tf-iam-ssm-range-scope` pre-commit hook and a CI step in `.github/workflows/_quality.yml`, with its unittest suite included in the `check_tf_*` checker tests. Currently scoped to `platform/terraform/modules/range/vpc/iam.tf`; expand the hook's `files:` regex and the CI invocation when another module defines a range-instance role.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R18",
+        "description": "The GitHub Actions OIDC deploy role in `platform/terraform/global/iam/github-oidc.tf` MUST keep its managed-policy attachments consolidated by AWS service category and at or below 6 `aws_iam_role_policy_attachment` resources, preserving headroom under AWS's hard limit of 10 managed policies per role. A new AWS service surface MUST be added by extending one of the existing category policies (`compute`, `networking`, `data`, `security`, `management`), not by adding another attachment. The cap is enforced by `scripts/check_tf_iam_role_naming/check_tf_iam_role_naming.py` (`OIDC_ATTACHMENT_CAP`), wired as the `check-tf-iam-role-naming` pre-commit hook, with its unittest suite included in the `check_tf_*` checker tests. The same checker preserves the deploy-role naming seam (`role/shifter-*`), the `iam:AttachRolePolicy` `iam:PolicyArn` allowlist, and the OIDC `iam_scoped` trust scoping. Consolidation moves IAM statements between category policies without broadening scopes or conditions; the migration uses `moved` blocks so existing environments replace attachment addresses in place (destroy-before-create) and never exceed 10 attachments mid-apply. Established by #254 when the role's 10 by-service policies were consolidated into 5 by-category policies.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R19",
+        "description": "Because the GitHub Actions OIDC deploy role consolidates many AWS services into 5 category managed policies (ADR-004-R18), each category policy document MUST stay under AWS's hard limit of 6,144 characters for a customer-managed policy, so a category can be extended with new deploy verbs without the deploy hitting `LimitExceeded` at apply time. The limit is enforced by `scripts/check_tf_iam_role_naming/check_tf_iam_role_naming.py` (`OIDC_POLICY_DOC_LIMIT`, `check_github_oidc_policy_doc_size`), wired as the `check-tf-iam-role-naming` pre-commit hook, with its unittest suite included in the `check_tf_*` checker tests. The checker measures the whitespace-stripped HCL of each `aws_iam_policy` block, a conservative over-estimate of the rendered JSON because the `${...account_id}`/`${...aws_region}` interpolations are longer than the values they render to, so a passing check guarantees the rendered document is also under the limit. When a category approaches the limit it MUST be compacted or split rather than allowed to overflow. Established by #254 when the by-category policies were extended to cover the full platform deploy surface under least privilege.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R20",
+        "description": "The self-hosted GitHub Actions deploy runner defined in `platform/terraform/global/github-runner/main.tf` MUST fail closed on account-default-VPC placement by default. A range's `private_dns_enabled` interface VPC endpoints override service hostnames for the entire VPC, so a range sharing the runner's VPC can hijack the runner's AWS API resolution and black-hole CI (the ~107-minute wedge that #1220's `timeout-minutes` only backstops). The preferred placements are a dedicated runner VPC or the portal VPC private tier, selected via the operator-supplied `var.vpc_id` / `var.subnet_id` (live `vpc-*`/`subnet-*` IDs are never committed, per ADR-004-R14). Enforcement is fail-closed at plan/apply time: the stack resolves the account default VPC via `data.aws_vpcs.default` and an `aws_security_group.runner` `lifecycle.precondition` rejects a resolved runner VPC (`local.runner_vpc_id`) matching it, with a second precondition rejecting a runner subnet that does not belong to that VPC. An explicit, documented opt-in escape hatch `var.allow_default_vpc` (default `false`, so the guard stays fail-closed for everyone who does not set it) permits default-VPC placement where the range private-DNS collision risk is knowingly accepted; when set with empty `var.vpc_id`/`var.subnet_id` the stack auto-resolves the default VPC and one of its subnets so no live IDs are committed. aws-dev and aws-proof set it `true` today; the durable placement design (keep default VPC vs. build reproducible isolated placement) is being reassessed in #1437. The presence of the guard is pinned by `scripts/check_tf_runner_network/check_tf_runner_network.py`, wired as the `check-tf-runner-network` pre-commit hook and the matching `_quality.yml` step, with its unittest suite included in the `check_tf_*` checker tests, so the precondition cannot be silently removed. Established by #1222; opt-in escape hatch added by #1425.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -173,6 +223,11 @@
       "scripts/adr_guard/adr_guard.py",
       "scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py",
       "scripts/check_tf_rds_security/check_tf_rds_security.py",
+      "scripts/check_tf_iam_ssm_range_scope/check_tf_iam_ssm_range_scope.py",
+      "scripts/check_portal_target_sg_sources/check_portal_target_sg_sources.py",
+      "scripts/check_tf_iam_role_naming/check_tf_iam_role_naming.py",
+      "scripts/check_tf_runner_network/check_tf_runner_network.py",
+      "scripts/check_checkov_invocation_parity/check_checkov_invocation_parity.py",
       "platform/terraform/.checkov.yaml",
       "docs/adr/exceptions.yaml",
       "docs/architecture/checkov-soft-fail-preflight-757.md",
@@ -240,6 +295,11 @@
         "id": "ADR-006-R3",
         "description": "Each Shifter Kubernetes namespace must have a default-deny NetworkPolicy covering both ingress and egress, and Shifter NetworkPolicies must use explicit service CIDRs instead of broad internet egress ranges.",
         "checks": ["k8s-network-policy-coverage"]
+      },
+      {
+        "id": "ADR-006-R4",
+        "description": "Creation of Jobs running as the privileged provisioner service account in the shifter-jobs namespace must be gated by a ValidatingAdmissionPolicy (present and byte-identical in platform/k8s/gcp/base/ and the helm-rendered output of platform/charts/shifter). The policy must deny such Jobs unless they mirror the full canonical GCPTaskRunner contract: submitted by the workers service account, single container named pulumi-provisioner, pinned ENGINE_TASK_IMAGE, no command (entrypoint) override, a range/ngfw command family, no envFrom, emptyDir-only volumes, the read-only/non-root/drop-ALL container security context, and restartPolicy Never. Pinning only the image is insufficient because the caller could keep the image and override the executable fields. RBAC cannot constrain serviceAccountName and the restricted PSS profile does not pin serviceAccountName, image, or command. Enforced at runtime by the cluster and in CI by the structural invariant tests.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -248,6 +308,9 @@
       "platform/k8s/gcp/base/namespaces.yaml",
       "platform/k8s/gcp/base/networkpolicies.yaml",
       "platform/charts/shifter/templates/networkpolicies.yaml",
+      "platform/k8s/gcp/base/validatingadmissionpolicy-provisioner-jobs.yaml",
+      "platform/charts/shifter/templates/validatingadmissionpolicy-provisioner-jobs.yaml",
+      "shifter/shifter_platform/tests/platform/test_gcp_job_launcher_manifests.py",
       ".kube-linter.yaml",
       ".pre-commit-config.yaml",
       "scripts/adr_guard/adr_guard.py",
@@ -710,8 +773,7 @@
       "shifter/shifter_platform/entrypoint.sh",
       "shifter/shifter_platform/locale/en/LC_MESSAGES/django.po",
       "shifter/shifter_platform/tests/config/test_i18n_configuration.py",
-      "shifter/shifter_platform/templates",
-      "shifter/shifter_platform/cms/experiments/templates"
+      "shifter/shifter_platform/templates"
     ]
   },
   {
@@ -719,7 +781,7 @@
     "title": "Range network egress is a platform-level policy, applied uniformly on AWS and GCP",
     "status": "accepted",
     "scope": "repository",
-    "decision": "Range egress is configured once at the platform level (`settings.range_egress` in shifter.yaml) and applied uniformly across supported cloud backends. The configuration shape is provider-neutral (`mode` + `allowed_cidrs`), validated by shifter/installation/range_egress.py, and bridged into AWS Network Firewall rule groups (platform/terraform/modules/range/vpc/firewall.tf) and GCP VPC firewall egress rules (platform/terraform/gcp/modules/platform-core/main.tf). The default mode (`status-quo`) preserves each backend's existing posture so the policy is opt-in. CIDRs are operator configuration, not secrets, but the per-deployment allowlist values live in gitignored `local.auto.tfvars` overrides — the committed Terraform baseline carries an empty allowlist so the repo is OSS-publishable without exposing any operator's allowlist (PLAT-220, #775).",
+    "decision": "Range egress is configured once at the platform level (`settings.range_egress` in shifter.yaml) and applied uniformly across supported cloud backends. The configuration shape is provider-neutral (`mode` + `allowed_cidrs`), validated by shifter/installation/range_egress.py, and bridged into AWS Network Firewall rule groups (platform/terraform/modules/range/vpc/firewall.tf) and GCP VPC firewall egress rules (platform/terraform/gcp/modules/platform-core/main.tf). The default mode (`status-quo`) preserves each backend's existing posture so the policy is opt-in. CIDRs are operator configuration, not secrets, and per-deployment values must not be committed; follow-up #958 closes the remaining drift by requiring provider-specific Terraform bridge inputs to be rendered from the validated root policy instead of hand-maintained as a second allowlist copy.",
     "rules": [
       {
         "id": "ADR-017-R1",
@@ -728,12 +790,17 @@
       },
       {
         "id": "ADR-017-R2",
-        "description": "Per-deployment range egress allowlist values must not be committed to the repository. Operators write the values into a gitignored `local.auto.tfvars` (or any `*.auto.tfvars.local`) alongside the env's `terraform.tfvars`; the committed Terraform baseline ships an empty allowlist. `.gitignore` blocks the prior committed forms (`victim_allowed_cidrs*.auto.tfvars`, `range_egress*.auto.tfvars`) from being re-introduced.",
+        "description": "Per-deployment range egress allowlist values must not be committed to the repository. Provider bridge values live only in gitignored deployment override files such as `local.auto.tfvars` (or any `*.auto.tfvars.local`) alongside the env's `terraform.tfvars`; the committed Terraform baseline ships an empty allowlist. `.gitignore` blocks the prior committed forms (`victim_allowed_cidrs*.auto.tfvars`, `range_egress*.auto.tfvars`) from being re-introduced.",
         "checks": ["no-plaintext-secrets-in-tfvars"]
       },
       {
         "id": "ADR-017-R3",
         "description": "Default behavior when `settings.range_egress` is omitted (or `mode: status-quo`) is documented per backend: AWS retains the existing Network Firewall posture (enabled by default, deny-all with documented allow lanes); GCP retains its existing Cloud NAT egress (no enforcement). `mode: deny-all` and `mode: allowlist` apply the documented platform contract uniformly on both clouds (deny-all base on the range VPC; HTTPS allow on TCP 443 to the operator-declared CIDRs).",
+        "checks": []
+      },
+      {
+        "id": "ADR-017-R4",
+        "description": "Deploy-time or local renderer paths for range egress must consume the normalized `settings.range_egress` policy from `shifter/installation/range_egress.py` / `load_root_config` and render provider-specific Terraform bridge variables from that policy. Operators must not maintain a separate CIDR allowlist copy in both root config and tfvars; provider variables remain internal and Terraform validation remains a direct-use backstop.",
         "checks": []
       }
     ],
@@ -757,6 +824,7 @@
       "platform/terraform/gcp/environments/gcp-dev/main.tf",
       "platform/terraform/gcp/environments/gcp-dev/terraform.tfvars",
       "docs/architecture/range-egress-ip-allowlist.md",
+      "docs/architecture/range-egress-allowlist-render-preflight-958.md",
       "docs/dev/deploy-secrets.md",
       ".gitignore"
     ]
@@ -824,6 +892,517 @@
       "scripts/adr_guard/tests/test_adr_guard.py",
       "docs/adr/README.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md"
+    ]
+  },
+  {
+    "id": "ADR-020",
+    "title": "Range internet isolation is enforced by routing and Network Firewall default-deny, not security-group egress",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "All concurrent per-user ranges share one stable range VPC, each range in its own ephemeral subnet. Range network isolation splits responsibility across two layers by design: per-subnet security groups (`aws_security_group.subnet` in shifter/engine/provisioner/terraform/modules/range/main.tf) own local L4 reachability and gate only ingress (the subnet's own CIDR, `connected_to` peers, and portal SSH/RDP), while the route table plus AWS Network Firewall own internet egress containment. The security groups intentionally allow all egress (`0.0.0.0/0`, protocol -1) because security groups cannot express the domain/SNI allowlists, direct-IP-SNI rejection, and all-protocol default-deny the range needs; encoding a partial egress allowlist there would be redundant with and weaker than the firewall. The all-egress security group is acceptable only because every range route table sends `0.0.0.0/0` to the firewall endpoint (`aws_route.private_to_firewall` in platform/terraform/modules/range/vpc/firewall.tf; runtime `aws_route.firewall`) and the firewall STRICT_ORDER policy drops all unmatched egress at priority 100 (`drop_all`), with narrow allow lanes for victim IPs/domains, DNS to 8.8.8.8, and NTP. Blast radius: a compromised range host cannot reach another range (target security-group ingress denies it) and cannot reach the internet except through the firewall's allowlisted lanes. Cross-range and participant internet isolation therefore relies on the Network Firewall default-deny, not on security groups (review finding NET-7). The rationale and live model are recorded in docs/architecture/range-isolation-model.md; the configurable egress allowlist layered on this base is ADR-017.",
+    "rules": [
+      {
+        "id": "ADR-020-R1",
+        "description": "Per-range security groups gate ingress only (own subnet CIDR, `connected_to` peers, and portal SSH/RDP) and intentionally allow all egress. Security groups must not be documented or relied upon as the control for range internet-egress isolation.",
+        "checks": []
+      },
+      {
+        "id": "ADR-020-R2",
+        "description": "Range internet-egress isolation is owned by the route table (user-subnet `0.0.0.0/0` to the firewall endpoint) plus the AWS Network Firewall STRICT_ORDER default-deny (`drop_all`, priority 100). The all-egress security groups are acceptable only while that route-table-to-firewall path and default-deny remain intact; weakening either is a security-posture change requiring a matching ADR update.",
+        "checks": []
+      },
+      {
+        "id": "ADR-020-R3",
+        "description": "`enable_network_firewall = false` routes user subnets straight to NAT (`aws_route.private_to_nat`) and removes the default-deny, leaving the all-egress security groups unrestricted; it is an explicit dev-only opt-out. Making the firewall optional in any production profile requires its own ADR and guardrail.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy"],
+    "evidence": [
+      "shifter/engine/provisioner/terraform/modules/range/main.tf",
+      "platform/terraform/modules/range/vpc/main.tf",
+      "platform/terraform/modules/range/vpc/firewall.tf",
+      "platform/terraform/modules/range/vpc/nat.tf",
+      "docs/architecture/range-isolation-model.md",
+      "docs/architecture/range-egress-ip-allowlist.md"
+    ]
+  },
+  {
+    "id": "ADR-021",
+    "title": "Range placement is single-AZ; multi-AZ is deferred",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "The stable range VPC and every concurrent range placed in it are pinned to a single availability zone, the first AZ the account exposes (`local.primary_az = data.aws_availability_zones.available.names[0]` in platform/terraform/modules/range/vpc/nat.tf). The NAT, firewall, persistent-NGFW, and SSM-endpoint subnets are placed in that AZ; the AZ is published as the module `availability_zone` output, bound into the provisioner as `RANGE_AVAILABILITY_ZONE` (platform/terraform/modules/engine-provisioner/task_definition.tf, shifter/engine/provisioner/config.py), and applied to runtime range subnets and instances (shifter/engine/provisioner/terraform/modules/range/main.tf). `ec2:RunInstances` is IAM-constrained to that AZ (platform/terraform/modules/engine-provisioner/iam.tf). This is a deliberate cost-and-simplicity decision for ephemeral ranges: one NAT Gateway and one firewall endpoint serve all ranges, inter-AZ data-transfer charges are avoided, and routing/endpoint placement stays single-target. It accepts a concentrated failure domain (a single-AZ impairment takes out all concurrent ranges) and a capacity ceiling bounded by one AZ. Explicit decision: multi-AZ range placement is not warranted now (review finding NET-8); it is revisited if ranges gain non-reprovisionable durable state, an availability SLO is placed on individual active ranges, or one AZ's capacity becomes the binding constraint. The rationale, trade-offs, and future placement seam are recorded in docs/architecture/range-single-az-placement.md.",
+    "rules": [
+      {
+        "id": "ADR-021-R1",
+        "description": "The range VPC and all concurrent ranges are placed in a single availability zone, selected once as the account's first AZ and propagated through the `availability_zone` output, `RANGE_AVAILABILITY_ZONE`, and the `ec2:AvailabilityZone` IAM condition. This is the accepted posture for ephemeral ranges and trades availability and per-AZ capacity for cost and simplicity.",
+        "checks": []
+      },
+      {
+        "id": "ADR-021-R2",
+        "description": "Multi-AZ range placement is deferred. If later warranted it must be introduced as an explicit placement contract -- an environment-owned ordered zone list, a per-range placement selector feeding both stable and runtime modules, and a deterministic per-AZ egress target (firewall endpoint per AZ) so the ADR-020 default-deny holds in every AZ -- not as an ad-hoc `multi_az` boolean or a stray `data.aws_availability_zones` lookup in the runtime module.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy"],
+    "evidence": [
+      "platform/terraform/modules/range/vpc/nat.tf",
+      "platform/terraform/modules/range/vpc/outputs.tf",
+      "platform/terraform/modules/engine-provisioner/task_definition.tf",
+      "platform/terraform/modules/engine-provisioner/iam.tf",
+      "shifter/engine/provisioner/config.py",
+      "shifter/engine/provisioner/terraform_vars.py",
+      "shifter/engine/provisioner/terraform/modules/range/main.tf",
+      "docs/architecture/range-single-az-placement.md"
+    ]
+  },
+  {
+    "id": "ADR-022",
+    "title": "Major platform features carry user and technical documentation",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "GEN-001 is enforced by a repo-native documentation coverage manifest plus an adr_guard check. Each major platform feature is enumerated in docs/adr/documentation-coverage.yaml with at least one user doc and one technical doc; the documentation-coverage check validates that every referenced doc exists under the in-app docs tree, is not under a _deprecated/hidden path, and is reachable from an index.md. 'Major platform feature' is an issue/PR classification recorded in the manifest, not a runtime model; the check enforces documentation existence and discoverability, not prose depth (that stays a review concern).",
+    "rules": [
+      {
+        "id": "ADR-022-R1",
+        "description": "Every feature in docs/adr/documentation-coverage.yaml must declare at least one user doc and at least one technical doc. Each referenced doc must exist under the manifest's docs_root, must not live under a _deprecated or hidden path, and must be linked from an index.md so it is discoverable. The check validates the whole manifest on every run regardless of the changed-file set.",
+        "checks": ["documentation-coverage"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "agent-policy"],
+    "evidence": [
+      "docs/adr/documentation-coverage.yaml",
+      "scripts/adr_guard/adr_guard.py",
+      "scripts/adr_guard/tests/test_adr_guard.py",
+      "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md"
+    ]
+  },
+  {
+    "id": "ADR-025",
+    "title": "Range events use transactional outbox and authoritative reconciliation for durable delivery",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "PostgreSQL is the authoritative state store for range, request, and instance state. Range events are correctness-critical propagation signals, not best-effort notifications. Every such event is made recoverable through two complementary layers: (1) a transactional outbox — the provisioner enqueues each event into `engine_range_event_outbox` in the same DB transaction as the authoritative state write, and the `drain_range_event_outbox` portal management command publishes PENDING rows to the SNS topic / Pub/Sub with exponential-backoff retry and a DLQ terminal state after max_attempts; (2) a DB-authoritative reconciler — the `reconcile_range_events` portal management command re-reads authoritative `engine.Range` state and idempotently re-drives stale CMS `RangeInstance` projections through the existing handler seam. Consumer handlers propagate transient failures rather than swallowing them, engaging the worker ack-after-handler SQS retry and DLQ. Mission Control websocket fanout remains advisory. AWS SNS/SQS and GCP Pub/Sub messaging surfaces maintain dead-letter, retry-policy, and Cloud Monitoring alert parity.",
+    "rules": [
+      {
+        "id": "ADR-025-R1",
+        "description": "PostgreSQL is the authoritative state store for range, request, and instance state. Range events are correctness-critical propagation signals, not a replacement state store and not best-effort notifications. A lost or undelivered event must not leave CMS range projections or Engine state permanently stale without an operator-visible signal.",
+        "checks": []
+      },
+      {
+        "id": "ADR-025-R2",
+        "description": "Every correctness-critical event must have at least one durable recovery path: either (a) transactional outbox (`engine_range_event_outbox` enqueued atomically with the authoritative state write) with a drainer that publishes with exponential-backoff retry, a DLQ terminal state after max_attempts, and an operator alert; or (b) idempotent DB-authoritative reconciliation that re-reads `engine.Range` state and re-drives the affected domain projections through existing handler/orchestrator/bridge seams. The two paths are complementary and both are present in the shipping implementation.",
+        "checks": []
+      },
+      {
+        "id": "ADR-025-R3",
+        "description": "Consumer handlers must propagate transient DB or broker failures so the worker ack-after-handler retry and DLQ engage. Swallowing a transient exception and returning normally is not acceptable for correctness-critical events. Invalid, permanently unprocessable, or duplicate payloads may be deliberately logged and acknowledged; the distinction must be explicit in the handler.",
+        "checks": []
+      },
+      {
+        "id": "ADR-025-R4",
+        "description": "Mission Control websocket fanout is advisory only. It is a projection of authoritative state and is not a recovery path for lost events. CMS state convergence and Engine status transitions must not depend on one-shot best-effort websocket delivery.",
+        "checks": []
+      },
+      {
+        "id": "ADR-025-R5",
+        "description": "The `engine_range_event_outbox` (`RangeEventOutbox`) durable persistence surface is a first-class Django model with an explicit Django migration. It carries ownership (engine app), retention (PENDING rows drained to terminal PUBLISHED or DLQ state by the drainer; rows with a terminal status are eligible for periodic cleanup), idempotency (each outbox row covers one atomic state write; the drainer publishes exactly once per PENDING row and transitions to terminal state on success), and replay semantics (PENDING rows can be re-drained by re-running `drain_range_event_outbox`). Hiding retry state in JSON columns, cache, Redis channels, local files, or task memory is not acceptable.",
+        "checks": []
+      },
+      {
+        "id": "ADR-025-R6",
+        "description": "AWS SNS/SQS and GCP Pub/Sub messaging surfaces must maintain parity on dead-letter configuration, retry/backoff policy, and operator-visible alerting (CloudWatch alarms on AWS; Cloud Monitoring alerts on GCP). Adding dead-letter, retry, or alerting posture to one provider requires the same change on the other provider's messaging module.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "shifter/shifter_platform/engine/models.py",
+      "shifter/shifter_platform/engine/migrations/0023_range_event_outbox.py",
+      "shifter/shifter_platform/engine/management/commands/drain_range_event_outbox.py",
+      "shifter/shifter_platform/cms/management/commands/reconcile_range_events.py",
+      "shifter/shifter_platform/cms/handlers/__init__.py",
+      "shifter/shifter_platform/cms/handlers/range_events.py",
+      "shifter/shifter_platform/engine/handlers.py",
+      "shifter/shifter_platform/mission_control/handlers.py",
+      "platform/terraform/modules/portal/messaging/main.tf",
+      "platform/terraform/gcp/modules/portal/messaging/main.tf",
+      "docs/architecture/range-event-delivery-preflight-476.md",
+      "shifter/shifter_platform/documentation/docs/technical/architecture.md"
+    ]
+  },
+  {
+    "id": "ADR-023",
+    "title": "Agent risk audit findings use canonical internal identity and sanitized public tracking",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Repeatable agent-driven risk audits treat the Risk Register as the canonical internal store for detailed findings and GitHub issues as sanitized tracking proxies only. A tracked risk has one opaque persisted `risk_key`; same-risk matching is based on a versioned structural tuple, not titles, prose, GitHub issue numbers, or database primary keys. Public GitHub issue content is generated from a sanitized summary policy and must not copy Risk Register detail, exploit evidence, raw scanner output, internal topology, live cloud identifiers, or secrets. Risk Register writes, GitHub issue creation/update, severity or confidence promotion, and lifecycle changes require an explicit human review gate. Productized writes reuse the Risk Register API/service/audit path, Cognito group authorization, and exact `shared.api_tokens` `risk:read` / `risk:write` scopes; operator MCP runs may use `mcp/ops` named DB tools only with the MCP policy/audit evidence surface called out explicitly.",
+    "rules": [
+      {
+        "id": "ADR-023-R1",
+        "description": "Risk Register entries are the internal source of truth for detailed agent risk-audit findings. GitHub issues are sanitized tracking proxies and may carry only coarse component, broad risk class, high-level mitigation objective, review/status labels, and an opaque `Risk-Key`; they must not carry exploit steps, proof-of-concept commands, secrets, raw logs, scanner output, internal endpoints/topology, or live cloud identifiers.",
+        "checks": []
+      },
+      {
+        "id": "ADR-023-R2",
+        "description": "Same-risk matching uses an opaque persisted `risk_key` plus a versioned normalized tuple covering component scope, asset class, risk kind, control failure, actor vector, precondition class, and impact class. Future implementation must add explicit structured Risk Register metadata or link tables when needed; it must not hide machine identity, dedupe fingerprints, confidence, last-seen state, or GitHub links in free-form descriptions or comments.",
+        "checks": []
+      },
+      {
+        "id": "ADR-023-R3",
+        "description": "Risk-audit automation may analyze the repository and propose Risk Register or GitHub updates, but writes, issue creation/update, severity or confidence promotion, and lifecycle changes require a human review gate. Product/API mutations reuse the existing Risk Register auth, serializer, service, and audit paths; operator MCP direct-table workflows must rely on `.shifter.yaml`, `mcp/ops/policy.js`, and `mcp/ops/audit.js` as their evidence surface.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy"],
+    "evidence": [
+      "docs/architecture/agent-risk-audit-preflight-163.md",
+      "shifter/shifter_platform/risk_register/models.py",
+      "shifter/shifter_platform/risk_register/api/serializers.py",
+      "shifter/shifter_platform/risk_register/api/views.py",
+      "shifter/shifter_platform/risk_register/services.py",
+      "shifter/shifter_platform/shared/api_tokens",
+      "mcp/ops/index.js",
+      "mcp/ops/policy.js",
+      "mcp/ops/audit.js"
+    ]
+  },
+  {
+    "id": "ADR-024",
+    "title": "ACES migration uses a parity-gated parallel cutover",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Shifter migrates toward ACES through a parallel path, a row-based parity inventory, explicit ACES manifest/conformance gates, and archive-after-cutover cleanup. Current Shifter behavior remains authoritative until the ACES path proves parity through the normal portal, CMS, engine, provisioner, CTF, Mission Control, artifact, status, and validation surfaces. Legacy experiments are the explicit exception: ADR-027 removes the half-built `cms.experiments` path, so future experiment capability starts from a new ACES-backed design.",
+    "rules": [
+      {
+        "id": "ADR-024-R1",
+        "description": "ACES adoption must not replace current Shifter runtime behavior until a parallel ACES path has passed parity, manifest/conformance, portal/engine/provisioner, Polaris, CTF, Mission Control, artifact, status, and ADR guard validation. Legacy experiments are removed by ADR-027 and are not current runtime authority.",
+        "checks": []
+      },
+      {
+        "id": "ADR-024-R2",
+        "description": "Every legacy migration surface tracked for ACES cutover must map to exactly one category in docs/architecture/aces-migration-parity-inventory.yaml: ACES SDL, ACES schema/profile gap, Shifter backend responsibility, validation gate, or archive/delete. Inventory rows cite canonical owners and must not become a second runtime schema, parser, status taxonomy, or exception envelope.",
+        "checks": []
+      },
+      {
+        "id": "ADR-024-R3",
+        "description": "Archive/delete is generally a post-cutover posture. CyberScript, current CMS scenario templates, Polaris runtime material, CTF behavior, Mission Control, provisioner paths, artifact handling, status models, and validation gates remain current authority until replacement gates are implemented and green. ADR-027 is the accepted exception for the removed legacy experiments path.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy"],
+    "evidence": [
+      "docs/architecture/aces-migration-adr.md",
+      "docs/architecture/aces-migration-parity-inventory.yaml",
+      "docs/architecture/aces-runtime-target-backend-manifest-preflight-1233.md",
+      "docs/architecture/aces-operation-status-snapshot-projection-preflight-1234.md",
+      "docs/architecture/aces-polaris-acceptance-parity-gate-preflight-1237.md",
+      "scenario-dev/polaris/design/aces-sdl-validation-path.md",
+      "scenario-dev/polaris/sdl/README.md",
+      "shifter/shifter_platform/cms/scenarios/schema.py",
+      "shifter/shifter_platform/cms/scenarios/registry.py",
+      "shifter/shifter_platform/cms/scenarios/hydrator.py",
+      "shifter/shifter_platform/shared/schemas",
+      "shifter/cyberscript",
+      "shifter/shifter_platform/ctf",
+      "shifter/shifter_platform/mission_control",
+      "shifter/shifter_platform/engine",
+      "shifter/engine/provisioner",
+      "scripts/adr_guard/adr_guard.py"
+    ]
+  },
+  {
+    "id": "ADR-026",
+    "title": "Commercial self-serve ranges may use a no-default-route zero-egress posture",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Commercial self-serve training ranges with untrusted users may run in an explicit zero-egress posture where runtime participant subnet route tables have no `0.0.0.0/0` route and no NAT or Internet Gateway target. This extends ADR-020 by adding a second route-table posture alongside the existing AWS Network Firewall allowlist path, and extends ADR-017 by requiring any operator-facing egress-mode configuration to reuse the existing range-egress policy/renderer boundary rather than creating a second public schema. `allowlist` remains the default and preserves the trusted-event behavior: user subnet -> Network Firewall -> NAT -> IGW with STRICT_ORDER default-deny and documented allow lanes. `none` is not ADR-017 `deny-all`; `deny-all` is firewall enforcement with a default route, while `none` removes the default-route internet path. Runtime package/tool/agent/phone-home needs for `none` ranges must move to Packer bake time, in-range services, omitted integrations, or a dedicated proxy outside participant subnets.",
+    "rules": [
+      {
+        "id": "ADR-026-R1",
+        "description": "Zero-egress must be selected by an explicit validated mode. It must not be inferred from an empty or missing firewall endpoint, from `enable_network_firewall = false`, or from an empty allowlist. In `none` mode runtime range route tables must not create `aws_route.firewall`, any NAT target, or any `0.0.0.0/0` route.",
+        "checks": []
+      },
+      {
+        "id": "ADR-026-R2",
+        "description": "If zero-egress is operator-facing, it must extend the existing `settings.range_egress` / `RangeEgressPolicy` / `shifter-config render` path. Provider/runtime Terraform variables are bridge inputs only and must retain direct validation backstops. Operators must not maintain the egress mode in both root config and hand-authored tfvars or workflow inputs.",
+        "checks": []
+      },
+      {
+        "id": "ADR-026-R3",
+        "description": "Stable range VPC service endpoints reachable from participant subnets in the commercial shape (SSM, S3 gateway, STS, Bedrock, Route 53 Resolver, or future endpoints) must be deliberately classified as management-plane requirements, disabled for `none`, or replaced by in-range/proxy paths. Leaving an endpoint reachable by accident is not an acceptable zero-egress implementation.",
+        "checks": []
+      },
+      {
+        "id": "ADR-026-R4",
+        "description": "`none` ranges must boot without public internet dependencies. Runtime package installs, tooling fetches, XDR/XSIAM installer downloads, public DNS/NTP, and simulated phone-home must move to AMI bake time, in-range services, omitted integrations, or a proxy outside participant subnets. Existing allowlist-mode behavior must remain unchanged.",
+        "checks": []
+      },
+      {
+        "id": "ADR-026-R5",
+        "description": "Validation must include both infrastructure state and inside-range behavior: no NAT/IGW/default route on `none` subnet route tables, no reachability to external IPs or domains including previously allowlisted lanes, and focused regression coverage that allowlist mode still creates the Network Firewall route.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "docs/architecture/range-zero-egress-preflight-1171.md",
+      "docs/architecture/range-isolation-model.md",
+      "docs/architecture/range-egress-ip-allowlist.md",
+      "shifter/installation/range_egress.py",
+      "shifter/installation/render.py",
+      "platform/terraform/modules/range/vpc/firewall.tf",
+      "platform/terraform/modules/range/vpc/nat.tf",
+      "platform/terraform/modules/range/vpc/s3-endpoint.tf",
+      "platform/terraform/modules/range/vpc/ssm-endpoints.tf",
+      "shifter/engine/provisioner/terraform/modules/range/main.tf",
+      "shifter/engine/provisioner/terraform/modules/range/variables.tf",
+      "shifter/engine/provisioner/terraform_vars.py",
+      "shifter/packer/README.md",
+      "scenario-dev/polaris/tests/isolation-smoketest.sh"
+    ]
+  },
+  {
+    "id": "ADR-027",
+    "title": "Remove legacy experiments in favor of a future ACES-backed design",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Shifter removes the half-built legacy `cms.experiments` feature instead of completing or redesigning it in place. The removal deletes the Django app, experiment/script UI and APIs, websocket/event/queue/runtime wiring, tests, specs, UAT artifacts, and legacy database tables. Future experiment capability must start from an accepted ACES-backed replacement design rather than reviving the deleted runtime path or feature flag.",
+    "rules": [
+      {
+        "id": "ADR-027-R1",
+        "description": "The legacy `cms.experiments` app and its Mission Control script/file surfaces must not be reintroduced without a new accepted ADR and replacement product/security review.",
+        "checks": []
+      },
+      {
+        "id": "ADR-027-R2",
+        "description": "Runtime, deployment, queue, websocket, API, navigation, and API-token scope surfaces must not advertise or route legacy experiments after removal.",
+        "checks": []
+      },
+      {
+        "id": "ADR-027-R3",
+        "description": "Future experiment capability starts from an ACES-backed contract and must not reuse `EXPERIMENTS_ENABLED`, `EXPERIMENT_PAYLOAD`, or the removed `cms.experiments` data model as the implementation shortcut.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "docs/architecture/experiments-removal-adr.md",
+      "docs/architecture/aces-migration-adr.md",
+      "shifter/shifter_platform/cms/migrations/0034_remove_legacy_experiments.py",
+      "shifter/shifter_platform/tests/cms/test_experiments_removed.py",
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/config/_cloud.py",
+      "shifter/shifter_platform/config/asgi.py",
+      "shifter/shifter_platform/config/urls.py",
+      "shifter/shifter_platform/mission_control/urls.py",
+      "shifter/shifter_platform/mission_control/api/urls.py",
+      "platform/terraform/gcp/modules/platform-core/main.tf",
+      "scripts/gcp/render_runtime_env.py",
+      ".github/workflows/deploy.yml"
+    ]
+  },
+  {
+    "id": "ADR-028",
+    "title": "CTF participant solve history is semi-private (participant and organizer only)",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "The individual scoreboard (CTF-401) exposes aggregate ranking data -- rank, display name, total score, solve count, and last-solve time -- publicly to all participants. A participant's per-challenge solve history is semi-private: it is visible only to that participant and to the event organizer, unless the participant explicitly chooses to share it. This clarifies and supersedes the literal reading of CTF-401's \"Participants shall be able to click a row to see that participant's solve history\" clause, which would expose every participant's per-challenge history to all participants. Rationale: aggregate standing is inherently public on a scoreboard, but which specific challenges a participant solved reveals skill areas and progress and enables targeting or collusion inference -- it is nobody's business except the participant and the organizer. Concretely, scoreboard rows link to the solve-history drill-down only for the viewer's own row; the ctf:participant_solve_history view authorizes own-participant-or-event-organizer. Solve-history projections are correct-solves-only and never expose submitted flag values, incorrect-attempt details, or attempt source IP addresses. Ranking and CTF-406 tie-breaking stay in ctf.services.scoring; presentation never re-ranks. Governing requirement: CTF-1404 (Solve History Visibility).",
+    "rules": [
+      {
+        "id": "ADR-028-R1",
+        "description": "Participant per-challenge solve history must be gated to the participant themselves or the event organizer. Scoreboard row drill-down links must render only for the viewer's own row; other rows stay display-only. Do not widen ctf:participant_solve_history to any-participant access to match CTF-401's literal wording -- CTF-1404 governs the semi-private posture.",
+        "checks": []
+      },
+      {
+        "id": "ADR-028-R2",
+        "description": "Any solve-history projection must be correct-solves-only and must never expose submitted flag values, incorrect-attempt details, or attempt source IP addresses to a participant-visible surface. Reuse ctf.services.submission.get_participant_solve_history rather than serialising raw CTFSubmission rows.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "docs/architecture/ctf-scoreboard-contract-preflight-521.md",
+      "shifter/shifter_platform/ctf/views/participant.py",
+      "shifter/shifter_platform/ctf/services/submission.py",
+      "shifter/shifter_platform/templates/ctf/includes/scoreboard_table.html",
+      "shifter/shifter_platform/templates/ctf/participant/scoreboard.html",
+      "shifter/shifter_platform/tests/ctf/test_scoreboard_views.py",
+      "shifter/shifter_platform/tests/ctf/test_submission_service.py"
+    ]
+  },
+  {
+    "id": "ADR-029",
+    "title": "SPA cutover frontend stack, deployment, and API boundary",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "The Shifter portal migrates from server-rendered Django templates to a single-page application. The SPA is React 18 with TypeScript, built by Vite, and shipped as content-hashed static assets through Django's existing staticfiles plus WhiteNoise manifest pipeline; the bundle is built at container-image build time before collectstatic and is never committed. The client runtime uses React Router v7 in library/data-router mode for route and URL state, and TanStack Query v5 over a single typed fetch client for server state, caching, invalidation, idempotent GET retry, and mutation no-retry policy. No Node SSR meta-framework and no second server are introduced: the SPA is client-rendered and served from the single Django origin, so there is exactly one session and one CSRF posture. The SPA consumes the existing canonical DRF /api/v1/ surface (NamespaceVersioning, the shared error envelope in shared/api/errors.py, PageNumberPagination) and adds no parallel API. Browser auth stays session-cookie based with the CSRF token sent as the X-CSRFToken header; shf_ API tokens remain for programmatic clients only and are never placed in the browser. The cutover is phased per module in order: Risk Register, Mission Control, CTF, Scenario Editor, Docs. Legacy Django template routes remain until a module-specific issue explicitly retires them. Full design detail, backend API gaps, and no-go criteria are in docs/architecture/spa-cutover-architecture-1300.md; the first module's runtime-library defaults and Risk Register workspace boundary are in docs/design/spa-risk-register-workspace-1301.md. Governing issues: #1300, #1301, #1302.",
+    "rules": [
+      {
+        "id": "ADR-029-R1",
+        "description": "New SPA frontend code uses React plus TypeScript built by Vite, shipped as content-hashed static assets via Django staticfiles/WhiteNoise (built at image build, never committed to the repo). Do not introduce a Node SSR meta-framework, a second server or origin, or an alternate bundler; a different frontend stack requires a superseding ADR.",
+        "checks": []
+      },
+      {
+        "id": "ADR-029-R2",
+        "description": "SPA data access goes only through the canonical DRF /api/v1/ surface -- no ad hoc JSON routes and no legacy per-app /*/api/ endpoints in SPA code paths. Do not add csrf_exempt for session-authenticated browser calls: the browser sends the session cookie plus the X-CSRFToken header. Do not place shf_ API tokens in the browser. Backend validation and domain behavior stay server-side; the SPA must not duplicate backend validation rules.",
+        "checks": []
+      },
+      {
+        "id": "ADR-029-R3",
+        "description": "Migration is phased. A legacy Django template route is retired only by a module-specific issue that meets the retirement criteria in docs/architecture/spa-cutover-architecture-1300.md. Frontend guardrails (the SPA build, typecheck, lint, unit, and e2e CI jobs, and the SPA-to-/api/v1 boundary check) land with the first SPA implementation change, not deferred after it.",
+        "checks": []
+      },
+      {
+        "id": "ADR-029-R4",
+        "description": "SPA route state uses React Router v7 library/data-router mode, and server state uses TanStack Query v5 layered over the single typed fetch client. Do not introduce a parallel router, global server-state store, per-module fetch wrapper, or framework/SSR mode without a superseding ADR. Router loaders stay thin or omitted so cache invalidation remains owned by TanStack Query.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy"],
+    "evidence": [
+      "docs/architecture/spa-cutover-architecture-1300.md",
+      "docs/design/spa-design-system-foundation-1299.md",
+      "docs/design/spa-risk-register-workspace-1301.md",
+      "docs/architecture/spa-risk-register-implementation-preflight-1302.md",
+      "docs/design/design-system/README.md"
+    ]
+  },
+  {
+    "id": "ADR-030",
+    "title": "Live-fire range creation requires approved instantiation backends",
+    "status": "accepted",
+    "scope": "range_provisioning",
+    "decision": "Every normal Shifter scenario is live-fire: participants and agents may run arbitrary commands, exploit services, pivot, and attempt escape. CTF-driven participant range creation must therefore use an approved live-fire range instantiation backend whose containment boundary is outside the Kubernetes management plane. On GCP, the intended live-fire backend is a cloud-network-isolated range cell built from GCP VM, VPC/subnet, firewall, service-account, and tag controls. Kubernetes, GKE, and GDC may remain Shifter platform infrastructure, and Kubernetes systems may appear inside scenario content when they are isolated within the range cell. Existing Kubernetes/GDC VM Runtime plumbing, including deterministic VLAN-backed GDC networks, may remain available for explicitly declared non-user modes such as deterministic BAS, product demos, image validation, and operator-run validation. It must not be selected by default, fallback, or CTF participant flow for normal user ranges. Backend selection must be mediated by an explicit range instantiation policy control tracked by #1354.",
+    "rules": [
+      {
+        "id": "ADR-030-R1",
+        "description": "CTF-driven participant range creation must evaluate an explicit range instantiation policy before selecting a provider/backend. If no policy permits a backend for the current creation context, selection must fail closed with an operator-visible error instead of falling back to Kubernetes, GDC VM Runtime, pods, or any other unapproved backend.",
+        "checks": []
+      },
+      {
+        "id": "ADR-030-R2",
+        "description": "Kubernetes, GKE, GDC VM Runtime, Kubernetes pods, NetworkAttachmentDefinitions, and GDC L2 Networks are not approved as the containment boundary for normal live-fire user ranges. They may be used for the Shifter management plane, for infrastructure retained for explicitly allowed non-user modes, or as services inside a range cell, but not as the participant trust boundary for CTF-created ranges.",
+        "checks": []
+      },
+      {
+        "id": "ADR-030-R3",
+        "description": "Retained Kubernetes/GDC range plumbing must be selected only by an explicit non-user instantiation mode such as BAS, product demo, image build validation, or operator validation. Documentation and runtime errors must name that scope clearly so deterministic demo infrastructure is not mistaken for the approved CTF live-fire range backend.",
+        "checks": []
+      },
+      {
+        "id": "ADR-030-R4",
+        "description": "Normal GCP live-fire ranges must move toward cloud-network-isolated VM range cells. A range-cell backend must prevent participant access to Kubernetes and GDC APIs, must not place participant-executable workloads on the platform pod network, and must enforce isolation with provider network, firewall, identity, and metadata/API controls.",
+        "checks": []
+      },
+      {
+        "id": "ADR-030-R5",
+        "description": "A backend is not event-ready until range-side escape validation passes for cross-range private IP reachability, platform/pod/service/node network reachability, cloud metadata/API credential exposure, approved management ingress, and configured internet egress policy.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy"],
+    "evidence": [
+      "https://github.com/Brad-Edwards/shifter/issues/1340",
+      "https://github.com/Brad-Edwards/shifter/issues/1354",
+      "docs/architecture/gdc-windows-dc-image-build.md",
+      "docs/architecture/range-isolation-model.md",
+      "scripts/polaris-aws-range/ranges.tf",
+      "shifter/engine/provisioner/range_terraform_runner.py",
+      "shifter/engine/provisioner/gdc_range_networks.py",
+      "shifter/engine/provisioner/gdc_vmruntime_assets.py"
+    ]
+  },
+  {
+    "id": "ADR-031",
+    "title": "ACES-native provisioning core is a feature-flagged parallel path",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Shifter builds an ACES-native provisioning path as a parallel, feature-flagged implementation rather than routing ACES through the cyberscript scenario kernel. A compiled ACES ProvisioningPlan (produced by the PyPI-pinned aces-sdl runtime inside shared.aces) is realized directly: the platform serializes the compiled plan and the engine/provisioner realize it by reading the ACES plan payloads via accessors that mirror the reference ACES backends. Shifter introduces no parallel SDL and no re-modeled provisioning schema; see ADR-032 for how realization works. The existing cyberscript scenario -> RangeSpec -> hydrate -> interpret -> provisioner path is left unchanged and authoritative. The whole ACES-native path is gated by SHIFTER_ACES_NATIVE_PROVISIONING (default off) and stays inert until an explicitly authorized cutover. This is the provisioning-surface instance of ADR-024 (parity-gated parallel cutover); the ACES-owned conformance suite is the primary oracle. It supersedes the #1262 scenario_ref passthrough, which discarded compiled ACES topology and depended on cyberscript scenarios.",
+    "rules": [
+      {
+        "id": "ADR-031-R1",
+        "description": "ACES SDL packages (aces_sdl, aces_contracts, aces_runtime, aces_processor, aces_conformance, aces_backend_protocols) may be imported only within shared.aces. The cms, engine, mission_control, ctf, and management layers and the engine provisioner must consume ACES realization through the serialized ACES ProvisioningPlan and shared seams, never by importing an aces_* package. Enforced by an import-linter forbidden contract in CI.",
+        "checks": []
+      },
+      {
+        "id": "ADR-031-R2",
+        "description": "The ACES-native provisioning path — ACES catalog launchability, ACES dispatch, ACES engine consumption, and ACES provisioner realization — must be gated by the SHIFTER_ACES_NATIVE_PROVISIONING feature flag (default off). With the flag off, ACES catalog entries are not launchable and the cyberscript scenario -> RangeSpec -> hydrate -> interpret -> provisioner path is unchanged and authoritative. The ACES-native path must not modify cyberscript hydration, RangeSpec/InstanceSpec, or the existing create_range body; it may only add parallel modules and additive flag-gated branches.",
+        "checks": []
+      },
+      {
+        "id": "ADR-031-R3",
+        "description": "ACES realization consumes the compiled ACES ProvisioningPlan directly; Shifter must not introduce a parallel SDL or a re-modeled provisioning schema (see ADR-032). The Shifter ACES RuntimeTarget backend must pass the ACES-owned conformance suite: the provisioning-only fixture gate (run_fixture_suite) and a live target probe (run_target_conformance) that requires a non-empty changed_addresses set and at least one PROVISIONING snapshot entry. Conformance verdict logic must not be reimplemented in Shifter.",
+        "checks": []
+      },
+      {
+        "id": "ADR-031-R4",
+        "description": "ACES backend diagnostics and operation evidence must be bounded, single-line, and free of backend realization detail (no terraform, ssm, ami-, cidr, subnet, secret, password, credential, or token substrings). Image ids, machine sizes, subnet allocation, provider configuration, and secrets are backend-owned realization and must not surface as authored ACES semantics or as evidence.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["ci", "agent-policy"],
+    "evidence": [
+      "https://github.com/Brad-Edwards/shifter/issues/1262",
+      "https://github.com/Brad-Edwards/shifter/issues/1264",
+      "docs/architecture/aces-runtime-target-backend-manifest-preflight-1233.md",
+      "docs/architecture/aces-migration-parity-inventory.yaml",
+      ".importlinter",
+      "shifter/shifter_platform/shared/aces/runtime_target.py",
+      "shifter/shifter_platform/shared/aces/dispatch_port.py",
+      "shifter/shifter_platform/config/_aces_settings.py",
+      "shifter/shifter_platform/tests/shared/aces/test_backend_conformance_gate.py"
+    ]
+  },
+  {
+    "id": "ADR-032",
+    "title": "How Shifter realizes ACES scenarios",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Shifter realizes ACES by riding the ACES contract end to end, not by shadowing it. The pinned aces-sdl runtime (inside shared.aces) compiles a scenario into an ACES ProvisioningPlan; realization consumes that plan's authored intent and resolves concrete infrastructure at the backend. Authored intent is taken verbatim: the node image comes from the ACES source, sizing from resources, and os_family selects only the OS realization dialect. Concrete artifacts (image ids, machine sizes, subnet allocation, provider configuration, secrets) are resolved at realization time from the authored identity via backend-owned configuration, mirroring the reference ACES backends. A backend may fast-path a recognized authored identity or compiled-plan signature to a prebaked artifact for efficiency, but such recognition is a lookup keyed on authored/compiled content that must fail loud or fall through -- it must never sniff a scenario and reshape parsing or the model (the cyberscript/Polaris hardcoded-scenario anti-pattern is prohibited). Because Shifter realizes across a process boundary (the separate provisioner deployable), the artifact that crosses the boundary is the serialized ACES ProvisioningPlan itself, read via accessors that mirror the reference backends' payload conventions; Shifter introduces no parallel SDL or re-modeled provisioning schema. ACES is a deliberate stack commitment: Shifter depends on the aces-sdl PyPI package pinned to a released version.",
+    "rules": [
+      {
+        "id": "ADR-032-R1",
+        "description": "Authored ACES intent is consumed verbatim, never re-derived or guessed. The node image is taken from the ACES source (name/version), sizing from resources (ram/cpu), and os_family selects only the OS realization dialect and serves as a cross-check. Realization must not infer the image from os_family, invent sizing, or override authored intent with backend heuristics.",
+        "checks": []
+      },
+      {
+        "id": "ADR-032-R2",
+        "description": "Concrete artifacts (image ids, machine sizes, subnets, provider configuration, secrets) are resolved at realization time from the authored identity via backend-owned configuration (the registry/prebake seam), never carried as authored ACES semantics. A backend may fast-path a recognized authored identity or compiled-plan signature to a prebaked artifact, but recognition must be keyed on authored/compiled content, must fail loud or fall through, and must never reshape parsing or the model. Sniffing a field to hardcode a specific scenario into a backend is prohibited.",
+        "checks": []
+      },
+      {
+        "id": "ADR-032-R3",
+        "description": "The artifact crossing the platform -> provisioner boundary is the serialized ACES compiled ProvisioningPlan; the provisioner reads it via accessors that mirror the reference ACES backends' payload conventions (spec.node.source, spec.node.resources, spec.infrastructure). Shifter must not introduce a parallel SDL, a re-modeled provisioning schema, or a Shifter-owned intermediate spec for provisioning intent.",
+        "checks": []
+      },
+      {
+        "id": "ADR-032-R4",
+        "description": "Shifter depends on the aces-sdl PyPI package pinned to a released version (currently 0.19.1); it must not pin to a git ref or a non-released build. aces_* SDL packages are imported only within shared.aces (ADR-024, ADR-031-R1); the engine, provisioner, and other layers consume the serialized plan as plain data without importing aces_*.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["ci", "agent-policy"],
+    "evidence": [
+      "https://github.com/Brad-Edwards/shifter/issues/1264",
+      "docs/architecture/aces-runtime-target-backend-manifest-preflight-1233.md",
+      ".importlinter",
+      "shifter/shifter_platform/pyproject.toml",
+      "shifter/shifter_platform/shared/aces/runtime_target.py"
     ]
   }
 ]

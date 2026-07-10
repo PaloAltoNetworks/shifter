@@ -120,8 +120,8 @@ The Kali box uses a **pre-baked AMI** with pentesting tools already installed:
 
 | Account | AMI | Name |
 |---------|-----|------|
-| Prod (322748898657) | `ami-01ca670fc1154a1d6` | `shifter-kali-20251212` |
-| Dev (878848911818) | `ami-0a9c4fc63c42afb51` | `shifter-kali-20251212` |
+| Prod (`<prod-account-id>`) | `ami-01ca670fc1154a1d6` | `shifter-kali-20251212` |
+| Dev (`<dev-account-id>`) | `ami-0a9c4fc63c42afb51` | `shifter-kali-20251212` |
 
 **Included:**
 - AWS SSM Agent (for management without SSH keys)

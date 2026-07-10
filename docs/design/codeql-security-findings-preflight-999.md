@@ -50,7 +50,7 @@ path construction, externally visible error envelopes, and log-injection sinks.
 | Error envelopes | `shared.errors.classify_user_message`, `UserFacingError`, `safe_user_message` | Responses choose from authored strings or explicit user-message fields; raw exception text stays in logs. |
 | Scenario loading | `cms.scenarios.loader`, `cms.scenarios.registry`, `cms.scenarios.schema.ScenarioTemplate` | Loader validates filesystem access; registry handles YAML-vs-DB lookup and metadata; schema validates scenario structure. |
 | Scenario editor validation | `cms.scenario_editor._validation.validate_scenario_id`, `validate_definition`, `validate_yaml` | Do not duplicate editor validation inside unrelated views or services. |
-| CMS experiments | `cms.experiments.schemas`, `cms.experiments.exceptions`, `cms.experiments.services` | Keep HTTP parsing in views, business validation in services/schemas, and existing exception classes. |
+| Deleted CMS experiments | Removed by ADR-027 / issue #1195 | Historical CodeQL fixes in the legacy experiments app do not authorize reviving the deleted runtime path. |
 | CTF domain errors | `ctf.exceptions` (`CTFValidationError`, `CTFNotFoundError`, `CTFPermissionError`, `CTFStateError`) | Do not create a second CTF logging/security exception hierarchy. |
 | Storage keys | `shared.s3.sanitize_s3_filename`, shared cloud storage adapters | Keep object-key normalization and logging in existing storage surfaces. |
 | Logging configuration | `shifter/engine/provisioner/logging_config.py`, `shifter/shifter_platform/config/logging.py` | Do not change formatter behavior to hide a call-site leak; fix the tainted call site. |

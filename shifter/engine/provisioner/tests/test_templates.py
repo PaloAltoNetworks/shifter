@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -41,8 +41,8 @@ class TestDCTemplateRendering:
     def dc_template(self):
         """Load the DC template."""
         templates_dir = Path(__file__).parent.parent / "templates"
-        # NOSONAR: autoescape=False is intentional - these are PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+        # select_autoescape() yields no escaping for these non-HTML (.ps1/.txt) templates
+        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=select_autoescape())
         return env.get_template("dc_windows.ps1.j2")
 
     @pytest.fixture
@@ -102,7 +102,7 @@ class TestNGFWInitCfgTemplate:
     def init_cfg_template(self):
         """Load the init-cfg template."""
         templates_dir = Path(__file__).parent.parent / "templates"
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=select_autoescape())
         return env.get_template("ngfw_init_cfg.txt.j2")
 
     @pytest.fixture

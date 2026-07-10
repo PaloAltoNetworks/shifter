@@ -78,6 +78,35 @@ class TestHelpView:
         assert response.context["support_email"] == "support@test.example.com"
 
 
+class TestWalkthroughView:
+    URL = reverse("mission_control:walkthrough")
+
+    def test_requires_login(self):
+        assert Client().get(self.URL).status_code == 302
+
+    def test_requires_get(self, authenticated_client):
+        client, _ = authenticated_client(email="walk-post@example.com")
+        assert client.post(self.URL).status_code == 405
+
+    @override_settings(CTFD_PLATFORM_URL="https://ctf.test.example.com/login")
+    def test_renders_walkthrough_from_explicit_config(self, authenticated_client):
+        client, _ = authenticated_client(email="walk@example.com")
+        response = client.get(self.URL)
+        assert response.status_code == 200
+        assert "mission_control/walkthrough.html" in _template_names(response)
+        assert response.context["page_title"] == "CTFd"
+        assert response.context["active_nav"] == "walkthrough"
+        # Data source is explicit configuration, not a hardcoded literal (#560 AC-2).
+        assert response.context["ctfd_url"] == "https://ctf.test.example.com/login"
+
+    def test_renders_no_challenge_flag_literals(self, authenticated_client):
+        # #560 AC-1: Mission Control runtime must render no literal challenge flags.
+        client, _ = authenticated_client(email="walk-noflag@example.com")
+        response = client.get(self.URL)
+        assert response.status_code == 200
+        assert "FLAG{" not in response.content.decode("utf-8").upper()
+
+
 class TestGetUserStorageUsed:
     def test_returns_zero_for_no_agents(self, authenticated_client):
         from cms.assets.services import get_storage_used

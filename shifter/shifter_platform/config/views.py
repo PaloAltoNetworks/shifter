@@ -6,14 +6,20 @@ import logging
 from django.conf import settings
 from django.contrib.auth import BACKEND_SESSION_KEY, login, logout
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseForbidden, HttpResponseRedirect, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
 from config import identity_platform as identity_platform_auth
+from risk_register.models import AuditLog
+from risk_register.services import AuthPrincipal, audit_auth_event, get_client_ip
 from shared.auth import is_ctf_organizer, is_ctf_participant
+from shared.errors import classify_user_message
+
+# SonarCloud S1192: extracted duplicated string literals.
+DASHBOARD_URL = "mission_control:dashboard"
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +29,12 @@ def home(request):
     return render(request, "coming_soon.html")
 
 
+@require_http_methods(["GET", "HEAD"])
+def privacy_notice(request: HttpRequest) -> HttpResponse:
+    """Public privacy notice shell for operator-supplied content."""
+    return render(request, "privacy/notice.html")
+
+
 def _render_identity_platform_login(request, *, status_code: int = 200):
     client_config = identity_platform_auth.identity_platform_client_config()
     site_url = (settings.SITE_URL or "").rstrip("/") or request.build_absolute_uri("/").rstrip("/")
@@ -30,16 +42,18 @@ def _render_identity_platform_login(request, *, status_code: int = 200):
         request,
         "identity_platform_login.html",
         {
-            "identity_platform_config_json": json.dumps(
-                {
-                    **client_config,
-                    "sessionExchangeUrl": reverse("identity_platform_session"),
-                    "dashboardUrl": reverse("dashboard_router"),
-                    "loginUrl": reverse("platform_login"),
-                    "passwordResetUrl": reverse("platform_login"),
-                    "verificationContinueUrl": f"{site_url}{reverse('platform_login')}",
-                }
-            ),
+            # Pass the dict itself; the template's `json_script` filter does the
+            # single JSON encoding. Pre-serializing here would double-encode, so
+            # the browser's JSON.parse would yield a string and config.apiKey
+            # would be undefined (Firebase init then fails auth/invalid-api-key).
+            "identity_platform_config_json": {
+                **client_config,
+                "sessionExchangeUrl": reverse("identity_platform_session"),
+                "dashboardUrl": reverse("dashboard_router"),
+                "loginUrl": reverse("platform_login"),
+                "passwordResetUrl": reverse("platform_login"),
+                "verificationContinueUrl": f"{site_url}{reverse('platform_login')}",
+            },
             "allowed_email_domain": client_config["allowedEmailDomain"],
         },
         status=status_code,
@@ -52,13 +66,13 @@ def _render_identity_platform_logout(request):
         request,
         "identity_platform_logout.html",
         {
-            "identity_platform_logout_config_json": json.dumps(
-                {
-                    **client_config,
-                    "redirectUrl": settings.LOGOUT_REDIRECT_URL,
-                    "loginUrl": reverse("platform_login"),
-                }
-            )
+            # Pass the dict; the template's `json_script` filter encodes once.
+            # (See _render_identity_platform_login for the double-encode hazard.)
+            "identity_platform_logout_config_json": {
+                **client_config,
+                "redirectUrl": settings.LOGOUT_REDIRECT_URL,
+                "loginUrl": reverse("platform_login"),
+            }
         },
     )
 
@@ -96,8 +110,13 @@ def identity_platform_session(request):
     try:
         user = identity_platform_auth.login_with_identity_token(request, id_token)
     except identity_platform_auth.IdentityPlatformAuthError as exc:
+        # Log the full detail server-side; return only the fixed-vocabulary code
+        # plus a classified, non-tainted message so upstream exception text
+        # (e.g. an Identity Platform API response body) cannot leak to the caller
+        # (CodeQL py/stack-trace-exposure).
+        logger.exception("identity_platform_session: authentication failed (code=%s)", exc.code)
         return JsonResponse(
-            {"error": exc.code, "message": str(exc)},
+            {"error": exc.code, "message": classify_user_message(str(exc), default="Authentication failed")},
             status=403,
         )
 
@@ -125,13 +144,13 @@ def dashboard_router(request):
     """
     if is_ctf_organizer(request.user):
         logger.debug("Routing organizer %s to Mission Control dashboard", request.user.email)
-        return HttpResponseRedirect(reverse("mission_control:dashboard"))
+        return HttpResponseRedirect(reverse(DASHBOARD_URL))
     elif is_ctf_participant(request.user):
         logger.debug("Routing participant %s to Mission Control dashboard", request.user.email)
-        return HttpResponseRedirect(reverse("mission_control:dashboard"))
+        return HttpResponseRedirect(reverse(DASHBOARD_URL))
     else:
         logger.debug("Routing standard user %s to Mission Control", request.user.email)
-        return HttpResponseRedirect(reverse("mission_control:dashboard"))
+        return HttpResponseRedirect(reverse(DASHBOARD_URL))
 
 
 @require_POST
@@ -151,6 +170,16 @@ def logout_view(request):
     backend = request.session.get(BACKEND_SESSION_KEY, "")
     email = request.user.email
     redirect_url = settings.LOGOUT_REDIRECT_URL
+
+    # Capture the audit identity and request context before Django ``logout``
+    # flushes the session below.
+    audit_auth_event(
+        action=AuditLog.Action.LOGOUT,
+        principal=AuthPrincipal(user_id=request.user.id, email=email),
+        source_ip=get_client_ip(request),
+        user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
+        context="Portal logout",
+    )
 
     if "OIDCAuthenticationBackend" in backend:
         # Build the Cognito logout URL before clearing the session,

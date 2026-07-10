@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
-from shared.schemas import RangeContext, RangeSpec, RequestSpec
+from shared.schemas import RangeRef, RangeSpec, RequestSpec
+from shared.schemas.persistence import wrap_persisted_spec
 
 from ._common import EngineError, _resolve_instance_host
 
@@ -21,6 +22,32 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_TASK_ARN_FIELDS = {
+    "provision": "provisioning_task_arn",
+    "destroy": "teardown_task_arn",
+}
+
+
+def _persist_task_arn(range_obj: Range, operation: str, task_arn: str | None) -> None:
+    """Store an ECS task identifier on the operation-specific Range field."""
+    if not task_arn:
+        return
+    field_name = _TASK_ARN_FIELDS.get(operation)
+    if field_name is None:
+        raise ValueError(f"Unknown range task operation: {operation}")
+    setattr(range_obj, field_name, task_arn)
+    range_obj.save(update_fields=[field_name])
+
+
+def _range_ref_from_range(range_obj: Range, request_spec: RequestSpec, range_spec: RangeSpec) -> RangeRef:
+    """Build a RangeRef from an existing/persisted engine Range."""
+    return RangeRef(
+        request_id=request_spec.request_id,
+        range_id=range_obj.id,
+        user_id=range_spec.user_id,
+        status=ResourceStatus(range_obj.status),
+    )
+
 
 def _atomic() -> ContextManager[None]:
     """Late-bound ``engine.services.transaction.atomic()`` so tests can patch the package-level name."""
@@ -29,7 +56,7 @@ def _atomic() -> ContextManager[None]:
     return _es.transaction.atomic()
 
 
-def create_range(request_spec: RequestSpec) -> UUID:
+def create_range(request_spec: RequestSpec) -> RangeRef:
     """Provision infrastructure for range.
 
     Interprets the RequestSpec into Engine models (Request, Instance),
@@ -61,15 +88,25 @@ def create_range(request_spec: RequestSpec) -> UUID:
         len(range_spec.all_instances),
     )
 
+    existing_range = Range.objects.filter(request__request_id=request_spec.request_id).first()
+    if existing_range is not None:
+        logger.info("create_range: reusing existing range request_id=%s", request_spec.request_id)
+        return _range_ref_from_range(existing_range, request_spec, range_spec)
+
     range_obj = _persist_range_atomically(request_spec, range_spec, user_model, Range)
 
-    task_arn = start_range_provisioning(request_spec.request_id)
+    try:
+        task_arn = start_range_provisioning(request_spec.request_id)
+    except Exception:
+        range_obj.status = Range.Status.FAILED
+        range_obj.error_message = "Provisioning dispatch failed"
+        range_obj.save(update_fields=["status", "error_message", "updated_at"])
+        raise
     if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
+        _persist_task_arn(range_obj, "provision", task_arn)
         logger.info("create_range: started ECS task=%s", task_arn)
 
-    return request_spec.request_id
+    return _range_ref_from_range(range_obj, request_spec, range_spec)
 
 
 def _persist_range_atomically(
@@ -100,7 +137,7 @@ def _persist_range_atomically(
                 cms_user_id=range_spec.user_id,
                 status=range_model.Status.PROVISIONING,
                 subnet_index=subnet_index,
-                range_config=range_spec.model_dump(),
+                range_config=wrap_persisted_spec("range_spec", range_spec),
             )
         else:
             range_obj = range_model.objects.create(
@@ -109,7 +146,7 @@ def _persist_range_atomically(
                 cms_user_id=range_spec.user_id,
                 status=range_model.Status.PROVISIONING,
                 subnet_index=subnet_index,
-                range_config=range_spec.model_dump(),
+                range_config=wrap_persisted_spec("range_spec", range_spec),
             )
 
         logger.info(
@@ -136,7 +173,7 @@ def _persist_range_atomically(
     return range_obj
 
 
-def destroy_range(request: RangeContext) -> bool:
+def destroy_range(range_ref: RangeRef) -> bool:
     """Tear down range infrastructure.
 
     Sets status to DESTROYING and triggers async ECS teardown.
@@ -147,16 +184,19 @@ def destroy_range(request: RangeContext) -> bool:
     from engine.ecs import start_teardown
     from engine.models import Range
 
-    if request.range_id is None:
-        return _destroy_via_request_id(request.request_id)
+    if not isinstance(range_ref, RangeRef):
+        raise TypeError(f"range_ref must be RangeRef, got {type(range_ref).__name__}")
 
-    logger.debug("destroy_range: range_id=%s", request.range_id)
+    if range_ref.range_id is None:
+        return _destroy_via_request_id(range_ref.request_id)
+
+    logger.debug("destroy_range: range_id=%s", range_ref.range_id)
     try:
-        range_obj = Range.objects.get(id=request.range_id)
+        range_obj = Range.objects.get(id=range_ref.range_id)
     except Range.DoesNotExist:
-        logger.warning("destroy_range: range not found range_id=%s", request.range_id)
+        logger.warning("destroy_range: range not found range_id=%s", range_ref.range_id)
         return False
-    return _apply_destroy_to_range(range_obj, request.range_id, request.user_id, start_teardown)
+    return _apply_destroy_to_range(range_obj, range_ref.range_id, range_ref.user_id, start_teardown)
 
 
 def _destroy_via_request_id(request_id: UUID | None) -> bool:
@@ -181,66 +221,70 @@ def _apply_destroy_to_range(
         logger.info("destroy_range: range already destroying range_id=%s", range_id)
         return True
 
+    previous_status = range_obj.status
     range_obj.status = ResourceStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
     logger.info("destroy_range: set status to DESTROYING range_id=%s", range_id)
 
-    task_arn = start_teardown(range_id, user_id)
+    try:
+        task_arn = start_teardown(range_id, user_id)
+    except Exception:
+        range_obj.status = previous_status
+        range_obj.save(update_fields=["status", "updated_at"])
+        raise
     if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
+        _persist_task_arn(range_obj, "destroy", task_arn)
         logger.info("destroy_range: started ECS task=%s", task_arn)
     return True
 
 
-def cancel_range(range_ctx: RangeContext) -> None:
+def cancel_range(range_ref: RangeRef) -> None:
     """Cancel in-progress provisioning.
 
     Only works for ranges in PENDING or PROVISIONING status.
     Sets status directly to DESTROYING without triggering teardown.
     """
-    if range_ctx is None:
-        logger.error("cancel_range called with None range_ctx")
-        raise TypeError("range_ctx cannot be None")
-    if not isinstance(range_ctx, RangeContext):
-        logger.error("cancel_range called with invalid type: %s", type(range_ctx).__name__)
-        raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
+    if range_ref is None:
+        logger.error("cancel_range called with None range_ref")
+        raise TypeError("range_ref cannot be None")
+    if not isinstance(range_ref, RangeRef):
+        logger.error("cancel_range called with invalid type: %s", type(range_ref).__name__)
+        raise TypeError(f"range_ref must be RangeRef, got {type(range_ref).__name__}")
 
-    if range_ctx.range_id is None:
-        if range_ctx.request_id:
-            cancel_range_by_request(range_ctx.request_id)
+    if range_ref.range_id is None:
+        if range_ref.request_id:
+            cancel_range_by_request(range_ref.request_id)
             return
         logger.error("cancel_range called with both range_id and request_id as None")
-        raise ValueError("range_ctx must have either range_id or request_id")
+        raise ValueError("range_ref must have either range_id or request_id")
 
-    if not isinstance(range_ctx.range_id, int) or range_ctx.range_id < 0:
-        logger.error("cancel_range called with invalid range_id: %s", range_ctx.range_id)
-        raise ValueError("range_ctx.range_id must be a non-negative integer")
+    if not isinstance(range_ref.range_id, int) or range_ref.range_id < 0:
+        logger.error("cancel_range called with invalid range_id: %s", range_ref.range_id)
+        raise ValueError("range_ref.range_id must be a non-negative integer")
 
     logger.debug(
         "cancel_range: range_id=%s user_id=%s status=%s",
-        range_ctx.range_id,
-        range_ctx.user_id,
-        range_ctx.status,
+        range_ref.range_id,
+        range_ref.user_id,
+        range_ref.status,
     )
     from engine.models import Range
 
-    range_id = range_ctx.range_id
+    range_id = range_ref.range_id
     try:
         range_obj = Range.objects.get(id=range_id)
     except Range.DoesNotExist:
         logger.warning("cancel_range: range not found range_id=%s", range_id)
         return
 
-    if range_ctx.status not in CANCELLABLE_STATUSES:
+    if ResourceStatus(range_obj.status) not in CANCELLABLE_STATUSES:
         logger.warning(
             "cancel_range: range not cancellable range_id=%s status=%s",
             range_id,
-            range_ctx.status,
+            range_obj.status,
         )
         return
 
-    range_ctx.status = ResourceStatus.DESTROYING
     range_obj.status = Range.Status.DESTROYING
     range_obj.save(update_fields=["status"])
     # Provisioner will poll for status and destroy when it sees DESTROYING
@@ -278,6 +322,7 @@ def _apply_destroy_by_request(
         logger.info("destroy_range_by_request: already destroying request_id=%s", request_id)
         return True
 
+    previous_status = range_obj.status
     range_obj.status = ResourceStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
     logger.info(
@@ -286,10 +331,14 @@ def _apply_destroy_by_request(
         range_obj.id,
     )
 
-    task_arn = start_range_teardown(request_id)
+    try:
+        task_arn = start_range_teardown(request_id)
+    except Exception:
+        range_obj.status = previous_status
+        range_obj.save(update_fields=["status", "updated_at"])
+        raise
     if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
+        _persist_task_arn(range_obj, "destroy", task_arn)
         logger.info("destroy_range_by_request: started ECS task=%s", task_arn)
     return True
 
@@ -305,24 +354,32 @@ def cancel_range_by_request(request_id: UUID) -> bool:
     range_obj = Range.objects.filter(request__request_id=request_id).first()
     if not range_obj:
         logger.warning("cancel_range_by_request: no range for request_id=%s", request_id)
-        return False
-
-    if range_obj.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
+        accepted = False
+    elif range_obj.status == Range.Status.DESTROYING:
+        logger.info(
+            "cancel_range_by_request: already destroying request_id=%s range_id=%s",
+            request_id,
+            range_obj.id,
+        )
+        accepted = True
+    elif range_obj.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
         logger.warning(
             "cancel_range_by_request: not cancellable status=%s request_id=%s",
             range_obj.status,
             request_id,
         )
-        return False
+        accepted = False
+    else:
+        range_obj.status = Range.Status.DESTROYING
+        range_obj.save(update_fields=["status"])
+        logger.info(
+            "cancel_range_by_request: cancelled request_id=%s range_id=%s",
+            request_id,
+            range_obj.id,
+        )
+        accepted = True
 
-    range_obj.status = Range.Status.DESTROYING
-    range_obj.save(update_fields=["status"])
-    logger.info(
-        "cancel_range_by_request: cancelled request_id=%s range_id=%s",
-        request_id,
-        range_obj.id,
-    )
-    return True
+    return accepted
 
 
 def get_instance_ips_by_uuid(range_id: int) -> dict[str, str]:
@@ -343,6 +400,52 @@ def get_instance_ips_by_uuid(range_id: int) -> dict[str, str]:
             continue
         result[uuid_value.strip()] = ip_value
     return result
+
+
+def reassign_range_owner_by_request(request_id: UUID, new_user: User) -> bool:
+    """Reassign the ``Range``/``Request`` owner for ``request_id`` to ``new_user``.
+
+    Used by CMS's cross-owner range-recovery path (``cms.services.reassign_range_owner``,
+    called from ``ctf.services.range.recovery`` via ``ctf.bridges``) to transfer
+    terminal/Guacamole access -- which resolves strictly by ``Range.user``
+    (``Range.resolve_active_for_instance`` / ``Range.get_active_for_user``) -- to a
+    new participant. Idempotent: returns True without writing when the range is
+    already owned by ``new_user``.
+
+    Returns:
+        True if a range was found (and reassigned or already owned by
+        ``new_user``), False if no range exists for ``request_id``.
+    """
+    from engine.models import Range
+
+    range_obj = Range.objects.filter(request__request_id=request_id).select_related("request").first()
+    if not range_obj:
+        logger.warning("reassign_range_owner_by_request: no range for request_id=%s", request_id)
+        return False
+
+    if range_obj.user_id == new_user.id:
+        logger.info(
+            "reassign_range_owner_by_request: already owned by user_id=%s request_id=%s",
+            new_user.id,
+            request_id,
+        )
+        return True
+
+    range_obj.user = new_user
+    range_obj.cms_user_id = new_user.id
+    range_obj.save(update_fields=["user", "cms_user_id"])
+
+    if range_obj.request is not None:
+        range_obj.request.user = new_user
+        range_obj.request.save(update_fields=["user"])
+
+    logger.info(
+        "reassign_range_owner_by_request: reassigned range_id=%s request_id=%s to user_id=%s",
+        range_obj.id,
+        request_id,
+        new_user.id,
+    )
+    return True
 
 
 def get_range_status(range_id: int) -> dict[str, Any] | None:

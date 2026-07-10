@@ -1,7 +1,12 @@
-"""Event publishing for Shifter Engine provisioner.
+"""Durable event enqueueing for Shifter Engine provisioner.
 
-This module handles publishing range and NGFW status events to SNS for fan-out
-via SQS queues.
+Phase 1 (#476): events are written to the transactional outbox
+(engine_range_event_outbox) via provisioner_db.enqueue_event_outbox instead of
+being published directly to SNS.  A separate drainer (Phase 2) reads PENDING
+rows and publishes them to the event bus.
+
+Payloads are notification-shaped: IDs and status only, no secrets or full
+instance state (see preflight note docs/architecture/range-event-delivery-preflight-476.md).
 
 Usage from provisioner:
     from events import publish_status_update, publish_ready, publish_failed, publish_ngfw_event
@@ -14,65 +19,43 @@ Usage from provisioner:
         new_status="provisioning",
     )
 
-    # When range provisioning completes (notification only - state written to DB first)
-    publish_ready(
-        request_id="uuid-string",
-        range_id=1,
-        user_id=42,
-    )
-
-    # When range provisioning fails
-    publish_failed(
-        request_id="uuid-string",
-        range_id=1,
-        user_id=42,
-        error_message="Subnet exhausted",
-    )
-
-    # When NGFW lifecycle changes (status update, provisioned, failed, destroyed)
-    publish_ngfw_event(
-        request_id="uuid-string",
-        instance_id="uuid-string",
-        app_id="uuid-string",
-        status="provisioning",  # Optional: ResourceStatus value
-        state={"error_message": "..."},  # Optional: context-specific data
-    )
+    # Atomic status + outbox (range_ops.py pattern):
+    #   outbox_event = build_status_event(request_id, range_id, user_id, "paused")
+    #   update_range_status(range_id, "paused", outbox_event=outbox_event)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from cloud import get_event_bus
+from cyberscript.enums import ResourceStatus
+from cyberscript.wire_constants import (
+    EVENT_TYPE_CANCELLED,
+    EVENT_TYPE_DESTROYED,
+    EVENT_TYPE_NGFW,
+    EVENT_TYPE_PROVISIONED,
+    EVENT_TYPE_STATUS_UPDATED,
+)
+
+import provisioner_db
 from log_redact import safe_log_fingerprint, safe_log_value
 
 logger = logging.getLogger(__name__)
 
-# Resource event type constants (mirroring shared.messages.events); consolidating
-# these into the shared package is tracked in #641.
-EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
-EVENT_TYPE_PROVISIONED = "range.provisioned"
-EVENT_TYPE_DESTROYED = "range.destroyed"
-EVENT_TYPE_CANCELLED = "range.cancelled"
-
-# NGFW event type constant (matching shared.messages.events)
-EVENT_TYPE_NGFW = "ngfw.event"
-
-# Resource status constants (matching shared.enums.ResourceStatus)
-STATUS_PENDING = "pending"
-STATUS_PROVISIONING = "provisioning"
-STATUS_READY = "ready"
-STATUS_PAUSING = "pausing"
-STATUS_PAUSED = "paused"
-STATUS_RESUMING = "resuming"
-STATUS_FAILED = "failed"
-STATUS_DESTROYING = "destroying"
-STATUS_DESTROYED = "destroyed"
+# Status string aliases for provisioner call sites (sourced from cyberscript.enums).
+STATUS_PENDING = ResourceStatus.PENDING.value
+STATUS_PROVISIONING = ResourceStatus.PROVISIONING.value
+STATUS_READY = ResourceStatus.READY.value
+STATUS_PAUSING = ResourceStatus.PAUSING.value
+STATUS_PAUSED = ResourceStatus.PAUSED.value
+STATUS_RESUMING = ResourceStatus.RESUMING.value
+STATUS_FAILED = ResourceStatus.FAILED.value
+STATUS_DESTROYING = ResourceStatus.DESTROYING.value
+STATUS_DESTROYED = ResourceStatus.DESTROYED.value
 
 
 def _get_sns_topic_arn() -> str:
@@ -120,38 +103,68 @@ def _create_event(
     }
 
 
-def _publish_event(event: dict[str, Any]) -> None:
-    """Publish event to SNS topic.
+def _enqueue_event(event: dict[str, Any]) -> None:
+    """Durably enqueue an event to the transactional outbox.
 
-    Publishes the event to SNS
-    via SQS queues.
+    Writes to engine_range_event_outbox in its own transaction.  A separate
+    drainer (Phase 2) publishes PENDING rows to the event bus.
+
+    Unlike the old _publish_event, failures are NOT swallowed: a DB error
+    raises so the provisioner learns the event was not durably recorded.
 
     Args:
-        event: Event dictionary to publish.
+        event: Event dictionary containing at minimum ``event_id`` and
+               ``event_type``.  Payload must be notification-shaped (IDs
+               only, no secrets or full instance state).
+
+    Raises:
+        Exception: Any error from enqueue_event_outbox propagates to the caller.
     """
-    try:
-        topic_arn = _get_sns_topic_arn()
-        bus = get_event_bus()
-        bus.publish(
-            topic_id=topic_arn,
-            message=json.dumps(event),
-            attributes={"event_type": event.get("event_type", "unknown")},
-        )
+    provisioner_db.enqueue_event_outbox(event)
+    logger.debug(
+        "Enqueued event to outbox: request_id_fp=%s range_id_fp=%s event_type=%s",
+        safe_log_fingerprint(event.get("request_id")),
+        safe_log_fingerprint(event.get("range_id")),
+        safe_log_value(event.get("event_type")),
+    )
 
-        logger.debug(
-            "Published event: request_id_fp=%s range_id_fp=%s event_type=%s",
-            safe_log_fingerprint(event.get("request_id")),
-            safe_log_fingerprint(event.get("range_id")),
-            safe_log_value(event.get("event_type")),
-        )
 
-    except Exception as e:
-        logger.error(
-            "Failed to publish event: request_id_fp=%s range_id_fp=%s error=%s",
-            safe_log_fingerprint(event.get("request_id")),
-            safe_log_fingerprint(event.get("range_id")),
-            safe_log_value(e),
-        )
+# Thin backward-compatibility alias.  External callers that imported
+# _publish_event by name continue to work; new code should call _enqueue_event.
+_publish_event = _enqueue_event
+
+
+def build_status_event(
+    request_id: str,
+    range_id: int,
+    user_id: int,
+    new_status: str,
+    error_message: str | None = None,
+) -> dict[str, Any]:
+    """Build a range.status.updated event dict without enqueueing it.
+
+    Used by range_ops.py call sites that pass the event as ``outbox_event=``
+    to update_range_status so the status change and event intent commit
+    atomically in the same DB transaction.
+
+    Args:
+        request_id:    UUID string of the Request.
+        range_id:      ID of the range.
+        user_id:       ID of the user who owns the range.
+        new_status:    New status value.
+        error_message: Optional error message for failure events.
+
+    Returns:
+        Event dict ready to pass as outbox_event= to update_range_status.
+    """
+    return _create_event(
+        event_type=EVENT_TYPE_STATUS_UPDATED,
+        request_id=request_id,
+        range_id=range_id,
+        user_id=user_id,
+        new_status=new_status,
+        error_message=error_message,
+    )
 
 
 def publish_status_update(
@@ -186,7 +199,7 @@ def publish_status_update(
         safe_log_value(new_status),
     )
 
-    _publish_event(event)
+    _enqueue_event(event)
 
 
 def publish_ready(
@@ -227,7 +240,7 @@ def publish_ready(
         safe_log_fingerprint(range_id),
     )
 
-    _publish_event(event)
+    _enqueue_event(event)
 
 
 def publish_failed(
@@ -281,7 +294,7 @@ def publish_destroyed(request_id: str, range_id: int, user_id: int) -> None:
         safe_log_fingerprint(range_id),
     )
 
-    _publish_event(event)
+    _enqueue_event(event)
 
 
 def publish_cancelled(request_id: str, range_id: int, user_id: int) -> None:
@@ -305,7 +318,7 @@ def publish_cancelled(request_id: str, range_id: int, user_id: int) -> None:
         safe_log_fingerprint(range_id),
     )
 
-    _publish_event(event)
+    _enqueue_event(event)
 
 
 # =============================================================================
@@ -356,4 +369,4 @@ def publish_ngfw_event(
         safe_log_fingerprint(serial_number) if serial_number else "<none>",
     )
 
-    _publish_event(event)
+    _enqueue_event(event)

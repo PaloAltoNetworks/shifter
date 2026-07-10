@@ -8,10 +8,19 @@ Two audit mechanisms exist:
 
 | Mechanism | Location | Scope | Storage |
 |-----------|----------|-------|---------|
-| `AuditLog` | `risk_register/models.py` | Risk, Comment, APIKey entities | Database |
+| `AuditLog` | `risk_register/models.py` | Platform audit hub for risk-register entities, range lifecycle, credentials, authentication/role sync, terminal sessions, NGFW, experiments, scenarios, scripts, and archival APIKey rows | Database |
 | `ActivityLog` | `management/models.py` | Agent upload/delete only | Database |
 
-**Gaps**: Range lifecycle, credentials, authentication, user management, configuration changes unaudited.
+Range lifecycle audit is implemented through two complementary seams:
+
+- CMS service mutations write durable lifecycle rows through
+  `risk_register.services.audit_log()`.
+- Mission Control HTTP range lifecycle endpoints add request context through
+  `mission_control.views._common._audit_range_lifecycle()`, which delegates to
+  `risk_register.services.audit_log_from_request()`.
+
+**Remaining gaps**: configuration changes and any new high-impact action that
+does not yet route through the central audit helpers.
 
 ## Target Architecture
 
@@ -39,6 +48,24 @@ graph TB
 ```
 
 All apps call `risk_register.services.audit_log()` to record events. AuditLog becomes the single source of truth.
+
+## Audit Failure Policy
+
+Audit writes are mode-dependent:
+
+- Safety-control audit writes use `audit_log(..., strict=True)`. These writes
+  are mandatory: persistence failure is re-raised so callers can fail closed and
+  roll back the mutation the audit row would have described.
+- Default audit writes are best-effort for the caller, but not silent. A failed
+  non-strict write records bounded process-local degraded state in
+  `risk_register.audit_health` before returning `None`.
+- Degraded audit health is exposed through the existing `django-health-check`
+  registry as `AuditLogDegradedHealthCheck`. Public `/health` keeps its coarse
+  body shape (`working` / `unavailable`) and never includes audit payloads,
+  request data, or raw database/serialization exception text.
+
+A durable retry queue for non-strict audit writes is a separate design: it must
+own queue storage, encryption, retention, replay, and operator reset semantics.
 
 ## Extended AuditLog Model
 
@@ -221,10 +248,13 @@ def audit_log_system_event(
 
 | Event | Source | Actor Type | Action |
 |-------|--------|------------|--------|
-| Range requested | `cms/services.py:create_range` | user | provision |
+| Range requested | `cms.services.create_range`; `mission_control.api.ranges.LaunchRangeView` records HTTP request context | user | provision |
 | Range ready | `engine/handlers.py` | system | ready |
 | Range failed | `engine/handlers.py` | system | failed |
-| Range destroyed | `cms/services.py:destroy_range` | user | deprovision |
+| Range cancelled | `cms.services.cancel_range*`; `mission_control.api.ranges.CancelRangeView` records HTTP request context | user | cancel |
+| Range paused | `cms.services.pause_range*`; `mission_control.api.ranges.PauseRangeView` records HTTP request context | user | pause |
+| Range resumed | `cms.services.resume_range*`; `mission_control.api.ranges.ResumeRangeView` records HTTP request context | user | resume |
+| Range destroyed | `cms.services.destroy_range*`; `mission_control.api.ranges.DestroyRangeView` records HTTP request context | user | deprovision |
 
 ### Session Events
 
@@ -330,18 +360,15 @@ Archives to: `s3://{bucket}/audit-archive/{year}/{month}/audit_{timestamp}.jsonl
 | How | user_agent, context |
 | Before/After | previous_state, new_state |
 
-## Files to Modify
+## Canonical Implementation Points
 
-| File | Changes |
+| File | Responsibility |
 |------|---------|
-| `risk_register/models.py` | Extend EntityType, Action, ActorType; add source_ip, user_agent, request_id |
-| `risk_register/services.py` | Add audit_log(), audit_log_from_request(), audit_log_system_event() |
-| `risk_register/admin.py` | Extend AuditLogAdmin filters |
-| `risk_register/api/views.py` | Add AuditLogViewSet |
-| `risk_register/api/serializers.py` | Add AuditLogSerializer |
-| `config/oidc.py` | Add authentication event logging |
-| `cms/services.py` | Add range/credential/ngfw audit logging |
-| `cms/assets/services.py` | Migrate from ActivityLog to AuditLog |
-| `engine/handlers.py` | Add range lifecycle audit logging |
-| `mission_control/consumers.py` | Add session audit logging |
-| `management/services.py` | Add user audit logging |
+| `risk_register/models.py` | Owns `AuditLog` enums and persistence fields. Extend here only when an existing entity/action enum cannot represent the event. |
+| `risk_register/services.py` | Owns `AuditEvent`, `audit_log()`, `audit_log_from_request()`, `audit_log_system_event()`, trusted client-IP extraction, request-id correlation, and strict/best-effort failure policy. |
+| `mission_control/api/ranges.py` | Canonical HTTP range lifecycle surface for both `/api/v1/mission-control/...` and legacy `/mission-control/api/...` route wrappers. |
+| `mission_control/views/_common.py` | Owns `_audit_range_lifecycle()`, the shared HTTP request-context audit helper for range lifecycle endpoints. |
+| `cms/services.py` facade | Public cross-layer service seam. Mission Control and CTF callers should use this facade, not private CMS service submodules or CMS models. |
+| `cms/services/_range_create.py`, `_range_destroy.py`, `_range_lifecycle.py` | Own service-layer range lifecycle validation, ownership/state transitions, engine dispatch, rollback-on-rejection, and durable lifecycle audit rows. |
+| `engine/handlers.py` and `cms/handlers/range_events.py` | Own system/event-driven lifecycle status convergence and should use system audit helpers when adding new audited event-handler actions. |
+| `mission_control/consumers.py` | Owns terminal/RDP session audit events. |

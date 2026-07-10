@@ -83,19 +83,36 @@ def _get_bool_env(name: str) -> bool | None:
 
 
 def _should_promote_dc_at_runtime(provider: str | None = None) -> bool:
-    """Decide whether DC promotion should run during setup."""
-    override = _get_bool_env("DC_RUNTIME_PROMOTION")
-    if override is not None:
-        return override
-    return (provider or _get_cloud_provider()) == "gcp"
+    """Runtime DC promotion is intentionally disabled and unreachable.
+
+    Domain controllers must be pre-promoted at bake time (promotion takes
+    ~15-20 minutes and would dominate time-to-serve, and unattended runtime
+    promotion of a live-fire range guest is not an approved behaviour). The
+    runtime-promotion code path (``DCSetupPlan(runtime_promotion=True)`` and its
+    templates) is retained for a future, explicitly-authorized decision, but
+    nothing may select it: this gate always returns ``False`` regardless of
+    provider or environment, and there is deliberately no enable path (no
+    provider default, no ``DC_RUNTIME_PROMOTION`` env escape hatch). Re-enabling
+    runtime promotion is a future work item that requires an explicit decision.
+    """
+    return False
 
 
 def _should_run_dc_bootstrap_plan(provider: str | None = None) -> bool:
-    """Decide whether DC hostname/SSH bootstrap should run via setup plans."""
-    override = _get_bool_env("DC_BOOTSTRAP_VIA_SETUP_PLAN")
-    if override is not None:
-        return override
-    return (provider or _get_cloud_provider()) == "gcp"
+    """The runtime DC bootstrap plan is intentionally disabled and unreachable.
+
+    The DC ``BootstrapPlan`` renames the guest (``Rename-Computer``), which on a
+    pre-promoted domain controller mutates the DC's AD identity -- another runtime
+    DC mutation that must not run against a pre-baked DC. Its SSH-enablement work
+    is redundant: the range guest metadata startup script installs the SSH host
+    key and the provisioner's ``administrators_authorized_keys`` at boot, and
+    ``_configure_dc_ssh_access`` re-asserts the authorized key over that
+    connection. Like runtime promotion, the plan and gate are retained for a
+    future, explicitly-authorized decision, but nothing may select it: this gate
+    always returns ``False`` (no provider default, no ``DC_BOOTSTRAP_VIA_SETUP_PLAN``
+    env escape hatch).
+    """
+    return False
 
 
 def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:

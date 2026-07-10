@@ -11,6 +11,8 @@ import pytest
 
 from engine.ssh import SSHConnection, SSHConnectionError
 
+from .conftest import patch_asyncssh
+
 
 class TestSSHConnectionInit:
     """Tests for SSHConnection initialization."""
@@ -68,12 +70,9 @@ class TestSSHConnectionConnect:
         """Successful connect establishes connection and creates PTY process."""
         conn = SSHConnection(**valid_connection_params)
 
-        with patch("engine.ssh.asyncssh") as mock_asyncssh:
-            mock_key = MagicMock()
-            mock_asyncssh.import_private_key = MagicMock(return_value=mock_key)
-            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
-            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
-
+        mock_key = MagicMock()
+        mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+        with patch_asyncssh(mock_asyncssh_connection, imported_key=mock_key) as mock_asyncssh:
             await conn.connect()
 
             # Key imported
@@ -110,11 +109,8 @@ class TestSSHConnectionConnect:
         """Connect uses custom port when specified."""
         conn = SSHConnection(**valid_connection_params, port=2222)
 
-        with patch("engine.ssh.asyncssh") as mock_asyncssh:
-            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
-            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
-            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
-
+        mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+        with patch_asyncssh(mock_asyncssh_connection) as mock_asyncssh:
             await conn.connect()
 
             assert mock_asyncssh.connect.call_args[1]["port"] == 2222
@@ -133,11 +129,8 @@ class TestSSHConnectionConnect:
         """Connect with session_id runs tmux new-session command."""
         conn = SSHConnection(**valid_connection_params, session_id="test-uuid-1234")
 
-        with patch("engine.ssh.asyncssh") as mock_asyncssh:
-            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
-            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
-            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
-
+        mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+        with patch_asyncssh(mock_asyncssh_connection):
             await conn.connect()
 
             # Verify tmux command is passed
@@ -164,11 +157,8 @@ class TestSSHConnectionConnect:
         # Session ID with special characters that could be problematic
         conn = SSHConnection(**valid_connection_params, session_id="test/session;rm -rf")
 
-        with patch("engine.ssh.asyncssh") as mock_asyncssh:
-            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
-            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
-            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
-
+        mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+        with patch_asyncssh(mock_asyncssh_connection):
             await conn.connect()
 
             # Verify special chars are replaced with hyphens
@@ -180,13 +170,12 @@ class TestSSHConnectionConnect:
         """Permission denied raises SSHConnectionError."""
         conn = SSHConnection(**valid_connection_params)
 
-        with patch("engine.ssh.asyncssh") as mock_asyncssh:
-            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
-            mock_asyncssh.connect = AsyncMock(side_effect=asyncssh.PermissionDenied("Auth failed"))
-            mock_asyncssh.PermissionDenied = asyncssh.PermissionDenied
-
-            with pytest.raises(SSHConnectionError, match="authentication failed"):
-                await conn.connect()
+        with (
+            patch("asyncssh.import_private_key", MagicMock(return_value=MagicMock())),
+            patch("asyncssh.connect", AsyncMock(side_effect=asyncssh.PermissionDenied("Auth failed"))),
+            pytest.raises(SSHConnectionError, match="authentication failed"),
+        ):
+            await conn.connect()
 
     @pytest.mark.asyncio
     async def test_connect_network_error(self, valid_connection_params):
@@ -194,14 +183,8 @@ class TestSSHConnectionConnect:
         conn = SSHConnection(**valid_connection_params)
 
         with (
-            patch(
-                "engine.ssh.asyncssh.import_private_key",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "engine.ssh.asyncssh.connect",
-                AsyncMock(side_effect=OSError("Connection refused")),
-            ),
+            patch("asyncssh.import_private_key", return_value=MagicMock()),
+            patch("asyncssh.connect", AsyncMock(side_effect=OSError("Connection refused"))),
             pytest.raises(SSHConnectionError, match="Network error"),
         ):
             await conn.connect()
@@ -293,8 +276,10 @@ class TestSSHConnectionReceive:
         conn = SSHConnection(**valid_connection_params)
         conn._process = mock_asyncssh_process
 
-        with patch("engine.ssh.asyncio.wait_for", side_effect=TimeoutError()):
-            result = await conn.receive()
+        # A timeout in the underlying stdout read propagates through
+        # asyncio.wait_for; receive() swallows it and returns empty bytes.
+        mock_asyncssh_process.stdout.read = AsyncMock(side_effect=TimeoutError())
+        result = await conn.receive()
 
         assert result == b""
 
@@ -381,11 +366,8 @@ class TestSSHConnectionContextManager:
         mock_asyncssh_process,
     ):
         """Context manager connects on entry and disconnects on exit."""
-        with patch("engine.ssh.asyncssh") as mock_asyncssh:
-            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
-            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
-            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
-
+        mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+        with patch_asyncssh(mock_asyncssh_connection):
             async with SSHConnection(**valid_connection_params) as conn:
                 assert conn._conn is not None
 

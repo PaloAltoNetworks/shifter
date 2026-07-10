@@ -52,6 +52,17 @@ ec2_ami_id           = "ami-00e428798e77d38d9"
 ec2_instance_type    = "t3.xlarge"
 ec2_root_volume_size = 50
 
+# Portal runtime capacity tunables (#930). t3.xlarge has 4 vCPUs, so the
+# Gunicorn/Uvicorn pool is 4 workers. Terminal caps are process-local;
+# per-instance terminal ceiling = portal_web_workers * terminal_max_sessions =
+# 4 * 200 = 800 sessions.
+portal_web_workers             = 4
+terminal_max_sessions          = 200
+terminal_max_sessions_per_user = 10
+terminal_idle_timeout_seconds  = 1800
+terminal_max_session_seconds   = 28800
+terminal_read_poll_seconds     = 30
+
 # ------------------------------------------------------------------------------
 # ALB
 # ------------------------------------------------------------------------------
@@ -96,8 +107,20 @@ enable_autoscaling   = true
 asg_min_size         = 2
 asg_max_size         = 5
 asg_desired_capacity = 2
-scale_up_threshold   = 70
-scale_down_threshold = 30
+scale_up_threshold   = 70 # CPU guardrail notification only (#940)
+
+# Portal app-saturation autoscaling + observability (#940). prod runs the ASG,
+# so scale-out tracks ALB request-path saturation (RequestCountPerTarget +
+# TargetResponseTime) and the additive worker-busy-ratio scale-out; the app
+# emitter is enabled so the PortalCapacity alarms/dashboard have a live series.
+# portal_web_workers = 4 here, so soft concurrency 8 ~ 2x the ~4-request baseline.
+enable_portal_capacity_alarms                = true
+portal_capacity_metrics_enabled              = true
+portal_worker_soft_concurrency               = 8
+scale_target_requests_per_target             = 1000
+scale_target_response_time_seconds           = 0.5
+worker_busy_ratio_scale_out_threshold        = 0.8
+target_response_time_alarm_threshold_seconds = 1.0
 
 # Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
 # Prod runs the portal on Redis (CHANNEL_LAYER_BACKEND=redis), as before.
@@ -110,6 +133,7 @@ enable_redis = true
 redis_node_type          = "cache.t3.medium"
 redis_engine_version     = "7.1"
 redis_enable_replication = true
+redis_apply_immediately  = false
 
 # ------------------------------------------------------------------------------
 # Logging
@@ -139,7 +163,13 @@ enable_waf_logging     = true
 # Portal east-west inspection (#122)
 # ------------------------------------------------------------------------------
 
-enable_portal_inspection    = true
+# Default-off baseline (#932). Enabling inspection removes the direct
+# private->NAT default route, so a misconfigured firewall endpoint blackholes
+# egress. A deploy opts in via the TF_VARS_*_PORTAL secret (local.auto.tfvars);
+# the post-apply assertion (scripts/assert_portal_inspection) then fails the
+# deploy if the route/endpoint wiring is unhealthy instead of shipping a
+# blackhole.
+enable_portal_inspection    = false
 firewall_log_retention_days = 365
 
 # prod: secure default; flip false + apply before any intentional destroy
@@ -164,14 +194,17 @@ dc_domain_name = "internal.shifter"
 # Guacamole
 # ------------------------------------------------------------------------------
 
-guacd_image_tag                = "1.5.5"
-guacamole_client_image_tag     = "1.5.5"
-guacd_cpu                      = 512
-guacd_memory                   = 1024
-guacamole_client_cpu           = 512
-guacamole_client_memory        = 1024
-guacd_desired_count            = 2
-guacamole_client_desired_count = 2
+guacd_image_tag            = "1.5.5"
+guacamole_client_image_tag = "1.5.5"
+guacd_cpu                  = 512
+guacd_memory               = 1024
+guacamole_client_cpu       = 512
+guacamole_client_memory    = 1024
+guacd_desired_count        = 2
+# Single guacamole-client task: tokens are minted and served from task-local
+# process memory, so N>1 client tasks break first-click RDP (#928). Scale guacd
+# for capacity, not the client.
+guacamole_client_desired_count = 1
 
 # Database (production settings)
 guacamole_db_instance_class        = "db.t3.small"

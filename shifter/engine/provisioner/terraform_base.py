@@ -246,6 +246,21 @@ def _validate_request_uuid(request_uuid: str) -> None:
         raise ValueError(f"request_uuid must be a path-safe identifier, got {request_uuid!r}")
 
 
+def _request_workspace_root(workspace_root: Path, request_uuid: str) -> Path:
+    """Build the per-request workspace path and confirm it stays within the workspace root.
+
+    `request_uuid` is already format-validated by `_validate_request_uuid`, but this
+    re-checks the *constructed path* (after `resolve()` collapses any symlink/`..`)
+    so the directory we create, copy into, and later rmtree can never escape the
+    workspace root.
+    """
+    base = workspace_root.resolve()
+    request_root = (workspace_root / request_uuid).resolve()
+    if request_root != base and not request_root.is_relative_to(base):
+        raise ValueError(f"request workspace path escapes the workspace root: {request_root}")
+    return request_root
+
+
 def _stage_workspace(source_dir: Path, request_uuid: str, label: str) -> Path:
     """Copy the read-only Terraform module source to a writable per-request workspace.
 
@@ -279,7 +294,7 @@ def _stage_workspace(source_dir: Path, request_uuid: str, label: str) -> Path:
     """
     _validate_request_uuid(request_uuid)
     workspace_root = Path(os.environ.get("TERRAFORM_WORKSPACE_DIR", _DEFAULT_TERRAFORM_WORKSPACE_DIR))
-    request_root = workspace_root / request_uuid
+    request_root = _request_workspace_root(workspace_root, request_uuid)
     if request_root.exists():
         shutil.rmtree(request_root, ignore_errors=True)
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -520,7 +535,7 @@ def apply(
         try:
             raw_outputs = json.loads(output_result.stdout)
         except json.JSONDecodeError as e:
-            logger.error("Failed to parse Terraform output: %s", output_result.stdout[:500])
+            logger.exception("Failed to parse Terraform output: %s", output_result.stdout[:500])
             raise RuntimeError(f"Failed to parse Terraform output as JSON: {e}") from e
 
         outputs: dict[str, Any] = {}

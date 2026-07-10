@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-BUILD_TARBALL_S3_URI="${BUILD_TARBALL_S3_URI:-s3://shifter-polaris-bake-dev-741140496509/polaris/build-aws-dev-default-vpc.tar.gz}"
+BUILD_TARBALL_S3_URI="${BUILD_TARBALL_S3_URI:?Set BUILD_TARBALL_S3_URI to your polaris build tarball, e.g. s3://shifter-polaris-bake-dev-<account-id>/polaris/build-aws-dev-default-vpc.tar.gz}"
 POLARIS_ROOT="${POLARIS_ROOT:-/opt/polaris}"
 BUILD_DIR="${POLARIS_ROOT}/scenario-dev/polaris/build"
 REBUILD_SERVICES="${REBUILD_SERVICES:-dns a14-kali a16-research-analyst}"

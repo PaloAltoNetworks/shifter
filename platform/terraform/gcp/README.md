@@ -43,6 +43,55 @@ Security posture:
   - `enable_managed_tls = true`
   - at least one `gke_master_authorized_cidrs` entry
 
+## Email delivery (optional)
+
+GCP has no native Amazon SES equivalent, so a GCP deployment sends transactional
+mail (sign-up verification, password reset, invitations) through an operator-chosen
+SaaS — SendGrid or Mailgun — using `django-anymail`. Email is optional: with
+`email_backend` unset (the default) the portal uses Django's console backend and
+no email secret is created.
+
+To enable email:
+
+1. Set the email variables in your environment override (for example
+   `local.auto.tfvars`, or rendered from CI secrets):
+
+   ```hcl
+   # SendGrid
+   email_backend      = "anymail.backends.sendgrid.EmailBackend"
+   email_from_address = "noreply@your-domain.example"
+
+   # or Mailgun
+   email_backend       = "anymail.backends.mailgun.EmailBackend"
+   email_from_address  = "noreply@your-domain.example"
+   email_sender_domain = "mg.your-domain.example"
+   ```
+
+2. `terraform apply`. Terraform creates an **unseeded** Secret Manager secret
+   `${project_id-prefix}-email` for the ESP API key. The key is never stored in
+   Terraform state, tfvars, Helm values, or this repo.
+
+3. Populate the secret with your ESP API key as a JSON bundle (the runtime
+   entrypoint reads the `api_key` field). Read the key from a silent prompt so
+   it never lands in shell history, command lines, or process arguments:
+
+   ```bash
+   read -rs -p "ESP API key: " ESP_API_KEY && echo
+   printf '{"api_key":"%s"}' "$ESP_API_KEY" \
+     | gcloud secrets versions add "${PROJECT_PREFIX}-email" --data-file=- --project "$PROJECT_ID"
+   unset ESP_API_KEY
+   ```
+
+   `printf` is a shell builtin, so the key passes through the variable and stdin
+   only — it is never exposed in `ps` output or shell history. Alternatively,
+   write the JSON to a `chmod 600` file and pass it with `--data-file=<path>`.
+
+The deploy renderer (`scripts/gcp/render_runtime_env.py`) emits `EMAIL_BACKEND`,
+`DEFAULT_FROM_EMAIL`, the secret **reference** `EMAIL_API_KEY_SECRET_ID`, and (for
+Mailgun) `MAILGUN_SENDER_DOMAIN`; the entrypoint hydrates the key into
+`EMAIL_API_KEY` at startup. See `shifter/shifter_platform/config/_email.py` for
+the backend selection.
+
 Current non-goals:
 
 - guest VM / NGFW / Compute Engine range infrastructure beyond the shared range-network foundation

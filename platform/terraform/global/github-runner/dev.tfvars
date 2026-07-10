@@ -1,5 +1,16 @@
-vpc_id       = "vpc-02c81b9b197f058b1"    # Default VPC (aws-dev account 741140496509)
-subnet_id    = "subnet-0be6dd26f8cd06a77" # us-east-2a public subnet
+# Runner network placement (ADR-004-R20).
+#
+# aws-dev opts into the account default VPC via the documented escape hatch:
+# with allow_default_vpc = true and vpc_id/subnet_id left empty, the stack
+# auto-resolves the default VPC and one of its subnets, so no live VPC/subnet
+# IDs are committed (ADR-004-R14). This accepts the range private-DNS collision
+# risk for dev; the design is being reassessed (see the issue in ADR-004-R20).
+#
+# To use an isolated network instead, set allow_default_vpc = false and supply a
+# non-default vpc_id/subnet_id (a dedicated runner VPC or the portal VPC private
+# tier) via a gitignored override, never committed here.
+allow_default_vpc = true
+
 runner_count = 3
 
 github_org  = "Brad-Edwards"

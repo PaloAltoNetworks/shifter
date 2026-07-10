@@ -161,6 +161,21 @@ class NGFWWizardManager {
         this.elements.otpFolderInput?.addEventListener('input', (e) => {
             this.formData.otp_folder = e.target.value.trim();
         });
+
+        this.elements.viewNgfwBtn?.addEventListener('click', () => {
+            const detailUrl = this.elements.viewNgfwBtn.dataset.detailUrl;
+            if (detailUrl) {
+                globalThis.location.href = detailUrl;
+            }
+        });
+    }
+
+    _setViewNgfwDetailUrl() {
+        if (!this.elements.viewNgfwBtn || !this.ngfwId) {
+            return;
+        }
+        this.elements.viewNgfwBtn.dataset.detailUrl =
+            this.detailUrlTemplate.replace('{id}', this.ngfwId);
     }
 
     setInitialState() {
@@ -281,9 +296,7 @@ class NGFWWizardManager {
 
             // Connect WebSocket for status updates
             this.ngfwId = data.id;
-            if (this.elements.viewNgfwBtn) {
-                this.elements.viewNgfwBtn.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
-            }
+            this._setViewNgfwDetailUrl();
             this.connectWebSocket();
 
         } catch (err) {
@@ -307,7 +320,13 @@ class NGFWWizardManager {
         this.ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                console.log('NGFW status update:', data);
+                // Log the status only when it is a known, safe literal; any
+                // other value (including an attacker-influenced one carrying
+                // CR/LF) logs as 'unknown' so it cannot forge log entries
+                // (CodeQL js/log-injection).
+                const KNOWN_STATUSES = ['ready', 'failed', 'pending', 'provisioning', 'stopped'];
+                const safeStatus = KNOWN_STATUSES.includes(data.status) ? data.status : 'unknown';
+                console.log('NGFW status update:', safeStatus);
 
                 if (data.status === 'ready') {
                     this.showSuccess();

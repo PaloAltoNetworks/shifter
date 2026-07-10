@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 import secrets
 from collections import deque
 from typing import TYPE_CHECKING, Any
@@ -27,6 +26,7 @@ from ctf.models import (
     CTFParticipant,
     CTFTopic,
 )
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     pass
@@ -206,7 +206,7 @@ def _verify_hash(submitted_flag: str, stored_hash: str, context_id: UUID) -> boo
                 stored_hash.encode("utf-8"),
             )
         except Exception as e:
-            logger.error("Flag verification error for %s: %s", context_id, e)
+            logger.exception("Flag verification error for %s: %s", context_id, e)
             return False
     elif stored_hash.startswith("pbkdf2:"):
         parts = stored_hash.split(":", 2)
@@ -236,6 +236,52 @@ def _verify_hash(submitted_flag: str, stored_hash: str, context_id: UUID) -> boo
         return False
 
 
+def _verify_regex_flag(flag_obj: CTFFlag, submitted_flag: str) -> bool:
+    """Verify a submitted flag against a regex CTFFlag.
+
+    The organizer-authored pattern (stored plaintext in ``flag_hash``) runs on a
+    request worker against participant input, so evaluation is bounded and fails
+    closed via ``ctf.services.regex_policy`` (issue #1183, ReDoS / CWE-1333).
+    """
+    from ctf.services.regex_policy import safe_fullmatch
+
+    return safe_fullmatch(flag_obj.flag_hash, submitted_flag, case_sensitive=flag_obj.case_sensitive)
+
+
+def _verify_programmable_flag(flag_obj: CTFFlag, submitted_flag: str, config: dict[str, Any]) -> bool:
+    """Verify a submitted flag against a programmable validator CTFFlag."""
+    from ctf.validators import get_validator
+
+    validator_name = config.get("validator_name", "")
+    validator_func = get_validator(validator_name)
+    if validator_func is None:
+        logger.error("Unknown validator %r for flag %s", validator_name, flag_obj.id)
+        return False
+    try:
+        return validator_func(submitted_flag, config.get("params", {}))
+    except Exception as e:
+        logger.exception("Validator %r error for flag %s: %s", validator_name, flag_obj.id, e)
+        return False
+
+
+def _verify_http_flag(flag_obj: CTFFlag, submitted_flag: str, config: dict[str, Any]) -> bool:
+    """Verify a submitted flag against an HTTP validator CTFFlag."""
+    from ctf.validators import validate_http
+
+    try:
+        return validate_http(submitted_flag, config, flag_obj.challenge_id)
+    except Exception as e:
+        logger.exception("HTTP validator error for flag %s: %s", flag_obj.id, e)
+        return False
+
+
+def _verify_static_flag(flag_obj: CTFFlag, submitted_flag: str) -> bool:
+    """Verify a submitted flag against a static (hashed) CTFFlag."""
+    # Static flags: hashed comparison
+    value = submitted_flag if flag_obj.case_sensitive else submitted_flag.lower()
+    return _verify_hash(value, flag_obj.flag_hash, flag_obj.id)
+
+
 def verify_single_flag(flag_obj: CTFFlag, submitted_flag: str) -> bool:
     """Verify a submitted flag against a single CTFFlag record.
 
@@ -247,38 +293,13 @@ def verify_single_flag(flag_obj: CTFFlag, submitted_flag: str) -> bool:
         True if the flag matches.
     """
     if flag_obj.flag_type == "regex":
-        # Regex flags: pattern stored as plaintext in flag_hash
-        regex_flags = 0 if flag_obj.case_sensitive else re.IGNORECASE
-        try:
-            return bool(re.fullmatch(flag_obj.flag_hash, submitted_flag, flags=regex_flags))
-        except re.error as e:
-            logger.error("Invalid regex pattern for flag %s: %s", flag_obj.id, e)
-            return False
-    elif flag_obj.flag_type in ("programmable", "http"):
-        from ctf.validators import get_validator, validate_http
-
+        return _verify_regex_flag(flag_obj, submitted_flag)
+    if flag_obj.flag_type in ("programmable", "http"):
         config = flag_obj.validator_config or {}
         if flag_obj.flag_type == "programmable":
-            validator_name = config.get("validator_name", "")
-            validator_func = get_validator(validator_name)
-            if validator_func is None:
-                logger.error("Unknown validator %r for flag %s", validator_name, flag_obj.id)
-                return False
-            try:
-                return validator_func(submitted_flag, config.get("params", {}))
-            except Exception as e:
-                logger.error("Validator %r error for flag %s: %s", validator_name, flag_obj.id, e)
-                return False
-        else:  # http
-            try:
-                return validate_http(submitted_flag, config, flag_obj.challenge_id)
-            except Exception as e:
-                logger.error("HTTP validator error for flag %s: %s", flag_obj.id, e)
-                return False
-    else:
-        # Static flags: hashed comparison
-        value = submitted_flag if flag_obj.case_sensitive else submitted_flag.lower()
-        return _verify_hash(value, flag_obj.flag_hash, flag_obj.id)
+            return _verify_programmable_flag(flag_obj, submitted_flag, config)
+        return _verify_http_flag(flag_obj, submitted_flag, config)
+    return _verify_static_flag(flag_obj, submitted_flag)
 
 
 def verify_flag(challenge: CTFChallenge, submitted_flag: str) -> bool:
@@ -299,8 +320,21 @@ def verify_flag(challenge: CTFChallenge, submitted_flag: str) -> bool:
     if flags:
         return any(verify_single_flag(flag_obj, submitted_flag) for flag_obj in flags)
 
-    # Backward compat: fall back to challenge.flag_hash
-    return _verify_hash(submitted_flag, challenge.flag_hash, challenge.id)
+    # Backward compat: fall back to the legacy challenge.flag_hash. A non-hash
+    # sentinel ("multi-flag" and similar) means the challenge relies on CTFFlag
+    # rows that have all been removed; verifying against it would silently reject
+    # every submission with no diagnostic. Log loudly and return False instead of
+    # failing quietly so the misconfiguration is visible (#1146).
+    legacy_hash = challenge.flag_hash
+    if not legacy_hash or not legacy_hash.startswith(("$2", "pbkdf2:", "sha256:")):
+        logger.error(
+            "Challenge %s has no flag records and no usable legacy flag_hash "
+            "(value=%r); every submission will be rejected. Re-add at least one flag.",
+            challenge.id,
+            legacy_hash,
+        )
+        return False
+    return _verify_hash(submitted_flag, legacy_hash, challenge.id)
 
 
 def _validate_programmable_config(validator_config: dict[str, Any] | None) -> None:
@@ -377,6 +411,90 @@ def _validate_http_config(validator_config: dict[str, Any] | None) -> None:
 VALID_FLAG_TYPES = ("static", "regex", "programmable", "http")
 
 
+def _is_flag_modifiable(event: CTFEvent) -> bool:
+    """Return True when flag rows may be added, updated, or removed."""
+    return event.is_content_modifiable or event.is_live_flag_repairable
+
+
+def _flag_hash_for_payload(
+    flag_type: str,
+    flag_data: dict[str, Any],
+    *,
+    case_sensitive: bool,
+    validator_config: dict[str, Any] | None,
+) -> str:
+    """Validate flag payload fields and return the value to store in flag_hash."""
+    if flag_type not in VALID_FLAG_TYPES:
+        raise CTFValidationError(
+            f"Invalid flag_type: {flag_type}",
+            details={"flag_type": flag_type},
+        )
+
+    if flag_type in ("static", "regex"):
+        plaintext_flag = flag_data.get("flag", "").strip()
+        if not plaintext_flag:
+            raise CTFValidationError(
+                "Flag value is required",
+                details={"missing_fields": ["flag"]},
+            )
+        if flag_type == "regex":
+            # Reject unsafe patterns at creation time (over-long or
+            # uncompilable) so organizers get immediate feedback and the
+            # request-worker verifier never stores a ReDoS-prone pattern
+            # (issue #1183). The pattern is not echoed back to avoid leaking it.
+            from ctf.services.regex_policy import UnsafeRegexError, validate_pattern
+
+            try:
+                validate_pattern(plaintext_flag)
+            except UnsafeRegexError as e:
+                raise CTFValidationError(
+                    str(e),
+                    details={"pattern_length": len(plaintext_flag)},
+                ) from None
+            return plaintext_flag
+        return hash_flag(plaintext_flag, case_sensitive=case_sensitive)
+
+    if flag_type == "programmable":
+        _validate_programmable_config(validator_config)
+        return "programmable"
+
+    _validate_http_config(validator_config)
+    return "http"
+
+
+def _reject_non_flag_live_edits(challenge: CTFChallenge, challenge_data: dict[str, Any]) -> None:
+    """Refuse broad challenge edits during ACTIVE/PAUSED live events."""
+    if challenge.event.is_content_modifiable:
+        return
+    if not challenge.event.is_live_flag_repairable:
+        raise CTFStateError(
+            f"Cannot modify challenge in event with status {challenge.event.status}",
+            details={
+                "challenge_id": str(challenge.pk),
+                "event_status": challenge.event.status,
+            },
+        )
+    allowed_keys = {"flag", "flags"}
+    if not allowed_keys.intersection(challenge_data.keys()):
+        raise CTFStateError(
+            f"Only flag fields may be changed during a live event (status {challenge.event.status})",
+            details={
+                "challenge_id": str(challenge.pk),
+                "event_status": challenge.event.status,
+            },
+        )
+    extra_keys = set(challenge_data.keys()) - allowed_keys
+    if extra_keys:
+        raise CTFStateError(
+            f"Only flag fields may be changed during a live event (status {challenge.event.status})",
+            details={
+                "challenge_id": str(challenge.pk),
+                "event_status": challenge.event.status,
+                "disallowed_fields": sorted(extra_keys),
+            },
+        )
+
+
 def add_flag(
     challenge_id: UUID,
     flag_data: dict[str, Any],
@@ -414,7 +532,7 @@ def add_flag(
 
     _assert_actor_owns_event(actor_id, challenge.event)
 
-    if not challenge.event.is_content_modifiable:
+    if not _is_flag_modifiable(challenge.event):
         raise CTFStateError(
             f"Cannot modify challenge in event with status {challenge.event.status}",
             details={"challenge_id": str(challenge_id), "event_status": challenge.event.status},
@@ -424,41 +542,12 @@ def add_flag(
     case_sensitive = flag_data.get("case_sensitive", True)
     order = flag_data.get("order", 0)
     validator_config = flag_data.get("validator_config")
-
-    if flag_type not in VALID_FLAG_TYPES:
-        raise CTFValidationError(
-            f"Invalid flag_type: {flag_type}",
-            details={"flag_type": flag_type},
-        )
-
-    if flag_type in ("static", "regex"):
-        plaintext_flag = flag_data.get("flag", "").strip()
-        if not plaintext_flag:
-            raise CTFValidationError(
-                "Flag value is required",
-                details={"missing_fields": ["flag"]},
-            )
-
-        if flag_type == "regex":
-            # Validate regex pattern
-            try:
-                re.compile(plaintext_flag)
-            except re.error as e:
-                raise CTFValidationError(
-                    f"Invalid regex pattern: {e}",
-                    details={"pattern": plaintext_flag},
-                ) from None
-            # Regex patterns stored as plaintext (can't hash a regex)
-            stored_value = plaintext_flag
-        else:
-            # Static flags: hash for secure storage
-            stored_value = hash_flag(plaintext_flag, case_sensitive=case_sensitive)
-    elif flag_type == "programmable":
-        _validate_programmable_config(validator_config)
-        stored_value = "programmable"
-    else:  # http
-        _validate_http_config(validator_config)
-        stored_value = "http"
+    stored_value = _flag_hash_for_payload(
+        flag_type,
+        flag_data,
+        case_sensitive=case_sensitive,
+        validator_config=validator_config,
+    )
 
     flag_obj = CTFFlag.objects.create(
         challenge=challenge,
@@ -469,7 +558,93 @@ def add_flag(
         validator_config=validator_config,
     )
 
-    logger.info("Added flag %s to challenge %s", flag_obj.id, challenge_id)
+    if challenge.event.is_live_flag_repairable:
+        from ctf.services.audit import audit_live_flag_repair
+
+        audit_live_flag_repair(
+            actor_id=actor_id,
+            challenge_id=challenge.pk,
+            flag_id=flag_obj.pk,
+            event_id=challenge.event_id,
+            action="add",
+        )
+
+    logger.info("Added flag %s to challenge %s", flag_obj.id, safe_log_value(challenge_id))
+    return flag_obj
+
+
+def update_flag(
+    flag_id: UUID,
+    flag_data: dict[str, Any],
+    *,
+    actor_id: int,
+) -> CTFFlag:
+    """Update an existing challenge flag (including live-event repairs).
+
+    Args:
+        flag_id: UUID of the flag to update.
+        flag_data: Same shape as ``add_flag`` flag_data (flag, flag_type, etc.).
+        actor_id: User pk of the caller.
+
+    Returns:
+        The updated CTFFlag instance.
+    """
+    try:
+        flag_obj = CTFFlag.objects.select_related("challenge__event").get(pk=flag_id)
+    except CTFFlag.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Flag {flag_id} not found",
+            details={"flag_id": str(flag_id)},
+        ) from None
+
+    challenge = flag_obj.challenge
+    _assert_actor_owns_event(actor_id, challenge.event)
+
+    if not _is_flag_modifiable(challenge.event):
+        raise CTFStateError(
+            f"Cannot modify challenge in event with status {challenge.event.status}",
+            details={"flag_id": str(flag_id), "event_status": challenge.event.status},
+        )
+
+    flag_type = flag_data.get("flag_type", flag_obj.flag_type)
+    case_sensitive = flag_data.get("case_sensitive", flag_obj.case_sensitive)
+    order = flag_data.get("order", flag_obj.order)
+    validator_config = flag_data.get("validator_config", flag_obj.validator_config)
+    stored_value = _flag_hash_for_payload(
+        flag_type,
+        flag_data,
+        case_sensitive=case_sensitive,
+        validator_config=validator_config,
+    )
+
+    flag_obj.flag_hash = stored_value
+    flag_obj.flag_type = flag_type
+    flag_obj.case_sensitive = case_sensitive
+    flag_obj.order = order
+    flag_obj.validator_config = validator_config
+    flag_obj.save(
+        update_fields=[
+            "flag_hash",
+            "flag_type",
+            "case_sensitive",
+            "order",
+            "validator_config",
+            "updated_at",
+        ]
+    )
+
+    if challenge.event.is_live_flag_repairable:
+        from ctf.services.audit import audit_live_flag_repair
+
+        audit_live_flag_repair(
+            actor_id=actor_id,
+            challenge_id=challenge.pk,
+            flag_id=flag_obj.pk,
+            event_id=challenge.event_id,
+            action="update",
+        )
+
+    logger.info("Updated flag %s on challenge %s", flag_obj.id, challenge.pk)
     return flag_obj
 
 
@@ -495,10 +670,21 @@ def remove_flag(flag_id: UUID, *, actor_id: int) -> None:
 
     _assert_actor_owns_event(actor_id, flag_obj.challenge.event)
 
-    if not flag_obj.challenge.event.is_content_modifiable:
+    if not _is_flag_modifiable(flag_obj.challenge.event):
         raise CTFStateError(
             f"Cannot modify challenge in event with status {flag_obj.challenge.event.status}",
             details={"flag_id": str(flag_id), "event_status": flag_obj.challenge.event.status},
+        )
+
+    if flag_obj.challenge.event.is_live_flag_repairable:
+        from ctf.services.audit import audit_live_flag_repair
+
+        audit_live_flag_repair(
+            actor_id=actor_id,
+            challenge_id=flag_obj.challenge_id,
+            flag_id=flag_obj.pk,
+            event_id=flag_obj.challenge.event_id,
+            action="remove",
         )
 
     flag_obj.delete(soft=True)
@@ -724,14 +910,7 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any], *, acto
 
     _assert_actor_owns_event(actor_id, challenge.event)
 
-    if not challenge.event.is_content_modifiable:
-        raise CTFStateError(
-            f"Cannot modify challenge in event with status {challenge.event.status}",
-            details={
-                "challenge_id": str(challenge_id),
-                "event_status": challenge.event.status,
-            },
-        )
+    _reject_non_flag_live_edits(challenge, challenge_data)
 
     data = challenge_data.copy()
     flags_list = data.pop("flags", None)
@@ -745,7 +924,18 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any], *, acto
             setattr(challenge, key, value)
         challenge.save()
         _apply_optional_challenge_associations(challenge, flags_list, tag_names, topic_names, actor_id)
-        logger.info("Updated challenge %s", challenge_id)
+        logger.info("Updated challenge %s", safe_log_value(challenge_id))
+
+        if challenge.event.is_live_flag_repairable and ("flag" in challenge_data or flags_list is not None):
+            from ctf.services.audit import audit_live_flag_repair
+
+            audit_live_flag_repair(
+                actor_id=actor_id,
+                challenge_id=challenge.pk,
+                flag_id=challenge.flags.order_by("order").values_list("pk", flat=True).first() or challenge.pk,
+                event_id=challenge.event_id,
+                action="update_legacy_flag",
+            )
 
     _sync_release_task(challenge)
 
@@ -979,6 +1169,67 @@ from ctf.services.authorization import assert_actor_owns_event as _assert_actor_
 # -----------------------------------------------------------------------------
 
 
+def _assert_participant_eligible(participant: CTFParticipant) -> None:
+    """Raise CTFStateError unless the participant is registered and non-disqualified."""
+    from ctf.services.participant.queries import _PLAYING_PARTICIPANT_STATUSES
+
+    # Participant eligibility: aligned with `eligible_participant_q`.
+    if participant.registered_at is None or participant.status not in _PLAYING_PARTICIPANT_STATUSES:
+        raise CTFStateError(
+            "Participant is not eligible",
+            details={
+                "participant_id": str(participant.id),
+                "status": participant.status,
+            },
+        )
+
+
+def _assert_event_active_and_in_window(event: CTFEvent) -> None:
+    """Raise CTFStateError unless the event is ACTIVE and within its competition window."""
+    from ctf.enums import EventStatus
+
+    if event.status != EventStatus.ACTIVE.value:
+        raise CTFStateError(
+            f"Event is not active (status: {event.status})",
+            details={"event_id": str(event.id), "status": event.status},
+        )
+
+    now = timezone.now()
+    if now < event.event_start or now > event.event_end:
+        raise CTFStateError(
+            "Event is not within its competition window",
+            details={
+                "event_id": str(event.id),
+                "event_start": event.event_start.isoformat(),
+                "event_end": event.event_end.isoformat(),
+                "server_time": now.isoformat(),
+            },
+        )
+
+
+def _assert_challenge_visible_and_released(challenge: CTFChallenge) -> None:
+    """Raise CTFStateError unless the challenge is visible (not hidden/locked) and released."""
+    if challenge.visibility == "hidden":
+        raise CTFStateError(
+            "Challenge is not available",
+            details={"challenge_id": str(challenge.id)},
+        )
+    if challenge.visibility == "locked":
+        raise CTFStateError(
+            "Challenge is locked",
+            details={"challenge_id": str(challenge.id)},
+        )
+
+    if not challenge.is_released:
+        raise CTFStateError(
+            "Challenge has not been released yet",
+            details={
+                "challenge_id": str(challenge.id),
+                "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
+            },
+        )
+
+
 def assert_challenge_available_for_participant(
     participant: CTFParticipant,
     challenge: CTFChallenge,
@@ -1004,18 +1255,7 @@ def assert_challenge_available_for_participant(
         CTFStateError: any availability gate fails (including ineligible
             participant).
     """
-    from ctf.enums import EventStatus
-    from ctf.services.participant import _PLAYING_PARTICIPANT_STATUSES
-
-    # Participant eligibility: aligned with `eligible_participant_q`.
-    if participant.registered_at is None or participant.status not in _PLAYING_PARTICIPANT_STATUSES:
-        raise CTFStateError(
-            "Participant is not eligible",
-            details={
-                "participant_id": str(participant.id),
-                "status": participant.status,
-            },
-        )
+    _assert_participant_eligible(participant)
 
     if challenge.event_id != participant.event_id:
         raise CTFValidationError(
@@ -1026,45 +1266,8 @@ def assert_challenge_available_for_participant(
             },
         )
 
-    event = challenge.event
-    if event.status != EventStatus.ACTIVE.value:
-        raise CTFStateError(
-            f"Event is not active (status: {event.status})",
-            details={"event_id": str(event.id), "status": event.status},
-        )
-
-    now = timezone.now()
-    if now < event.event_start or now > event.event_end:
-        raise CTFStateError(
-            "Event is not within its competition window",
-            details={
-                "event_id": str(event.id),
-                "event_start": event.event_start.isoformat(),
-                "event_end": event.event_end.isoformat(),
-                "server_time": now.isoformat(),
-            },
-        )
-
-    if challenge.visibility == "hidden":
-        raise CTFStateError(
-            "Challenge is not available",
-            details={"challenge_id": str(challenge.id)},
-        )
-    if challenge.visibility == "locked":
-        raise CTFStateError(
-            "Challenge is locked",
-            details={"challenge_id": str(challenge.id)},
-        )
-
-    if not challenge.is_released:
-        raise CTFStateError(
-            "Challenge has not been released yet",
-            details={
-                "challenge_id": str(challenge.id),
-                "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
-            },
-        )
-
+    _assert_event_active_and_in_window(challenge.event)
+    _assert_challenge_visible_and_released(challenge)
     _assert_prerequisites_met(challenge, participant)
 
 
@@ -1092,7 +1295,7 @@ def assert_challenge_readable_for_participant(
     Submit/hint/file-download endpoints continue to use
     `assert_challenge_available_for_participant`.
     """
-    from ctf.services.participant import _PLAYING_PARTICIPANT_STATUSES
+    from ctf.services.participant.queries import _PLAYING_PARTICIPANT_STATUSES
 
     if participant.registered_at is None or participant.status not in _PLAYING_PARTICIPANT_STATUSES:
         raise CTFStateError(
@@ -1212,33 +1415,42 @@ def add_prerequisite(
             details={"challenge_id": str(challenge_id)},
         )
 
-    # Check duplicate
-    if CTFChallengePrerequisite.objects.filter(
-        challenge=challenge,
-        required_challenge=required,
-    ).exists():
-        raise CTFValidationError(
-            "This prerequisite already exists",
-            details={
-                "challenge_id": str(challenge_id),
-                "required_challenge_id": str(required_challenge_id),
-            },
-        )
+    # Serialize prerequisite writes for this event so the duplicate and cycle
+    # checks and the insert cannot interleave with a concurrent edit (#1144).
+    # Without the lock, concurrent "A requires B" and "B requires A" each pass
+    # _would_create_cycle against the pre-write graph and together close an
+    # A<->B cycle (the unique constraint stops duplicate edges, not cycles),
+    # soft-bricking both challenges. The event row is the serialization point.
+    with transaction.atomic():
+        CTFEvent.objects.select_for_update().get(pk=challenge.event_id)
 
-    # Circular dependency check (BFS)
-    if _would_create_cycle(challenge_id, required_challenge_id):
-        raise CTFValidationError(
-            "Adding this prerequisite would create a circular dependency",
-            details={
-                "challenge_id": str(challenge_id),
-                "required_challenge_id": str(required_challenge_id),
-            },
-        )
+        # Check duplicate
+        if CTFChallengePrerequisite.objects.filter(
+            challenge=challenge,
+            required_challenge=required,
+        ).exists():
+            raise CTFValidationError(
+                "This prerequisite already exists",
+                details={
+                    "challenge_id": str(challenge_id),
+                    "required_challenge_id": str(required_challenge_id),
+                },
+            )
 
-    prereq = CTFChallengePrerequisite.objects.create(
-        challenge=challenge,
-        required_challenge=required,
-    )
+        # Circular dependency check (BFS)
+        if _would_create_cycle(challenge_id, required_challenge_id):
+            raise CTFValidationError(
+                "Adding this prerequisite would create a circular dependency",
+                details={
+                    "challenge_id": str(challenge_id),
+                    "required_challenge_id": str(required_challenge_id),
+                },
+            )
+
+        prereq = CTFChallengePrerequisite.objects.create(
+            challenge=challenge,
+            required_challenge=required,
+        )
 
     logger.info(
         "Added prerequisite: %s requires %s",

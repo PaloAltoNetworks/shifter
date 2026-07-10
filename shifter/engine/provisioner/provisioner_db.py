@@ -22,6 +22,7 @@ import psycopg
 from psycopg import sql
 
 from config import has_ngfw_attachment_state
+from log_redact import safe_log_fingerprint
 from state_helpers import (
     _build_instance_state,
     _build_provisioned_instance_payload,
@@ -113,8 +114,59 @@ def _append_kwarg_assignment(assignments: list[Any], values: list[Any], key: str
     values.append(value)
 
 
-def update_range_status(range_id: int, status: str, **kwargs: str | int | None) -> None:
-    """Update range status in database."""
+def enqueue_event_outbox(event: dict[str, object], *, cur: psycopg.Cursor[tuple[object, ...]] | None = None) -> None:
+    """Insert an event into the transactional outbox for durable delivery.
+
+    When ``cur`` is provided the INSERT is executed on that cursor and the
+    caller owns the surrounding transaction/commit (atomic with the state
+    change).  When ``cur`` is None a new connection is opened, the row is
+    inserted, and the connection is committed immediately.
+
+    Uses ON CONFLICT (event_id) DO NOTHING so the call is idempotent.
+
+    Args:
+        event: Full event dict; must contain ``event_id`` and ``event_type``.
+        cur:   Optional psycopg cursor sharing the caller's transaction.
+
+    Raises:
+        Exception: Any DB error is re-raised — callers must learn when durable
+            recording fails.
+    """
+    _insert_sql = """
+        INSERT INTO engine_range_event_outbox
+            (event_id, event_type, payload, status, attempts, max_attempts,
+             next_attempt_at, created_at)
+        VALUES
+            (%s, %s, %s, 'PENDING', 0, 10, NOW(), NOW())
+        ON CONFLICT (event_id) DO NOTHING
+    """
+    params = (str(event["event_id"]), event["event_type"], json.dumps(event))
+
+    if cur is not None:
+        cur.execute(_insert_sql, params)
+    else:
+        with get_db_connection() as conn:
+            with conn.cursor() as _cur:
+                _cur.execute(_insert_sql, params)
+            conn.commit()
+
+
+def update_range_status(
+    range_id: int,
+    status: str,
+    outbox_event: dict | None = None,
+    **kwargs: str | int | None,
+) -> None:
+    """Update range status in database.
+
+    Args:
+        range_id:     Primary key of the Range.
+        status:       New status string.
+        outbox_event: Optional event dict to insert into the outbox atomically
+                      with the status update.  When provided, the INSERT and
+                      the UPDATE commit in the same transaction.
+        **kwargs:     Additional column=value pairs for the UPDATE SET clause.
+    """
     logger.debug("update_range_status: range_id=%s status=%s kwargs=%s", range_id, status, list(kwargs.keys()))
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -132,6 +184,9 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
             values.append(range_id)
             query = sql.SQL("UPDATE mission_control_range SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments))
             cur.execute(query, values)
+
+            if outbox_event is not None:
+                enqueue_event_outbox(outbox_event, cur=cur)
         conn.commit()
 
 
@@ -140,15 +195,28 @@ def write_provisioned_state(
     subnets: dict[str, dict[str, Any]],
     instances: list[dict[str, Any]],
     ngfw_instance_id: int | None = None,
+    outbox_event: dict | None = None,
 ) -> None:
-    """Write provisioned infrastructure state directly to database."""
+    """Write provisioned infrastructure state directly to database.
+
+    Args:
+        range_id:        Primary key of the Range.
+        subnets:         Mapping of subnet name → subnet data dict.
+        instances:       List of instance data dicts.
+        ngfw_instance_id: FK to the NGFW Instance, if any.
+        outbox_event:    Optional event dict to insert into the outbox
+                         atomically with the state writes.
+    """
     provider = _get_cloud_provider()
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             for subnet_name, subnet_data in subnets.items():
                 subnet_uuid = subnet_data.get("uuid")
                 if not subnet_uuid:
-                    logger.warning("Subnet %s missing UUID, skipping DB write", subnet_name)
+                    logger.warning(
+                        "Subnet subnet_fp=%s missing UUID, skipping DB write",
+                        safe_log_fingerprint(subnet_name),
+                    )
                     continue
 
                 state = _build_subnet_state(subnet_data, provider=provider)
@@ -163,15 +231,15 @@ def write_provisioned_state(
                 )
                 if cur.rowcount == 0:
                     raise ValueError(f"No engine_subnet record found for uuid={subnet_uuid}, range_id={range_id}")
-                logger.debug("Updated engine_subnet state: uuid=%s", subnet_uuid)
+                logger.debug("Updated engine_subnet state: subnet_fp=%s", safe_log_fingerprint(subnet_uuid))
 
             provisioned_instances = []
             for inst in instances:
                 instance_uuid = inst.get("uuid")
                 if not instance_uuid:
                     logger.warning(
-                        "Instance (role=%s) missing UUID, skipping DB write",
-                        inst.get("role", "unknown"),
+                        "Instance (role_fp=%s) missing UUID, skipping DB write",
+                        safe_log_fingerprint(inst.get("role", "unknown")),
                     )
                     continue
 
@@ -187,7 +255,7 @@ def write_provisioned_state(
                 )
                 if cur.rowcount == 0:
                     raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
-                logger.debug("Updated engine_instance state: uuid=%s", instance_uuid)
+                logger.debug("Updated engine_instance state: instance_fp=%s", safe_log_fingerprint(instance_uuid))
 
                 provisioned_instances.append(_build_provisioned_instance_payload(inst, provider=provider))
 
@@ -206,6 +274,9 @@ def write_provisioned_state(
                 range_id,
                 len(provisioned_instances),
             )
+
+            if outbox_event is not None:
+                enqueue_event_outbox(outbox_event, cur=cur)
 
         conn.commit()
     logger.info(
@@ -268,10 +339,13 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
 
 def _update_range_config(range_id: int, range_spec: dict[str, Any]) -> None:
     """Write updated range_config back to mission_control_range."""
+    from cyberscript.persisted_envelope import ensure_wrapped_persisted_spec
+
+    wrapped = ensure_wrapped_persisted_spec("range_spec", range_spec)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE mission_control_range SET range_config = %s WHERE id = %s",
-            (json.dumps(range_spec), range_id),
+            (json.dumps(wrapped), range_id),
         )
         conn.commit()
     logger.info("Persisted updated range_config for range %d", range_id)
@@ -299,7 +373,10 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
         if not row:
             raise ValueError(f"Range request not found: {request_id}")
 
-        range_config = row[3] if row[3] else {}
+        range_config_raw = row[3] if row[3] else {}
+        from cyberscript.persisted_envelope import unwrap_persisted_spec
+
+        range_config = unwrap_persisted_spec(range_config_raw)
         user_id = row[2]
         ngfw_instance_id = None
 
@@ -330,3 +407,71 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
             "status": row[5],
             "ngfw_instance_id": ngfw_instance_id,
         }
+
+
+def get_aces_range_data_by_request_id(request_id: str) -> dict[str, Any]:
+    """Read ACES-native range data: the serialized ACES plan + ids (ADR-032).
+
+    Unlike :func:`get_range_data_by_request_id`, this does NOT run the cyberscript
+    persisted-envelope unwrap or the NGFW attachment lookup: for the ACES-native
+    path ``range_config`` is the serialized ACES ProvisioningPlan itself, returned
+    verbatim as ``plan`` for the provisioner ``aces-range`` command to realize.
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                r.request_id,
+                rng.id AS range_id,
+                rng.user_id,
+                rng.range_config,
+                rng.subnet_index,
+                rng.status
+            FROM engine_request r
+            JOIN mission_control_range rng ON rng.request_id = r.id
+            WHERE r.request_id = %s
+            """,
+            (request_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Range request not found: {request_id}")
+
+    return {
+        "request_id": str(row[0]),
+        "range_id": row[1],
+        "user_id": row[2],
+        "plan": row[3] if row[3] else {},
+        "subnet_index": row[4],
+        "status": row[5],
+    }
+
+
+def get_aces_image_candidates(provider: str, source_name: str) -> list[dict[str, Any]]:
+    """Return enabled ACES image mappings for (provider, source_name) (ADR-032-R2).
+
+    The tenant-managed image registry the provisioner resolves against at
+    realization. Returns the candidate rows for a source name; the pure resolver
+    (``aces_image_resolver``) applies the exact-version / any-version rules.
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT source_version, image_ref, machine_type, disk_size_gb, disk_type
+            FROM engine_aces_image_mapping
+            WHERE provider = %s AND source_name = %s AND enabled = TRUE
+            """,
+            (provider, source_name),
+        )
+        rows = cur.fetchall()
+
+    return [
+        {
+            "source_version": row[0],
+            "image_ref": row[1],
+            "machine_type": row[2],
+            "disk_size_gb": row[3],
+            "disk_type": row[4],
+        }
+        for row in rows
+    ]

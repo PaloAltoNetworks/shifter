@@ -9,6 +9,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from django.db import transaction
 from django.db.models import QuerySet
 
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
@@ -56,13 +57,20 @@ def grant_award(
     if participant.event_id != event.pk:
         raise CTFValidationError("Participant does not belong to this event.")
 
-    award = CTFAward.objects.create(
-        event=event,
-        participant=participant,
-        points=points,
-        reason=reason,
-        granted_by=granted_by,
-    )
+    with transaction.atomic():
+        award = CTFAward.objects.create(
+            event=event,
+            participant=participant,
+            points=points,
+            reason=reason,
+            granted_by=granted_by,
+        )
+        # Maintain the materialized leaderboard (issue #850): an award changes
+        # the participant's (and their team's) total score.
+        from ctf.services.scoring import recompute_participant_score, recompute_team_score
+
+        recompute_participant_score(participant.id)
+        recompute_team_score(participant.team_id)
 
     logger.info(
         "Award granted: %+d points to participant %s in event %s by %s — %s",
@@ -90,7 +98,17 @@ def revoke_award(award_id: UUID) -> None:
     except CTFAward.DoesNotExist:
         raise CTFNotFoundError(f"Award {award_id} not found.") from None
 
-    award.delete(soft=True)
+    with transaction.atomic():
+        participant_id = award.participant_id
+        team_id = award.participant.team_id
+        award.delete(soft=True)
+        # Maintain the materialized leaderboard (issue #850): revoking an award
+        # removes its points from the participant's (and team's) total.
+        from ctf.services.scoring import recompute_participant_score, recompute_team_score
+
+        recompute_participant_score(participant_id)
+        recompute_team_score(team_id)
+
     logger.info("Award revoked: %s", award_id)
 
 

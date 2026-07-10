@@ -1,0 +1,101 @@
+/* CTF admin: event force delete page.
+   Extracted from templates/ctf/admin/event_force_delete.html (issue #414). */
+
+.breadcrumb {
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #94a3b8;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--theme-text-secondary);
+}
+
+.warning-banner {
+    background: #29181a;
+    border: 1px solid #dc3545;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+    color: #ff4d4f;
+    font-weight: 600;
+}
+
+.impact-list {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0 0;
+}
+
+.impact-list li {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--theme-border);
+    display: flex;
+    justify-content: space-between;
+}
+
+.impact-list li:last-child {
+    border-bottom: none;
+}
+
+.confirm-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    background: var(--theme-bg-secondary);
+    color: var(--theme-text-primary);
+    font-size: 14px;
+    margin-top: 8px;
+}
+
+.confirm-input:focus {
+    outline: none;
+    border-color: #dc3545;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: #fff;
+    width: 100%;
+    margin-top: 12px;
+    cursor: pointer;
+}
+
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.error-msg {
+    color: #dc3545;
+    font-size: 13px;
+    margin-top: 8px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+}
+
+.page-title-danger {
+    color: #dc3545;
+}
+
+.confirm-hint {
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+}
+
+.confirm-target {
+    font-weight: 600;
+    margin: 8px 0;
+    font-size: 15px;
+}

@@ -198,6 +198,15 @@ describe('TerminalManager', () => {
 
             expect(manager.activeTerminalUuid).toBe('kali-uuid');
         });
+
+        test('registers custom key event handler for clipboard shortcuts', () => {
+            manager.init();
+
+            expect(mockTerminal.attachCustomKeyEventHandler).toHaveBeenCalledTimes(3);
+            expect(mockTerminal.attachCustomKeyEventHandler.mock.calls[0][0]).toEqual(
+                expect.any(Function)
+            );
+        });
     });
 
     describe('createTabs', () => {
@@ -381,18 +390,40 @@ describe('TerminalManager', () => {
     });
 
     describe('_getRetryDelay', () => {
-        test('returns base delay for first retry', () => {
-            expect(manager._getRetryDelay(0)).toBe(1000);
+        // Equal-jitter backoff (#931): a delay is half the deterministic
+        // exponential cap plus a uniform random share of the other half. This
+        // keeps a minimum backoff floor while spreading reconnects so an ASG
+        // instance refresh does not stampede every dropped terminal onto the
+        // remaining instances at the same instant.
+        test('first retry stays within the jittered base window', () => {
+            for (let i = 0; i < 50; i++) {
+                const delay = manager._getRetryDelay(0);
+                expect(delay).toBeGreaterThanOrEqual(500);
+                expect(delay).toBeLessThanOrEqual(1000);
+            }
         });
 
-        test('returns exponential delay', () => {
-            expect(manager._getRetryDelay(1)).toBe(2000);
-            expect(manager._getRetryDelay(2)).toBe(4000);
-            expect(manager._getRetryDelay(3)).toBe(8000);
+        test('exponential cap grows but each delay keeps the jitter floor', () => {
+            for (const [retry, cap] of [[1, 2000], [2, 4000], [3, 8000]]) {
+                const delay = manager._getRetryDelay(retry);
+                expect(delay).toBeGreaterThanOrEqual(cap / 2);
+                expect(delay).toBeLessThanOrEqual(cap);
+            }
         });
 
-        test('caps at max delay', () => {
-            expect(manager._getRetryDelay(10)).toBe(10000);
+        test('caps at max delay with jitter', () => {
+            const delay = manager._getRetryDelay(10);
+            expect(delay).toBeGreaterThanOrEqual(5000);
+            expect(delay).toBeLessThanOrEqual(10000);
+        });
+
+        test('jitter spreads reconnects (anti-stampede)', () => {
+            const samples = new Set();
+            for (let i = 0; i < 50; i++) {
+                samples.add(manager._getRetryDelay(3));
+            }
+            // Deterministic backoff would yield a single value; jitter must vary.
+            expect(samples.size).toBeGreaterThan(1);
         });
     });
 
@@ -551,16 +582,47 @@ describe('TerminalManager', () => {
             expect(localStorage.getItem('terminal-layout')).toBe('split');
         });
 
-        test('mountSplitPaneTerminals and mountTerminalToSplitPane run against the fixture', () => {
+        // Terminal.open() is a no-op mock, so the real xterm `.xterm` node is
+        // never created in the container. Inject it so mountTerminalToSplitPane's
+        // element-move path actually runs; otherwise the move silently skips and
+        // a no-op implementation would still pass.
+        const injectXtermNode = (containerId) => {
+            const node = document.createElement('div');
+            node.className = 'xterm';
+            document.getElementById(containerId).appendChild(node);
+            return node;
+        };
+
+        test('mountSplitPaneTerminals moves each pane terminal element into its wrapper', () => {
             manager.leftPaneUuid = 'kali-uuid';
             manager.rightPaneUuid = 'victim-uuid';
-            expect(() => manager.mountSplitPaneTerminals()).not.toThrow();
-            expect(() => manager.mountTerminalToSplitPane('left', 'dc-uuid')).not.toThrow();
+            const kaliXterm = injectXtermNode('terminal-kali-uuid');
+            const victimXterm = injectXtermNode('terminal-victim-uuid');
+
+            manager.mountSplitPaneTerminals();
+
+            expect(document.getElementById('left-terminal-wrapper').querySelector('.xterm')).toBe(kaliXterm);
+            expect(document.getElementById('right-terminal-wrapper').querySelector('.xterm')).toBe(victimXterm);
+
+            // Re-mounting a different instance replaces the left pane's content.
+            const dcXterm = injectXtermNode('terminal-dc-uuid');
+            manager.mountTerminalToSplitPane('left', 'dc-uuid');
+            expect(document.getElementById('left-terminal-wrapper').querySelector('.xterm')).toBe(dcXterm);
+            expect(document.getElementById('left-terminal-wrapper').contains(kaliXterm)).toBe(false);
         });
 
-        test('updateSplitPaneStatus refreshes the pane status text', () => {
-            expect(() => manager.updateSplitPaneStatus('left', 'kali-uuid')).not.toThrow();
-            expect(document.querySelector('#left-pane-status .status-text')).not.toBeNull();
+        test('updateSplitPaneStatus writes the disconnected status into the pane header', () => {
+            const statusEl = document.getElementById('left-pane-status');
+            // Dirty the fixture first so the assertions prove the method wrote
+            // them rather than reading values the markup already carried.
+            statusEl.querySelector('.status-text').textContent = 'stale';
+            statusEl.querySelector('.status-indicator').className = 'status-indicator stale';
+
+            // kali has no socket yet, so the pane must report the disconnected state.
+            manager.updateSplitPaneStatus('left', 'kali-uuid');
+
+            expect(statusEl.querySelector('.status-text').textContent).toBe('Not connected');
+            expect(statusEl.querySelector('.status-indicator').className).toContain('disconnected');
         });
 
         test('restoreTerminalsToTabPanes tears down the split instance', () => {

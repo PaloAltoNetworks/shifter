@@ -6,6 +6,8 @@ from mission_control.upload_session import (
     UPLOAD_LOCK_TIMEOUT,
     check_upload_in_progress,
     set_upload_in_progress,
+    upload_lock_matches_token,
+    upload_token_fingerprint,
 )
 
 
@@ -128,6 +130,48 @@ class TestSetUploadInProgress:
         set_upload_in_progress(session, True)
 
         assert session["upload_lock"]["started_at"] > old_time
+
+    def test_stores_upload_token_fingerprint_when_token_is_supplied(self):
+        """Should store a non-secret token fingerprint for cancel correlation."""
+        session = MockSession()
+
+        set_upload_in_progress(session, True, upload_token="signed-upload-token")
+
+        lock = session["upload_lock"]
+        assert lock["upload_lock_fingerprint"] == upload_token_fingerprint("signed-upload-token")
+        assert "signed-upload-token" not in lock.values()
+
+
+class TestUploadLockMatchesToken:
+    """Tests for upload token/session-lock correlation."""
+
+    def test_matches_current_token_fingerprint(self):
+        session = MockSession()
+        set_upload_in_progress(session, True, upload_token="current-token")
+
+        assert upload_lock_matches_token(session, "current-token") is True
+
+    def test_rejects_different_token(self):
+        session = MockSession()
+        set_upload_in_progress(session, True, upload_token="current-token")
+
+        assert upload_lock_matches_token(session, "old-token") is False
+
+    def test_rejects_lock_without_fingerprint(self):
+        session = MockSession()
+        set_upload_in_progress(session, True)
+
+        assert upload_lock_matches_token(session, "current-token") is False
+
+    def test_rejects_and_clears_expired_lock(self):
+        session = MockSession()
+        session["upload_lock"] = {
+            "started_at": time.time() - UPLOAD_LOCK_TIMEOUT - 1,
+            "upload_lock_fingerprint": upload_token_fingerprint("current-token"),
+        }
+
+        assert upload_lock_matches_token(session, "current-token") is False
+        assert "upload_lock" not in session
 
 
 # -----------------------------------------------------------------------------

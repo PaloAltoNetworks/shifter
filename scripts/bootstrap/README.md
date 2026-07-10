@@ -15,7 +15,7 @@ The `deploy.py` CLI provides an interactive walkthrough for bootstrapping a bare
 - DNS record creation (ACM validation, ALB pointing)
 
 **AWS Bootstrap Creates:**
-- S3 bucket for Terraform state (with `use_lockfile = true` S3 native locking — no DynamoDB)
+- S3 bucket for Terraform state (with `use_lockfile = true` S3 native locking, no DynamoDB)
 - GitHub OIDC provider for keyless CI/CD
 - IAM role with all required permissions. The role uses an inline
   AdministratorAccess-equivalent policy so bootstrap works in AWS
@@ -54,10 +54,15 @@ bootstrap creates, and the AWS deploy workflows cannot run until the
 runners are provisioned and registered.
 
 1. Run `bootstrap --env dev --profile <profile>` to create the shared dev
-   state bucket, GitHub OIDC provider, and deploy role. Let it update
-   `AWS_ROLE_ARN_DEV` and the dev `.s3.tfbackend` files.
-2. Update `platform/terraform/global/github-runner/dev.tfvars` with the
-   target account's VPC and subnet IDs.
+   state bucket, GitHub OIDC provider, and deploy role. Let it set the
+   `AWS_ROLE_ARN_DEV` and `TF_INFRA_STATE_BUCKET_DEV` GitHub secrets (the
+   env-suffixed names the dev deploy workflows read; prod uses the unsuffixed
+   `AWS_ROLE_ARN` / `TF_INFRA_STATE_BUCKET`) and update the dev `.s3.tfbackend`
+   files.
+2. Apply the runner root with non-default runner network IDs. Use a dedicated
+   runner VPC or the portal VPC private tier; do not use the account default
+   VPC. Keep live VPC/subnet IDs in a gitignored override or another approved
+   deploy-time binding, not in tracked placeholder tfvars.
 3. Apply `platform/terraform/global/github-runner` and register each EC2
    runner with GitHub. Bootstrap does not create or register the self-hosted
    runners; their Terraform root is applied separately after the shared
@@ -131,7 +136,7 @@ repo-specific fixes from the live spike:
 
 ## Options
 
-- `--env` (required): `dev` or `prod`
+- `--env` (required): `dev`, `proof`, or `prod`
 - `--profile` (required): AWS CLI profile name
 - `--dry-run` (optional): Show what would happen without making changes
 - `--project-id` (GDC only): GCP project ID, defaults to `PANW_GCP_DEV` or repo-root `.env`

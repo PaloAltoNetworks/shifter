@@ -13,7 +13,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.views.decorators.http import require_GET
 
-from mission_control.guacamole_bootstrap import BootstrapQueueFull, enqueue_guacamole_bootstrap
+from mission_control.guacamole_bootstrap import BootstrapQueueFull, consume_ready_url, enqueue_guacamole_bootstrap
 from mission_control.models import GuacamoleBootstrapRequest
 from shared.log_sanitize import safe_log_value
 
@@ -44,11 +44,16 @@ def _authenticated_user_id(user: User) -> int:
     raise _BootstrapViewError(JsonResponse({"error": "Authenticated user id unavailable"}, status=500))
 
 
-def _bootstrap_urls(request_id: UUID) -> tuple[str, str]:
+def _bootstrap_urls(
+    request_id: UUID,
+    *,
+    status_url_name: str = "mission_control:guacamole_bootstrap_status",
+    open_url_name: str = "mission_control:guacamole_bootstrap_open",
+) -> tuple[str, str]:
     """Return the polling URL and compatibility opener URL for a bootstrap."""
     kwargs = {"request_id": request_id}
-    status_url = reverse("mission_control:guacamole_bootstrap_status", kwargs=kwargs)
-    open_url = reverse("mission_control:guacamole_bootstrap_open", kwargs=kwargs)
+    status_url = reverse(status_url_name, kwargs=kwargs)
+    open_url = reverse(open_url_name, kwargs=kwargs)
     return status_url, open_url
 
 
@@ -58,6 +63,8 @@ def guacamole_bootstrap_response(
     protocol: str,
     target_id: str,
     build_url: Callable[[], str],
+    status_url_name: str = "mission_control:guacamole_bootstrap_status",
+    open_url_name: str = "mission_control:guacamole_bootstrap_open",
 ) -> JsonResponse:
     """Enqueue Guacamole bootstrap work and return a pollable response."""
     try:
@@ -80,7 +87,11 @@ def guacamole_bootstrap_response(
         response["Retry-After"] = "1"
         return response
 
-    status_url, open_url = _bootstrap_urls(bootstrap.id)
+    status_url, open_url = _bootstrap_urls(
+        bootstrap.id,
+        status_url_name=status_url_name,
+        open_url_name=open_url_name,
+    )
     response = JsonResponse(
         {
             "request_id": str(bootstrap.id),
@@ -176,11 +187,20 @@ def _status_response(bootstrap: GuacamoleBootstrapRequest) -> JsonResponse:
 
     if bootstrap.is_expired:
         _mark_expired(bootstrap)
+        _clear_parked_url(bootstrap)
         payload["status"] = bootstrap.status
         payload["error"] = bootstrap.error_message or "Guacamole session request expired"
         status_code = 410
     elif bootstrap.status == GuacamoleBootstrapRequest.Status.SUCCEEDED:
-        payload["url"] = bootstrap.result_url
+        url = consume_ready_url(request_id=bootstrap.id, user_id=bootstrap.user_id)
+        if url:
+            # Single-use delivery: the URL is returned exactly once and the
+            # token material is cleared from the row inside consume_ready_url.
+            payload["url"] = url
+        else:
+            # A repeated poll after delivery must not replay the token URL.
+            payload["error"] = "Guacamole session link is no longer available"
+            status_code = 410
     elif bootstrap.status == GuacamoleBootstrapRequest.Status.FAILED:
         payload["error"] = bootstrap.error_message or "Guacamole session bootstrap failed"
         status_code = bootstrap.error_status_code
@@ -191,6 +211,18 @@ def _status_response(bootstrap: GuacamoleBootstrapRequest) -> JsonResponse:
     if retry_after:
         response["Retry-After"] = "1"
     return response
+
+
+def _clear_parked_url(bootstrap: GuacamoleBootstrapRequest) -> None:
+    """Clear a token URL still parked on an expired row before returning 410.
+
+    A ``succeeded`` row that expired before any poll keeps ``result_url`` until
+    pruning; the expired-poll response never delivers it, so clear it now to
+    shrink the at-rest window rather than wait for the prune job.
+    """
+    if bootstrap.result_url:
+        bootstrap.result_url = ""
+        bootstrap.save(update_fields=("result_url", "updated_at"))
 
 
 def _mark_expired(bootstrap: GuacamoleBootstrapRequest) -> None:

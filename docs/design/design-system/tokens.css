@@ -1,0 +1,409 @@
+/*
+ * Shifter Design System — Design Tokens
+ * Issue #1299 (SPA cutover: design system foundation).
+ *
+ * Framework-neutral CSS custom properties. This is the single source of truth
+ * for the platform's visual language, shared by the SPA and by legacy Django
+ * templates during phased migration. Consume ONLY the semantic tokens
+ * (`--ds-color-*` role names, scales) from components; the raw/primitive ramps
+ * exist so semantic tokens can be re-pointed by a future visual-identity pass
+ * without touching component code.
+ *
+ * Layering:
+ *   primitive (raw scales)  ->  semantic (role tokens)  ->  component (.ds-*)
+ *
+ * Theming:
+ *   :root                 = dark theme (operational default)
+ *   [data-theme="light"]  = light theme
+ *   prefers-color-scheme  = auto-applies light when no explicit data-theme
+ *
+ * All semantic color pairs meet WCAG 2.1 AA (>= 4.5:1 for body text,
+ * >= 3:1 for large text / UI component boundaries). See the foundation doc
+ * `docs/design/spa-design-system-foundation-1299.md` for the verified matrix.
+ *
+ * Naming is logical/RTL-safe: no `left`/`right` in token names, and components
+ * built on these tokens must use CSS logical properties.
+ */
+
+:root {
+  /* ----------------------------------------------------------------------- *
+   * PRIMITIVE TOKENS — raw scales. Do not consume directly in components.
+   * ----------------------------------------------------------------------- */
+
+  /* Neutral ramp (cool gray, subtle blue tint) — the workhorse. */
+  --ds-neutral-0: #fff;
+  --ds-neutral-25: #f8fafb;
+  --ds-neutral-50: #f1f4f6;
+  --ds-neutral-100: #e6eaee;
+  --ds-neutral-150: #d6dce2;
+  --ds-neutral-200: #c2cad3;
+  --ds-neutral-300: #9aa5b1;
+  --ds-neutral-400: #7b8794;
+  --ds-neutral-500: #55606d;
+  --ds-neutral-600: #3d4753;
+  --ds-neutral-700: #313a44;
+  --ds-neutral-750: #262e37;
+  --ds-neutral-800: #1e242c;
+  --ds-neutral-850: #1a1f26;
+  --ds-neutral-900: #12161b;
+  --ds-neutral-950: #0b0e12;
+  --ds-neutral-1000: #06080b;
+
+  /* Accent ramp (professional blue). Doubles as the "info" hue. */
+  --ds-blue-50: #eaf1fb;
+  --ds-blue-100: #d3e2f7;
+  --ds-blue-200: #b3ccef;
+  --ds-blue-300: #7aa6e4;
+  --ds-blue-400: #4f86d6;
+  --ds-blue-500: #3b70c4;
+  --ds-blue-600: #315fa8;
+  --ds-blue-700: #294f8c;
+  --ds-blue-800: #22406f;
+  --ds-blue-900: #16233a;
+
+  /* Green ramp (success). */
+  --ds-green-50: #e7f6ec;
+  --ds-green-100: #c6ebd2;
+  --ds-green-300: #57c98a;
+  --ds-green-400: #2fa25a;
+  --ds-green-500: #1f9550;
+  --ds-green-600: #157a3a;
+  --ds-green-700: #0f6330;
+  --ds-green-900: #102a1d;
+
+  /* Amber ramp (warning). */
+  --ds-amber-50: #fbf1dd;
+  --ds-amber-100: #f6e0b3;
+  --ds-amber-300: #e0a94b;
+  --ds-amber-400: #d99b28;
+  --ds-amber-500: #c07f10;
+  --ds-amber-600: #8a5e08;
+  --ds-amber-700: #6f4b07;
+  --ds-amber-900: #2c220c;
+
+  /* Red ramp (danger). */
+  --ds-red-50: #fbeaea;
+  --ds-red-100: #eeb0b0;
+  --ds-red-300: #ec7a7a;
+  --ds-red-400: #db5757;
+  --ds-red-500: #d0403f;
+  --ds-red-600: #b62f2f;
+  --ds-red-700: #8c2626;
+  --ds-red-900: #2e1414;
+
+  /* ----------------------------------------------------------------------- *
+   * PRIMITIVE TOKENS — dimensions, type, motion (theme-independent).
+   * ----------------------------------------------------------------------- */
+
+  /* Font families — system stacks (zero web-font dependency, OSS-friendly). */
+  --ds-font-sans: -apple-system, blinkmacsystemfont, "Segoe UI", roboto,
+    "Helvetica Neue", arial, sans-serif;
+  --ds-font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+    menlo, consolas, "Liberation Mono", monospace;
+
+  /* Type scale (dense, operational; root assumed 16px). */
+  --ds-font-size-3xs: 0.6875rem; /* 11px — micro labels, dense metadata */
+  --ds-font-size-2xs: 0.75rem; /* 12px — captions, table meta */
+  --ds-font-size-xs: 0.8125rem; /* 13px — dense body, table cells */
+  --ds-font-size-sm: 0.875rem; /* 14px — default body */
+  --ds-font-size-md: 0.9375rem; /* 15px — comfortable body */
+  --ds-font-size-lg: 1.0625rem; /* 17px — section heading */
+  --ds-font-size-xl: 1.25rem; /* 20px — page title */
+  --ds-font-size-2xl: 1.5rem; /* 24px — display */
+  --ds-font-size-3xl: 1.875rem; /* 30px — big stat / empty-state */
+  --ds-line-height-tight: 1.2;
+  --ds-line-height-snug: 1.35;
+  --ds-line-height-normal: 1.5;
+  --ds-font-weight-regular: 400;
+  --ds-font-weight-medium: 500;
+  --ds-font-weight-semibold: 600;
+  --ds-font-weight-bold: 700;
+  --ds-letter-spacing-tight: -0.01em;
+  --ds-letter-spacing-normal: 0;
+  --ds-letter-spacing-wide: 0.04em; /* uppercase eyebrow labels */
+
+  /* Spacing — 4px base grid. */
+  --ds-space-0: 0;
+  --ds-space-px: 1px;
+  --ds-space-1: 0.25rem; /* 4 */
+  --ds-space-2: 0.5rem; /* 8 */
+  --ds-space-3: 0.75rem; /* 12 */
+  --ds-space-4: 1rem; /* 16 */
+  --ds-space-5: 1.25rem; /* 20 */
+  --ds-space-6: 1.5rem; /* 24 */
+  --ds-space-8: 2rem; /* 32 */
+  --ds-space-10: 2.5rem; /* 40 */
+  --ds-space-12: 3rem; /* 48 */
+  --ds-space-16: 4rem; /* 64 */
+
+  /* Radius. */
+  --ds-radius-none: 0;
+  --ds-radius-sm: 3px;
+  --ds-radius-md: 5px;
+  --ds-radius-lg: 8px;
+  --ds-radius-xl: 12px;
+  --ds-radius-pill: 999px;
+  --ds-radius-circle: 50%;
+
+  /* Border widths. */
+  --ds-border-width-thin: 1px;
+  --ds-border-width-thick: 2px;
+
+  /* Focus ring geometry (color is a semantic, theme-mapped token). */
+  --ds-focus-ring-width: 2px;
+  --ds-focus-ring-offset: 2px;
+
+  /* Motion. */
+  --ds-duration-fast: 120ms;
+  --ds-duration-base: 180ms;
+  --ds-duration-slow: 260ms;
+  --ds-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ds-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ds-ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Z-index layers — named so overlays compose predictably. */
+  --ds-z-base: 0;
+  --ds-z-raised: 10;
+  --ds-z-sticky: 100;
+  --ds-z-dropdown: 1000;
+  --ds-z-overlay: 1100;
+  --ds-z-modal: 1200;
+  --ds-z-popover: 1300;
+  --ds-z-toast: 1400;
+  --ds-z-tooltip: 1500;
+
+  /* Layout (logical, RTL-safe). */
+  --ds-nav-width-collapsed: 56px;
+  --ds-nav-width-expanded: 240px;
+  --ds-topbar-height: 48px;
+  --ds-content-max-width: 1440px;
+
+  /* ----------------------------------------------------------------------- *
+   * SEMANTIC TOKENS — DARK THEME (operational default). Consume these.
+   * ----------------------------------------------------------------------- */
+
+  --ds-color-scheme: dark;
+
+  /* Surfaces. */
+  --ds-color-bg: var(--ds-neutral-950);
+  --ds-color-bg-subtle: #0f1318;
+  --ds-color-surface: var(--ds-neutral-900);
+  --ds-color-surface-raised: var(--ds-neutral-850);
+  --ds-color-surface-sunken: var(--ds-neutral-1000);
+  --ds-color-surface-hover: #1f262e;
+  --ds-color-surface-selected: #14212f;
+  --ds-color-overlay: rgb(3, 6, 10, 0.66);
+
+  /* Foreground / text. */
+  --ds-color-fg: var(--ds-neutral-100);
+  --ds-color-fg-muted: var(--ds-neutral-300);
+  --ds-color-fg-subtle: var(--ds-neutral-400);
+  --ds-color-fg-on-accent: #fff;
+  --ds-color-fg-link: var(--ds-blue-300);
+  --ds-color-fg-link-hover: #9cc0ee;
+
+  /* Borders. `border-input` is the resting outline of form controls and meets
+     WCAG 1.4.11 (>= 3:1) against surface/sunken; `border` is a decorative
+     divider. */
+  --ds-color-border-subtle: #1c222a;
+  --ds-color-border: #2a323c;
+  --ds-color-border-strong: #3b4552;
+  --ds-color-border-input: #5c6772;
+
+  /* Accent / interactive. */
+  --ds-color-accent: var(--ds-blue-500);
+  --ds-color-accent-hover: var(--ds-blue-600);
+  --ds-color-accent-active: var(--ds-blue-700);
+  --ds-color-accent-subtle: var(--ds-blue-900);
+  --ds-color-accent-fg: var(--ds-blue-300);
+
+  /* Focus & selection. */
+  --ds-color-focus-ring: #6aa4ec;
+  --ds-color-selection-bg: #24405f;
+  --ds-color-selection-fg: #fff;
+
+  /* Status — success. */
+  --ds-color-success-fg: var(--ds-green-300);
+  --ds-color-success-bg: var(--ds-green-900);
+  --ds-color-success-border: #226e45;
+  --ds-color-success-solid: var(--ds-green-600);
+  --ds-color-success-on-solid: #fff;
+
+  /* Status — warning. */
+  --ds-color-warning-fg: var(--ds-amber-300);
+  --ds-color-warning-bg: var(--ds-amber-900);
+  --ds-color-warning-border: #7a5c14;
+  --ds-color-warning-solid: var(--ds-amber-400);
+  --ds-color-warning-on-solid: #241a04;
+
+  /* Status — danger. */
+  --ds-color-danger-fg: var(--ds-red-300);
+  --ds-color-danger-bg: var(--ds-red-900);
+  --ds-color-danger-border: #7c2b2b;
+  --ds-color-danger-solid: var(--ds-red-500);
+  --ds-color-danger-on-solid: #fff;
+
+  /* Status — info (accent hue). */
+  --ds-color-info-fg: var(--ds-blue-300);
+  --ds-color-info-bg: var(--ds-blue-900);
+  --ds-color-info-border: #2a4a78;
+  --ds-color-info-solid: var(--ds-blue-500);
+  --ds-color-info-on-solid: #fff;
+
+  /* Status — neutral (inactive / unknown / destroyed). */
+  --ds-color-neutral-fg: var(--ds-neutral-300);
+  --ds-color-neutral-bg: var(--ds-neutral-850);
+  --ds-color-neutral-border: #2a323c;
+  --ds-color-neutral-solid: var(--ds-neutral-500);
+  --ds-color-neutral-on-solid: #fff;
+
+  /* Elevation (dark: darker, slightly stronger shadows). */
+  --ds-shadow-xs: 0 1px 2px rgb(0, 0, 0, 0.4);
+  --ds-shadow-sm: 0 2px 4px rgb(0, 0, 0, 0.45);
+  --ds-shadow-md: 0 4px 12px rgb(0, 0, 0, 0.5);
+  --ds-shadow-lg: 0 8px 24px rgb(0, 0, 0, 0.55);
+  --ds-shadow-xl: 0 16px 40px rgb(0, 0, 0, 0.6);
+}
+
+/* ------------------------------------------------------------------------- *
+ * SEMANTIC TOKENS — LIGHT THEME.
+ * Applied explicitly via [data-theme="light"], or automatically via
+ * prefers-color-scheme when the author has not pinned a theme.
+ * ------------------------------------------------------------------------- */
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --ds-color-scheme: light;
+    --ds-color-bg: var(--ds-neutral-50);
+    --ds-color-bg-subtle: #eceff2;
+    --ds-color-surface: var(--ds-neutral-0);
+    --ds-color-surface-raised: var(--ds-neutral-0);
+    --ds-color-surface-sunken: #eef1f4;
+    --ds-color-surface-hover: #f0f3f6;
+    --ds-color-surface-selected: #e4eefb;
+    --ds-color-overlay: rgb(15, 20, 28, 0.4);
+    --ds-color-fg: var(--ds-neutral-900);
+    --ds-color-fg-muted: var(--ds-neutral-500);
+    --ds-color-fg-subtle: #646d79;
+    --ds-color-fg-on-accent: #fff;
+    --ds-color-fg-link: #2a5aa8;
+    --ds-color-fg-link-hover: #1f4788;
+    --ds-color-border-subtle: #e6eaee;
+    --ds-color-border: #cfd6dd;
+    --ds-color-border-strong: #aab4bf;
+    --ds-color-border-input: #7e8a97;
+    --ds-color-accent: var(--ds-blue-500);
+    --ds-color-accent-hover: var(--ds-blue-600);
+    --ds-color-accent-active: var(--ds-blue-700);
+    --ds-color-accent-subtle: var(--ds-blue-50);
+    --ds-color-accent-fg: #2a5aa8;
+    --ds-color-focus-ring: #2f63b8;
+    --ds-color-selection-bg: #cfe0f7;
+    --ds-color-selection-fg: var(--ds-neutral-900);
+    --ds-color-success-fg: #147a3d;
+    --ds-color-success-bg: var(--ds-green-50);
+    --ds-color-success-border: #9ed4b3;
+    --ds-color-success-solid: var(--ds-green-600);
+    --ds-color-success-on-solid: #fff;
+    --ds-color-warning-fg: #8a5e08;
+    --ds-color-warning-bg: var(--ds-amber-50);
+    --ds-color-warning-border: #e6c583;
+    --ds-color-warning-solid: var(--ds-amber-400);
+    --ds-color-warning-on-solid: #241a04;
+    --ds-color-danger-fg: #b62f2f;
+    --ds-color-danger-bg: var(--ds-red-50);
+    --ds-color-danger-border: #eeb0b0;
+    --ds-color-danger-solid: var(--ds-red-500);
+    --ds-color-danger-on-solid: #fff;
+    --ds-color-info-fg: #2a5aa8;
+    --ds-color-info-bg: var(--ds-blue-50);
+    --ds-color-info-border: #b3ccef;
+    --ds-color-info-solid: var(--ds-blue-500);
+    --ds-color-info-on-solid: #fff;
+    --ds-color-neutral-fg: var(--ds-neutral-500);
+    --ds-color-neutral-bg: #eceff2;
+    --ds-color-neutral-border: #cfd6dd;
+    --ds-color-neutral-solid: var(--ds-neutral-500);
+    --ds-color-neutral-on-solid: #fff;
+    --ds-shadow-xs: 0 1px 2px rgb(16, 24, 40, 0.06);
+    --ds-shadow-sm: 0 1px 3px rgb(16, 24, 40, 0.1), 0 1px 2px rgb(16, 24, 40, 0.06);
+    --ds-shadow-md: 0 4px 8px -2px rgb(16, 24, 40, 0.1), 0 2px 4px -2px rgb(16, 24, 40, 0.06);
+    --ds-shadow-lg: 0 12px 16px -4px rgb(16, 24, 40, 0.08), 0 4px 6px -2px rgb(16, 24, 40, 0.03);
+    --ds-shadow-xl: 0 20px 24px -4px rgb(16, 24, 40, 0.08);
+  }
+}
+
+/* Explicit light theme — wins over the media query and over the dark default. */
+[data-theme="light"] {
+  --ds-color-scheme: light;
+  --ds-color-bg: var(--ds-neutral-50);
+  --ds-color-bg-subtle: #eceff2;
+  --ds-color-surface: var(--ds-neutral-0);
+  --ds-color-surface-raised: var(--ds-neutral-0);
+  --ds-color-surface-sunken: #eef1f4;
+  --ds-color-surface-hover: #f0f3f6;
+  --ds-color-surface-selected: #e4eefb;
+  --ds-color-overlay: rgb(15, 20, 28, 0.4);
+  --ds-color-fg: var(--ds-neutral-900);
+  --ds-color-fg-muted: var(--ds-neutral-500);
+  --ds-color-fg-subtle: #646d79;
+  --ds-color-fg-on-accent: #fff;
+  --ds-color-fg-link: #2a5aa8;
+  --ds-color-fg-link-hover: #1f4788;
+  --ds-color-border-subtle: #e6eaee;
+  --ds-color-border: #cfd6dd;
+  --ds-color-border-strong: #aab4bf;
+  --ds-color-border-input: #7e8a97;
+  --ds-color-accent: var(--ds-blue-500);
+  --ds-color-accent-hover: var(--ds-blue-600);
+  --ds-color-accent-active: var(--ds-blue-700);
+  --ds-color-accent-subtle: var(--ds-blue-50);
+  --ds-color-accent-fg: #2a5aa8;
+  --ds-color-focus-ring: #2f63b8;
+  --ds-color-selection-bg: #cfe0f7;
+  --ds-color-selection-fg: var(--ds-neutral-900);
+  --ds-color-success-fg: #147a3d;
+  --ds-color-success-bg: var(--ds-green-50);
+  --ds-color-success-border: #9ed4b3;
+  --ds-color-success-solid: var(--ds-green-600);
+  --ds-color-success-on-solid: #fff;
+  --ds-color-warning-fg: #8a5e08;
+  --ds-color-warning-bg: var(--ds-amber-50);
+  --ds-color-warning-border: #e6c583;
+  --ds-color-warning-solid: var(--ds-amber-400);
+  --ds-color-warning-on-solid: #241a04;
+  --ds-color-danger-fg: #b62f2f;
+  --ds-color-danger-bg: var(--ds-red-50);
+  --ds-color-danger-border: #eeb0b0;
+  --ds-color-danger-solid: var(--ds-red-500);
+  --ds-color-danger-on-solid: #fff;
+  --ds-color-info-fg: #2a5aa8;
+  --ds-color-info-bg: var(--ds-blue-50);
+  --ds-color-info-border: #b3ccef;
+  --ds-color-info-solid: var(--ds-blue-500);
+  --ds-color-info-on-solid: #fff;
+  --ds-color-neutral-fg: var(--ds-neutral-500);
+  --ds-color-neutral-bg: #eceff2;
+  --ds-color-neutral-border: #cfd6dd;
+  --ds-color-neutral-solid: var(--ds-neutral-500);
+  --ds-color-neutral-on-solid: #fff;
+  --ds-shadow-xs: 0 1px 2px rgb(16, 24, 40, 0.06);
+  --ds-shadow-sm: 0 1px 3px rgb(16, 24, 40, 0.1), 0 1px 2px rgb(16, 24, 40, 0.06);
+  --ds-shadow-md: 0 4px 8px -2px rgb(16, 24, 40, 0.1), 0 2px 4px -2px rgb(16, 24, 40, 0.06);
+  --ds-shadow-lg: 0 12px 16px -4px rgb(16, 24, 40, 0.08), 0 4px 6px -2px rgb(16, 24, 40, 0.03);
+  --ds-shadow-xl: 0 20px 24px -4px rgb(16, 24, 40, 0.08);
+}
+
+/* Explicit dark theme selector for completeness (equals the :root default). */
+[data-theme="dark"] {
+  --ds-color-scheme: dark;
+}
+
+/* Honor reduced-motion globally: collapse durations to instant. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ds-duration-fast: 0ms;
+    --ds-duration-base: 0ms;
+    --ds-duration-slow: 0ms;
+  }
+}

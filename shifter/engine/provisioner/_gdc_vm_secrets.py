@@ -189,3 +189,42 @@ def _ensure_gcs_image_secret(
             _IMAGE_IMPORT_K8S_NAME,
         )
     return _IMAGE_IMPORT_K8S_NAME
+
+
+def _ensure_cloudinit_secret(
+    core_api: CoreV1Api,
+    client_module: ModuleType,
+    namespace: str,
+    secret_name: str,
+    user_data: str,
+    api_exception: type[ApiException],
+) -> str:
+    """Create-or-patch the per-VM cloud-init userData secret and return its name.
+
+    GDC's VirtualMachine admission webhook forbids inline ``cloudInit.noCloud``
+    userData longer than 2048 bytes and requires a ``secretRef`` instead, so the
+    provisioner always stores userData in a per-VM Secret (data key ``userData``,
+    which GDC reads) and points ``cloudInit.noCloud.secretRef.name`` at it.
+    """
+    body = client_module.V1Secret(
+        metadata=client_module.V1ObjectMeta(name=secret_name, namespace=namespace),
+        type="Opaque",
+        string_data={"userData": user_data},
+    )
+    try:
+        core_api.create_namespaced_secret(namespace=namespace, body=body)
+        logger.info(
+            "Created GDC cloud-init secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            safe_log_fingerprint(secret_name),
+        )
+    except api_exception as exc:
+        if exc.status != 409:
+            raise
+        core_api.patch_namespaced_secret(name=secret_name, namespace=namespace, body=body)
+        logger.info(
+            "Updated GDC cloud-init secret ns_fp=%s/%s",
+            safe_log_fingerprint(namespace),
+            safe_log_fingerprint(secret_name),
+        )
+    return secret_name

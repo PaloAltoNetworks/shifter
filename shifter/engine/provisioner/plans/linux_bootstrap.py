@@ -20,11 +20,24 @@ hostname="{{ hostname }}"
 
 echo "Setting hostname to $hostname..."
 
+# Escalate when not already root. The AWS SSM path runs this as root; the GDC
+# in-range SSH path connects as an unprivileged user (ubuntu/kali) that holds a
+# passwordless-sudo entitlement (same assumption as set_local_password). Both
+# `hostnamectl set-hostname` (talks to systemd-hostnamed over a root-only
+# polkit action) and writing /etc/hosts require root, so escalate with
+# `sudo -n` off the root path. Empty SUDO keeps the AWS path free of any sudo
+# dependency.
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo -n"
+fi
+
 # Set hostname persistently
-hostnamectl set-hostname "$hostname"
+$SUDO hostnamectl set-hostname "$hostname"
 
 # Update /etc/hosts
-echo "127.0.0.1 $hostname" >> /etc/hosts
+echo "127.0.0.1 $hostname" | $SUDO tee -a /etc/hosts >/dev/null
 
 echo "Hostname set to $hostname"
 exit 0

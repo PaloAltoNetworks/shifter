@@ -59,6 +59,15 @@ if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
     DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
     export DJANGO_SECRET_KEY
 
+    # Optional previous signing keys for a zero-downtime SECRET_KEY rotation
+    # (config.settings.SECRET_KEY_FALLBACKS). Absent in steady state; the app
+    # secret bundle carries `django_secret_key_fallbacks` (a JSON array) only
+    # while a rotation is in flight. `.get(..., [])` keeps a bundle without the
+    # field valid, and re-serialising to JSON preserves any comma in an old key
+    # through the env var.
+    DJANGO_SECRET_KEY_FALLBACKS=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.dumps(json.load(sys.stdin).get('django_secret_key_fallbacks', [])))")
+    export DJANGO_SECRET_KEY_FALLBACKS
+
     # Export field encryption key with proper base64 padding (Fernet requires it)
     FIELD_ENCRYPTION_KEY=$(echo "$APP_SECRET" | python -c "
 import sys, json
@@ -123,6 +132,22 @@ if [[ -n "${REDIS_SECRET_ID:-}" ]]; then
     unset REDIS_SECRET
 fi
 
+# Hydrate the transactional-email ESP (SendGrid/Mailgun) API key from Secret
+# Manager when the GCP runtime advertises it (PLAT-002, #671).
+# EMAIL_API_KEY_SECRET_ID is rendered into the pod env by
+# scripts/gcp/render_runtime_env.py; the API key itself never travels via the
+# runtime ConfigMap or generated env file. The payload is JSON ({"api_key":
+# "..."}) and flows through stdin into `python -c` so the secret value is not
+# exposed in process argv. Email is optional: this block is skipped (console
+# backend) when no secret is configured, so AWS (django-ses, IAM) and
+# unconfigured deployments are unaffected.
+if [[ -n "${EMAIL_API_KEY_SECRET_ID:-}" ]]; then
+    EMAIL_SECRET=$(fetch_runtime_secret "$EMAIL_API_KEY_SECRET_ID")
+    EMAIL_API_KEY=$(echo "$EMAIL_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['api_key'])")
+    export EMAIL_API_KEY
+    unset EMAIL_SECRET
+fi
+
 # ------------------------------------------------------------------------------
 # Wait for database
 # ------------------------------------------------------------------------------
@@ -161,6 +186,25 @@ else
     echo "Skipping migrations (SKIP_MIGRATIONS is set)"
 fi
 
+# ------------------------------------------------------------------------------
+# Switch the long-running connection to RDS IAM authentication (AWS only)
+# ------------------------------------------------------------------------------
+# The DB wait and migrations above ran as the password-authenticated master
+# user (schema owner / migrator). The long-running app and workers instead
+# connect as a dedicated rds_iam runtime user with a short-lived token
+# (config.db_backends.rds_iam via DB_IAM_AUTH), so the runtime process holds no
+# database password. Gated to the AWS deployed path: CLOUD_PROVIDER aws AND a
+# DB secret was hydrated from Secrets Manager, so local docker-compose (direct
+# DB_PASSWORD, no DB_SECRET_ID) and GCP stay on their existing auth.
+# DB_IAM_AUTH_RUNTIME=false is the break-glass escape hatch (keep password auth
+# for a one-off privileged manage.py command run as the master user).
+if [[ "${CLOUD_PROVIDER:-aws}" == "aws" && -n "${DB_SECRET_ID:-}" && "${DB_IAM_AUTH_RUNTIME:-true}" == "true" ]]; then
+    echo "Switching runtime database connection to RDS IAM authentication (user ${DB_IAM_USER:-portal_runtime})..."
+    export DB_IAM_AUTH=true
+    export DB_USER="${DB_IAM_USER:-portal_runtime}"
+    unset DB_PASSWORD
+fi
+
 # Run command passed as arguments, or default to gunicorn + uvicorn workers.
 #
 # The production portal web process runs Gunicorn managing a pool of Uvicorn
@@ -171,16 +215,21 @@ fi
 # pool without rebuilding the image. Defaults are conservative: 4 workers and
 # a 90s timeout (Gunicorn's 30s default would kill long-lived WebSocket and
 # SSH terminal connections that are the portal's main workload). The worker
-# class string is `uvicorn_worker.UvicornWorker` (the supported standalone
-# `uvicorn-worker` package) — `uvicorn.workers.UvicornWorker` is deprecated
-# upstream. `tests/test_asgi_worker_smoke.py` pins the import contract in CI.
+# class is `config.asgi_worker.ShifterUvicornWorker`, a subclass of the
+# supported standalone `uvicorn-worker` package's `UvicornWorker`
+# (`uvicorn.workers.UvicornWorker` is deprecated upstream). The subclass pins
+# an explicit WebSocket keepalive (`ws_ping_interval`/`ws_ping_timeout`) sized
+# below the ALB idle_timeout so long-lived terminal/notification/RDP sockets
+# are not silently reaped (issue #931); the bare worker would leave the ping
+# settings to Uvicorn's defaults. `tests/test_asgi_worker_smoke.py` pins both
+# the import contract and the keepalive in CI.
 if [[ $# -gt 0 ]]; then
     echo "Running: $@"
     exec "$@"
 else
     echo "Starting gunicorn (uvicorn workers)..."
     exec gunicorn config.asgi:application \
-        --worker-class uvicorn_worker.UvicornWorker \
+        --worker-class config.asgi_worker.ShifterUvicornWorker \
         --bind "${PORTAL_WEB_BIND:-0.0.0.0:8000}" \
         --workers "${PORTAL_WEB_WORKERS:-4}" \
         --timeout "${PORTAL_WEB_TIMEOUT:-90}" \

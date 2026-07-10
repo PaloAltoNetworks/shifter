@@ -6,10 +6,19 @@ metadata:
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch"]
+    # delete: the task runner unwinds a Job (and its Secret) when owner-reference
+    # installation fails, to avoid orphaning the per-Job Secret.
+    verbs: ["create", "get", "list", "watch", "delete"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    # Sensitive provisioner env vars flow through a per-Job Secret (issue #1185)
+    # that the task runner creates, patches with the Job ownerReference (so it is
+    # garbage-collected with the Job), and deletes on the unwind path. Without
+    # this rule range launch fails at create_namespaced_secret with a 403.
+    resources: ["secrets"]
+    verbs: ["create", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

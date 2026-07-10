@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from django.utils import timezone
 
@@ -24,18 +27,39 @@ logger = logging.getLogger(__name__)
 _RANGE_NOT_FOUND_MSG = "Range not found"
 
 
-def _engine_destroy_range_by_request_call(request_id: Any) -> Any:  # NOSONAR
+def _engine_destroy_range_by_request_call(request_id: UUID) -> bool:
     """Late-bound call so test patches of cms.services.engine_destroy_range_by_request apply."""
     from cms import services as _cs
 
-    return _cs.engine_destroy_range_by_request(request_id)
+    result: bool = _cs.engine_destroy_range_by_request(request_id)
+    return result
 
 
-def _engine_cancel_range_by_request_call(request_id: Any) -> Any:  # NOSONAR
+def _engine_cancel_range_by_request_call(request_id: UUID) -> bool:
     """Late-bound call so test patches of cms.services.engine_cancel_range_by_request apply."""
     from cms import services as _cs
 
-    return _cs.engine_cancel_range_by_request(request_id)
+    result: bool = _cs.engine_cancel_range_by_request(request_id)
+    return result
+
+
+_TransitionSpec = tuple[str, Callable[[UUID], bool], AuditLog.Action, str, str, bool]
+_DESTROY_TRANSITION: _TransitionSpec = (
+    ResourceStatus.DESTROYING.value,
+    _engine_destroy_range_by_request_call,
+    AuditLog.Action.DEPROVISION,
+    "Range cannot be destroyed in current state",
+    "destroy_range",
+    True,
+)
+_CANCEL_TRANSITION: _TransitionSpec = (
+    ResourceStatus.DESTROYING.value,
+    _engine_cancel_range_by_request_call,
+    AuditLog.Action.CANCEL,
+    "Range cannot be cancelled in current state",
+    "cancel_range",
+    False,
+)
 
 
 def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
@@ -52,106 +76,159 @@ def _get_range_call(user: User, range_id: int) -> RangeInstance:
     return _cs.get_range(user, range_id)
 
 
-def destroy_range(user: User, range_id: int) -> None:
+def _transition_then_dispatch(
+    *,
+    instance: RangeInstance,
+    request_id: UUID,
+    user: User,
+    audit_entity_id: int,
+    transition: _TransitionSpec,
+) -> None:
+    """Apply a CMS lifecycle transition, dispatch engine cleanup, and revert on rejection."""
+    target_status, engine_call, audit_action, failure_message, label, soft_delete = transition
+    previous_status = instance.status
+    previous_deleted_at = instance.deleted_at
+    status_changed = previous_status != target_status or (soft_delete and previous_deleted_at is None)
+
+    if status_changed:
+        instance.status = target_status
+        update_fields = ["status"]
+        if soft_delete:
+            instance.deleted_at = timezone.now()
+            update_fields.append("deleted_at")
+        instance.save(update_fields=update_fields)
+
+    try:
+        accepted = engine_call(request_id)
+    except Exception:
+        _restore_range_instance_status(instance, previous_status, previous_deleted_at)
+        raise
+
+    if not accepted:
+        _restore_range_instance_status(instance, previous_status, previous_deleted_at)
+        logger.warning("%s: engine rejected cleanup request_id=%s", label, request_id)
+        raise CMSError(failure_message)
+
+    if status_changed:
+        _audit_log_call(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=audit_entity_id,
+            action=audit_action,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={
+                "status": previous_status,
+                "scenario": instance.scenario_id,
+            },
+            new_state={"status": target_status},
+            request_id=str(request_id),
+        )
+
+
+def _restore_range_instance_status(
+    instance: RangeInstance,
+    previous_status: str,
+    previous_deleted_at: datetime | None,
+) -> None:
+    """Restore CMS status/deleted_at after engine cleanup dispatch rejects."""
+    instance.status = previous_status
+    instance.deleted_at = previous_deleted_at
+    instance.save(update_fields=["status", "deleted_at"])
+
+
+def destroy_range(user: User, range_instance_pk: int) -> None:
     """Tear down range.
 
     Fetches RangeInstance, verifies ownership, updates CMS status to DESTROYING,
     then delegates to engine.services.destroy_range with RangeContext.
 
+    The PK is the identifier callers hold (``find_range_instance_id_by_request``
+    and ``get_range_status_by_id`` are PK-keyed); lookups must use the PK, not
+    the legacy nullable ``RangeInstance.range_id`` engine field (issue #1139).
+
     Args:
         user: User requesting destruction
-        range_id: ID of the range to destroy
+        range_instance_pk: PK of the RangeInstance to destroy
 
     Returns:
         None
 
     Raises:
-        TypeError: If user is None, invalid type, or range_id is invalid type
-        ValueError: If user has no ID (unsaved) or range_id is invalid
+        TypeError: If user is None, invalid type, or range_instance_pk is invalid type
+        ValueError: If user has no ID (unsaved) or range_instance_pk is invalid
         CMSError: If range not found or not owned by user
         EngineError: If engine fails to destroy range
     """
     _validate_caller_user(user, "destroy_range")
 
-    if range_id is None:
+    if range_instance_pk is None:
         logger.error(
-            "destroy_range called with None range_id for user_id=%s",
+            "destroy_range called with None range_instance_pk for user_id=%s",
             user.id,
         )
-        raise TypeError("range_id cannot be None")
+        raise TypeError("range_instance_pk cannot be None")
 
-    if not isinstance(range_id, int):
+    if not isinstance(range_instance_pk, int):
         logger.error(
-            "destroy_range called with invalid range_id type: %s",
-            type(range_id).__name__,
+            "destroy_range called with invalid range_instance_pk type: %s",
+            type(range_instance_pk).__name__,
         )
-        msg = f"range_id must be an int, got {type(range_id).__name__}"
+        msg = f"range_instance_pk must be an int, got {type(range_instance_pk).__name__}"
         raise TypeError(msg)
 
-    if range_id < 0:
+    if range_instance_pk < 0:
         logger.error(
-            "destroy_range called with negative range_id=%s for user_id=%s",
-            range_id,
+            "destroy_range called with negative range_instance_pk=%s for user_id=%s",
+            range_instance_pk,
             user.id,
         )
-        raise ValueError("range_id must be non-negative")
+        raise ValueError("range_instance_pk must be non-negative")
 
     logger.debug(
-        "destroy_range called for user_id=%s, range_id=%s",
+        "destroy_range called for user_id=%s, range_instance_pk=%s",
         user.id,
-        range_id,
+        range_instance_pk,
     )
 
     try:
-        instance = RangeInstance.objects.get(range_id=range_id)
+        instance = RangeInstance.objects.get(pk=range_instance_pk)
     except RangeInstance.DoesNotExist:
         logger.warning(
-            "destroy_range: range not found for user_id=%s, range_id=%s",
+            "destroy_range: range not found for user_id=%s, range_instance_pk=%s",
             user.id,
-            range_id,
+            range_instance_pk,
         )
-        raise CMSError(f"Range {range_id} not found") from None
+        raise CMSError(f"Range {range_instance_pk} not found") from None
 
     if instance.user_id != user.id:
         logger.error(
-            "destroy_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
-            range_id,
+            "destroy_range: access denied - range_instance_pk=%s owned by user_id=%s, requested by user_id=%s",
+            range_instance_pk,
             instance.user_id,
             user.id,
         )
-        raise CMSError(f"Range {range_id} not found")
+        raise CMSError(f"Range {range_instance_pk} not found")
 
     try:
-        instance.status = ResourceStatus.DESTROYING.value
-        instance.deleted_at = timezone.now()
-        instance.save(update_fields=["status", "deleted_at"])
-
         request_id = instance.request.request_id if instance.request else None
         if request_id is None:
             logger.error(
-                "destroy_range: no request_id for range_id=%s, cannot destroy",
-                range_id,
+                "destroy_range: no request_id for range_instance_pk=%s, cannot destroy",
+                range_instance_pk,
             )
-            raise CMSError(f"Range {range_id} has no associated request")
+            raise CMSError(f"Range {range_instance_pk} has no associated request")
 
-        _engine_destroy_range_by_request_call(request_id)
-
-        _audit_log_call(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=range_id,
-            action=AuditLog.Action.DEPROVISION,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            previous_state={
-                "status": ResourceStatus.DESTROYING.value,
-                "scenario": instance.scenario_id,
-            },
-            request_id=str(request_id),
+        _transition_then_dispatch(
+            instance=instance,
+            request_id=request_id,
+            user=user,
+            audit_entity_id=range_instance_pk,
+            transition=_DESTROY_TRANSITION,
         )
 
         logger.debug(
-            "destroy_range completed for range_id=%s request_id=%s user_id=%s",
-            range_id,
+            "destroy_range completed for range_instance_pk=%s request_id=%s user_id=%s",
+            range_instance_pk,
             request_id,
             user.id,
         )
@@ -160,9 +237,9 @@ def destroy_range(user: User, range_id: int) -> None:
         raise
     except Exception:
         logger.exception(
-            "Error in destroy_range for user_id=%s, range_id=%s",
+            "Error in destroy_range for user_id=%s, range_instance_pk=%s",
             user.id,
-            range_id,
+            range_instance_pk,
         )
         raise
 
@@ -170,21 +247,8 @@ def destroy_range(user: User, range_id: int) -> None:
 def cancel_range(user: User, range_id: int) -> None:
     """Cancel provisioning range.
 
-    Verifies ownership via get_range, then delegates to
-    engine.orchestration.cancel().
-
-    Args:
-        user: User requesting cancellation
-        range_id: ID of the range to cancel
-
-    Returns:
-        None
-
-    Raises:
-        TypeError: If user is None, invalid type, or range_id is invalid type
-        ValueError: If user has no ID (unsaved) or range_id is invalid
-        CMSError: If range not found or not owned by user
-        OrchestrationError: If range not in cancellable status
+    Verifies ownership via get_range, marks the CMS row destroying, and delegates
+    engine cancellation.
     """
     _validate_caller_user(user, "cancel_range")
 
@@ -237,11 +301,6 @@ def cancel_range(user: User, range_id: int) -> None:
         raise
 
     try:
-        instance.status = ResourceStatus.DESTROYED.value
-        instance.save(update_fields=["status"])
-        if instance.status != ResourceStatus.DESTROYED.value:
-            raise CMSError("Range status not updated to DESTROYED")
-
         request_id = instance.request.request_id if instance.request else None
         if request_id is None:
             logger.error(
@@ -250,19 +309,12 @@ def cancel_range(user: User, range_id: int) -> None:
             )
             raise CMSError(f"Range {range_id} has no associated request")
 
-        _engine_cancel_range_by_request_call(request_id)
-
-        _audit_log_call(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=range_id,
-            action=AuditLog.Action.CANCEL,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            previous_state={
-                "status": ResourceStatus.DESTROYED.value,
-                "scenario": instance.scenario_id,
-            },
-            request_id=str(request_id),
+        _transition_then_dispatch(
+            instance=instance,
+            request_id=request_id,
+            user=user,
+            audit_entity_id=range_id,
+            transition=_CANCEL_TRANSITION,
         )
     except (TypeError, ValueError, CMSError):
         raise
@@ -331,23 +383,12 @@ def destroy_range_by_request_id(user: User, request_id: str) -> None:
         raise CMSError("Range has no associated request")
 
     try:
-        instance.status = ResourceStatus.DESTROYING.value
-        instance.deleted_at = timezone.now()
-        instance.save(update_fields=["status", "deleted_at"])
-
-        _engine_destroy_range_by_request_call(instance.request.request_id)
-
-        _audit_log_call(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=instance.range_id or 0,
-            action=AuditLog.Action.DEPROVISION,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            previous_state={
-                "status": ResourceStatus.DESTROYING.value,
-                "scenario": instance.scenario_id,
-            },
-            request_id=str(request_id),
+        _transition_then_dispatch(
+            instance=instance,
+            request_id=instance.request.request_id,
+            user=user,
+            audit_entity_id=instance.range_id or 0,
+            transition=_DESTROY_TRANSITION,
         )
 
         logger.debug(
@@ -422,22 +463,12 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
         raise CMSError("Range has no associated request")
 
     try:
-        instance.status = ResourceStatus.DESTROYED.value
-        instance.save(update_fields=["status"])
-
-        _engine_cancel_range_by_request_call(instance.request.request_id)
-
-        _audit_log_call(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=instance.id,
-            action=AuditLog.Action.CANCEL,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            previous_state={
-                "status": ResourceStatus.DESTROYED.value,
-                "scenario": instance.scenario_id,
-            },
-            request_id=str(instance.request.request_id),
+        _transition_then_dispatch(
+            instance=instance,
+            request_id=instance.request.request_id,
+            user=user,
+            audit_entity_id=instance.id,
+            transition=_CANCEL_TRANSITION,
         )
 
         logger.debug(

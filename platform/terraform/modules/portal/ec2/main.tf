@@ -13,7 +13,13 @@ locals {
   common_tags = merge(var.tags, {
     Module = "ec2"
   })
-  log_group_name = "/portal/${var.name_prefix}"
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
+  log_group_name  = "/portal/${var.name_prefix}"
+  django_environment = (
+    var.environment == "dev" ? "development" :
+    var.environment == "prod" ? "production" :
+    var.environment
+  )
 }
 
 # ------------------------------------------------------------------------------
@@ -63,12 +69,66 @@ resource "aws_cloudwatch_metric_alarm" "unhealthy_workers" {
   })
 }
 
+# Log-derived SQS worker restart signal (#274). Distinct from the #953 host
+# supervisor's Shifter/WorkerHealth metrics and from Shifter/PortalCapacity.
+# Per-queue series for diagnostics; a separate aggregate series feeds the alarm
+# because CloudWatch alarms require a concrete metric, not SEARCH().
+resource "aws_cloudwatch_log_metric_filter" "worker_restarts" {
+  name           = "${var.name_prefix}-worker-restarts"
+  log_group_name = aws_cloudwatch_log_group.portal.name
+  pattern        = "{ ($.message = \"*Worker restart detected*\") && ($.labels.worker_queue = \"*\") }"
+
+  metric_transformation {
+    name      = "WorkerRestarts"
+    namespace = "Shifter/Workers/${var.name_prefix}"
+    value     = "1"
+
+    dimensions = {
+      Queue = "$.labels.worker_queue"
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "worker_restarts_aggregate" {
+  name           = "${var.name_prefix}-worker-restarts-aggregate"
+  log_group_name = aws_cloudwatch_log_group.portal.name
+  pattern        = "{ ($.message = \"*Worker restart detected*\") && ($.labels.worker_queue = \"*\") }"
+
+  metric_transformation {
+    name          = "WorkerRestartsTotal"
+    namespace     = "Shifter/Workers/${var.name_prefix}"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "worker_restart_rate" {
+  alarm_name          = "${var.name_prefix}-worker-restart-rate"
+  alarm_description   = "SQS workers restarting frequently on ${var.name_prefix} (#274)"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "WorkerRestartsTotal"
+  namespace           = "Shifter/Workers/${var.name_prefix}"
+  period              = var.worker_restart_alarm_period_seconds
+  statistic           = "Sum"
+  threshold           = var.worker_restart_alarm_threshold
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = var.worker_health_alarm_actions
+  ok_actions    = var.worker_health_alarm_actions
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-worker-restart-rate"
+  })
+}
+
 # ------------------------------------------------------------------------------
 # IAM Role for EC2
 # ------------------------------------------------------------------------------
 
 resource "aws_iam_role" "this" {
-  name = "${var.name_prefix}-ec2-role"
+  name                 = "${local.iam_name_prefix}-ec2-role"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -207,6 +267,34 @@ resource "aws_iam_role_policy" "cloudwatch_metrics" {
   })
 }
 
+# Portal web capacity metrics (#940). The portal app process publishes
+# request/terminal saturation gauges to the Shifter/PortalCapacity namespace.
+# This is a SEPARATE least-privilege statement, constrained by its own
+# cloudwatch:namespace condition, rather than widening the worker-health policy
+# above — keeping web-capacity emission and worker-container liveness on distinct
+# grants. cloudwatch:PutMetricData has no resource-level scoping, so the
+# namespace condition is the boundary.
+resource "aws_iam_role_policy" "cloudwatch_metrics_portal_capacity" {
+  name = "cloudwatch-metrics-portal-capacity"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "Shifter/PortalCapacity"
+          }
+        }
+      }
+    ]
+  })
+}
+
 # IAM policy for reading range SSH keys from Secrets Manager
 # SSH keys are stored at: shifter/{env}/range/{range_id}/*-ssh-key
 # Required for Terminal UI feature to connect to Kali/Victim instances
@@ -223,6 +311,29 @@ resource "aws_iam_role_policy" "range_ssh_keys" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:shifter/*/range/*"
+      }
+    ]
+  })
+}
+
+# IAM policy for RDS IAM database authentication (#159).
+# The long-running portal (web + workers) connects to the database as the
+# dedicated rds_iam runtime user with a short-lived token instead of a stored
+# password (config.db_backends.rds_iam; mission_control migration 0041 creates
+# the user). Scoped to that single DB user on this RDS instance's resource id,
+# mirroring modules/engine-provisioner/iam.tf's rds_iam_auth grant for the
+# provisioner Lambda user.
+resource "aws_iam_role_policy" "rds_iam_auth" {
+  name = "rds-iam-auth"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "rds-db:connect"
+        Resource = "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${var.db_resource_id}/${var.db_iam_runtime_user}"
       }
     ]
   })
@@ -388,6 +499,38 @@ resource "aws_iam_role_policy" "sqs_kms" {
   })
 }
 
+resource "aws_iam_role_policy" "s3_kms" {
+  name = "s3-kms-access"
+  role = aws_iam_role.this.id
+
+  # The portal user-storage bucket is SSE-KMS encrypted with a CMK and its
+  # bucket policy *enforces* that CMK (modules/portal/s3). The CMK key policy
+  # grants the account root for the s3 ViaService path, which delegates the
+  # decision to IAM — so the instance role must hold kms:GenerateDataKey
+  # (uploads) and kms:Decrypt (downloads) on the key or every challenge-file
+  # PutObject/GetObject fails with AccessDenied / SNS-style KMS errors.
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey"
+        ]
+        Resource = var.s3_kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "s3.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "ses_send" {
   count = var.enable_ses ? 1 : 0
 
@@ -471,7 +614,7 @@ resource "aws_iam_role_policy" "lifecycle_action" {
 }
 
 resource "aws_iam_instance_profile" "this" {
-  name = "${var.name_prefix}-ec2-profile"
+  name = "${local.iam_name_prefix}-ec2-profile"
   role = aws_iam_role.this.name
 
   tags = local.common_tags
@@ -531,13 +674,15 @@ resource "aws_launch_template" "this" {
     security_groups             = [aws_security_group.this.id]
   }
 
-  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+  user_data = base64gzip(templatefile("${path.module}/user_data.sh", {
     aws_region                 = var.aws_region
+    django_environment         = local.django_environment
     ecr_repository_url         = var.ecr_repository_url
     log_group_name             = local.log_group_name
     ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
     lifecycle_hook_name        = "${var.name_prefix}-launch-hook"
     name_prefix                = var.name_prefix
+    docker_stop_timeout        = var.docker_stop_timeout
     worker_health_monitor_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.sh"))
     worker_health_service_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.service"))
     worker_health_timer_b64    = base64encode(file("${path.module}/worker-health/shifter-worker-health.timer"))
@@ -601,6 +746,16 @@ resource "aws_autoscaling_group" "this" {
   health_check_type         = "EC2"
   health_check_grace_period = 900
 
+  # Do not block `terraform apply` on the ASG reaching capacity. New instances
+  # sit in Pending:Wait until user_data finishes and calls
+  # CompleteLifecycleAction (docker install + portal container boot, minutes
+  # each), and warm-pool churn compounds it, so a multi-instance scale-up (e.g.
+  # 2 -> 6 on a larger instance type) blows past Terraform's default 10m
+  # capacity wait and fails the apply mid-roll (#1462). Readiness is gated
+  # downstream by the instance refresh below plus the deploy's verify-digest /
+  # verify-workers / health steps, so the in-apply wait is redundant.
+  wait_for_capacity_timeout = "0"
+
   min_size         = var.asg_min_size
   max_size         = var.asg_max_size
   desired_capacity = var.asg_desired_capacity
@@ -613,7 +768,7 @@ resource "aws_autoscaling_group" "this" {
   instance_refresh {
     strategy = "Rolling"
     preferences {
-      min_healthy_percentage = 50
+      min_healthy_percentage = var.instance_refresh_min_healthy_percentage
     }
   }
 
@@ -649,69 +804,25 @@ resource "aws_autoscaling_group" "this" {
 # ------------------------------------------------------------------------------
 # Auto Scaling Policies
 # ------------------------------------------------------------------------------
+# Portal autoscaling is driven by request-path saturation, not average EC2 CPU
+# (#940). The primary scale-out/scale-in policies are ALB target-tracking
+# (ALBRequestCountPerTarget + TargetResponseTime) in autoscaling_alb.tf; the
+# simple policy below is an *additive* app-saturation scale-out, triggered by
+# the Shifter/PortalCapacity WorkerBusyRatio alarm in observability.tf. There is
+# deliberately NO CPU-low / simple scale-IN policy: leaving CPU-low as a scale-in
+# path alongside target tracking lets a latency-saturated-but-low-CPU fleet scale
+# in (the documented #851 / #940 failure mode), so target tracking owns the
+# saturation-aware, drain-respecting scale-in. Average EC2 CPU remains only as a
+# guardrail *notification* alarm (observability.tf), not a scaling action.
 
 resource "aws_autoscaling_policy" "scale_up" {
   count = var.enable_autoscaling ? 1 : 0
 
-  name                   = "${var.name_prefix}-scale-up"
+  name                   = "${var.name_prefix}-app-saturation-scale-out"
   scaling_adjustment     = 1
   adjustment_type        = "ChangeInCapacity"
-  cooldown               = 300
+  cooldown               = var.scale_out_cooldown_seconds
   autoscaling_group_name = aws_autoscaling_group.this[0].name
-}
-
-resource "aws_autoscaling_policy" "scale_down" {
-  count = var.enable_autoscaling ? 1 : 0
-
-  name                   = "${var.name_prefix}-scale-down"
-  scaling_adjustment     = -1
-  adjustment_type        = "ChangeInCapacity"
-  cooldown               = 300
-  autoscaling_group_name = aws_autoscaling_group.this[0].name
-}
-
-resource "aws_cloudwatch_metric_alarm" "cpu_high" {
-  count = var.enable_autoscaling ? 1 : 0
-
-  alarm_name          = "${var.name_prefix}-cpu-high"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = 120
-  statistic           = "Average"
-  threshold           = var.scale_up_threshold
-  alarm_description   = "Scale up when CPU > ${var.scale_up_threshold}%"
-
-  dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.this[0].name
-  }
-
-  alarm_actions = [aws_autoscaling_policy.scale_up[0].arn]
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_metric_alarm" "cpu_low" {
-  count = var.enable_autoscaling ? 1 : 0
-
-  alarm_name          = "${var.name_prefix}-cpu-low"
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = 120
-  statistic           = "Average"
-  threshold           = var.scale_down_threshold
-  alarm_description   = "Scale down when CPU < ${var.scale_down_threshold}%"
-
-  dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.this[0].name
-  }
-
-  alarm_actions = [aws_autoscaling_policy.scale_down[0].arn]
-
-  tags = local.common_tags
 }
 
 # ------------------------------------------------------------------------------
@@ -729,13 +840,15 @@ resource "aws_instance" "this" {
   monitoring             = true
   ebs_optimized          = true
 
-  user_data_base64 = base64encode(templatefile("${path.module}/user_data.sh", {
+  user_data_base64 = base64gzip(templatefile("${path.module}/user_data.sh", {
     aws_region                 = var.aws_region
+    django_environment         = local.django_environment
     ecr_repository_url         = var.ecr_repository_url
     log_group_name             = local.log_group_name
     ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
     lifecycle_hook_name        = ""
     name_prefix                = var.name_prefix
+    docker_stop_timeout        = var.docker_stop_timeout
     worker_health_monitor_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.sh"))
     worker_health_service_b64  = base64encode(file("${path.module}/worker-health/shifter-worker-health.service"))
     worker_health_timer_b64    = base64encode(file("${path.module}/worker-health/shifter-worker-health.timer"))
@@ -777,4 +890,28 @@ resource "aws_autoscaling_lifecycle_hook" "launch" {
   lifecycle_transition   = "autoscaling:EC2_INSTANCE_LAUNCHING"
   heartbeat_timeout      = var.lifecycle_hook_heartbeat_timeout
   default_result         = "ABANDON"
+}
+
+# ------------------------------------------------------------------------------
+# ASG Termination Drain Hook (bounded drain for long-lived connections)
+# ------------------------------------------------------------------------------
+# Holds a terminating instance in Terminating:Wait for a bounded window so that,
+# during an instance refresh or scale-in, the ALB has time to deregister the
+# target (target-group deregistration_delay) and existing terminal / RDP / SSH
+# WebSocket sessions can drain before the container is SIGKILLed (issue #931,
+# DP-21). This is a passive timeout-only drain: no instance-side
+# CompleteLifecycleAction is required, and default_result = "CONTINUE" lets the
+# termination proceed automatically once heartbeat_timeout elapses, so no
+# instance ever gets stuck. Kept separate from the launch hook above so launch
+# bootstrap success never depends on termination-drain logic. The instance IAM
+# role already scopes autoscaling:CompleteLifecycleAction to this ASG, so an
+# early-completion path can be added later without an IAM change.
+resource "aws_autoscaling_lifecycle_hook" "terminate" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  name                   = "${var.name_prefix}-terminate-hook"
+  autoscaling_group_name = aws_autoscaling_group.this[0].name
+  lifecycle_transition   = "autoscaling:EC2_INSTANCE_TERMINATING"
+  heartbeat_timeout      = var.termination_drain_timeout
+  default_result         = "CONTINUE"
 }

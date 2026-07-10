@@ -6,11 +6,15 @@ these functions rather than calling AuditLog.log() directly.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
+
+from risk_register.audit_health import mark_audit_degraded
 from risk_register.models import AuditLog
 from shared.log_sanitize import safe_log_fingerprint
 
@@ -50,6 +54,15 @@ class StateChange:
 
 
 @dataclass(frozen=True)
+class RequestAudit:
+    """Request-derived audit context (source IP, user agent, request id)."""
+
+    source_ip: str | None = None
+    user_agent: str = ""
+    request_id: str = ""
+
+
+@dataclass(frozen=True)
 class AuthPrincipal:
     """Identity of the principal in an authentication audit event."""
 
@@ -66,18 +79,24 @@ class SessionInfo:
     range_id: int | None = None
     session_type: str = ""
     target_ip: str = ""
+    email: str = ""
 
 
-def audit_log(event: AuditEvent) -> AuditLog | None:
+def audit_log(event: AuditEvent, *, strict: bool = False) -> AuditLog | None:
     """Record an audit event.
 
     Called by all platform apps for auditable operations.
 
     Args:
         event: The auditable event to record (see :class:`AuditEvent`).
+        strict: When True, re-raise on persistence failure instead of swallowing
+            it. The default (False) preserves the "audit logging never breaks the
+            caller" contract; ``strict=True`` is for fail-closed paths where the
+            audit row is the safety control and the caller rolls back the mutation
+            it describes if the row cannot be written (issue #937 SEC-5).
 
     Returns:
-        The created AuditLog entry
+        The created AuditLog entry, or None when a non-strict write fails.
     """
     entity_type = event.entity_type
     entity_id = event.entity_id
@@ -129,7 +148,8 @@ def audit_log(event: AuditEvent) -> AuditLog | None:
             safe_log_fingerprint(actor_id),
         )
         return entry
-    except Exception:
+    except Exception as exc:
+        mark_audit_degraded(exc)
         # Audit logging should never break the application
         op_name = str(action).replace("\r", " ").replace("\n", " ")[:100]
         op_target_kind = str(entity_type).replace("\r", " ").replace("\n", " ")[:100]
@@ -140,13 +160,94 @@ def audit_log(event: AuditEvent) -> AuditLog | None:
             op_target_kind,
             op_target_id,
         )
+        if strict:
+            raise
         return None
 
 
-def get_client_ip(request: HttpRequest) -> str | None:
-    """Extract client IP from request, handling proxies.
+def audit_role_sync(
+    *,
+    user_id: int,
+    actor_type: str,
+    actor_id: int | None,
+    change: StateChange,
+    source: str,
+    request: RequestAudit | None = None,
+) -> AuditLog | None:
+    """Record a ``user_type`` / CTF-group-membership change (fail-closed).
 
-    Handles X-Forwarded-For from ALB and other proxies.
+    The safety control for the self-mutable ``custom:user_type`` attribute is a
+    durable, reviewable audit trail (issue #937 SEC-5), so this writer is
+    strict: a persistence failure raises rather than returning None, so callers
+    running it inside a transaction roll back the role mutation it describes.
+    ``change`` carries the old and new ``user_type`` plus the old and new CTF
+    group names — never tokens, cookies, or raw provider payloads.
+    """
+    request = request or RequestAudit()
+    return audit_log(
+        AuditEvent(
+            entity_type=AuditLog.EntityType.USER,
+            entity_id=user_id,
+            action=AuditLog.Action.ROLE_SYNC,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            previous_state=change.previous,
+            new_state=change.new,
+            context=f"user_type sync via {source}",
+            source_ip=request.source_ip,
+            user_agent=request.user_agent,
+            request_id=request.request_id,
+        ),
+        strict=True,
+    )
+
+
+def _valid_ip(value: str | None) -> str | None:
+    """Return ``value`` if it parses as an IP address, else ``None``."""
+    if not value:
+        return None
+    candidate = value.strip()
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return None
+    return candidate
+
+
+def select_trusted_client_ip(
+    xff_value: str | None,
+    remote_addr: str | None,
+    *,
+    trusted_hops: int = 1,
+) -> str | None:
+    """Resolve the client IP from an ``X-Forwarded-For`` chain plus direct peer.
+
+    Behind ``trusted_hops`` reverse proxies that each append the address they
+    received the request from, the trustworthy client value is the
+    ``trusted_hops``-th entry counted from the **right** — the rightmost entry
+    is the nearest proxy's view of its peer (the value the ALB appends).
+    Everything to the left of that is client-supplied and therefore spoofable,
+    so it is never trusted. When the chain is absent, shorter than the trusted
+    hop count, or the selected token is not a valid IP, fall back to the direct
+    peer ``remote_addr`` (SEC-4, issue #937).
+    """
+    hops = trusted_hops if trusted_hops and trusted_hops > 0 else 1
+    if xff_value:
+        parts = [part.strip() for part in xff_value.split(",") if part.strip()]
+        if len(parts) >= hops:
+            selected = _valid_ip(parts[-hops])
+            if selected is not None:
+                return selected
+    return _valid_ip(remote_addr)
+
+
+def get_client_ip(request: HttpRequest) -> str | None:
+    """Extract the trusted client IP for audit attribution.
+
+    Canonical HTTP audit source-IP resolver: delegates to
+    :func:`select_trusted_client_ip` using ``settings.AUDIT_TRUSTED_PROXY_HOPS``
+    so the leftmost (attacker-controlled) ``X-Forwarded-For`` value is never
+    trusted behind the load balancer.
 
     Args:
         request: Django HttpRequest
@@ -154,15 +255,12 @@ def get_client_ip(request: HttpRequest) -> str | None:
     Returns:
         Client IP address or None
     """
-    # Check X-Forwarded-For first (from ALB/proxy)
-    xff = request.META.get("HTTP_X_FORWARDED_FOR")
-    if xff:
-        # X-Forwarded-For format: "client, proxy1, proxy2"
-        # Take the first (leftmost) IP which is the original client
-        return xff.split(",")[0].strip()
-
-    # Fall back to REMOTE_ADDR
-    return request.META.get("REMOTE_ADDR")
+    trusted_hops = getattr(settings, "AUDIT_TRUSTED_PROXY_HOPS", 1)
+    return select_trusted_client_ip(
+        request.META.get("HTTP_X_FORWARDED_FOR"),
+        request.META.get("REMOTE_ADDR"),
+        trusted_hops=trusted_hops,
+    )
 
 
 def get_request_id(request: HttpRequest) -> str:
@@ -378,6 +476,8 @@ def audit_session_event(
         new_state["session_type"] = session.session_type
     if session.target_ip:
         new_state["target_ip"] = session.target_ip
+    if session.email:
+        new_state["email"] = session.email
 
     # Sessions don't have persistent IDs
     return audit_log(

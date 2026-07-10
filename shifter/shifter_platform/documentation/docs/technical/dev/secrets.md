@@ -41,10 +41,10 @@ Runtime secrets accessed by the portal at startup.
 | `shifter-{env}-portal-db-credentials` | RDS connection (host, port, user, password, dbname) |
 | `shifter-{env}-portal-app` | Django SECRET_KEY, other app secrets |
 | `shifter-{env}-portal-cognito` | OIDC client ID, client secret, domain |
-| `shifter-{env}-portal-dc-domain` | Domain-controller domain Administrator password (`DC_DOMAIN_PASSWORD`) — used by the engine provisioner to promote prebaked DC AMIs and to domain-join victims |
+| `shifter-{env}-portal-dc-domain` | Domain-controller domain Administrator password (`DC_DOMAIN_PASSWORD`), used by the engine provisioner to promote prebaked DC AMIs and to domain-join victims |
 
 The domain-controller password is a live credential. It must not appear in
-committed tfvars, workflow YAML, Terraform plan comments, or command logs —
+committed tfvars, workflow YAML, Terraform plan comments, or command logs,
 only in Secrets Manager and (like every other portal secret) in restricted
 Terraform state.
 
@@ -59,10 +59,10 @@ stack creates the secret with a live `AWSCURRENT` value and wires its ARN into
 the engine ECS task definition (`secrets = [...]`) and the portal SSM parameter
 (`${ps_prefix}/dc-domain-password-secret-arn`). The engine provisioner uses
 that value to promote each prebaked DC AMI (the AMI ships AD DS binaries; the
-domain — and its Administrator password — is created per range at provision
+domain (and its Administrator password) is created per range at provision
 time) and to domain-join victims; the portal Django container reads it at
 runtime via `entrypoint.sh`. There is no out-of-band
-`aws secretsmanager create-secret` / `put-secret-value` step — a fresh
+`aws secretsmanager create-secret` / `put-secret-value` step. A fresh
 environment is fully provisioned by the normal bootstrap → `terraform apply`
 flow, same as every other secret in the stack.
 
@@ -87,7 +87,7 @@ already expects at startup:
 Current rollout behavior:
 
 - `shifter-gcp-dev-app` and `shifter-gcp-dev-db` are seeded by Terraform for the first deployable control-plane slice
-- `shifter-gcp-dev-guacamole-db` and `shifter-gcp-dev-guacamole-json-auth` are now seeded by Terraform and synced into the `guacamole-runtime` Kubernetes Secret during deploy
+- `shifter-gcp-dev-guacamole-db` and `shifter-gcp-dev-guacamole-json-auth` are seeded by Terraform and synced into the `guacamole-runtime` Kubernetes Secret **out of band** during deploy (`kubectl apply` from Secret Manager, before the Helm release). Secret Manager and the Kubernetes Secret are the only runtime copies: these values are never placed in Helm chart values or Helm release history. The chart references the `guacamole-runtime` Secret by name only (`envFrom.secretRef`).
 - Identity Platform is provisioned by Terraform for the secure GCP portal login path
 - The first GCP operator is seeded by bootstrap using `GCP_BOOTSTRAP_ADMIN_EMAIL` / `GCP_BOOTSTRAP_ADMIN_PASSWORD` (or an interactive prompt)
 - Bootstrap operator elevation is runtime-configured with `PLATFORM_BOOTSTRAP_STAFF_EMAILS` / `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS`; these values must stay out of committed source
@@ -145,18 +145,28 @@ aws secretsmanager create-secret \
 
 ## Rotating Secrets
 
+The bullets below are high-level operator notes, not a full production rotation
+strategy. The production rotation policy per credential class is
+`docs/architecture/secrets-rotation-strategy.md`; before changing production
+rotation behavior, apply the architecture guardrails in
+`docs/architecture/secrets-rotation-strategy-preflight-159.md`.
+
 ### Database Password
-1. Update in Secrets Manager
-2. Restart portal container (picks up new value)
+The current portal reads `DB_PASSWORD` at container startup. Rotating the
+database password must keep the actual RDS password and the Secret Manager JSON
+bundle consistent, then restart/drain portal processes so they hydrate the new
+value. Updating only one side is not a completed rotation.
 
 ### Django SECRET_KEY
-1. Update in Secrets Manager
-2. Restart portal (existing sessions invalidated)
+Updating `django_secret_key` in the app secret and restarting the portal
+invalidates existing sessions unless explicit `SECRET_KEY_FALLBACKS` support is
+added first. Do not rotate `field_encryption_key` as a side effect of rotating
+`django_secret_key`.
 
 ### Cognito Client Secret
-1. Rotate in Cognito console
-2. Update in Secrets Manager
-3. Restart portal
+Treat this as a coordinated Cognito app-client credential swap. Keep old and
+new client credentials available through portal deploy/drain; do not delete the
+old client while old portal processes can still use it.
 
 ### VM guest passwords (per-instance)
 
@@ -190,8 +200,8 @@ channel). See `docs/architecture/vm-guest-credential-preflight-762.md`.
    `administrators_authorized_keys`, the engine provisioner runs
    `SetLocalPasswordPlan` via `SetupOrchestrator`:
    - Linux (kali, ubuntu): the password is piped through `chpasswd`
-     stdin — never as a `chpasswd` argv.
-   - Windows victim: `Set-LocalUser -Password (ConvertTo-SecureString …)` —
+     stdin, never as a `chpasswd` argv.
+   - Windows victim: `Set-LocalUser -Password (ConvertTo-SecureString …)`,
      never as a `net user` argv.
    - `SetupOrchestrator.SENSITIVE_CONTEXT_KEY_PARTS` masks the value
      in captured stdout/stderr because the context key is
@@ -203,12 +213,12 @@ channel). See `docs/architecture/vm-guest-credential-preflight-762.md`.
    `shared.cloud.get_secrets_store().get_secret()`. If the fetch fails
    (deleted secret, IAM regression), the portal raises a
    non-sensitive `ValueError` that the Mission Control RDP view maps
-   to HTTP 400 — same envelope as a missing reference.
+   to HTTP 400, the same envelope as a missing reference.
 
 #### DC role
 
 The DC role keeps the deployment-scoped `DC_DOMAIN_PASSWORD` contract
-documented below — a DC host's local Administrator account *is* the
+documented below: a DC host's local Administrator account *is* the
 domain Administrator account, so per-instance rotation is handled
 through DC promotion rather than the per-instance secret.
 
@@ -222,7 +232,7 @@ AWS path, the same as the existing per-instance SSH-key precedent
 Terraform state lives in the S3 backend with bucket-level encryption
 and least-privilege IAM access; this is the established mitigation.
 Eliminating state exposure entirely would require external secret
-generation (e.g., a Lambda invoking `aws secretsmanager create-secret`)
+generation (for example, a Lambda invoking `aws secretsmanager create-secret`)
 and is a separate workstream.
 
 #### Residual SSM Run Command body exposure (AWS)
@@ -257,7 +267,7 @@ Per-instance rotation is achieved by destroying and re-provisioning
 the range; the Terraform `random_password` regenerates, the new value
 replaces the previous secret version, and `SetLocalPasswordPlan` pushes
 it on the next provision. Image rebuilds (Packer) do **not** rotate
-live credentials — they only refresh the bootstrap scripts shipped on
+live credentials; they only refresh the bootstrap scripts shipped on
 first boot.
 
 ### Domain Controller Administrator Password
@@ -281,7 +291,7 @@ rotation pick up the new value without a task-definition redeploy.
    ```
    (or terminate the portal EC2 and let the ASG relaunch).
 3. Re-provision any ranges whose DC was promoted with the old value so the live
-   domain credential matches the secret again — existing ranges keep the old
+   domain credential matches the secret again; existing ranges keep the old
    password until they are re-provisioned. No engine provisioner task-definition
    redeploy is required; the next ECS task launch reads the rotated value.
 

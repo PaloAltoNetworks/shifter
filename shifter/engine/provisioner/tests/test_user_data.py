@@ -1,12 +1,43 @@
 """User data template tests for Shifter Engine."""
 
+import base64
 import sys
 from pathlib import Path
 
 import pytest
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+# The Linux GDC templates now render a provisioner-generated Ed25519 host key
+# into cloud-init ``ssh_keys:`` (trusted-side-channel host verification). These
+# tests exercise the raw templates, so the fixtures default representative
+# host-key material; the Windows template ignores the extra kwargs.
+_SAMPLE_HOST_PRIVATE_KEY = (
+    "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+    "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQy\n"
+    "NTUxOQAAACDTESTTESTTESTTESTTESTTESTTESTTESTTESTTESTTQAAAA==\n"
+    "-----END OPENSSH PRIVATE KEY-----\n"
+)
+_SAMPLE_HOST_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTHOSTKEY shifter-host"
+
+
+class _HostKeyTemplate:
+    """Wrap a Jinja template, defaulting the host-key vars the Linux GDC
+    templates require so existing ``render()`` calls need not pass them."""
+
+    def __init__(self, template):
+        self._template = template
+
+    def render(self, **kwargs):
+        kwargs.setdefault("host_private_key", _SAMPLE_HOST_PRIVATE_KEY)
+        kwargs.setdefault(
+            "host_private_key_b64",
+            base64.b64encode(_SAMPLE_HOST_PRIVATE_KEY.encode()).decode("ascii"),
+        )
+        kwargs.setdefault("host_public_key", _SAMPLE_HOST_PUBLIC_KEY)
+        return self._template.render(**kwargs)
 
 
 class TestKaliTemplate:
@@ -16,9 +47,9 @@ class TestKaliTemplate:
     def kali_template(self):
         """Load the Kali template."""
         templates_dir = Path(__file__).parent.parent / "templates"
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
-        return env.get_template("kali.sh.j2")
+        # select_autoescape() yields no escaping for these non-HTML (.sh/.ps1) templates
+        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=select_autoescape())
+        return _HostKeyTemplate(env.get_template("kali.sh.j2"))
 
     def test_kali_template_hostname(self, kali_template):
         """hostname variable should be replaced."""
@@ -39,17 +70,24 @@ class TestKaliTemplate:
         assert test_key in result
         assert "{{ public_key }}" not in result
 
-    def test_kali_template_valid_bash(self, kali_template):
-        """Output should be a valid bash script with required sections."""
+    def test_kali_template_is_cloud_config_wrapping_bash(self, kali_template):
+        """Output must be #cloud-config (GDC requirement) embedding a bash script."""
+        import yaml
+
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key="ssh-rsa AAAA...",
         )
-        assert result.strip().startswith("#!/bin/bash")
+        # GDC VM Runtime rejects non-#cloud-config user-data (InvalidCloudInitUserdata).
+        assert result.startswith("#cloud-config\n")
+        doc = yaml.safe_load(result)
+        assert doc["runcmd"] == ["/opt/shifter/gdc-user-data.sh"]
+        script = next(e["content"] for e in doc["write_files"] if e["path"].endswith("gdc-user-data.sh"))
+        assert script.startswith("#!/bin/bash")
         # Verify essential script components rather than arbitrary length
-        assert "hostnamectl set-hostname" in result  # Must set hostname
-        assert "authorized_keys" in result  # Must configure SSH
-        assert "echo" in result  # Must have logging/output
+        assert "hostnamectl set-hostname" in script  # Must set hostname
+        assert "authorized_keys" in script  # Must configure SSH
+        assert "echo" in script  # Must have logging/output
 
     def test_kali_template_sets_hostname(self, kali_template):
         """Template should set hostname."""
@@ -100,12 +138,12 @@ class TestVictimLinuxTemplate:
     def linux_template(self):
         """Load the Linux victim template."""
         templates_dir = Path(__file__).parent.parent / "templates"
-        # NOSONAR: autoescape=False - shell templates, not HTML
+        # select_autoescape() yields no escaping for these non-HTML (.sh) templates
         env = Environment(
             loader=FileSystemLoader(str(templates_dir)),
-            autoescape=False,
+            autoescape=select_autoescape(),
         )
-        return env.get_template("victim_linux.sh.j2")
+        return _HostKeyTemplate(env.get_template("victim_linux.sh.j2"))
 
     def test_victim_linux_template_configures_ssh(self, linux_template):
         """Template should configure SSH access."""
@@ -121,14 +159,21 @@ class TestVictimLinuxTemplate:
         # Should NOT install XDR (SSM does that)
         assert "curl" not in result
 
-    def test_victim_linux_template_valid_bash(self, linux_template):
-        """Output should be a valid bash script."""
+    def test_victim_linux_template_is_cloud_config_wrapping_bash(self, linux_template):
+        """Output must be #cloud-config (GDC requirement) embedding a bash script."""
+        import yaml
+
         result = linux_template.render(
             public_key="ssh-rsa test-key",
             ssh_user="ubuntu",
         )
-        assert result.strip().startswith("#!/bin/bash")
-        assert "set -euo pipefail" in result or "set -e" in result
+        # GDC VM Runtime rejects non-#cloud-config user-data (InvalidCloudInitUserdata).
+        assert result.startswith("#cloud-config\n")
+        doc = yaml.safe_load(result)
+        assert doc["runcmd"] == ["/opt/shifter/gdc-user-data.sh"]
+        script = next(e["content"] for e in doc["write_files"] if e["path"].endswith("gdc-user-data.sh"))
+        assert script.startswith("#!/bin/bash")
+        assert "set -euo pipefail" in script or "set -e" in script
 
     def test_victim_linux_template_explains_ssm(self, linux_template):
         """Template should explain that setup plans handle the remaining steps."""
@@ -169,8 +214,8 @@ class TestVictimWindowsTemplate:
     def windows_template(self):
         """Load the Windows victim template."""
         templates_dir = Path(__file__).parent.parent / "templates"
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+        # select_autoescape() yields no escaping for these non-HTML (.sh/.ps1) templates
+        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=select_autoescape())
         return env.get_template("victim_windows.ps1.j2")
 
     def test_victim_windows_template_configures_access(self, windows_template):
@@ -217,12 +262,12 @@ class TestTemplateContentSafety:
     def all_templates(self):
         """Load all templates."""
         templates_dir = Path(__file__).parent.parent / "templates"
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+        # select_autoescape() yields no escaping for these non-HTML (.sh/.ps1) templates
+        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=select_autoescape())
         return {
-            "kali": env.get_template("kali.sh.j2"),
-            "linux": env.get_template("victim_linux.sh.j2"),
-            "windows": env.get_template("victim_windows.ps1.j2"),
+            "kali": _HostKeyTemplate(env.get_template("kali.sh.j2")),
+            "linux": _HostKeyTemplate(env.get_template("victim_linux.sh.j2")),
+            "windows": _HostKeyTemplate(env.get_template("victim_windows.ps1.j2")),
         }
 
     def test_templates_use_strict_bash_mode(self, all_templates):
@@ -265,3 +310,80 @@ class TestTemplateContentSafety:
         )
         assert "log" in linux_result.lower() or "echo" in linux_result.lower()
         assert "log" in windows_result.lower() or "Write-Host" in windows_result
+
+
+class TestGdcCloudInitMerge:
+    """Guard the GDC VM Runtime cloud-init merge contract.
+
+    GDC's VM controller text-injects its own ``write_files`` entry
+    (``/var/lib/cloud/scripts/per-boot/google_boot_init.sh``) immediately
+    after the ``write_files:`` key, as a flush-left (indent-0) block-sequence
+    item. If our own ``write_files`` items are indented (``  - path:``), the
+    merged document mixes indent-0 and indent-2 sequence items, which is
+    invalid YAML ("expected <block end>, but found '-'"). cloud-init then
+    discards the *entire* config, so ``ssh_keys``/``write_files``/``runcmd``
+    never apply and the guest serves a boot-generated host key (range setup
+    then fails host-key verification). Our list items must be flush-left so
+    the merged sequence stays uniform.
+    """
+
+    # Captured live from a GDC range VM's regenerated kubevm cloud-init secret.
+    _GDC_INJECTED_WRITE_FILE = (
+        "- path: /var/lib/cloud/scripts/per-boot/google_boot_init.sh\n"
+        "  encoding: b64\n"
+        "  permissions: '0744'\n"
+        "  content: IyEvYmluL2Jhc2gKZWNobyBoaQo=\n"
+    )
+
+    @pytest.fixture
+    def linux_templates(self):
+        templates_dir = Path(__file__).parent.parent / "templates"
+        env = Environment(
+            loader=FileSystemLoader(str(templates_dir)),
+            autoescape=select_autoescape(["html", "xml"]),
+        )
+        return {
+            "kali": _HostKeyTemplate(env.get_template("kali.sh.j2")),
+            "linux": _HostKeyTemplate(env.get_template("victim_linux.sh.j2")),
+        }
+
+    @pytest.mark.parametrize("which", ["kali", "linux"])
+    def test_write_files_items_are_flush_left(self, linux_templates, which):
+        """write_files / runcmd list items must sit at indent 0 (no leading spaces)."""
+        result = linux_templates[which].render(hostname="h", public_key="ssh-rsa AAAA x@y", ssh_user="ubuntu")
+        # Flush-left list items present; no 2-space-indented items anywhere
+        # (a 2-space-indented `- path:` next to GDC's indent-0 item breaks YAML).
+        assert "\n- path:" in result
+        assert "\n  - path:" not in result
+        assert "\nruncmd:\n- " in result
+        assert "\nruncmd:\n  - " not in result
+
+    @pytest.mark.parametrize("which", ["kali", "linux"])
+    def test_authorized_keys_installed_in_early_write_files_stage(self, linux_templates, which):
+        """The runner key must be installed via write_files (early cloud-init stage),
+        not only in the final-stage runcmd, so auth works even when a guest's final
+        stage stalls (e.g. the heavy Kali desktop image)."""
+        import yaml
+
+        result = linux_templates[which].render(hostname="h", public_key="ssh-rsa AAAAKEY x@y", ssh_user="ubuntu")
+        doc = yaml.safe_load(result)
+        ak = [e for e in doc["write_files"] if e["path"].endswith("/.ssh/authorized_keys")]
+        assert len(ak) == 1, "expected exactly one authorized_keys write_files entry"
+        entry = ak[0]
+        assert entry["permissions"] == "0600"
+        assert "ssh-rsa AAAAKEY x@y" in entry["content"]
+        # Owner must be the connecting user, not root.
+        assert entry["owner"].split(":")[0] in entry["path"]
+
+    @pytest.mark.parametrize("which", ["kali", "linux"])
+    def test_survives_gdc_write_files_injection(self, linux_templates, which):
+        """A simulated GDC per-boot write_files injection must keep the doc valid YAML."""
+        import yaml
+
+        result = linux_templates[which].render(hostname="h", public_key="ssh-rsa AAAA x@y", ssh_user="ubuntu")
+        merged = result.replace("write_files:\n", "write_files:\n" + self._GDC_INJECTED_WRITE_FILE, 1)
+        doc = yaml.safe_load(merged)
+        paths = [e.get("path") for e in doc["write_files"]]
+        assert "/var/lib/cloud/scripts/per-boot/google_boot_init.sh" in paths
+        assert "/opt/shifter/gdc-user-data.sh" in paths
+        assert doc["runcmd"] == ["/opt/shifter/gdc-user-data.sh"]

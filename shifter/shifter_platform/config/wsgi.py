@@ -21,3 +21,7 @@ from django.core.wsgi import get_wsgi_application  # noqa: E402
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 application = get_wsgi_application()
+
+from config._posture import log_settings_posture  # noqa: E402
+
+log_settings_posture(os.environ)

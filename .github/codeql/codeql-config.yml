@@ -1,0 +1,10 @@
+name: "Shifter CodeQL config"
+
+# scenario-dev holds CTF scenario content: intentionally-vulnerable target
+# container apps (for example boreas-intranet's deliberate path traversal and
+# reflected XSS) plus scenario smoke-test harnesses. These are training targets
+# deployed onto range hosts, not part of the Shifter platform or engine security
+# posture, so they are excluded from platform code scanning. Scanning them only
+# produces expected-vulnerable noise that masks real platform findings.
+paths-ignore:
+  - "scenario-dev/**"

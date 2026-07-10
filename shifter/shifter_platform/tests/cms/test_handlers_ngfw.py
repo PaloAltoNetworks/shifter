@@ -1,21 +1,65 @@
-"""CMS NGFW handler tests.
+"""Behavior tests for the CMS NGFW event handler.
 
-Tests for process_ngfw_event handler function:
-- Handles ngfw.event events (unified NGFW lifecycle events)
-- Updates CMS Instance and App status
-- Validates required fields (instance_id, app_id)
-- Handles missing Instance/App gracefully
-- Validates status values
+``process_ngfw_event`` consumes unified ``ngfw.event`` messages and updates the
+real CMS ``Instance`` and ``App`` rows (status, and ``App.data.serial_number``).
+These tests drive the handler against real rows and assert the persisted effect,
+instead of patching ``Instance.objects.get`` / ``App.objects.get``.
 """
 
 import json
-from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from django.contrib.auth import get_user_model
 
-from shared.enums import ResourceStatus
+from cms.handlers import process_ngfw_event
+from cms.models import App, AppType, Instance, InstanceType, Request
+from shared.enums import RequestType, ResourceStatus
 from shared.messages.events import EVENT_TYPE_NGFW
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
+
+
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(username="cms-ngfw@example.com", email="cms-ngfw@example.com")
+
+
+@pytest.fixture
+def request_obj(user):
+    return Request.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
+
+
+@pytest.fixture
+def instance(request_obj):
+    instance_type = InstanceType.objects.create(
+        name="NGFW Test Instance Type",
+        slug=f"ngfw-it-{uuid4().hex[:8]}",
+        spec_slug="credential.scm",
+    )
+    return Instance.objects.create(
+        request=request_obj,
+        name="ngfw-instance",
+        instance_type=instance_type,
+        status=ResourceStatus.PROVISIONING.value,
+    )
+
+
+@pytest.fixture
+def app(instance):
+    app_type = AppType.objects.create(
+        name="NGFW Test App Type",
+        slug=f"ngfw-at-{uuid4().hex[:8]}",
+        spec_slug="credential.scm",
+    )
+    return App.objects.create(
+        name="ngfw-app",
+        app_type=app_type,
+        instance=instance,
+        status=ResourceStatus.PROVISIONING.value,
+    )
 
 
 def make_sns_message(event: dict) -> dict:
@@ -23,363 +67,157 @@ def make_sns_message(event: dict) -> dict:
     return {"Message": json.dumps(event)}
 
 
-@pytest.fixture
-def mock_instance():
-    """Create a mock CMS Instance."""
-    inst = MagicMock()
-    inst.id = uuid4()
-    inst.status = ResourceStatus.PROVISIONING.value
-    return inst
-
-
-@pytest.fixture
-def mock_app():
-    """Create a mock CMS App."""
-    app = MagicMock()
-    app.id = uuid4()
-    app.status = ResourceStatus.PROVISIONING.value
-    app.data = {}
-    return app
+def _ngfw_event(instance_id, app_id, **extra) -> dict:
+    return {"event_type": EVENT_TYPE_NGFW, "instance_id": str(instance_id), "app_id": str(app_id), **extra}
 
 
 class TestProcessNgfwEventStatusUpdates:
     """Status update tests for process_ngfw_event()."""
 
-    def test_updates_status_on_ngfw_event(self, mock_instance, mock_app):
-        """process_ngfw_event updates Instance and App status."""
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.READY.value,
-        }
+    def test_updates_status_on_ngfw_event(self, instance, app):
+        event = _ngfw_event(instance.id, app.id, status=ResourceStatus.READY.value)
+        process_ngfw_event(make_sns_message(event))
 
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.READY.value
+        assert app.status == ResourceStatus.READY.value
 
-            process_ngfw_event(make_sns_message(event))
+    def test_updates_to_failed_status(self, instance, app):
+        event = _ngfw_event(instance.id, app.id, status=ResourceStatus.FAILED.value)
+        process_ngfw_event(make_sns_message(event))
 
-        assert mock_instance.status == ResourceStatus.READY.value
-        mock_instance.save.assert_called_once_with(update_fields=["status"])
-        assert mock_app.status == ResourceStatus.READY.value
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.FAILED.value
+        assert app.status == ResourceStatus.FAILED.value
 
-    def test_updates_to_failed_status(self, mock_instance, mock_app):
-        """process_ngfw_event can update to FAILED status."""
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.FAILED.value,
-        }
+    def test_updates_to_destroyed_status(self, instance, app):
+        instance.status = ResourceStatus.DESTROYING.value
+        instance.save(update_fields=["status"])
+        app.status = ResourceStatus.DESTROYING.value
+        app.save(update_fields=["status"])
 
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
+        event = _ngfw_event(instance.id, app.id, status=ResourceStatus.DESTROYED.value)
+        process_ngfw_event(make_sns_message(event))
 
-            process_ngfw_event(make_sns_message(event))
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.DESTROYED.value
+        assert app.status == ResourceStatus.DESTROYED.value
 
-        assert mock_instance.status == ResourceStatus.FAILED.value
-        mock_instance.save.assert_called_once_with(update_fields=["status"])
-        assert mock_app.status == ResourceStatus.FAILED.value
+    def test_event_without_status_does_not_change_status(self, instance, app):
+        event = _ngfw_event(instance.id, app.id)  # no status field
+        process_ngfw_event(make_sns_message(event))
 
-    def test_updates_to_destroyed_status(self, mock_instance, mock_app):
-        """process_ngfw_event can update to DESTROYED status."""
-        mock_instance.status = ResourceStatus.DESTROYING.value
-        mock_app.status = ResourceStatus.DESTROYING.value
-
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.DESTROYED.value,
-        }
-
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
-
-            process_ngfw_event(make_sns_message(event))
-
-        assert mock_instance.status == ResourceStatus.DESTROYED.value
-        mock_instance.save.assert_called_once_with(update_fields=["status"])
-        assert mock_app.status == ResourceStatus.DESTROYED.value
-
-    def test_event_without_status_does_not_change_status(self, mock_instance, mock_app):
-        """process_ngfw_event with no status field leaves status unchanged."""
-        original_instance_status = mock_instance.status
-        original_app_status = mock_app.status
-
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            # No status field
-        }
-
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
-
-            process_ngfw_event(make_sns_message(event))
-
-        assert mock_instance.status == original_instance_status
-        mock_instance.save.assert_not_called()
-        assert mock_app.status == original_app_status
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.PROVISIONING.value
+        assert app.status == ResourceStatus.PROVISIONING.value
 
 
 class TestProcessNgfwEventInvalidInputs:
     """Ignored and invalid input tests for process_ngfw_event()."""
 
-    def test_ignores_unknown_event_type(self, mock_instance, mock_app):
-        """process_ngfw_event ignores unknown event types."""
-        event = {
-            "event_type": "ngfw.unknown.event",
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.READY.value,
-        }
+    def test_ignores_unknown_event_type(self, instance, app):
+        event = _ngfw_event(instance.id, app.id, status=ResourceStatus.READY.value)
+        event["event_type"] = "ngfw.unknown.event"
+        process_ngfw_event(make_sns_message(event))
 
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
-        ):
-            from cms.handlers import process_ngfw_event
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.PROVISIONING.value
+        assert app.status == ResourceStatus.PROVISIONING.value
 
-            process_ngfw_event(make_sns_message(event))
-
-        # Should not have looked up any models
-        mock_get_instance.assert_not_called()
-        mock_get_app.assert_not_called()
-
-    def test_handles_missing_instance_gracefully(self, mock_instance, mock_app):
+    def test_handles_missing_instance_gracefully(self, app):
         """Missing Instance does not stop processing — App is still updated."""
-        from cms.models import Instance
+        event = _ngfw_event(uuid4(), app.id, status=ResourceStatus.READY.value)
+        process_ngfw_event(make_sns_message(event))
 
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(uuid4()),  # Non-existent
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.READY.value,
-        }
+        app.refresh_from_db()
+        assert app.status == ResourceStatus.READY.value
 
-        with (
-            patch(
-                "cms.handlers.ngfw_events.Instance.objects.get",
-                side_effect=Instance.DoesNotExist,
-            ),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
-
-            process_ngfw_event(make_sns_message(event))
-
-        # Instance lookup failed, so its save must NOT have run.
-        mock_instance.save.assert_not_called()
-        # App processing must still have happened — that's the documented behavior.
-        assert mock_app.status == ResourceStatus.READY.value
-        mock_app.save.assert_called_once_with(update_fields=["status"])
-
-    def test_handles_missing_app_gracefully(self, mock_instance, mock_app):
+    def test_handles_missing_app_gracefully(self, instance):
         """Missing App does not stop processing — Instance is still updated."""
-        from cms.models import App
+        event = _ngfw_event(instance.id, uuid4(), status=ResourceStatus.READY.value)
+        process_ngfw_event(make_sns_message(event))
 
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(uuid4()),  # Non-existent
-            "status": ResourceStatus.READY.value,
-        }
+        instance.refresh_from_db()
+        assert instance.status == ResourceStatus.READY.value
 
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", side_effect=App.DoesNotExist),
-        ):
-            from cms.handlers import process_ngfw_event
+    def test_handles_missing_required_ids(self, instance, app):
+        """Events missing instance_id or app_id are ignored — no row changes."""
+        process_ngfw_event(
+            make_sns_message(
+                {"event_type": EVENT_TYPE_NGFW, "app_id": str(app.id), "status": ResourceStatus.READY.value}
+            )
+        )
+        process_ngfw_event(
+            make_sns_message(
+                {"event_type": EVENT_TYPE_NGFW, "instance_id": str(instance.id), "status": ResourceStatus.READY.value}
+            )
+        )
 
-            process_ngfw_event(make_sns_message(event))
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.PROVISIONING.value
+        assert app.status == ResourceStatus.PROVISIONING.value
 
-        # Instance was updated even though App is gone.
-        assert mock_instance.status == ResourceStatus.READY.value
-        mock_instance.save.assert_called_once_with(update_fields=["status"])
-        # App lookup raised, so its save must NOT have run.
-        mock_app.save.assert_not_called()
+    def test_rejects_invalid_status(self, instance, app):
+        event = _ngfw_event(instance.id, app.id, status="invalid_status")
+        process_ngfw_event(make_sns_message(event))
 
-    def test_handles_missing_required_ids(self, mock_instance, mock_app):
-        """process_ngfw_event handles events missing instance_id or app_id."""
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
-        ):
-            from cms.handlers import process_ngfw_event
+        instance.refresh_from_db()
+        app.refresh_from_db()
+        assert instance.status == ResourceStatus.PROVISIONING.value
+        assert app.status == ResourceStatus.PROVISIONING.value
 
-            # Missing instance_id
-            event = {
-                "event_type": EVENT_TYPE_NGFW,
-                "app_id": str(mock_app.id),
-                "status": ResourceStatus.READY.value,
-            }
-            process_ngfw_event(make_sns_message(event))  # Should not raise
+    def test_handles_multiple_message_formats(self, instance, app):
+        """process_ngfw_event accepts a raw dict and a JSON string envelope."""
+        # Raw dict (no SNS wrapper).
+        process_ngfw_event(_ngfw_event(instance.id, app.id, status=ResourceStatus.READY.value))
+        instance.refresh_from_db()
+        assert instance.status == ResourceStatus.READY.value
 
-            # Missing app_id
-            event = {
-                "event_type": EVENT_TYPE_NGFW,
-                "instance_id": str(mock_instance.id),
-                "status": ResourceStatus.READY.value,
-            }
-            process_ngfw_event(make_sns_message(event))  # Should not raise
-
-        # Neither lookup should have been attempted
-        mock_get_instance.assert_not_called()
-        mock_get_app.assert_not_called()
-
-    def test_rejects_invalid_status(self, mock_instance, mock_app):
-        """process_ngfw_event rejects invalid status values."""
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": "invalid_status",
-        }
-
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
-        ):
-            from cms.handlers import process_ngfw_event
-
-            process_ngfw_event(make_sns_message(event))
-
-        # Should return early without looking up models
-        mock_get_instance.assert_not_called()
-        mock_get_app.assert_not_called()
-        # Status on fixtures should be unchanged
-        assert mock_instance.status == ResourceStatus.PROVISIONING.value
-        assert mock_app.status == ResourceStatus.PROVISIONING.value
-
-    def test_handles_multiple_message_formats(self, mock_instance, mock_app):
-        """process_ngfw_event handles raw dict and JSON string formats."""
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.READY.value,
-        }
-
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
-
-            # Raw dict (no SNS wrapper)
-            process_ngfw_event(event)
-            assert mock_instance.status == ResourceStatus.READY.value
-
-            # Reset status for next test
-            mock_instance.status = ResourceStatus.PROVISIONING.value
-            mock_instance.save.reset_mock()
-
-            # JSON string
-            process_ngfw_event(json.dumps(event))
-            assert mock_instance.status == ResourceStatus.READY.value
+        # JSON string.
+        process_ngfw_event(json.dumps(_ngfw_event(instance.id, app.id, status=ResourceStatus.DESTROYED.value)))
+        instance.refresh_from_db()
+        assert instance.status == ResourceStatus.DESTROYED.value
 
 
 class TestProcessNgfwEventSerialNumber:
     """Serial number payload tests for process_ngfw_event()."""
 
-    def test_stores_serial_number_in_app_data(self, mock_instance, mock_app):
-        """process_ngfw_event stores serial_number in App.data."""
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.READY.value,
-            "serial_number": "007951000123456",
-        }
+    def test_stores_serial_number_in_app_data(self, instance, app):
+        event = _ngfw_event(instance.id, app.id, status=ResourceStatus.READY.value, serial_number="007951000123456")
+        process_ngfw_event(make_sns_message(event))
 
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
+        app.refresh_from_db()
+        assert app.data.get("serial_number") == "007951000123456"
+        assert app.status == ResourceStatus.READY.value
 
-            process_ngfw_event(make_sns_message(event))
+    def test_serial_number_not_stored_when_not_provided(self, instance, app):
+        event = _ngfw_event(instance.id, app.id, status=ResourceStatus.READY.value)
+        process_ngfw_event(make_sns_message(event))
 
-        assert mock_app.data.get("serial_number") == "007951000123456"
-        mock_app.save.assert_called_once_with(update_fields=["status", "data"])
+        app.refresh_from_db()
+        assert "serial_number" not in app.data
 
-    def test_serial_number_not_stored_when_not_provided(self, mock_instance, mock_app):
-        """process_ngfw_event does not add serial_number when not in event."""
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.READY.value,
-            # No serial_number field
-        }
+    def test_serial_number_preserves_existing_app_data(self, instance, app):
+        app.data = {"existing_key": "existing_value"}
+        app.save(update_fields=["data"])
 
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
+        event = _ngfw_event(instance.id, app.id, status=ResourceStatus.READY.value, serial_number="007951000123456")
+        process_ngfw_event(make_sns_message(event))
 
-            process_ngfw_event(make_sns_message(event))
+        app.refresh_from_db()
+        assert app.data.get("existing_key") == "existing_value"
+        assert app.data.get("serial_number") == "007951000123456"
 
-        assert "serial_number" not in mock_app.data
+    def test_serial_number_stored_without_status_update(self, instance, app):
+        event = _ngfw_event(instance.id, app.id, serial_number="007951000123456")  # no status
+        process_ngfw_event(make_sns_message(event))
 
-    def test_serial_number_preserves_existing_app_data(self, mock_instance, mock_app):
-        """process_ngfw_event preserves existing App.data when adding serial."""
-        mock_app.data = {"existing_key": "existing_value"}
-
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            "status": ResourceStatus.READY.value,
-            "serial_number": "007951000123456",
-        }
-
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
-
-            process_ngfw_event(make_sns_message(event))
-
-        assert mock_app.data.get("existing_key") == "existing_value"
-        assert mock_app.data.get("serial_number") == "007951000123456"
-
-    def test_serial_number_stored_without_status_update(self, mock_instance, mock_app):
-        """process_ngfw_event can store serial_number even without status."""
-        original_status = mock_app.status
-
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(mock_instance.id),
-            "app_id": str(mock_app.id),
-            # No status field - only serial_number
-            "serial_number": "007951000123456",
-        }
-
-        with (
-            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
-        ):
-            from cms.handlers import process_ngfw_event
-
-            process_ngfw_event(make_sns_message(event))
-
-        assert mock_app.status == original_status  # Status unchanged
-        assert mock_app.data.get("serial_number") == "007951000123456"
-        mock_app.save.assert_called_once_with(update_fields=["data"])
+        app.refresh_from_db()
+        assert app.status == ResourceStatus.PROVISIONING.value  # unchanged
+        assert app.data.get("serial_number") == "007951000123456"

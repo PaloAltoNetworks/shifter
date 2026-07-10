@@ -64,6 +64,7 @@ from _gdc_vm_secrets import (
     _IMAGE_IMPORT_K8S_NAME,
     _delete_rdp_password_secret,
     _delete_ssh_secret,
+    _ensure_cloudinit_secret,
     _ensure_gcs_image_secret,
     _ensure_rdp_password_secret,
     _ensure_ssh_secret,
@@ -165,7 +166,15 @@ def _build_pending_vm_runtime_instance(
         rdp_password_secret_ref: str | None = None
     else:
         rdp_password_secret_ref, _ = _ensure_rdp_password_secret(range_id, instance)
-    user_data = _render_user_data(instance, hostname, public_key)
+    user_data, host_public_key = _render_user_data(instance, hostname, public_key)
+    cloudinit_secret_name = _ensure_cloudinit_secret(
+        kube.core_api,
+        kube.client_module,
+        subnet.namespace,
+        f"{vm_name}-cloudinit",
+        user_data,
+        kube.api_exception,
+    )
     os_type = str(instance.get("os_type", "ubuntu"))
     profile = vm_config.get_profile(role=str(instance.get("role", "victim")), os_type=os_type)
     labels = _asset_labels(range_id, request_uuid, subnet.subnet_name, str(instance.get("uuid", "")))
@@ -193,7 +202,7 @@ def _build_pending_vm_runtime_instance(
         namespace=subnet.namespace,
         vm_name=vm_name,
         disk_name=disk_name,
-        user_data=user_data,
+        user_data_secret_name=cloudinit_secret_name,
         labels=labels,
         network=_VMNetworkSpec(
             network_name=subnet.network_name,
@@ -224,6 +233,7 @@ def _build_pending_vm_runtime_instance(
         "ssh_secret_ref": ssh_secret_ref,
         "rdp_password_secret_ref": rdp_password_secret_ref,
         "public_key": public_key,
+        "host_public_key": host_public_key,
         "static_ip": static_ip,
     }
 
@@ -255,6 +265,7 @@ def _build_vm_runtime_output(
         "instance_id": pending["vm_name"],
         "private_ip": private_ip,
         "public_key": pending["public_key"],
+        "gdc_host_public_key": pending.get("host_public_key", ""),
         "ssh_key_secret_arn": pending["ssh_secret_ref"],
         "ssh_username": get_ssh_username(os_type, role),
         "gdc_vm_name": pending["vm_name"],
@@ -356,7 +367,12 @@ def apply_range_assets(
     api_client = _build_kube_api_client(access.kubeconfig)
     custom_api = client_module.CustomObjectsApi(api_client)
     core_api = client_module.CoreV1Api(api_client)
-    kube = _KubeAccess(custom_api=custom_api, api_exception=api_exception)
+    kube = _KubeAccess(
+        custom_api=custom_api,
+        api_exception=api_exception,
+        core_api=core_api,
+        client_module=client_module,
+    )
 
     range_id = int(variables["range_id"])
     namespace = _select_namespace(range_id, subnet_outputs, access)

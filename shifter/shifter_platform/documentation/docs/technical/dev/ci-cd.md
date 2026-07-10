@@ -103,6 +103,12 @@ non-docs changes make it true, ordinary docs-only changes make it false, and
 guardrail docs make it true even though they are documentation. PR Gate accepts
 a skipped Quality job only when `quality_relevant` is false.
 
+The Shifter Engine reusable workflow has an additional blocking provisioner
+pytest gate before local Docker validation, credentialed image build, and ECS
+deploy. This keeps deploy-triggering AWS branch runs from building or deploying
+the provisioner image when the top-level Quality job is legitimately skipped
+because the SHA was already validated on `dev`.
+
 - **ADR conformance**: `python3 scripts/adr_guard/adr_guard.py --all --level ci`
   Includes `adr-registry`, `layer-imports`, `cross-layer-model-imports`, and
   `cloud-factory-seam` (ADR-005-R1 cloud adapter parity).
@@ -134,7 +140,8 @@ a skipped Quality job only when `quality_relevant` is false.
   comments) require a matching entry in `docs/adr/exceptions.yaml` with
   owner, reason, expiry, affected paths, and the Checkov policy ID.
 - **Secret scanning**: gitleaks on newly introduced commits
-- **Coverage**: `shifter_platform` emits terminal and XML coverage reports
+- **Coverage**: `shifter_platform` and provisioner test jobs emit XML coverage
+  reports
 
 Commit-message or label-based test skips are not accepted by `deploy.yml`.
 
@@ -177,16 +184,62 @@ for the required surface.
 
 ## AWS Platform Deployment
 
-After Terraform apply, AWS platform deployment:
+The `Core -> Range -> Engine -> Platform` chain above is the order between the
+reusable workflows. This section documents the ordered sequence of jobs and
+steps **inside** the platform reusable workflow (`_shifter-platform.yml`), which
+is the portal (platform) stack. Jobs run in this order (each `needs` the
+previous):
 
-1. Build Docker image
-2. Push to ECR with tags: `latest`, `{git-sha}`
-3. Find target EC2 instances via tags
-4. SSM send-command to pull and run new container
+1. **`push-guacamole-images`**: build and push the `guacd` and
+   `guacamole-client` images to ECR (only when the pinned tag is absent). Runs
+   first because the portal plan and apply reference them.
+2. **`plan`**: render `local.auto.tfvars` from `TF_VARS_<ENV>_PORTAL` (and the
+   engine image digest into `zz-engine-image.auto.tfvars`), render the backend
+   config, then `init` / `validate` / `plan`.
+3. **`apply`** (branch/dispatch only), in order:
+   - **Drain Service Discovery** registrations the plan will delete (scale
+     affected ECS services to zero) so replacements do not collide.
+   - `terraform apply` the saved plan.
+   - **Restore ECS desired counts** after apply.
+   - **Assert portal inspection** route and endpoint wiring (no-op when
+     inspection is off; fails the deploy if the routed firewall path is
+     unhealthy).
+   - **Verify RDS pending modifications applied** (dev only): a successful apply
+     that leaves non-empty `PendingModifiedValues` fails the job.
+   - **Wait for Guacamole ECS services to stabilize** (bounded poll).
+4. **`build`**: build and push the portal image
+   (`shifter/shifter_platform/Dockerfile`) to `shifter-<env>-portal`. The image
+   is tagged `<short-sha>-<run-id>-<run-attempt>` and the job outputs its
+   digest; there is no `latest` tag.
+5. **`deploy`**, in order:
+   - **Resolve topology** from Terraform state (`enable_autoscaling`,
+     `ec2_instance_id`, `asg_name`).
+   - **Update Parameter Store** with the new image digest and tag.
+   - **Update bootstrap admin parameters** (staff / superuser emails).
+   - **Run database migrations** on one healthy instance (ASG mode; single
+     instance mode migrates inside its deploy script).
+   - **Deploy via SSM** (single instance) **or trigger an ASG instance
+     refresh** (ASG mode).
+   - **Verify ASG image digest** and **verify ASG worker health** (ASG mode).
+6. **`verify`**: post-deploy health check.
+7. **`post-deploy-smoke`** (dev applies only, `continue-on-error`): run
+   `scripts/smoke-test.sh`. A failure opens a `[smoke-test]` bug issue and does
+   not fail the deploy. Requires the `SMOKE_*` secrets (see
+   [`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md)).
 
-**Single Instance Mode**: Deploys to `{env}-portal-ec2` tagged instance.
+**Single instance mode** targets the `{env}-portal-ec2` tagged instance.
+**Auto Scaling mode** refreshes `{env}-portal-asg` and verifies the new digest
+and worker health on every in-service instance.
 
-**Auto Scaling Mode**: Deploys to all instances in `{env}-portal-asg`.
+### First-run DNS timing
+
+On a fresh account the first Portal apply blocks while AWS validates ACM
+certificates and SES identities. Publish the validation records in the
+authoritative DNS zone while the apply is waiting, and publish the runtime
+routing records (ALB CNAMEs, CTFd A record) once the apply creates those
+endpoints. The exact records and commands are in
+[`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md)
+under the first-run DNS validation and routing sections.
 
 ## Environment Detection
 
@@ -230,7 +283,7 @@ All workflows run on `self-hosted` runners (not GitHub-hosted). The runner has:
 - AWS CLI configured
 - gcloud SDK support for GCP workflows
 - Docker + BuildX
-- Terraform 1.7.1
+- Terraform (deploy jobs pin `1.13.3`)
 - Python 3.12
 - Network access to AWS and GCP APIs
 

@@ -7,6 +7,27 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "iam_name_prefix" {
+  description = "Prefix for IAM role and instance profile names (defaults to name_prefix)"
+  type        = string
+  default     = null
+}
+
+variable "target_deregistration_delay_seconds" {
+  description = <<-EOT
+    Guacamole target-group deregistration delay in seconds, allowing in-flight
+    RDP/SSH browser sessions to drain when a target is removed (issue #931).
+    AWS allows 0-3600.
+  EOT
+  type        = number
+  default     = 120
+
+  validation {
+    condition     = var.target_deregistration_delay_seconds >= 0 && var.target_deregistration_delay_seconds <= 3600
+    error_message = "target_deregistration_delay_seconds must be between 0 and 3600."
+  }
+}
+
 variable "environment" {
   description = "Environment name (dev, prod)"
   type        = string
@@ -131,8 +152,13 @@ variable "guacd_desired_count" {
 }
 
 variable "guacamole_client_desired_count" {
-  description = "Desired number of guacamole-client tasks"
+  description = "Desired number of guacamole-client tasks. Must be 1: the client tier mints and serves auth tokens from task-local process memory, so N>1 breaks first-click RDP (#928). The module hard-pins the service to one task; this input is validated to 1 so a generated/deployed value cannot silently request more."
   type        = number
+
+  validation {
+    condition     = var.guacamole_client_desired_count == 1
+    error_message = "guacamole_client_desired_count must be 1: the guacamole-client tier is single-task by design (token/task affinity, #928). Scale guacd for capacity instead."
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -199,18 +225,42 @@ variable "db_apply_immediately" {
 # ------------------------------------------------------------------------------
 
 variable "enable_autoscaling" {
-  description = "Enable auto scaling for ECS services"
+  description = "Enable auto scaling for the guacd ECS service (the per-connection capacity tier). The guacamole-client tier is intentionally single-task and is never autoscaled (#928)."
   type        = bool
 }
 
 variable "autoscaling_min_capacity" {
-  description = "Minimum number of tasks for auto scaling"
+  description = "Minimum number of guacd tasks for auto scaling"
   type        = number
 }
 
 variable "autoscaling_max_capacity" {
-  description = "Maximum number of tasks for auto scaling"
+  description = "Maximum number of guacd tasks for auto scaling"
   type        = number
+}
+
+variable "guacd_autoscaling_min_capacity" {
+  description = "Minimum number of guacd tasks for auto scaling. Defaults to autoscaling_min_capacity."
+  type        = number
+  default     = null
+}
+
+variable "guacd_autoscaling_max_capacity" {
+  description = "Maximum number of guacd tasks for auto scaling. Defaults to autoscaling_max_capacity."
+  type        = number
+  default     = null
+}
+
+variable "guacamole_client_autoscaling_min_capacity" {
+  description = "Minimum number of guacamole-client tasks for auto scaling. Defaults to autoscaling_min_capacity."
+  type        = number
+  default     = null
+}
+
+variable "guacamole_client_autoscaling_max_capacity" {
+  description = "Maximum number of guacamole-client tasks for auto scaling. Defaults to autoscaling_max_capacity."
+  type        = number
+  default     = null
 }
 
 variable "autoscaling_cpu_target" {
@@ -263,4 +313,9 @@ variable "domain_name" {
   description = "Portal domain name (for constructing Guacamole redirect URI)"
   type        = string
   default     = ""
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary ARN required on CI-created shifter-* roles"
+  type        = string
 }

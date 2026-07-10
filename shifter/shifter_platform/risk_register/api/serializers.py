@@ -2,10 +2,47 @@
 
 from rest_framework import serializers
 
-from risk_register.models import APIKey, AuditLog, Comment, Risk, StrideCategory
+from risk_register.models import AuditLog, Comment, Risk, StrideCategory
+
+# SonarCloud S1192: extracted duplicated string literals.
+LIKELIHOOD_RANGE_MSG = "Likelihood score must be between 1 and 5"
+IMPACT_RANGE_MSG = "Impact score must be between 1 and 5"
 
 
-class RiskSerializer(serializers.ModelSerializer):
+class RiskValidatorsMixin:
+    """Shared field validators for Risk read/create/update serializers.
+
+    Centralizes the score-range and STRIDE-category rules so create, update,
+    and read serializers enforce identical validation. Previously only
+    ``RiskSerializer`` (never used for input) validated STRIDE codes, so the
+    create/update serializers accepted invalid STRIDE categories (#1302).
+    """
+
+    @staticmethod
+    def validate_likelihood_score(value: int | None) -> int | None:
+        """Validate likelihood score is between 1 and 5."""
+        if value is not None and (value < 1 or value > 5):
+            raise serializers.ValidationError(LIKELIHOOD_RANGE_MSG)
+        return value
+
+    @staticmethod
+    def validate_impact_score(value: int | None) -> int | None:
+        """Validate impact score is between 1 and 5."""
+        if value is not None and (value < 1 or value > 5):
+            raise serializers.ValidationError(IMPACT_RANGE_MSG)
+        return value
+
+    @staticmethod
+    def validate_stride_categories(value: list[str]) -> list[str]:
+        """Validate every STRIDE category is a known code."""
+        valid_codes = [choice[0] for choice in StrideCategory.choices]
+        for category in value:
+            if category not in valid_codes:
+                raise serializers.ValidationError(f"Invalid STRIDE category: {category}. Must be one of: {valid_codes}")
+        return value
+
+
+class RiskSerializer(RiskValidatorsMixin, serializers.ModelSerializer):
     """Serializer for Risk model."""
 
     risk_score = serializers.IntegerField(read_only=True)
@@ -35,28 +72,8 @@ class RiskSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
-    def validate_likelihood_score(self, value):
-        """Validate likelihood score is between 1 and 5."""
-        if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError("Likelihood score must be between 1 and 5")
-        return value
 
-    def validate_impact_score(self, value):
-        """Validate impact score is between 1 and 5."""
-        if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError("Impact score must be between 1 and 5")
-        return value
-
-    def validate_stride_categories(self, value):
-        """Validate STRIDE categories."""
-        valid_codes = [choice[0] for choice in StrideCategory.choices]
-        for category in value:
-            if category not in valid_codes:
-                raise serializers.ValidationError(f"Invalid STRIDE category: {category}. Must be one of: {valid_codes}")
-        return value
-
-
-class RiskCreateSerializer(serializers.ModelSerializer):
+class RiskCreateSerializer(RiskValidatorsMixin, serializers.ModelSerializer):
     """Serializer for creating risks."""
 
     class Meta:
@@ -74,18 +91,8 @@ class RiskCreateSerializer(serializers.ModelSerializer):
             "mitigation_status",
         ]
 
-    def validate_likelihood_score(self, value):
-        if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError("Likelihood score must be between 1 and 5")
-        return value
 
-    def validate_impact_score(self, value):
-        if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError("Impact score must be between 1 and 5")
-        return value
-
-
-class RiskUpdateSerializer(serializers.ModelSerializer):
+class RiskUpdateSerializer(RiskValidatorsMixin, serializers.ModelSerializer):
     """Serializer for updating risks."""
 
     class Meta:
@@ -103,16 +110,6 @@ class RiskUpdateSerializer(serializers.ModelSerializer):
             "mitigation_status",
             "resolution_reason",
         ]
-
-    def validate_likelihood_score(self, value):
-        if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError("Likelihood score must be between 1 and 5")
-        return value
-
-    def validate_impact_score(self, value):
-        if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError("Impact score must be between 1 and 5")
-        return value
 
 
 class CommentAuthorSerializer(serializers.Serializer):
@@ -163,43 +160,6 @@ class CommentCreateSerializer(serializers.Serializer):
     """Serializer for creating comments."""
 
     content = serializers.CharField(min_length=1)
-
-
-class APIKeySerializer(serializers.ModelSerializer):
-    """Serializer for APIKey model (read operations)."""
-
-    is_active = serializers.BooleanField(read_only=True)
-    display_key = serializers.CharField(read_only=True)
-
-    class Meta:
-        model = APIKey
-        fields = [
-            "id",
-            "name",
-            "prefix",
-            "display_key",
-            "created_at",
-            "last_used_at",
-            "expires_at",
-            "is_active",
-        ]
-        read_only_fields = fields
-
-
-class APIKeyCreateSerializer(serializers.Serializer):
-    """Serializer for creating API keys."""
-
-    name = serializers.CharField(max_length=100)
-    expires_at = serializers.DateTimeField(required=False, allow_null=True)
-
-
-class APIKeyCreatedSerializer(serializers.Serializer):
-    """Serializer for API key creation response (includes raw key)."""
-
-    id = serializers.IntegerField()
-    name = serializers.CharField()
-    key = serializers.CharField()
-    prefix = serializers.CharField()
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

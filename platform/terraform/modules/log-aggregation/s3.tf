@@ -12,6 +12,7 @@ locals {
   common_tags = merge(var.tags, {
     Module = "log-aggregation"
   })
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
 }
 
 # ------------------------------------------------------------------------------

@@ -17,10 +17,13 @@ from django.db import transaction
 from engine.secrets import SecretsError, get_rdp_password, get_ssh_key
 from engine.ssh import SSHConnection
 
+from ._aces_image import AcesImageMappingError, AcesImageMappingOptions, upsert_aces_image_mapping
+from ._aces_range import AcesRangeRef, create_aces_range
+from ._aces_status import project_aces_operation_status
 from ._common import EngineError
 from ._lifecycle import pause_range, resume_range
 from ._ngfw import create_ngfw, destroy_ngfw, start_ngfw, stop_ngfw
-from ._queries import get_ranges_for_ngfw, get_user_ready_range_instances
+from ._queries import get_authoritative_range_status, get_ranges_for_ngfw, get_user_ready_range_instances
 from ._range import (
     cancel_range,
     cancel_range_by_request,
@@ -29,6 +32,7 @@ from ._range import (
     destroy_range_by_request,
     get_instance_ips_by_uuid,
     get_range_status,
+    reassign_range_owner_by_request,
 )
 from ._terminal import (
     connect_ngfw_terminal,
@@ -38,6 +42,9 @@ from ._terminal import (
 )
 
 __all__ = (
+    "AcesImageMappingError",
+    "AcesImageMappingOptions",
+    "AcesRangeRef",
     "EngineError",
     "SSHConnection",
     "SecretsError",
@@ -45,11 +52,13 @@ __all__ = (
     "cancel_range_by_request",
     "connect_ngfw_terminal",
     "connect_terminal",
+    "create_aces_range",
     "create_ngfw",
     "create_range",
     "destroy_ngfw",
     "destroy_range",
     "destroy_range_by_request",
+    "get_authoritative_range_status",
     "get_instance_ips_by_uuid",
     "get_range_status",
     "get_ranges_for_ngfw",
@@ -59,8 +68,11 @@ __all__ = (
     "get_ssh_key",
     "get_user_ready_range_instances",
     "pause_range",
+    "project_aces_operation_status",
+    "reassign_range_owner_by_request",
     "resume_range",
     "start_ngfw",
     "stop_ngfw",
     "transaction",
+    "upsert_aces_image_mapping",
 )

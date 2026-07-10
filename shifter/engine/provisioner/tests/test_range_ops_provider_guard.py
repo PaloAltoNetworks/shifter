@@ -4,7 +4,22 @@ from unittest.mock import patch
 
 import pytest
 
+from events import EVENT_TYPE_STATUS_UPDATED
 from range_ops import get_range_instance_ids, run_range_pause, run_range_resume
+
+
+def _assert_status_outbox_event(mock_update_range, *, expected_status: str) -> None:
+    """Assert update_range_status was passed a real (non-None) status outbox event.
+
+    ``outbox_event=ANY`` would also match ``None`` — which would silently break
+    the atomic status+event commit #476 requires (``update_range_status`` skips
+    ``enqueue_event_outbox`` when ``outbox_event is None``). Inspect the value
+    directly so the regression is actually guarded.
+    """
+    event = mock_update_range.call_args.kwargs["outbox_event"]
+    assert event is not None
+    assert event["event_type"] == EVENT_TYPE_STATUS_UPDATED
+    assert event["new_status"] == expected_status
 
 
 class TestRangeInstanceClassification:
@@ -90,7 +105,6 @@ class TestRangeInstanceClassification:
 class TestGcpRangeLifecycle:
     """GCP pause/resume should fail closed until parity-safe lifecycle exists."""
 
-    @patch("range_ops.publish_status_update")
     @patch("range_ops.update_range_status")
     @patch("range_ops.pause_ngfw_for_range")
     @patch("range_ops._update_instance_statuses")
@@ -103,7 +117,6 @@ class TestGcpRangeLifecycle:
         mock_update_instances,
         mock_pause_ngfw,
         mock_update_range,
-        mock_publish,
     ):
         request_id = "req-123"
         vm_state = {
@@ -153,20 +166,12 @@ class TestGcpRangeLifecycle:
 
         mock_update_instances.assert_not_called()
         mock_pause_ngfw.assert_not_called()
-        mock_update_range.assert_called_once_with(
-            42,
-            "failed",
-            error_message="Failed to pause 2/2 instances",
-        )
-        mock_publish.assert_called_once_with(
-            request_id=request_id,
-            range_id=42,
-            user_id=7,
-            new_status="failed",
-            error_message="Failed to pause 2/2 instances",
-        )
+        # Phase 1: status + outbox_event commit atomically; no separate publish call
+        mock_update_range.assert_called_once()
+        assert mock_update_range.call_args.args == (42, "failed")
+        assert mock_update_range.call_args.kwargs["error_message"] == "Failed to pause 2/2 instances"
+        _assert_status_outbox_event(mock_update_range, expected_status="failed")
 
-    @patch("range_ops.publish_status_update")
     @patch("range_ops.update_range_status")
     @patch("range_ops.ensure_ngfw_running")
     @patch("range_ops._update_instance_statuses")
@@ -179,7 +184,6 @@ class TestGcpRangeLifecycle:
         mock_update_instances,
         mock_ensure_ngfw,
         mock_update_range,
-        mock_publish,
     ):
         request_id = "req-123"
         vm_state = {
@@ -229,15 +233,8 @@ class TestGcpRangeLifecycle:
 
         mock_ensure_ngfw.assert_called_once_with(request_id)
         mock_update_instances.assert_not_called()
-        mock_update_range.assert_called_once_with(
-            42,
-            "failed",
-            error_message="Failed to resume 2/2 instances",
-        )
-        mock_publish.assert_called_once_with(
-            request_id=request_id,
-            range_id=42,
-            user_id=7,
-            new_status="failed",
-            error_message="Failed to resume 2/2 instances",
-        )
+        # Phase 1: status + outbox_event commit atomically; no separate publish call
+        mock_update_range.assert_called_once()
+        assert mock_update_range.call_args.args == (42, "failed")
+        assert mock_update_range.call_args.kwargs["error_message"] == "Failed to resume 2/2 instances"
+        _assert_status_outbox_event(mock_update_range, expected_status="failed")

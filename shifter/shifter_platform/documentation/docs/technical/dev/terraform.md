@@ -20,18 +20,22 @@ platform/terraform/
 │   │       ├── main.tf
 │   │       ├── backend.tf
 │   │       └── terraform.tfvars
-│   └── prod/                 # Same structure as dev
+│   ├── prod/                 # Same structure as dev
+│   └── proof/                # Same structure as dev
 ├── modules/                  # Reusable modules
 │   ├── portal/
 │   │   ├── alb/              # Application Load Balancer, WAF
+│   │   ├── backup-alerts/    # Backup failure alerting
 │   │   ├── cognito/          # User pool, OIDC
+│   │   ├── ctfd/             # CTFd host and networking
 │   │   ├── ec2/              # Portal instances
 │   │   ├── messaging/        # SNS/SQS for events
 │   │   ├── rds/              # PostgreSQL database
 │   │   ├── redis/            # ElastiCache Redis
 │   │   ├── s3/               # User storage bucket
+│   │   ├── ses/              # Transactional email identities
 │   │   ├── ssm/              # SSM parameters
-│   │   └── vpc/              # Portal VPC, subnets
+│   │   └── vpc/              # Portal VPC, subnets, inspection firewall
 │   ├── range/
 │   │   └── vpc/              # Range VPC, Network Firewall
 │   ├── engine-provisioner/   # ECS task for Shifter Engine
@@ -41,7 +45,11 @@ platform/terraform/
 │   └── ecr/                  # Container registries
 └── global/                   # Cross-environment resources
     ├── iam/                  # GitHub OIDC, roles
-    ├── github-runner/        # Self-hosted runner
+    ├── github-runner/        # Self-hosted runners (+ runner-health)
+    ├── se-admins/            # SE administrator access
+    ├── ctfd-workshop/        # Standalone CTFd workshop stack
+    ├── tssummit/             # Technical Summit event stack
+    ├── tssummit-ranges/      # Technical Summit event ranges
     └── dev-box/              # Windows dev instance
 ```
 
@@ -72,9 +80,16 @@ Each component has its own state file:
 | Component | State Key |
 |-----------|-----------|
 | Core (ECR) | `shifter/{env}/terraform.tfstate` |
-| Portal | `shifter/{env}/portal/terraform.tfstate` |
-| Range | `shifter/{env}/range/terraform.tfstate` |
+| Range | `{env}/range/terraform.tfstate` |
+| Portal | `{env}/portal/terraform.tfstate` |
 | Global | `global/{component}/terraform.tfstate` |
+
+Only the Core key carries the `shifter/` prefix; the Range and Portal keys do
+not. The Portal stack reads the Core and Range state as remote-state data
+sources, so these keys must match exactly. For the full stack apply order,
+per-stack backend keys, and the "every value you must override before first
+apply" checklist, see
+[`docs/dev/aws-terraform-apply-order.md`](../../../../../../docs/dev/aws-terraform-apply-order.md).
 
 AWS Terraform state is stored in S3 with S3 native locking
 (`use_lockfile = true`):
@@ -135,8 +150,8 @@ AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
 
 ### RDS Change Application
 
-RDS changes that AWS can apply during a deploy — instance class, storage
-size, engine version, and dynamic parameter-group fields — must not be
+RDS changes that AWS can apply during a deploy (instance class, storage
+size, engine version, and dynamic parameter-group fields) must not be
 treated as complete until AWS reports no pending modifications for the
 affected instance. For dev-only RDS resources, prefer explicit
 `apply_immediately` module inputs that default to applying intended changes
@@ -256,11 +271,11 @@ Examples:
 
 ```hcl
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }

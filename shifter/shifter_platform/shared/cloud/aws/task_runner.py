@@ -63,7 +63,7 @@ class AWSTaskRunner:
 
             response: dict[str, Any] = client.run_task(**kwargs)
         except (ClientError, BotoCoreError) as e:
-            logger.error("run_task: failed definition=%s error=%s", task_definition, e)
+            logger.exception("run_task: failed definition=%s error=%s", task_definition, e)
             raise CloudTaskError(f"Failed to run ECS task: {e}") from e
 
         tasks: list[dict[str, Any]] = response.get("tasks", [])
@@ -94,5 +94,5 @@ class AWSTaskRunner:
                 "stopped_reason": task.get("stoppedReason"),
             }
         except (ClientError, BotoCoreError) as e:
-            logger.error("get_task_status: failed task_id=%s error=%s", task_id, e)
+            logger.exception("get_task_status: failed task_id=%s error=%s", task_id, e)
             raise CloudTaskError(f"Failed to get ECS task status: {e}") from e

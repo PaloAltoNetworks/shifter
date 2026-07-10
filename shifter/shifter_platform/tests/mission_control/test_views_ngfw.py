@@ -1,46 +1,50 @@
-"""Tests covering NGFW HTML and JSON views (`mission_control/views/_ngfw.py`).
+"""Behavior tests for the NGFW HTML + JSON views (mission_control/views/_ngfw.py).
 
-Mirrors the patching style of `test_ngfw_detail.py` /
-`test_api_ngfw_ssh_url.py`. All ORM and service calls are mocked.
+Drives the real views → real ``cms.services`` NGFW entrypoints (``list_ngfws`` /
+``get_ngfw`` / ``create_ngfw`` / ``destroy_ngfw`` / ``list_credentials``) against
+real ``App`` / ``Instance`` / ``Request`` / ``Credential`` rows → the real
+templates / JSON, instead of patching the cms service functions and ``render``.
+Engine NGFW provisioning is a no-op because ECS is unconfigured in test
+settings, so no cloud mock is required.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC
-from unittest.mock import MagicMock, patch
-from uuid import uuid4
+import time
+from datetime import timedelta
 
 import pytest
-from django.http import HttpResponse
-from django.test import RequestFactory
+from django.contrib.auth import get_user_model
+from django.test import Client
+from django.urls import reverse
+from django.utils import timezone
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
 
 
 @pytest.fixture
-def rf():
-    return RequestFactory()
+def user(db):
+    return User.objects.create_user(username="ngfw-views@example.com", email="ngfw-views@example.com")
 
 
 @pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = 1
-    user.pk = 1
-    user.email = "test@example.com"
-    user.is_authenticated = True
-    return user
+def client_for(db):
+    def _make(user):
+        client = Client()
+        client.force_login(user)
+        session = client.session
+        session["oidc_id_token_expiration"] = time.time() + 3600
+        session.save()
+        return client
+
+    return _make
 
 
-def _post_json(rf, path, payload, user):
-    req = rf.post(path, data=json.dumps(payload), content_type="application/json")
-    req.user = user
-    return req
-
-
-def _get(rf, path, user):
-    req = rf.get(path)
-    req.user = user
-    return req
+def _json(response):
+    return json.loads(response.content)
 
 
 # ---------------------------------------------------------------------------
@@ -49,84 +53,64 @@ def _get(rf, path, user):
 
 
 class TestNGFWListView:
-    def test_renders_with_ngfws_context(self, rf, mock_user):
-        from mission_control.views import ngfw_list
+    def test_lists_owned_ngfws(self, user, client_for, cms_ngfw_app):
+        cms_ngfw_app(user, name="Alpha NGFW")
+        cms_ngfw_app(user, name="Bravo NGFW")
 
-        ngfws = [MagicMock(name="N1"), MagicMock(name="N2")]
-        request = _get(rf, "/mc/ngfw/", mock_user)
-        with (
-            patch("mission_control.views._ngfw.cms_list_ngfws", return_value=ngfws),
-            patch("mission_control.views.render", return_value=HttpResponse("ok")) as render,
-        ):
-            ngfw_list(request)
-        _r, template, context = render.call_args.args
-        assert template == "mission_control/ngfw/list.html"
-        assert context["ngfws"] is ngfws
-        assert context["active_nav"] == "ngfw"
+        response = client_for(user).get(reverse("mission_control:ngfw_list"))
 
+        assert response.status_code == 200
+        body = response.content.decode()
+        assert "Alpha NGFW" in body
+        assert "Bravo NGFW" in body
 
-class TestNGFWDetailRedirectOnMissing:
-    def test_redirects_when_cms_raises_cms_error(self, rf, mock_user):
-        from cms.exceptions import CMSError as _BackendCMSError
-        from mission_control.views import ngfw_detail
+    def test_empty_state_when_no_ngfws(self, user, client_for):
+        response = client_for(user).get(reverse("mission_control:ngfw_list"))
 
-        request = _get(rf, f"/mc/ngfw/{uuid4()}/", mock_user)
-        request._messages = MagicMock()
-        with patch("mission_control.views.cms_get_ngfw", side_effect=_BackendCMSError("nope")):
-            response = ngfw_detail(request, str(uuid4()))
-        assert response.status_code == 302
-        assert "ngfw" in response.url
+        assert response.status_code == 200
+        assert "No NGFWs configured" in response.content.decode()
 
 
 class TestNGFWWizardView:
-    def test_filters_credentials_by_type_and_expiry(self, rf, mock_user):
-        from mission_control.views import ngfw_wizard
+    def test_shows_valid_credentials_and_hides_expired(self, user, client_for, ngfw_credentials):
+        from cms.models import Credential, CredentialType
 
-        scm_ok = MagicMock(credential_type="scm", is_expired=False)
-        scm_expired = MagicMock(credential_type="scm", is_expired=True)
-        dp_ok = MagicMock(credential_type="deployment_profile", is_expired=False)
-        other = MagicMock(credential_type="other", is_expired=False)
+        deployment_profile, scm_credential = ngfw_credentials(user)
+        # An expired SCM credential must be filtered out of the wizard.
+        scm_ct = CredentialType.objects.get(slug="scm")
+        Credential.objects.create(
+            user=user,
+            credential_type=scm_ct,
+            name="expired-scm-cred",
+            data={"name": "old"},
+            expires_at=timezone.now() - timedelta(days=1),
+        )
 
-        request = _get(rf, "/mc/ngfw/wizard/", mock_user)
-        with (
-            patch(
-                "mission_control.views._ngfw.cms_list_credentials",
-                return_value=[scm_ok, scm_expired, dp_ok, other],
-            ),
-            patch("mission_control.views.render", return_value=HttpResponse("ok")) as render,
-        ):
-            ngfw_wizard(request)
-        _r, template, context = render.call_args.args
-        assert template == "mission_control/ngfw/wizard.html"
-        assert context["scm_credentials"] == [scm_ok]
-        assert context["deployment_profiles"] == [dp_ok]
+        response = client_for(user).get(reverse("mission_control:ngfw_wizard"))
+
+        assert response.status_code == 200
+        body = response.content.decode()
+        assert deployment_profile.name in body
+        assert scm_credential.name in body
+        assert "expired-scm-cred" not in body
 
 
 class TestNGFWDeprovisionPage:
-    def test_renders_when_ngfw_found(self, rf, mock_user):
-        from mission_control.views import ngfw_deprovision
+    def test_renders_for_owned_ngfw(self, user, client_for, cms_ngfw_app):
+        app = cms_ngfw_app(user, name="Doomed NGFW")
 
-        ngfw = MagicMock(name="Box")
-        ngfw.name = "Box"
-        request = _get(rf, f"/mc/ngfw/{uuid4()}/deprovision/", mock_user)
-        with (
-            patch("mission_control.views.cms_get_ngfw", return_value=ngfw),
-            patch("mission_control.views.render", return_value=HttpResponse("ok")) as render,
-        ):
-            ngfw_deprovision(request, str(uuid4()))
-        _r, template, context = render.call_args.args
-        assert template == "mission_control/ngfw/deprovision.html"
-        assert context["ngfw"] is ngfw
+        response = client_for(user).get(reverse("mission_control:ngfw_deprovision", kwargs={"app_id": str(app.id)}))
 
-    def test_redirects_when_missing(self, rf, mock_user):
-        from cms.exceptions import CMSError as _BackendCMSError
-        from mission_control.views import ngfw_deprovision
+        assert response.status_code == 200
+        assert "Doomed NGFW" in response.content.decode()
 
-        request = _get(rf, f"/mc/ngfw/{uuid4()}/deprovision/", mock_user)
-        request._messages = MagicMock()
-        with patch("mission_control.views.cms_get_ngfw", side_effect=_BackendCMSError("nope")):
-            response = ngfw_deprovision(request, str(uuid4()))
+    def test_redirects_when_missing(self, user, client_for):
+        from uuid import uuid4
+
+        response = client_for(user).get(reverse("mission_control:ngfw_deprovision", kwargs={"app_id": str(uuid4())}))
+
         assert response.status_code == 302
+        assert reverse("mission_control:ngfw_list") in response.url
 
 
 # ---------------------------------------------------------------------------
@@ -135,65 +119,63 @@ class TestNGFWDeprovisionPage:
 
 
 class TestApiNGFWCreate:
-    def test_returns_201_on_success(self, rf, mock_user):
-        from mission_control.views import api_ngfw_create
+    def _create(self, client, payload):
+        return client.post(
+            reverse("mission_control:api_ngfw_create"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
 
-        ngfw_ref = MagicMock(app_id=uuid4())
-        payload = {
-            "name": "My NGFW",
-            "deployment_profile_id": "5",
-            "registration_method": "pin",
-            "scm_credential_id": "9",
-        }
-        request = _post_json(rf, "/mc/api/ngfw/", payload, mock_user)
-        with patch("mission_control.views._ngfw.cms_create_ngfw", return_value=ngfw_ref) as create:
-            response = api_ngfw_create(request)
+    def test_creates_ngfw_and_returns_201(self, user, client_for, ngfw_catalog, ngfw_credentials):
+        from cms.models import App
+
+        deployment_profile, scm_credential = ngfw_credentials(user)
+        response = self._create(
+            client_for(user),
+            {
+                "name": "My NGFW",
+                "deployment_profile_id": str(deployment_profile.id),
+                "registration_method": "pin",
+                "scm_credential_id": str(scm_credential.id),
+            },
+        )
+
         assert response.status_code == 201
-        data = json.loads(response.content)
-        assert data["status"] == "provisioning"
-        call_kwargs = create.call_args.kwargs
-        assert call_kwargs["deployment_profile_id"] == 5
-        assert call_kwargs["scm_credential_id"] == 9
+        assert _json(response)["status"] == "provisioning"
+        assert App.objects.filter(name="My NGFW", instance__request__user=user).exists()
 
-    def test_returns_400_for_invalid_json(self, rf, mock_user):
-        from mission_control.views import api_ngfw_create
-
-        request = rf.post("/mc/api/ngfw/", data="not json", content_type="application/json")
-        request.user = mock_user
-        response = api_ngfw_create(request)
+    def test_returns_400_for_invalid_json(self, user, client_for):
+        response = client_for(user).post(
+            reverse("mission_control:api_ngfw_create"), data="not json", content_type="application/json"
+        )
         assert response.status_code == 400
-        assert "Invalid JSON" in json.loads(response.content)["error"]
+        assert _json(response)["error"] == "Invalid JSON"
 
-    def test_returns_400_when_cms_raises(self, rf, mock_user):
-        from cms.exceptions import CMSError as _BackendCMSError
-        from mission_control.views import api_ngfw_create
+    def test_returns_400_when_user_already_has_active_ngfw(
+        self, user, client_for, ngfw_catalog, ngfw_credentials, cms_ngfw_app
+    ):
+        cms_ngfw_app(user, name="Existing")  # an active NGFW already exists
+        deployment_profile, scm_credential = ngfw_credentials(user)
 
-        payload = {
-            "name": "X",
-            "deployment_profile_id": "5",
-            "registration_method": "otp",
-            "otp_value": "OTP",
-            "otp_folder": "F",
-        }
-        request = _post_json(rf, "/mc/api/ngfw/", payload, mock_user)
-        with patch("mission_control.views._ngfw.cms_create_ngfw", side_effect=_BackendCMSError("bad")):
-            response = api_ngfw_create(request)
+        response = self._create(
+            client_for(user),
+            {
+                "name": "Second NGFW",
+                "deployment_profile_id": str(deployment_profile.id),
+                "registration_method": "pin",
+                "scm_credential_id": str(scm_credential.id),
+            },
+        )
+
         assert response.status_code == 400
-        # ``str(e)`` is no longer echoed; "bad" doesn't match any classifier
-        # keyword so the authored default is returned.
-        assert json.loads(response.content)["error"] == "NGFW could not be created"
+        assert "error" in _json(response)
 
-    def test_returns_400_for_value_error(self, rf, mock_user):
-        from mission_control.views import api_ngfw_create
-
-        payload = {
-            "name": "X",
-            "deployment_profile_id": "5",
-            "registration_method": "pin",
-        }
-        request = _post_json(rf, "/mc/api/ngfw/", payload, mock_user)
-        with patch("mission_control.views._ngfw.cms_create_ngfw", side_effect=ValueError("missing")):
-            response = api_ngfw_create(request)
+    def test_returns_400_for_missing_name(self, user, client_for, ngfw_catalog, ngfw_credentials):
+        deployment_profile, _scm = ngfw_credentials(user)
+        response = self._create(
+            client_for(user),
+            {"name": "", "deployment_profile_id": str(deployment_profile.id), "registration_method": "otp"},
+        )
         assert response.status_code == 400
 
 
@@ -203,24 +185,16 @@ class TestApiNGFWCreate:
 
 
 class TestApiNGFWList:
-    def test_returns_serialized_list(self, rf, mock_user):
-        from datetime import datetime
+    def test_returns_serialized_ngfws(self, user, client_for, cms_ngfw_app):
+        cms_ngfw_app(user, name="JsonNGFW", serial="SER-123")
 
-        from mission_control.views import api_ngfw_list
+        response = client_for(user).get(reverse("mission_control:api_ngfw_list"))
 
-        n = MagicMock()
-        n.app_id = uuid4()
-        n.name = "N1"
-        n.status = "ready"
-        n.created_at = datetime(2026, 1, 1, tzinfo=UTC)
-        n.serial_number = "S1"
-        request = _get(rf, "/mc/api/ngfw/", mock_user)
-        with patch("mission_control.views._ngfw.cms_list_ngfws", return_value=[n]):
-            response = api_ngfw_list(request)
-        data = json.loads(response.content)
-        assert len(data["ngfws"]) == 1
-        assert data["ngfws"][0]["name"] == "N1"
-        assert data["ngfws"][0]["serial_number"] == "S1"
+        assert response.status_code == 200
+        ngfws = _json(response)["ngfws"]
+        assert len(ngfws) == 1
+        assert ngfws[0]["name"] == "JsonNGFW"
+        assert ngfws[0]["serial_number"] == "SER-123"
 
 
 # ---------------------------------------------------------------------------
@@ -229,65 +203,44 @@ class TestApiNGFWList:
 
 
 class TestApiNGFWDestroy:
-    def test_returns_ok_on_success(self, rf, mock_user):
-        from mission_control.views import api_ngfw_destroy
+    def _destroy(self, client, app_id, confirm_name):
+        return client.post(
+            reverse("mission_control:api_ngfw_destroy", kwargs={"app_id": str(app_id)}),
+            data=json.dumps({"confirm_name": confirm_name}),
+            content_type="application/json",
+        )
 
-        app_id = str(uuid4())
-        request = _post_json(rf, f"/mc/api/ngfw/{app_id}/destroy/", {"confirm_name": "Box"}, mock_user)
-        with patch("mission_control.views._ngfw.cms_destroy_ngfw") as destroy:
-            response = api_ngfw_destroy(request, app_id)
+    def test_destroys_ngfw_on_matching_name(self, user, client_for, cms_ngfw_app):
+        from shared.enums import ResourceStatus
+
+        app = cms_ngfw_app(user, name="KillMe")
+
+        response = self._destroy(client_for(user), app.id, "KillMe")
+
         assert response.status_code == 200
-        assert json.loads(response.content)["status"] == "deprovisioning"
-        destroy.assert_called_once_with(mock_user, app_id, "Box")
+        assert _json(response)["status"] == "deprovisioning"
+        app.refresh_from_db()
+        assert app.status == ResourceStatus.DESTROYING.value
 
-    def test_returns_400_for_invalid_json(self, rf, mock_user):
-        from mission_control.views import api_ngfw_destroy
+    def test_returns_400_for_invalid_json(self, user, client_for):
+        from uuid import uuid4
 
-        request = rf.post(f"/mc/api/ngfw/{uuid4()}/destroy/", data="x", content_type="application/json")
-        request.user = mock_user
-        response = api_ngfw_destroy(request, str(uuid4()))
+        response = client_for(user).post(
+            reverse("mission_control:api_ngfw_destroy", kwargs={"app_id": str(uuid4())}),
+            data="x",
+            content_type="application/json",
+        )
         assert response.status_code == 400
 
-    def test_returns_404_when_cms_says_not_found(self, rf, mock_user):
-        from cms.exceptions import CMSError as _BackendCMSError
-        from mission_control.views import api_ngfw_destroy
+    def test_returns_404_when_missing(self, user, client_for):
+        from uuid import uuid4
 
-        app_id = str(uuid4())
-        request = _post_json(rf, f"/mc/api/ngfw/{app_id}/destroy/", {"confirm_name": "B"}, mock_user)
-        with (
-            patch(
-                "mission_control.views._ngfw.cms_destroy_ngfw",
-                side_effect=_BackendCMSError("NGFW not found"),
-            ),
-            pytest.raises(Exception) as exc_info,
-        ):
-            api_ngfw_destroy(request, app_id)
-        # Http404 raised
-        from django.http import Http404
+        response = self._destroy(client_for(user), uuid4(), "anything")
+        assert response.status_code == 404
 
-        assert isinstance(exc_info.value, Http404)
+    def test_returns_400_on_name_mismatch(self, user, client_for, cms_ngfw_app):
+        app = cms_ngfw_app(user, name="RealName")
 
-    def test_returns_400_for_other_cms_errors(self, rf, mock_user):
-        from cms.exceptions import CMSError as _BackendCMSError
-        from mission_control.views import api_ngfw_destroy
+        response = self._destroy(client_for(user), app.id, "WrongName")
 
-        app_id = str(uuid4())
-        request = _post_json(rf, f"/mc/api/ngfw/{app_id}/destroy/", {"confirm_name": "B"}, mock_user)
-        with patch(
-            "mission_control.views._ngfw.cms_destroy_ngfw",
-            side_effect=_BackendCMSError("attached ranges"),
-        ):
-            response = api_ngfw_destroy(request, app_id)
-        assert response.status_code == 400
-
-    def test_returns_400_for_value_error(self, rf, mock_user):
-        from mission_control.views import api_ngfw_destroy
-
-        app_id = str(uuid4())
-        request = _post_json(rf, f"/mc/api/ngfw/{app_id}/destroy/", {"confirm_name": "wrong"}, mock_user)
-        with patch(
-            "mission_control.views._ngfw.cms_destroy_ngfw",
-            side_effect=ValueError("name mismatch"),
-        ):
-            response = api_ngfw_destroy(request, app_id)
         assert response.status_code == 400

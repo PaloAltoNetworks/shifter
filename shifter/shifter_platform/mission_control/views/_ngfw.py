@@ -75,10 +75,12 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
         messages.warning(request, "NGFW not found. It may have failed during provisioning.")
         return redirect("mission_control:ngfw_list")
 
-    # Get ranges linked to this NGFW (via ngfw_instance_id)
+    # Get ranges linked to this NGFW. The NGFW is correlated to its Engine
+    # instance by the shared provisioning request_id (the CMS Instance UUID is a
+    # different id space from the Engine Range.ngfw_instance FK).
     linked_ranges = get_ranges_for_ngfw(
         user_id=cast(int, user.pk),
-        ngfw_instance_id=int(ngfw.instance_id),
+        ngfw_request_id=ngfw.request_id,
     )
 
     context = {

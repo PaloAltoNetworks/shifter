@@ -3,89 +3,7 @@
 {% extends "mission_control/base.html" %}
 {% load static i18n %}
 {% block extra_css %}
-    <style>
-/* Ranges tile grid - 2x2 layout */
-.ranges-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 16px;
-    max-width: 1200px;
-}
-
-.range-tile {
-    background: var(--theme-surface);
-    border: 1px solid var(--theme-border);
-    border-radius: 4px;
-    padding: 16px;
-    min-height: 200px;
-}
-
-.range-tile.launch-tile {
-    /* Launch tile has two-column layout */
-}
-
-.range-tile.empty-tile {
-    border-style: dashed;
-    opacity: 0.5;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.range-tile .tile-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--theme-text);
-    margin: 0 0 12px;
-}
-
-/* Two-column layout for launch tile */
-.launch-tile-content {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
-}
-
-.launch-tile-form {
-    /* Form controls column */
-}
-
-.launch-tile-info {
-    /* Scenario info column */
-    border-left: 1px solid var(--theme-border);
-    padding-left: 24px;
-}
-
-.scenario-info-panel {
-    display: none;
-}
-
-.scenario-info-panel.visible {
-    display: block;
-}
-
-.scenario-info-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--theme-text);
-    margin: 0 0 8px;
-}
-
-.scenario-info-description {
-    font-size: 12px;
-    color: var(--theme-text-muted);
-    line-height: 1.5;
-}
-
-/* Active range tile styles */
-.range-tile.active-tile .status {
-    margin-bottom: 12px;
-}
-
-.range-tile.provisioning-tile .status {
-    margin-bottom: 12px;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/mc-dashboard.css' %}">
 {% endblock %}
 {% block content %}
     <div class="page-header">
@@ -130,9 +48,7 @@
                             </div>
                         </div>
                         <!-- OS Selection - shown when scenario has from_agent instances -->
-                        <div class="form-group"
-                             id="os-selection-section"
-                             style="display: none">
+                        <div class="form-group d-none" id="os-selection-section">
                             <label class="form-label">
                                 {% trans "Victim OS" %}
                             </label>
@@ -163,9 +79,7 @@
                             </div>
                         </div>
                         <!-- Agent dropdown - filtered by selected OS for from_agent scenarios -->
-                        <div class="form-group"
-                             id="agent-section"
-                             style="display: none">
+                        <div class="form-group d-none" id="agent-section">
                             <label class="form-label">
                                 {% trans "Agent" %}
                             </label>
@@ -187,9 +101,7 @@
                             </div>
                         </div>
                         <!-- Windows Agent dropdown - shown when scenario requires Windows agents -->
-                        <div class="form-group"
-                             id="windows-agent-section"
-                             style="display: none">
+                        <div class="form-group d-none" id="windows-agent-section">
                             <label class="form-label">
                                 {% trans "Windows Agent" %}
                             </label>
@@ -214,9 +126,7 @@
                             </div>
                         </div>
                         <!-- Linux Agent dropdown - shown when scenario requires Linux agents -->
-                        <div class="form-group"
-                             id="linux-agent-section"
-                             style="display: none">
+                        <div class="form-group d-none" id="linux-agent-section">
                             <label class="form-label">
                                 {% trans "Linux Agent" %}
                             </label>
@@ -310,15 +220,35 @@
         </div>
         <div class="flex-row gap-md mt-md">
             <a href="{% url 'mission_control:terminal' %}"
-               class="btn btn-primary open-workspace-btn"
-               style="flex:1;
-                      text-align:center">{% trans "Open Range" %}</a>
-            <button class="btn btn-secondary" id="pause-btn" style="flex:1">
+               class="btn btn-primary open-workspace-btn flex-1 text-center">{% trans "Open Range" %}</a>
+            <button class="btn btn-secondary flex-1" id="pause-btn">
                 {% trans "Pause" %}
             </button>
-            <button class="btn btn-danger destroy-btn" style="flex:1">
+            <button class="btn btn-danger destroy-btn flex-1">
                 {% trans "Destroy" %}
             </button>
+        </div>
+        {# Secondary read-only ACES projection (#1276); filled by dashboard.js, hidden for non-ACES ranges. #}
+        <div class="aces-projection mt-md" hidden>
+            <div class="aces-projection-title text-small">
+                {% trans "ACES Operation" %}
+            </div>
+            <div class="aces-projection-status">
+                <span class="aces-status-label"></span>
+            </div>
+            <div class="aces-projection-meta text-small text-muted">
+                <span class="aces-observed-at"></span>
+                <span class="aces-snapshot-summary"></span>
+            </div>
+        </div>
+        {# Secondary read-only ACES participant/runtime + access-channel projection (#1290). #}
+        {# Filled by dashboard.js; hidden for non-ACES ranges. #}
+        <div class="aces-participant-runtime mt-md" hidden>
+            <div class="aces-participant-runtime-title text-small">
+                {% trans "ACES Participants" %}
+            </div>
+            <div class="aces-participant-runtime-participants text-small"></div>
+            <div class="aces-participant-runtime-channels text-small text-muted"></div>
         </div>
     </template>
     <template id="paused-template">
@@ -342,12 +272,34 @@
             </div>
         </div>
         <div class="flex-row gap-md mt-md">
-            <button class="btn btn-primary" id="resume-btn" style="flex:1">
+            <button class="btn btn-primary flex-1" id="resume-btn">
                 {% trans "Resume" %}
             </button>
-            <button class="btn btn-danger destroy-btn" style="flex:1">
+            <button class="btn btn-danger destroy-btn flex-1">
                 {% trans "Destroy" %}
             </button>
+        </div>
+        {# Secondary read-only ACES projection (#1276); filled by dashboard.js, hidden for non-ACES ranges. #}
+        <div class="aces-projection mt-md" hidden>
+            <div class="aces-projection-title text-small">
+                {% trans "ACES Operation" %}
+            </div>
+            <div class="aces-projection-status">
+                <span class="aces-status-label"></span>
+            </div>
+            <div class="aces-projection-meta text-small text-muted">
+                <span class="aces-observed-at"></span>
+                <span class="aces-snapshot-summary"></span>
+            </div>
+        </div>
+        {# Secondary read-only ACES participant/runtime + access-channel projection (#1290). #}
+        {# Filled by dashboard.js; hidden for non-ACES ranges. #}
+        <div class="aces-participant-runtime mt-md" hidden>
+            <div class="aces-participant-runtime-title text-small">
+                {% trans "ACES Participants" %}
+            </div>
+            <div class="aces-participant-runtime-participants text-small"></div>
+            <div class="aces-participant-runtime-channels text-small text-muted"></div>
         </div>
     </template>
     <template id="failed-template">

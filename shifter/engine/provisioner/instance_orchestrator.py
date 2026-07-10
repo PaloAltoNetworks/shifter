@@ -22,6 +22,7 @@ from instance_setup import (
 )
 from orchestrators.setup_orchestrator import SetupError
 from polaris_bootstrap import _run_polaris_range_bootstrap
+from techvault_bootstrap import _run_techvault_range_bootstrap
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,11 @@ def _setup_one_other_instance(
     inst_uuid = inst.get("uuid", "")
     inst_config = uuid_to_config.get(inst_uuid, {})
     is_polaris_vm = inst_config.get("ami_key") == "polaris-vm"
+    # TechVault: an Ubuntu docker host that presents as the "kali" attacker
+    # (os_type kali -> Guacamole RDP). The host seat user is "ubuntu" (uid
+    # 1000, required for aptl's 0400 wazuh certs), so the SSH key + RDP
+    # password target "ubuntu" rather than the os_type default "kali".
+    is_techvault = inst_config.get("ami_key") == "techvault"
     spec = _InstanceSetupSpec(
         role=inst.get("role", "victim"),
         os_type=inst.get("os", "ubuntu"),
@@ -122,6 +128,7 @@ def _setup_one_other_instance(
             domain_name=actual_domain,
         ),
         set_local_password=not is_polaris_vm,
+        ssh_user_override="ubuntu" if is_techvault else None,
     )
     try:
         _run_single_instance_setup(instance_data=inst, instance_id=inst_id, spec=spec)
@@ -133,15 +140,30 @@ def _setup_one_other_instance(
         # Gate on ami_key so this only fires for polaris instances.
         if is_polaris_vm:
             _run_polaris_range_bootstrap(
+                instance_data=inst,
                 instance_id=inst_id,
                 dc_ip=actual_dc_ip or "",
                 public_key=inst.get("public_key", ""),
+                range_id=range_id,
             )
             _set_attacker_container_password_after_bootstrap(
                 instance_data=inst,
                 instance_id=inst_id,
                 container_name="a14-kali",
                 ssh_user="kali",
+            )
+        # Per-scenario post-bootstrap: the TechVault AMI auto-starts its
+        # compose stack on boot, so we only write the Bedrock credential
+        # shard for Claude Code on the host seat. Record ssh_username=ubuntu
+        # so the portal RDPs in as the seat user rather than the os_type
+        # kali default; instances_output is the same list the DB writer
+        # persists (terraform_ops), so this mutation reaches the portal.
+        if is_techvault:
+            inst["ssh_username"] = "ubuntu"
+            _run_techvault_range_bootstrap(
+                instance_data=inst,
+                instance_id=inst_id,
+                range_id=range_id,
             )
         return (inst_id, True, None)
     except Exception as e:

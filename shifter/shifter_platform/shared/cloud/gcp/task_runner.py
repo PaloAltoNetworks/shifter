@@ -14,6 +14,7 @@ from shared.cloud import PROVISIONER_CONTAINER_NAME
 from shared.cloud.exceptions import CloudTaskError
 from shared.cloud.gcp.base import build_job_generate_name, parse_job_task_id
 from shared.cloud.sensitive_env import split_env
+from shared.log_sanitize import safe_log_fingerprint
 
 __all__ = ("PROVISIONER_CONTAINER_NAME", "GCPTaskRunner")
 
@@ -81,6 +82,23 @@ def _is_provisioner_task(container_name: str) -> bool:
     runtime profile parameter.
     """
     return container_name == PROVISIONER_CONTAINER_NAME
+
+
+def _job_condition_reason(status: object) -> str | None:
+    """Return the message/reason of the first Failed/Complete Job condition, if any."""
+    for condition in getattr(status, "conditions", None) or []:
+        if getattr(condition, "type", "") in {"Failed", "Complete"}:
+            return getattr(condition, "message", None) or getattr(condition, "reason", None)
+    return None
+
+
+def _derive_job_state(*, active: int, failed: int, succeeded: int) -> str:
+    """Map active/failed/succeeded Job counts to a coarse ECS-style task state."""
+    if succeeded > 0:
+        return "SUCCEEDED"
+    if failed > 0:
+        return "FAILED"
+    return "RUNNING" if active > 0 else "SUBMITTED"
 
 
 class GCPTaskRunner:
@@ -341,21 +359,9 @@ class GCPTaskRunner:
         succeeded = int(getattr(status, "succeeded", 0) or 0)
         started_at = getattr(status, "start_time", None)
         stopped_at = getattr(status, "completion_time", None)
-        stopped_reason = None
 
-        for condition in getattr(status, "conditions", None) or []:
-            if getattr(condition, "type", "") in {"Failed", "Complete"}:
-                stopped_reason = getattr(condition, "message", None) or getattr(condition, "reason", None)
-                break
-
-        if succeeded > 0:
-            state = "SUCCEEDED"
-        elif failed > 0:
-            state = "FAILED"
-        elif active > 0:
-            state = "RUNNING"
-        else:
-            state = "SUBMITTED"
+        stopped_reason = _job_condition_reason(status)
+        state = _derive_job_state(active=active, failed=failed, succeeded=succeeded)
 
         if state in {"SUCCEEDED", "FAILED"} and not stopped_reason:
             stopped_reason = self._extract_stopped_reason(core_api, namespace, job_name)
@@ -448,7 +454,7 @@ class GCPTaskRunner:
         except CloudTaskError:
             raise
         except Exception as e:
-            logger.error("run_task: failed task_definition=%s error=%s", task_definition, e)
+            logger.exception("run_task: failed task_definition=%s error=%s", task_definition, e)
             raise CloudTaskError(f"Failed to create Kubernetes Job: {e}") from e
 
     @staticmethod
@@ -475,8 +481,8 @@ class GCPTaskRunner:
             core_api.delete_namespaced_secret(name=secret_name, namespace=namespace)
         except Exception:
             logger.warning(
-                "run_task: failed to clean up orphan secret=%s namespace=%s",
-                secret_name,
+                "run_task: failed to clean up orphan secret_fp=%s namespace=%s",
+                safe_log_fingerprint(secret_name),
                 namespace,
                 exc_info=True,
             )
@@ -548,9 +554,9 @@ class GCPTaskRunner:
         caller's exception (raised after we return) carries the
         original cause."""
         logger.warning(
-            "run_task: unwinding run for job=%s secret=%s namespace=%s reason=%s",
+            "run_task: unwinding run for job=%s secret_fp=%s namespace=%s reason=%s",
             job_name,
-            secret_name,
+            safe_log_fingerprint(secret_name),
             namespace,
             detail,
         )
@@ -567,8 +573,8 @@ class GCPTaskRunner:
             core_api.delete_namespaced_secret(name=secret_name, namespace=namespace)
         except Exception:
             logger.warning(
-                "run_task: failed to delete Secret during unwind secret=%s namespace=%s",
-                secret_name,
+                "run_task: failed to delete Secret during unwind secret_fp=%s namespace=%s",
+                safe_log_fingerprint(secret_name),
                 namespace,
                 exc_info=True,
             )
@@ -591,5 +597,5 @@ class GCPTaskRunner:
         except CloudTaskError:
             raise
         except Exception as e:
-            logger.error("get_task_status: failed task_id=%s error=%s", task_id, e)
+            logger.exception("get_task_status: failed task_id=%s error=%s", task_id, e)
             raise CloudTaskError(f"Failed to get Kubernetes Job status: {e}") from e

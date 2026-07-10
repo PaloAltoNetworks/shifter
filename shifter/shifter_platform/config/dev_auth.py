@@ -9,14 +9,15 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
-from django.contrib.auth.models import Group
-from django.http import HttpResponseForbidden, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 
-from management.services import get_user_profile
-from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
-from shared.log_sanitize import safe_log
+from config.user_type_sync import sync_user_type
+from shared.log_sanitize import safe_log_value
+
+# SonarCloud S1192: extracted duplicated string literals.
+DASHBOARD_URL = "mission_control:dashboard"
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +28,9 @@ VALID_DEV_USER_TYPES = {"standard", "ctf_organizer", "ctf_participant"}
 
 # Redirect URLs by user type
 USER_TYPE_REDIRECTS = {
-    "standard": "mission_control:dashboard",
+    "standard": DASHBOARD_URL,
     "ctf_organizer": "ctf:admin_dashboard",
-    "ctf_participant": "mission_control:dashboard",
+    "ctf_participant": DASHBOARD_URL,
 }
 
 
@@ -46,30 +47,44 @@ def _is_dev_environment():
     return settings.DEBUG or getattr(settings, "ENVIRONMENT", "production") == "development"
 
 
-def _request_host_or_ip_allowed(request) -> bool:
-    """Allow dev auth only over explicitly local/admin access paths."""
-    host = request.get_host().split(":", 1)[0].strip().lower()
-    if host in {item.lower() for item in getattr(settings, "DEV_LOGIN_ALLOWED_HOSTS", [])}:
-        return True
+_IpAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
-    remote_addr = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() or request.META.get(
-        "REMOTE_ADDR", ""
-    )
+
+def _parse_peer_ip(remote_addr: str) -> _IpAddress | None:
+    """Parse ``REMOTE_ADDR`` into an IP address, or None when absent/malformed."""
+    remote_addr = remote_addr.strip()
     if not remote_addr:
-        return False
-
+        return None
     try:
-        client_ip = ipaddress.ip_address(remote_addr)
+        return ipaddress.ip_address(remote_addr)
     except ValueError:
+        return None
+
+
+def _ip_in_cidr(client_ip: _IpAddress, cidr: str) -> bool:
+    """Return True if ``client_ip`` falls in ``cidr``; skip malformed CIDRs."""
+    try:
+        return client_ip in ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        logger.warning("Ignoring invalid DEV_LOGIN_ALLOWED_CIDRS entry: %s", cidr)
         return False
 
-    for cidr in getattr(settings, "DEV_LOGIN_ALLOWED_CIDRS", []):
-        try:
-            if client_ip in ipaddress.ip_network(cidr, strict=False):
-                return True
-        except ValueError:
-            logger.warning("Ignoring invalid DEV_LOGIN_ALLOWED_CIDRS entry: %s", cidr)
-    return False
+
+def _request_peer_allowed(request: HttpRequest) -> bool:
+    """Allow dev auth only from a trusted direct peer address.
+
+    Admission is bound to the actual socket peer (``REMOTE_ADDR``) — never the
+    spoofable ``Host`` header or ``X-Forwarded-For`` (SEC-3, issue #937). The
+    loopback range is always admitted so local development and SSM/admin
+    tunnels (which present as loopback) keep working; additional admin networks
+    opt in through ``DEV_LOGIN_ALLOWED_CIDRS``.
+    """
+    client_ip = _parse_peer_ip(request.META.get("REMOTE_ADDR", ""))
+    if client_ip is None:
+        return False
+    if client_ip.is_loopback:
+        return True
+    return any(_ip_in_cidr(client_ip, cidr) for cidr in getattr(settings, "DEV_LOGIN_ALLOWED_CIDRS", []))
 
 
 def dev_login(request):
@@ -90,7 +105,7 @@ def dev_login(request):
     """
     if not _is_dev_environment():
         return HttpResponseForbidden("Development auth disabled in production")
-    if not settings.DEBUG and not _request_host_or_ip_allowed(request):
+    if not settings.DEBUG and not _request_peer_allowed(request):
         return HttpResponseForbidden("Development auth is only available through local or admin access paths")
 
     if request.method == "POST":
@@ -103,30 +118,14 @@ def dev_login(request):
         user, _created = User.objects.get_or_create(username=email, defaults={"email": email, "is_active": True})
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
 
-        # Set group membership based on user_type
-        ctf_groups = {CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP}
-        type_to_group = {
-            "ctf_organizer": CTF_ORGANIZER_GROUP,
-            "ctf_participant": CTF_PARTICIPANT_GROUP,
-        }
-
-        group_name = type_to_group.get(user_type)
-        if group_name:
-            group, _ = Group.objects.get_or_create(name=group_name)
-            user.groups.add(group)
-        else:
-            # "standard" — remove CTF groups
-            user.groups.remove(*Group.objects.filter(name__in=ctf_groups))
-
-        # Keep user_type field in sync for backwards compat
-        profile = get_user_profile(user)
-        if profile.user_type != user_type:
-            profile.user_type = user_type
-            profile.save(update_fields=["user_type"])
-        logger.info("Dev login: set user_type=%s for %s", safe_log(user_type), safe_log(email))
+        # Sync CTF group membership + profile via the shared, audited helper so
+        # dev-login produces the same fail-closed ROLE_SYNC audit trail as the
+        # real identity providers (issue #937 SEC-5).
+        sync_user_type(user, user_type, source="dev_login", request=request)
+        logger.info("Dev login: set user_type=%s for %s", safe_log_value(user_type), safe_log_value(email))
 
         # Redirect to appropriate dashboard
-        redirect_url = reverse(USER_TYPE_REDIRECTS.get(user_type, "mission_control:dashboard"))
+        redirect_url = reverse(USER_TYPE_REDIRECTS.get(user_type, DASHBOARD_URL))
         return HttpResponseRedirect(redirect_url)
 
     return render(request, "dev_login.html")
@@ -139,7 +138,7 @@ def dev_logout(request):
     """
     if not _is_dev_environment():
         return HttpResponseForbidden("Development auth disabled in production")
-    if not settings.DEBUG and not _request_host_or_ip_allowed(request):
+    if not settings.DEBUG and not _request_peer_allowed(request):
         return HttpResponseForbidden("Development auth is only available through local or admin access paths")
 
     from django.contrib.auth import logout

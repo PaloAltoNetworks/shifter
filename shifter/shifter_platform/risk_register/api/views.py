@@ -2,14 +2,12 @@
 
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from risk_register.api.permissions import IsAdminUser
+from risk_register.api.permissions import HasRiskRegisterCognitoGroup, IsAdminUser, IsStaffSessionOrToken
 from risk_register.api.serializers import (
-    APIKeyCreatedSerializer,
-    APIKeyCreateSerializer,
-    APIKeySerializer,
     AuditLogSerializer,
     CommentCreateSerializer,
     CommentSerializer,
@@ -17,12 +15,19 @@ from risk_register.api.serializers import (
     RiskSerializer,
     RiskUpdateSerializer,
 )
-from risk_register.models import APIKey, AuditLog, Comment, Risk
+from risk_register.models import AuditLog, Comment, Risk
+from shared.api.errors import api_error_response
+from shared.api_tokens import scopes
+from shared.api_tokens.authentication import ApiTokenAuthentication
+from shared.api_tokens.models import ApiToken
+from shared.api_tokens.permissions import require_scope
 
 
 def get_actor_info(request):
     """Extract actor type and ID from request for audit logging."""
-    if isinstance(request.auth, APIKey):
+    # A platform ApiToken authenticates without a Django user; attribute the
+    # audit row to the token.
+    if isinstance(request.auth, ApiToken):
         return AuditLog.ActorType.APIKEY, request.auth.id
     elif request.user and request.user.is_authenticated:
         return AuditLog.ActorType.USER, request.user.id
@@ -49,9 +54,18 @@ def risk_to_dict(risk: Risk) -> dict:
 
 
 class RiskViewSet(viewsets.ModelViewSet):
-    """ViewSet for Risk CRUD operations. Admin only."""
+    """ViewSet for Risk CRUD operations.
 
-    permission_classes = [IsAdminUser]
+    Accepts a staff/superuser session or a platform API token scoped
+    ``risk:read`` (safe methods) / ``risk:write`` (mutations).
+    """
+
+    authentication_classes = [ApiTokenAuthentication, SessionAuthentication]
+    permission_classes = [
+        HasRiskRegisterCognitoGroup,
+        IsStaffSessionOrToken,
+        require_scope(scopes.RISK_READ, scopes.RISK_WRITE),
+    ]
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -180,9 +194,11 @@ class RiskViewSet(viewsets.ModelViewSet):
         self.check_object_permissions(request, instance)
 
         if not instance.is_deleted:
-            return Response(
-                {"error": "bad_request", "message": "Risk is not deleted"},
-                status=status.HTTP_400_BAD_REQUEST,
+            return api_error_response(
+                code="bad_request",
+                message="Risk is not deleted",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                request=request,
             )
 
         previous_state = risk_to_dict(instance)
@@ -206,9 +222,19 @@ class RiskViewSet(viewsets.ModelViewSet):
 
 
 class CommentViewSet(viewsets.ViewSet):
-    """ViewSet for Comment operations (nested under risks). Admin only."""
+    """ViewSet for Comment operations (nested under risks).
 
-    permission_classes = [IsAdminUser]
+    Accepts a staff/superuser session or a platform API token scoped
+    ``risk:read`` (safe methods) / ``risk:write`` (mutations).
+    """
+
+    authentication_classes = [ApiTokenAuthentication, SessionAuthentication]
+    serializer_class = CommentSerializer
+    permission_classes = [
+        HasRiskRegisterCognitoGroup,
+        IsStaffSessionOrToken,
+        require_scope(scopes.RISK_READ, scopes.RISK_WRITE),
+    ]
 
     def list(self, request, risk_pk=None):
         """List comments for a risk.
@@ -235,20 +261,17 @@ class CommentViewSet(viewsets.ViewSet):
         serializer = CommentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Determine author
+        # Determine author. Session users are attributed; platform-token
+        # requests have no Django user and are left author-less (the audit log
+        # below records the token actor).
         author_user = None
-        author_apikey = None
-
-        if isinstance(request.auth, APIKey):
-            author_apikey = request.auth
-        elif request.user and request.user.is_authenticated:
+        if request.user and request.user.is_authenticated:
             author_user = request.user
 
         comment = Comment.objects.create(
             risk=risk,
             content=serializer.validated_data["content"],
             author_user=author_user,
-            author_apikey=author_apikey,
         )
 
         # Audit log
@@ -289,83 +312,6 @@ class CommentViewSet(viewsets.ViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class APIKeyViewSet(viewsets.ViewSet):
-    """ViewSet for API key management."""
-
-    permission_classes = [IsAdminUser]
-
-    def list(self, request):
-        """List all API keys."""
-        keys = APIKey.objects.all()
-        serializer = APIKeySerializer(keys, many=True)
-        return Response(serializer.data)
-
-    def retrieve(self, request, pk=None):
-        """Get a single API key."""
-        key = get_object_or_404(APIKey, pk=pk)
-        serializer = APIKeySerializer(key)
-        return Response(serializer.data)
-
-    def create(self, request):
-        """Create a new API key."""
-        serializer = APIKeyCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        api_key, raw_key = APIKey.create_key(
-            name=serializer.validated_data["name"],
-            created_by=request.user,
-            expires_at=serializer.validated_data.get("expires_at"),
-        )
-
-        # Audit log
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=api_key.id,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
-            new_state={
-                "name": api_key.name,
-                "prefix": api_key.prefix,
-            },
-        )
-
-        output = APIKeyCreatedSerializer(
-            {
-                "id": api_key.id,
-                "name": api_key.name,
-                "key": raw_key,
-                "prefix": api_key.prefix,
-            }
-        )
-        return Response(output.data, status=status.HTTP_201_CREATED)
-
-    @action(detail=True, methods=["post"])
-    def revoke(self, request, pk=None):
-        """Revoke an API key."""
-        api_key = get_object_or_404(APIKey, pk=pk)
-
-        if not api_key.is_active:
-            return Response(
-                {"error": "bad_request", "message": "API key is already revoked"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        api_key.revoke()
-
-        # Audit log
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=api_key.id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
-        )
-
-        serializer = APIKeySerializer(api_key)
-        return Response(serializer.data)
-
-
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only ViewSet for audit log queries. Admin only.
 
@@ -375,7 +321,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [HasRiskRegisterCognitoGroup, IsAdminUser]
 
     def get_queryset(self):
         """Return audit logs with optional filtering."""

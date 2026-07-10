@@ -14,7 +14,7 @@ from django.contrib.auth import get_user_model
 
 from engine import create_range, get_range_status
 from engine.models import Range
-from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
+from shared.schemas import InstanceSpec, RangeRef, RangeSpec, RequestSpec, SubnetSpec
 
 pytestmark = pytest.mark.django_db
 
@@ -83,21 +83,27 @@ class TestCreateRange:
 
         result = create_range(spec)
 
-        assert result == spec.request_id
+        assert isinstance(result, RangeRef)
+        assert result.request_id == spec.request_id
+        assert result.user_id == user.id
+        assert result.range_id is not None
         range_obj = Range.objects.get()
         assert range_obj.user_id == user.id
         # A subnet index was allocated.
         assert range_obj.subnet_index is not None
         assert range_obj.subnet_index >= Range.SUBNET_INDEX_MIN
 
-    def test_returns_request_id(self, user):
+    def test_returns_range_ref(self, user):
         spec = _request_spec(user.id)
-        assert create_range(spec) == spec.request_id
+        ref = create_range(spec)
+        assert isinstance(ref, RangeRef)
+        assert ref.request_id == spec.request_id
 
     def test_logs_range_creation(self, user, caplog):
         spec = _request_spec(user.id)
         with caplog.at_level(logging.INFO, logger="engine"):
-            create_range(spec)
+            result = create_range(spec)
+        assert isinstance(result, RangeRef)
         assert "create_range" in caplog.text
 
     def test_allocates_distinct_indices_for_concurrent_ranges(self, user, db, django_user_model):

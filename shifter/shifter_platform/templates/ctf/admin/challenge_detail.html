@@ -1,149 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     {{ challenge.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.detail-layout {
-    display: grid;
-    grid-template-columns: 1fr 360px;
-    gap: 16px;
-    align-items: start;
-}
-
-.breadcrumb {
-    display: flex;
-    gap: 4px;
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-    list-style: none;
-    padding: 0;
-    margin-top: 0;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb li + li::before {
-    content: "/";
-    margin-right: 4px;
-    color: var(--theme-text-secondary);
-}
-
-.challenge-badges {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-}
-
-.badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 10px;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.badge-category {
-    background: rgba(148, 163, 184, 0.15);
-    color: #94a3b8;
-}
-
-.badge-easy {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.badge-medium {
-    background: rgba(250, 173, 20, 0.15);
-    color: #faad14;
-}
-
-.badge-hard {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
-}
-
-.badge-expert {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.badge-points {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.badge-correct {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.badge-incorrect {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
-}
-
-.badge-secondary {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.detail-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    font-size: 13px;
-}
-
-.detail-row + .detail-row {
-    border-top: 1px solid var(--theme-border);
-}
-
-.detail-label {
-    color: var(--theme-text-secondary);
-}
-
-.detail-value {
-    font-weight: 600;
-    color: var(--theme-text);
-}
-
-.challenge-description {
-    font-size: 14px;
-    line-height: 1.6;
-    color: var(--theme-text);
-}
-
-.challenge-description p {
-    margin: 0 0 8px;
-}
-
-.empty-message {
-    padding: 24px;
-    text-align: center;
-    color: var(--theme-text-secondary);
-    font-size: 13px;
-}
-
-.hint-empty-note {
-    font-size: 13px;
-    margin: 0;
-}
-
-@media (max-width: 960px) {
-    .detail-layout {
-        grid-template-columns: 1fr;
-    }
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-challenge_detail.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -327,7 +190,7 @@
             <div class="card">
                 <div class="card-title flex-between-center">
                     {% trans "Flags" %}
-                    {% if event.is_content_modifiable %}
+                    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                         <button type="button"
                                 class="btn btn-sm btn-primary"
                                 onclick="document.getElementById('add-flag-form').classList.toggle('is-open')">
@@ -348,7 +211,7 @@
                                 <th>
                                     {% trans "Case Sensitive" %}
                                 </th>
-                                {% if event.is_content_modifiable %}
+                                {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                                     <th>
                                         {% trans "Actions" %}
                                     </th>
@@ -371,7 +234,7 @@
                                             {% trans "No" %}
                                         {% endif %}
                                     </td>
-                                    {% if event.is_content_modifiable %}
+                                    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                                         <td>
                                             <button type="button"
                                                     class="btn btn-sm btn-danger"
@@ -389,7 +252,7 @@
                         {% trans "No flag records. Using legacy flag_hash field." %}
                     </div>
                 {% endif %}
-                {% if event.is_content_modifiable %}
+                {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                     <div id="add-flag-form" class="collapse-panel">
                         <div class="mb-sm">
                             <label for="new-flag-value" class="field-label">
@@ -470,10 +333,10 @@
                             {% for file in challenge_files %}
                                 <tr>
                                     <td>
-                                        <a href="#"
-                                           data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
-                                           {{ file.display }}
-                                           </a>
+                                        <button type="button"
+                                                data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
+                                            {{ file.display }}
+                                        </button>
                                     </td>
                                     <td>
                                         {{ file.file_size_display }}
@@ -836,7 +699,7 @@ document.querySelectorAll('[data-download-url]').forEach(function(link) {
     });
 });
     </script>
-    {% if event.is_content_modifiable %}
+    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
         <script>
 function addFlag() {
     const flagValue = document.getElementById('new-flag-value').value.trim();

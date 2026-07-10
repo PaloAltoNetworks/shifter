@@ -54,6 +54,17 @@ variable "firewall_endpoint_id" {
   default     = ""
 }
 
+variable "range_egress_mode" {
+  description = "Runtime route-table egress posture for participant subnets (bridge for shifter.yaml settings.range_egress.mode). allowlist creates the firewall default route; none omits all 0.0.0.0/0 routes."
+  type        = string
+  default     = "allowlist"
+
+  validation {
+    condition     = contains(["allowlist", "none"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: allowlist, none."
+  }
+}
+
 variable "portal_vpc_cidr" {
   description = "Portal VPC CIDR for SSH/RDP access"
   type        = string

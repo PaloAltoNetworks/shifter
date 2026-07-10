@@ -14,11 +14,32 @@ locals {
 
   # Parameter Store path prefix
   ps_prefix = "/shifter/${var.environment}/portal"
+
+  # Django ENVIRONMENT value for the portal container. Mirrors
+  # local.django_environment in the portal/ec2 module (which sets it on the
+  # user_data boot path); the deploy script reads it from this parameter so
+  # the deploy-time migrate/run sets the same ENVIRONMENT and
+  # config.settings require_environment() does not fail closed (#948).
+  # Keep the two mappings in sync.
+  django_environment = (
+    var.environment == "dev" ? "development" :
+    var.environment == "prod" ? "production" :
+    var.environment
+  )
 }
 
 # ------------------------------------------------------------------------------
 # Parameter Store - Deployment Configuration
 # ------------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "environment" {
+  name        = "${local.ps_prefix}/environment"
+  description = "Django ENVIRONMENT value for the portal container (config.settings)"
+  type        = "String"
+  value       = local.django_environment
+
+  tags = local.common_tags
+}
 
 resource "aws_ssm_parameter" "image_tag" {
   name        = "${local.ps_prefix}/image-tag"
@@ -221,6 +242,43 @@ resource "aws_ssm_parameter" "channel_layer_backend" {
   tags = local.common_tags
 }
 
+# Redis AUTH + in-transit encryption wiring (#938). Written only when Redis is
+# the active backend AND the secure path is enabled. These carry non-secret
+# references and flags only: the AUTH token stays in Secrets Manager and is
+# hydrated into REDIS_PASSWORD by entrypoint.sh, never via Parameter Store.
+resource "aws_ssm_parameter" "redis_secret_arn" {
+  count = var.enable_redis && var.redis_tls ? 1 : 0
+
+  name        = "${local.ps_prefix}/redis-secret-arn"
+  description = "ARN of the Secrets Manager secret holding the Redis AUTH token (resolved to REDIS_PASSWORD at portal startup)"
+  type        = "String"
+  value       = var.redis_secret_arn
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "redis_tls" {
+  count = var.enable_redis && var.redis_tls ? 1 : 0
+
+  name        = "${local.ps_prefix}/redis-tls"
+  description = "Whether the Redis channel-layer connection uses in-transit encryption + AUTH (REDIS_TLS)"
+  type        = "String"
+  value       = "true"
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "redis_ca_mode" {
+  count = var.enable_redis && var.redis_tls ? 1 : 0
+
+  name        = "${local.ps_prefix}/redis-ca-mode"
+  description = "TLS trust mode for the Redis server certificate (REDIS_CA_MODE): system | pem"
+  type        = "String"
+  value       = var.redis_ca_mode
+
+  tags = local.common_tags
+}
+
 resource "aws_ssm_parameter" "db_host_override" {
   count = var.enable_db_host_override ? 1 : 0
 
@@ -250,6 +308,15 @@ resource "aws_ssm_parameter" "ctf_from_email" {
   tags = local.common_tags
 }
 
+resource "aws_ssm_parameter" "range_events_topic_id" {
+  name        = "${local.ps_prefix}/range-events-topic-id"
+  description = "SNS topic ARN for range events (outbox drainer / reconciler publish target)"
+  type        = "String"
+  value       = var.range_events_topic_id
+
+  tags = local.common_tags
+}
+
 resource "aws_ssm_parameter" "ctfd_platform_url" {
   count = var.ctfd_platform_url != "" ? 1 : 0
 
@@ -257,6 +324,91 @@ resource "aws_ssm_parameter" "ctfd_platform_url" {
   description = "Public URL for the standalone CTFd platform"
   type        = "String"
   value       = var.ctfd_platform_url
+
+  tags = local.common_tags
+}
+
+# ------------------------------------------------------------------------------
+# Parameter Store - Portal Runtime Capacity Tunables (#930)
+# ------------------------------------------------------------------------------
+# Non-secret integers read by both container hydration paths (user_data.sh on
+# first boot, scripts/portal-deploy/deploy_portal.sh on SSM redeploy) and mapped
+# 1:1 onto the matching Docker env var. Updating a value retunes the running
+# fleet on the next converge/restart, with no image rebuild. Caps are
+# process-local: per-instance cap = portal_web_workers * terminal_max_sessions.
+
+resource "aws_ssm_parameter" "portal_web_workers" {
+  name        = "${local.ps_prefix}/portal-web-workers"
+  description = "Gunicorn/Uvicorn worker processes per portal instance (PORTAL_WEB_WORKERS), sized to instance vCPUs"
+  type        = "String"
+  value       = tostring(var.portal_web_workers)
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "terminal_max_sessions" {
+  name        = "${local.ps_prefix}/terminal-max-sessions"
+  description = "Terminal SSH sessions per worker process (TERMINAL_MAX_SESSIONS); per-instance cap = workers * this"
+  type        = "String"
+  value       = tostring(var.terminal_max_sessions)
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "terminal_max_sessions_per_user" {
+  name        = "${local.ps_prefix}/terminal-max-sessions-per-user"
+  description = "Terminal SSH sessions per user, per worker process (TERMINAL_MAX_SESSIONS_PER_USER)"
+  type        = "String"
+  value       = tostring(var.terminal_max_sessions_per_user)
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "terminal_idle_timeout_seconds" {
+  name        = "${local.ps_prefix}/terminal-idle-timeout-seconds"
+  description = "Idle terminal session timeout in seconds (TERMINAL_IDLE_TIMEOUT_SECONDS)"
+  type        = "String"
+  value       = tostring(var.terminal_idle_timeout_seconds)
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "terminal_max_session_seconds" {
+  name        = "${local.ps_prefix}/terminal-max-session-seconds"
+  description = "Hard ceiling on a terminal session lifetime in seconds (TERMINAL_MAX_SESSION_SECONDS)"
+  type        = "String"
+  value       = tostring(var.terminal_max_session_seconds)
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "terminal_read_poll_seconds" {
+  name        = "${local.ps_prefix}/terminal-read-poll-seconds"
+  description = "Idle terminal read-loop poll interval in seconds (TERMINAL_READ_POLL_SECONDS); does not bound output latency"
+  type        = "String"
+  value       = tostring(var.terminal_read_poll_seconds)
+
+  tags = local.common_tags
+}
+
+# Portal web capacity metrics (#940). Read by both the first-boot user_data and
+# the SSM-redeploy deploy_portal.sh hydration paths, like the #930 terminal
+# tunables, so an operator can toggle the emitter or retune the busy-ratio
+# denominator on a running fleet without an image rebuild.
+resource "aws_ssm_parameter" "portal_capacity_metrics_enabled" {
+  name        = "${local.ps_prefix}/portal-capacity-metrics-enabled"
+  description = "Enable the per-worker Shifter/PortalCapacity metrics emitter (PORTAL_CAPACITY_METRICS_ENABLED): true|false"
+  type        = "String"
+  value       = tostring(var.portal_capacity_metrics_enabled)
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "portal_worker_soft_concurrency" {
+  name        = "${local.ps_prefix}/portal-worker-soft-concurrency"
+  description = "Busy-ratio denominator: soft concurrent-request target per portal web worker (PORTAL_WORKER_SOFT_CONCURRENCY)"
+  type        = "String"
+  value       = tostring(var.portal_worker_soft_concurrency)
 
   tags = local.common_tags
 }

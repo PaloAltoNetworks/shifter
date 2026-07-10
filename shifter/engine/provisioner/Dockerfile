@@ -35,15 +35,20 @@ RUN apt-get update && apt-get install -y curl openssh-client unzip && \
 
 # Install Python dependencies
 WORKDIR /app
-COPY requirements.txt requirements-gcp.txt ./
+COPY engine/provisioner/requirements.txt engine/provisioner/requirements-gcp.txt ./
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r requirements-gcp.txt
+
+# First-party wire-contract package (cyberscript) on PYTHONPATH — same pattern as
+# shifter_platform/Dockerfile. Constants-only imports avoid pulling Pydantic into
+# the provisioner runtime beyond what pip already installs for other deps.
+COPY cyberscript /opt/shifter-libs/cyberscript
 
 # Copy provisioner code as root-owned, immutable image content. The runtime
 # user does NOT own /app — Terraform writes go to TERRAFORM_WORKSPACE_DIR
 # (terraform_base._stage_workspace) so a process compromise cannot tamper
 # with application code at runtime (issue #1103, follow-up to #950).
-COPY . .
+COPY engine/provisioner/ .
 
 # Bake the Terraform provider packages needed by the runtime range/NGFW
 # modules. Provisioner tasks run in private subnets without public Terraform
@@ -64,7 +69,8 @@ ENV HOME=/home/appuser \
     PULUMI_HOME=/home/appuser/.pulumi \
     TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache \
     TF_CLI_CONFIG_FILE=/app/terraform.tfrc \
-    TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace
+    TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace \
+    PYTHONPATH=/opt/shifter-libs
 
 # Drop privileges before invoking Terraform/Pulumi. Numeric UID:GID is used
 # (instead of `USER appuser`) so Kubernetes admission controllers running with

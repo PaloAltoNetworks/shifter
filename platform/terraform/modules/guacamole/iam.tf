@@ -4,7 +4,8 @@
 # Used by ECS to pull container images and write logs
 
 resource "aws_iam_role" "ecs_execution" {
-  name = "${var.name_prefix}-guacamole-ecs-execution"
+  name                 = "${local.iam_name_prefix}-guacamole-ecs-execution"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -109,7 +110,8 @@ resource "aws_iam_role_policy" "ecs_execution_kms" {
 # Used by the Guacamole client container for runtime operations
 
 resource "aws_iam_role" "guacamole_client_task" {
-  name = "${var.name_prefix}-guacamole-client-task"
+  name                 = "${local.iam_name_prefix}-guacamole-client-task"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -175,7 +177,8 @@ resource "aws_iam_role_policy" "guacamole_client_kms" {
 # Used by the guacd container - minimal permissions needed
 
 resource "aws_iam_role" "guacd_task" {
-  name = "${var.name_prefix}-guacd-task"
+  name                 = "${local.iam_name_prefix}-guacd-task"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

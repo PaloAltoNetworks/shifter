@@ -373,6 +373,31 @@ class TestScenarioTemplate:
         assert req["requires_windows"] is False
         assert req["requires_linux"] is False
 
+    def test_get_agent_requirements_from_agent_without_xdr_agent(self):
+        """from_agent requires an agent even when xdr_agent is False.
+
+        The canonical `basic` victim is `from_agent` with `xdr_agent: false`;
+        its OS is still derived from the user-provided agent, so the dashboard
+        must be told an agent is required (regression: requirements previously
+        gated has_from_agent on xdr_agent and reported False, letting the UI
+        launch agentless and 400 in hydration).
+        """
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[
+                InstanceConfig(name="Attacker", role="attacker", os_type="kali", xdr_agent=False),
+                InstanceConfig(name="Victim", role="victim", os_type="from_agent", xdr_agent=False),
+            ],
+        )
+        req = template.get_agent_requirements()
+        assert req["has_from_agent"] is True
+        assert req["requires_windows"] is False
+        assert req["requires_linux"] is False
+
     def test_get_agent_requirements_windows_required(self):
         """get_agent_requirements() returns requires_windows=True for Windows instances with xdr_agent."""
         from cms.scenarios.schema import InstanceConfig, ScenarioTemplate

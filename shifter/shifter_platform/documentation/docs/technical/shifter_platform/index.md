@@ -121,3 +121,18 @@ Foreign keys across domains are allowed. Referential integrity via database. Bus
 | Cross-domain foreign keys | Allowed | Pragmatic Django. DB integrity without microservices complexity. |
 | Status delivery | Redis pub/sub | Eliminates DB polling. Real-time updates to browser. |
 | API location | Mission Control only | Single HTTP surface. Domains expose services, not endpoints. |
+
+## Capture-the-Flag
+
+The `ctf` app layers capture-the-flag events on top of the range system, provisioning
+one range per participant through the CMS range services rather than a second
+provisioning path.
+
+- [CTF technical documentation](ctf): models, services, scheduling, and per-participant range provisioning.
+
+## Risk Register
+
+The `risk_register` app owns the Risk Register domain and is the first SPA
+cutover module (ADR-029).
+
+- [Risk Register technical documentation](risk_register): models, DRF API, authorization, audit, and the SPA integration.

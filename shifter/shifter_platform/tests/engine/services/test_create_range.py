@@ -8,7 +8,8 @@ on persisted state and return values, not on mocked ORM/interpreter/ECS calls.
 """
 
 import logging
-from uuid import UUID, uuid4
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -16,7 +17,10 @@ from django.test import override_settings
 
 from engine import create_range
 from engine.models import Range
-from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
+from shared.cloud.exceptions import CloudTaskError
+from shared.schemas import InstanceSpec, RangeRef, RangeSpec, RequestSpec, SubnetSpec
+
+from .conftest import ECS_TASK_ARN
 
 pytestmark = pytest.mark.django_db
 
@@ -46,17 +50,27 @@ def user(db):
 
 
 class TestCreateRangePersistence:
-    def test_returns_request_id_as_uuid(self, user):
+    def test_returns_range_ref(self, user):
         spec = make_request_spec(user_id=user.id)
         result = create_range(spec)
-        assert isinstance(result, UUID)
-        assert result == spec.request_id
+        assert isinstance(result, RangeRef)
+        assert result.request_id == spec.request_id
+        assert result.user_id == user.id
+        assert result.range_id is not None
+        assert result.range_id > 0
 
     def test_persists_range_for_the_looked_up_user(self, user):
         create_range(make_request_spec(user_id=user.id))
         range_obj = Range.objects.get()
         assert range_obj.user == user
         assert range_obj.cms_user_id == user.id
+
+    def test_persists_range_config_with_schema_discriminator(self, user):
+        create_range(make_request_spec(user_id=user.id))
+        range_obj = Range.objects.get()
+        assert range_obj.range_config["spec_schema"] == "range_spec"
+        assert range_obj.range_config["spec_version"] == "1"
+        assert range_obj.range_config["payload"]["scenario_id"] == "basic-attack"
 
     def test_allocates_a_subnet_index(self, user):
         create_range(make_request_spec(user_id=user.id))
@@ -75,12 +89,45 @@ class TestCreateRangePersistence:
     @override_settings(LOCAL_PROVISIONER=None, ENGINE_TASK_CLUSTER="", ENGINE_ECS_CLUSTER_ARN="")
     def test_no_task_arn_stored_when_ecs_unconfigured(self, user):
         # With no local provisioner and no ECS cluster configured,
-        # start_range_provisioning returns None, so no Step Functions ARN is
-        # recorded. Pinned via override_settings so the precondition holds
-        # regardless of settings leaked by other tests under xdist. (The
-        # ARN-present path is covered by the engine.ecs suites.)
+        # start_range_provisioning returns None, so no task ARN is recorded.
+        # Pinned via override_settings so the precondition holds regardless of
+        # settings leaked by other tests under xdist.
         create_range(make_request_spec(user_id=user.id))
-        assert Range.objects.get().step_function_execution_arn == ""
+        range_obj = Range.objects.get()
+        assert range_obj.provisioning_task_arn == ""
+        assert range_obj.teardown_task_arn == ""
+
+    def test_stores_provisioning_task_arn_when_ecs_configured(self, user, ecs_dispatch):
+        create_range(make_request_spec(user_id=user.id))
+        range_obj = Range.objects.get()
+        assert range_obj.provisioning_task_arn == ECS_TASK_ARN
+        assert range_obj.teardown_task_arn == ""
+
+    def test_reuses_existing_range_for_same_request_id(self, user):
+        spec = make_request_spec(user_id=user.id)
+        first = create_range(spec)
+        second = create_range(spec)
+
+        assert second.range_id == first.range_id
+        assert Range.objects.count() == 1
+
+    def test_marks_range_failed_when_provisioning_dispatch_fails(self, user, settings):
+        settings.CLOUD_PROVIDER = "aws"
+        settings.LOCAL_PROVISIONER = None
+        settings.ENGINE_TASK_CLUSTER = "test-cluster"
+        settings.ENGINE_TASK_DEFINITION = "test-taskdef"
+        settings.ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = "sg-test"
+        settings.ENGINE_TASK_NETWORK_SUBNET_IDS = "subnet-aaa,subnet-bbb"
+        ecs_client = MagicMock()
+        ecs_client.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:CPU"}]}
+
+        spec = make_request_spec(user_id=user.id)
+        with patch("boto3.client", return_value=ecs_client), pytest.raises(CloudTaskError):
+            create_range(spec)
+
+        range_obj = Range.objects.get(request__request_id=spec.request_id)
+        assert range_obj.status == Range.Status.FAILED
+        assert range_obj.error_message == "Provisioning dispatch failed"
 
 
 class TestCreateRangeErrorValidation:
@@ -128,12 +175,14 @@ class TestCreateRangeErrorValidation:
 class TestCreateRangeLogging:
     def test_logs_scenario_and_user_on_entry(self, user, caplog):
         with caplog.at_level(logging.DEBUG, logger="engine"):
-            create_range(make_request_spec(user_id=user.id, scenario_id="advanced-persistent-threat"))
+            ref = create_range(make_request_spec(user_id=user.id, scenario_id="advanced-persistent-threat"))
+        assert isinstance(ref, RangeRef)
         assert "advanced-persistent-threat" in caplog.text
         assert str(user.id) in caplog.text
 
     def test_logs_range_creation(self, user, caplog):
         with caplog.at_level(logging.INFO, logger="engine"):
-            create_range(make_request_spec(user_id=user.id))
+            ref = create_range(make_request_spec(user_id=user.id))
         range_obj = Range.objects.get()
+        assert isinstance(ref, RangeRef)
         assert str(range_obj.id) in caplog.text

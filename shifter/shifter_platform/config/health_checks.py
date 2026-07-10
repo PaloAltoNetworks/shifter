@@ -22,8 +22,10 @@ from health_check.plugins import plugin_dir
 from shared.log_sanitize import safe_log_value
 
 __all__ = [
+    "AuditLogDegradedHealthCheck",
     "ChannelLayerRedisHealthCheck",
     "channel_layer_uses_redis",
+    "register_audit_log_degraded_health_check",
     "register_channel_layer_redis_health_check",
 ]
 
@@ -60,8 +62,26 @@ class ChannelLayerRedisHealthCheck(HealthCheckPluginBase):
             _logger.warning("channel-layer Redis readiness failed: %s", safe_log_value(exc.__class__.__name__))
             self.add_error(ServiceUnavailable("Channel layer Redis unavailable"))
 
-    def _probe(self) -> None:
-        async_to_sync(_probe_configured_channel_layer)()
+    def _probe(self) -> bool:
+        return async_to_sync(_probe_configured_channel_layer)()
+
+
+class AuditLogDegradedHealthCheck(HealthCheckPluginBase):
+    """Report whether this worker has observed an audit write failure."""
+
+    def check_status(self) -> None:
+        from risk_register.audit_health import get_audit_health_snapshot
+
+        snapshot = get_audit_health_snapshot()
+        if snapshot.degraded:
+            self.add_error(ServiceUnavailable("Audit logging degraded"))
+
+
+def register_audit_log_degraded_health_check() -> None:
+    """Register process-local audit degradation with the public health surface."""
+    if any(plugin is AuditLogDegradedHealthCheck for plugin, _options in plugin_dir._registry):
+        return
+    plugin_dir.register(AuditLogDegradedHealthCheck)
 
 
 def register_channel_layer_redis_health_check() -> None:
@@ -73,12 +93,13 @@ def register_channel_layer_redis_health_check() -> None:
     plugin_dir.register(ChannelLayerRedisHealthCheck)
 
 
-async def _probe_configured_channel_layer() -> None:
+async def _probe_configured_channel_layer() -> bool:
     """Run a bounded round trip against the configured default channel layer."""
     layer = get_channel_layer()
     if layer is None:
         raise ServiceUnavailable("Default channel layer is unavailable")
     await asyncio.wait_for(_round_trip(layer), timeout=_PROBE_TIMEOUT_SECONDS)
+    return True
 
 
 async def _round_trip(layer: ChannelLayerProbe) -> None:

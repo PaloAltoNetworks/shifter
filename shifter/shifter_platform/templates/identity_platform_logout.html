@@ -19,5 +19,6 @@
         {{ identity_platform_logout_config_json|json_script:"identity-platform-logout-config" }}
         <script type="module"
                 src="{% static 'js/identity_platform_logout.js' %}"></script>
+        {% include "partials/cookie_notice.html" %}
     </body>
 </html>

@@ -107,9 +107,17 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     logger.debug("get_rdp_connection_info: user=%s instance_uuid=%s", user.id, safe_log_value(instance_uuid))
 
-    range_obj = Range.get_active_for_user(user)
-    if not range_obj:
-        raise ValueError("No active range found")
+    range_obj = Range.resolve_active_for_instance(user, instance_uuid)
+    if range_obj is None:
+        # No active range contains the instance. Fall back to the user's active
+        # range so the pre-existing error semantics are preserved now that a user
+        # may hold multiple simultaneous active ranges (#450): no range at all ->
+        # "No active range found"; a not-yet-ready range (whose instance list may
+        # be empty) -> "not ready"; otherwise the UUID is genuinely absent ->
+        # "not found in range".
+        range_obj = Range.get_active_for_user(user)
+        if range_obj is None:
+            raise ValueError("No active range found")
     if range_obj.status != Range.Status.READY:
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
@@ -151,16 +159,24 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     logger.debug("connect_terminal: user_id=%s instance_uuid=%s", user.id, safe_log_value(instance_uuid))
 
-    range_obj = Range.objects.filter(
-        provisioned_instances__contains=[{"uuid": instance_uuid}],
-        user=user,
-    ).first()
-
-    if not range_obj:
-        logger.error(
-            "Range not found for instance: user_id=%s instance_uuid=%s", user.id, safe_log_value(instance_uuid)
-        )
-        raise ValueError(f"No range found containing instance {instance_uuid}")
+    # Resolve the active range by iterating the user's active ranges and finding
+    # the one that contains instance_uuid. This is portable (pure-Python, no
+    # provider-specific JSON DB lookup) and correct when a user holds multiple
+    # simultaneous active ranges (e.g. one Mission Control + one CTF range, #450).
+    range_obj = Range.resolve_active_for_instance(user, instance_uuid)
+    if range_obj is None:
+        # No active range contains the instance. Fall back to the user's active
+        # range so the pre-existing error semantics are preserved now that a user
+        # may hold multiple simultaneous active ranges (#450): no range at all ->
+        # "No active range found"; a not-yet-ready range (whose instance list may
+        # be empty) -> "not ready"; otherwise the UUID is genuinely absent ->
+        # "not found in range".
+        range_obj = Range.get_active_for_user(user)
+        if range_obj is None:
+            logger.error(
+                "No active range for user: user_id=%s instance_uuid=%s", user.id, safe_log_value(instance_uuid)
+            )
+            raise ValueError("No active range found")
 
     if range_obj.status != Range.Status.READY:
         logger.error("Range not ready: range_id=%s status=%s", range_obj.id, range_obj.status)

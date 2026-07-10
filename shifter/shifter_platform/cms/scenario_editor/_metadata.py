@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from cms.models import ScenarioMetadata
-from cms.scenarios.registry import get_scenario_detail
+from cms.scenarios.registry import get_catalog_entry
 from risk_register.models import AuditLog
 from shared.log_sanitize import safe_log_value
 
@@ -19,16 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 def _verify_scenario_exists(scenario_id: str, *, user_id: int) -> None:
-    """Confirm the scenario exists in the registry before metadata changes."""
-    try:
-        get_scenario_detail(scenario_id)
-    except ValueError as e:
+    """Confirm the scenario exists in the unified catalog before metadata changes.
+
+    Uses the catalog projection (not the legacy YAML/DB detail lookup) so the
+    access overlay can be toggled for ACES package-backed entries as well as
+    legacy YAML defaults and DB customs.
+    """
+    if get_catalog_entry(scenario_id) is None:
         logger.error(
             "update_metadata: scenario not found, scenario_id=%s, user_id=%s",
             safe_log_value(scenario_id),
             user_id,
         )
-        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
+        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found")
 
 
 def update_metadata(

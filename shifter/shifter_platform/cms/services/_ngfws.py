@@ -36,7 +36,7 @@ def _app_to_ngfw_context(app: App) -> NGFWAppContext:
     AWS infrastructure details are owned by Engine, not exposed here.
 
     Args:
-        app: App model with instance relationship loaded.
+        app: App model with ``instance`` and ``instance.request`` loaded.
     """
     from shared.schemas.app import NGFWAppContext
 
@@ -44,6 +44,7 @@ def _app_to_ngfw_context(app: App) -> NGFWAppContext:
     return NGFWAppContext(
         app_id=app.id,
         instance_id=app.instance.id,
+        request_id=app.instance.request.request_id,
         name=app.name,
         status=app.status,
         created_at=app.created_at,
@@ -165,7 +166,7 @@ def list_ngfws(user: User) -> list[NGFWAppContext]:
             instance__request__user=user,
             app_type__slug="panw-ngfw",
         )
-        .select_related("instance")
+        .select_related("instance", "instance__request")
         .order_by("-created_at")
     )
 
@@ -248,7 +249,7 @@ def _provision_ngfw_request_records(user: User, name: str) -> tuple[UUID, Reques
         request=request,
         name=name,
         instance_type=instance_type,
-        status=ResourceStatus.PROVISIONING.value,
+        status=ResourceStatus.PENDING.value,
     )
     logger.info("create_ngfw: created Instance id=%s for user_id=%s", instance.id, user.id)
 
@@ -256,11 +257,19 @@ def _provision_ngfw_request_records(user: User, name: str) -> tuple[UUID, Reques
         name=name,
         app_type=app_type,
         instance=instance,
-        status=ResourceStatus.PROVISIONING.value,
+        status=ResourceStatus.PENDING.value,
     )
     logger.info("create_ngfw: created App id=%s for instance_id=%s", app.id, instance.id)
 
     return request_id, request, instance, app
+
+
+def _set_cms_ngfw_status(instance: Instance, app: App, status: ResourceStatus) -> None:
+    """Persist CMS NGFW Instance/App status using the shared public vocabulary."""
+    instance.status = status.value
+    instance.save(update_fields=["status"])
+    app.status = status.value
+    app.save(update_fields=["status"])
 
 
 def _hydrate_and_dispatch_ngfw(
@@ -290,7 +299,10 @@ def _hydrate_and_dispatch_ngfw(
     )
 
     instance.data = ngfw_instance_spec.model_dump(mode="json")
-    instance.save(update_fields=["data"])
+    instance.status = ResourceStatus.PROVISIONING.value
+    instance.save(update_fields=["data", "status"])
+    app.status = ResourceStatus.PROVISIONING.value
+    app.save(update_fields=["status"])
 
     engine_create_ngfw(request_spec)
 
@@ -357,23 +369,36 @@ def create_ngfw(
     from cms.scenarios.hydrator import NGFWRegistration
 
     request_id, request, instance, app = _provision_ngfw_request_records(user, name)
-    _hydrate_and_dispatch_ngfw(
-        request_id,
-        user,
-        request,
-        instance,
-        app,
-        name,
-        NGFWRegistration(
-            # registration_method is validated to "pin"/"otp" upstream by
-            # _resolve_ngfw_registration; cast narrows str -> the Literal type.
-            deployment_profile=deployment_profile,
-            registration_method=cast(Literal["pin", "otp"], registration_method),
-            scm_credential=scm_credential,
-            otp_value=otp_value,
-            otp_folder=otp_folder,
-        ),
-    )
+    try:
+        _hydrate_and_dispatch_ngfw(
+            request_id,
+            user,
+            request,
+            instance,
+            app,
+            name,
+            NGFWRegistration(
+                # registration_method is validated to "pin"/"otp" upstream by
+                # _resolve_ngfw_registration; cast narrows str -> the Literal type.
+                deployment_profile=deployment_profile,
+                registration_method=cast(Literal["pin", "otp"], registration_method),
+                scm_credential=scm_credential,
+                otp_value=otp_value,
+                otp_folder=otp_folder,
+            ),
+        )
+    except Exception as exc:
+        # Sanitized log only: fixed text + correlation ids + exception *type*.
+        # NOT logger.exception/exc_info — hydrator/engine tracebacks can carry
+        # NGFW registration secrets (authcode/otp/scm_pin) and must not be logged.
+        logger.error(  # NOSONAR
+            "create_ngfw failed for user_id=%s request_id=%s exc_type=%s; marking NGFW records FAILED",
+            user.id,
+            request_id,
+            type(exc).__name__,
+        )
+        _set_cms_ngfw_status(instance, app, ResourceStatus.FAILED)
+        raise
 
     return NGFWAppRef(
         app_id=app.id,

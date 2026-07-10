@@ -1,30 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     Notifications - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.notification-card {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
-}
-
-.notification-meta {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-    margin-top: 4px;
-}
-
-.notification-body {
-    margin-top: 8px;
-    color: var(--theme-text);
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-notification_list.css' %}">
 {% endblock %}
 {% block content %}
     <div class="page-header flex-between">
@@ -39,7 +21,7 @@
             <div class="card">
                 <div class="notification-card">
                     <div>
-                        <div class="card-title" style="margin-bottom: 0;">
+                        <div class="card-title mb-0">
                             {{ n.subject }}
                         </div>
                         <div class="notification-meta">
@@ -80,7 +62,7 @@
                     <div class="mt-md">
                         <form method="post"
                               action="{% url 'ctf:api_notification_send' notification_id=n.id %}"
-                              style="display: inline">
+                              class="d-inline">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-primary">
                                 {% trans "Send Now" %}

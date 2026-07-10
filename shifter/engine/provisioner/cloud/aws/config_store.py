@@ -26,5 +26,5 @@ class AWSConfigStore(BaseAWSAdapter):
             value: str = response["Parameter"]["Value"]
             return value
         except (ClientError, BotoCoreError) as e:
-            logger.error("get_parameter: failed name=%s error=%s", name, e)
+            logger.exception("get_parameter: failed name=%s error=%s", name, e)
             raise CloudConfigStoreError(f"Failed to get SSM parameter: {e}") from e

@@ -99,7 +99,7 @@ def handler(event, context):
 
         # Check if email is explicitly allowed
         if email in allowed_emails:
-            logger.info(f"Signup allowed: email in allowlist")
+            logger.info("Signup allowed: email in allowlist")
             return event
 
         # Check if email domain is allowed

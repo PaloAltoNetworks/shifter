@@ -103,6 +103,11 @@ variable "db_skip_final_snapshot" {
   type        = bool
 }
 
+variable "redis_apply_immediately" {
+  description = "Apply ElastiCache Redis modifications during the deploy instead of queueing them for the maintenance window."
+  type        = bool
+}
+
 variable "db_apply_immediately" {
   description = "Apply portal RDS modifications during the deploy instead of queueing them for the maintenance window."
   type        = bool
@@ -128,6 +133,17 @@ variable "ec2_root_volume_size" {
 }
 
 # ECR values come from terraform_remote_state.foundation
+
+variable "terraform_state_bucket" {
+  description = "S3 bucket hosting Terraform state for this deployment instance"
+  type        = string
+}
+
+variable "terraform_state_region" {
+  description = "AWS region for the Terraform state bucket"
+  type        = string
+  default     = "us-east-2"
+}
 
 # ------------------------------------------------------------------------------
 # ALB
@@ -228,13 +244,52 @@ variable "asg_desired_capacity" {
 }
 
 variable "scale_up_threshold" {
-  description = "CPU percentage threshold to trigger scale up"
+  description = "Average EC2 CPU percentage that fires the guardrail notification alarm (#940: CPU is a notification, not a scaling action)."
   type        = number
 }
 
-variable "scale_down_threshold" {
-  description = "CPU percentage threshold to trigger scale down"
+# Portal app-saturation autoscaling + observability (#940). Scale-out tracks ALB
+# request-path saturation instead of average EC2 CPU.
+variable "scale_target_requests_per_target" {
+  description = "ALBRequestCountPerTarget target-tracking value: requests per target per minute held steady (primary scale-out signal)."
   type        = number
+  default     = 1000
+}
+
+variable "scale_target_response_time_seconds" {
+  description = "ALB TargetResponseTime (Average, seconds) target-tracking value: the latency/queueing target held steady."
+  type        = number
+  default     = 0.5
+}
+
+variable "worker_busy_ratio_scale_out_threshold" {
+  description = "Hottest-worker WorkerBusyRatio above which the additive app-saturation scale-out fires."
+  type        = number
+  default     = 0.8
+}
+
+variable "target_response_time_alarm_threshold_seconds" {
+  description = "ALB p95 TargetResponseTime (seconds) above which the latency observability alarm notifies."
+  type        = number
+  default     = 1.0
+}
+
+variable "enable_portal_capacity_alarms" {
+  description = "Create the portal capacity CloudWatch alarms and dashboard."
+  type        = bool
+  default     = true
+}
+
+variable "portal_capacity_metrics_enabled" {
+  description = "Enable the per-worker Shifter/PortalCapacity metrics emitter (PORTAL_CAPACITY_METRICS_ENABLED)."
+  type        = bool
+  default     = false
+}
+
+variable "portal_worker_soft_concurrency" {
+  description = "Busy-ratio denominator: soft concurrent in-flight HTTP request target per portal web worker (PORTAL_WORKER_SOFT_CONCURRENCY)."
+  type        = number
+  default     = 6
 }
 
 # ------------------------------------------------------------------------------
@@ -546,6 +601,46 @@ variable "ctf_from_email" {
   default     = "ctf@example.com"
 }
 
+# Portal runtime capacity tunables (#930). Forwarded to the portal/ssm module,
+# which validates them; per-instance terminal cap = portal_web_workers *
+# terminal_max_sessions. Set explicitly in terraform.tfvars so event capacity
+# policy is visible in one place rather than hidden in the image defaults.
+variable "portal_web_workers" {
+  description = "Gunicorn/Uvicorn worker processes per portal instance (PORTAL_WEB_WORKERS), sized to instance vCPUs."
+  type        = number
+  default     = 4
+}
+
+variable "terminal_max_sessions" {
+  description = "Active terminal SSH sessions per worker process (TERMINAL_MAX_SESSIONS)."
+  type        = number
+  default     = 200
+}
+
+variable "terminal_max_sessions_per_user" {
+  description = "Active terminal SSH sessions per user, per worker process (TERMINAL_MAX_SESSIONS_PER_USER)."
+  type        = number
+  default     = 10
+}
+
+variable "terminal_idle_timeout_seconds" {
+  description = "Idle terminal session timeout in seconds (TERMINAL_IDLE_TIMEOUT_SECONDS)."
+  type        = number
+  default     = 1800
+}
+
+variable "terminal_max_session_seconds" {
+  description = "Hard ceiling on a terminal session lifetime in seconds (TERMINAL_MAX_SESSION_SECONDS)."
+  type        = number
+  default     = 28800
+}
+
+variable "terminal_read_poll_seconds" {
+  description = "Idle terminal read-loop poll interval in seconds (TERMINAL_READ_POLL_SECONDS)."
+  type        = number
+  default     = 30
+}
+
 variable "ses_domain" {
   description = "Domain for SES email sending (e.g., example.com)"
   type        = string
@@ -577,4 +672,47 @@ variable "django_secret_key_ci" {
   description = "Django secret key for CI testing (extracted by quality.yml workflow, not used by Terraform)"
   type        = string
   default     = ""
+}
+
+# ------------------------------------------------------------------------------
+# Long-lived connection lifecycle (#931)
+# ------------------------------------------------------------------------------
+# Explicit, ordered timing for the portal's long-lived WebSocket / RDP / SSH
+# workload. Prod uses full drain windows. Ordering: ws_ping(20s) < idle_timeout,
+# and graceful(30s) < docker_stop < dereg <= termination_drain.
+
+variable "alb_idle_timeout_seconds" {
+  description = "ALB idle timeout (s) for long-lived WebSocket connections (#931)."
+  type        = number
+  default     = 300
+}
+
+variable "portal_deregistration_delay_seconds" {
+  description = "Portal target-group deregistration delay (s) for connection drain (#931)."
+  type        = number
+  default     = 120
+}
+
+variable "guacamole_deregistration_delay_seconds" {
+  description = "Guacamole target-group deregistration delay (s) for RDP/SSH drain (#931)."
+  type        = number
+  default     = 120
+}
+
+variable "termination_drain_timeout" {
+  description = "ASG termination-drain hold (s) for in-flight session drain on refresh/scale-in (#931)."
+  type        = number
+  default     = 180
+}
+
+variable "docker_stop_timeout" {
+  description = "Docker stop grace (s) on redeploy; must exceed the 30s Gunicorn graceful timeout (#931)."
+  type        = number
+  default     = 35
+}
+
+variable "instance_refresh_min_healthy_percentage" {
+  description = "Minimum healthy percentage kept in service during an ASG instance refresh (#931)."
+  type        = number
+  default     = 50
 }

@@ -23,226 +23,137 @@
         </div>
     </div>
     {% if scenarios %}
-        <div class="card" style="padding: 0; overflow: hidden;">
-            <table class="table"
-                   style="width: 100%;
-                          border-collapse: collapse">
+        <div class="card card-flush">
+            <table class="table list-table">
                 <thead>
-                    <tr style="border-bottom: 1px solid var(--theme-border);">
-                        <th style="padding: 12px 16px;
-                                   text-align: left;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                    <tr>
+                        <th>
                             {% trans "Name" %}
                         </th>
-                        <th style="padding: 12px 16px;
-                                   text-align: left;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                        <th>
                             {% trans "ID" %}
                         </th>
-                        <th style="padding: 12px 16px;
-                                   text-align: left;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                        <th>
                             {% trans "Type" %}
                         </th>
-                        <th style="padding: 12px 16px;
-                                   text-align: center;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                        <th class="text-center">
                             {% trans "Instances" %}
                         </th>
-                        <th style="padding: 12px 16px;
-                                   text-align: center;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                        <th class="text-center">
                             {% trans "NGFW" %}
                         </th>
-                        <th style="padding: 12px 16px;
-                                   text-align: center;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                        <th class="text-center">
                             {% trans "Status" %}
                         </th>
-                        <th style="padding: 12px 16px;
-                                   text-align: center;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                        <th class="text-center">
                             {% trans "Access" %}
                         </th>
-                        <th style="padding: 12px 16px;
-                                   text-align: right;
-                                   font-weight: 600;
-                                   font-size: 12px;
-                                   text-transform: uppercase;
-                                   color: var(--theme-text-secondary)">
+                        <th class="text-right">
                             {% trans "Actions" %}
                         </th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for scenario in scenarios %}
-                        <tr style="border-bottom: 1px solid var(--theme-border);
-                                   {% if not scenario.enabled %}
-                                       opacity: 0.5;
-                                   {% endif %}">
-                            <td style="padding: 12px 16px;">
+                        <tr{% if not scenario.enabled %} class="is-disabled"{% endif %}>
+                            <td>
                                 <a href="{% url 'scenario_editor:detail' scenario_id=scenario.id %}"
-                                   class="link"
-                                   style="font-weight: 600">{{ scenario.name }}</a>
+                                   class="link link-semibold">{{ scenario.name }}</a>
                             </td>
-                            <td style="padding: 12px 16px;
-                                       color: var(--theme-text-secondary);
-                                       font-family: monospace;
-                                       font-size: 13px">
+                            <td class="text-muted text-mono-sm">
                                 {{ scenario.id }}
                             </td>
-                            <td style="padding: 12px 16px;">
-                                {% if scenario.is_default %}
-                                    <span style="display: inline-block;
-                                                 padding: 2px 8px;
-                                                 border-radius: 10px;
-                                                 font-size: 11px;
-                                                 background: rgba(100,100,255,0.15);
-                                                 color: #8888ff">{% trans "Default" %}</span>
+                            <td>
+                                {% if scenario.scenario_type == "aces" %}
+                                    <span class="badge badge-custom">{% trans "ACES" %}</span>
+                                {% elif scenario.is_default %}
+                                    <span class="badge badge-default">{% trans "Default" %}</span>
                                 {% else %}
-                                    <span style="display: inline-block;
-                                                 padding: 2px 8px;
-                                                 border-radius: 10px;
-                                                 font-size: 11px;
-                                                 background: rgba(100,200,100,0.15);
-                                                 color: #88cc88">{% trans "Custom" %}</span>
+                                    <span class="badge badge-custom">{% trans "Custom" %}</span>
                                 {% endif %}
                             </td>
-                            <td style="padding: 12px 16px; text-align: center;">
-                                {{ scenario.instances|length }}
-                            </td>
-                            <td style="padding: 12px 16px; text-align: center;">
-                                {% if scenario.ngfw %}
-                                    <span style="color: #88cc88;">{% trans "Yes" %}</span>
+                            <td class="text-center">
+                                {% if scenario.scenario_type == "aces" %}
+                                    <span class="text-muted">-</span>
                                 {% else %}
-                                    <span style="color: var(--theme-text-secondary);">{% trans "No" %}</span>
+                                    {{ scenario.instances|length }}
                                 {% endif %}
                             </td>
-                            <td style="padding: 12px 16px; text-align: center;">
+                            <td class="text-center">
+                                {% if scenario.scenario_type == "aces" %}
+                                    <span class="text-muted">-</span>
+                                {% elif scenario.ngfw %}
+                                    <span class="text-yes">{% trans "Yes" %}</span>
+                                {% else %}
+                                    <span class="text-muted">{% trans "No" %}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
                                 <form method="post"
                                       action="{% url 'scenario_editor:toggle_enabled' scenario_id=scenario.id %}"
-                                      style="display: inline">
+                                      class="d-inline">
                                     {% csrf_token %}
-                                    <button type="submit"
-                                            class="btn btn-sm"
-                                            onclick="return confirm('Toggle this setting?')"
-                                            style="min-width: 70px;
-                                                   font-size: 12px;
-                                                   height: 24px;
-                                                   padding: 0 10px;
-                                                   border-radius: 12px;
-                                                   {% if scenario.enabled %}
-                                                       background: rgba(100,200,100,0.2);
-                                                       color: #88cc88;
-                                                       border: 1px solid rgba(100,200,100,0.3);
-                                                   {% else %}
-                                                       background: rgba(200,100,100,0.2);
-                                                       color: #cc8888;
-                                                       border: 1px solid rgba(200,100,100,0.3);
-                                                   {% endif %}">
-                                        {% if scenario.enabled %}
+                                    {% if scenario.enabled %}
+                                        <button type="submit"
+                                                class="btn btn-sm toggle-btn toggle-btn-on"
+                                                onclick="return confirm('Toggle this setting?')">
                                             {% trans "Enabled" %}
-                                        {% else %}
+                                        </button>
+                                    {% else %}
+                                        <button type="submit"
+                                                class="btn btn-sm toggle-btn toggle-btn-off"
+                                                onclick="return confirm('Toggle this setting?')">
                                             {% trans "Disabled" %}
-                                        {% endif %}
-                                    </button>
+                                        </button>
+                                    {% endif %}
                                 </form>
                             </td>
-                            <td style="padding: 12px 16px; text-align: center;">
+                            <td class="text-center">
                                 <form method="post"
                                       action="{% url 'scenario_editor:toggle_staff_only' scenario_id=scenario.id %}"
-                                      style="display: inline">
+                                      class="d-inline">
                                     {% csrf_token %}
-                                    <button type="submit"
-                                            class="btn btn-sm"
-                                            onclick="return confirm('Toggle this setting?')"
-                                            style="min-width: 70px;
-                                                   font-size: 12px;
-                                                   height: 24px;
-                                                   padding: 0 10px;
-                                                   border-radius: 12px;
-                                                   {% if scenario.staff_only %}
-                                                       background: rgba(255,180,50,0.2);
-                                                       color: #ddaa44;
-                                                       border: 1px solid rgba(255,180,50,0.3);
-                                                   {% else %}
-                                                       background: rgba(100,100,100,0.2);
-                                                       color: var(--theme-text-secondary);
-                                                       border: 1px solid rgba(100,100,100,0.3);
-                                                   {% endif %}">
-                                        {% if scenario.staff_only %}
+                                    {% if scenario.staff_only %}
+                                        <button type="submit"
+                                                class="btn btn-sm toggle-btn toggle-btn-staff"
+                                                onclick="return confirm('Toggle this setting?')">
                                             {% trans "Staff Only" %}
-                                        {% else %}
+                                        </button>
+                                    {% else %}
+                                        <button type="submit"
+                                                class="btn btn-sm toggle-btn toggle-btn-public"
+                                                onclick="return confirm('Toggle this setting?')">
                                             {% trans "All Users" %}
-                                        {% endif %}
-                                    </button>
+                                        </button>
+                                    {% endif %}
                                 </form>
                             </td>
-                            <td style="padding: 12px 16px; text-align: right;">
-                                <div class="flex-row gap-sm" style="justify-content: flex-end;">
-                                    <a href="{% url 'scenario_editor:clone' scenario_id=scenario.id %}"
-                                       class="btn btn-secondary"
-                                       style="font-size: 12px;
-                                              height: 24px;
-                                              padding: 0 10px;
-                                              border-radius: 12px;
-                                              min-width: auto">{% trans "Clone" %}</a>
-                                    {% if not scenario.is_default %}
-                                        <a href="{% url 'scenario_editor:edit' scenario_id=scenario.id %}"
-                                           class="btn btn-secondary"
-                                           style="font-size: 12px;
-                                                  height: 24px;
-                                                  padding: 0 10px;
-                                                  border-radius: 12px;
-                                                  min-width: auto">{% trans "Edit" %}</a>
-                                    {% endif %}
-                                    <a href="{% url 'scenario_editor:export' scenario_id=scenario.id %}"
-                                       class="btn btn-secondary"
-                                       style="font-size: 12px;
-                                              height: 24px;
-                                              padding: 0 10px;
-                                              border-radius: 12px;
-                                              min-width: auto">{% trans "YAML" %}</a>
-                                    {% if not scenario.is_default %}
-                                        <form method="post"
-                                              action="{% url 'scenario_editor:delete' scenario_id=scenario.id %}"
-                                              style="display: inline">
-                                            {% csrf_token %}
-                                            <button type="submit"
-                                                    class="btn js-scenario-delete-btn"
-                                                    data-scenario-name="{{ scenario.name }}"
-                                                    style="font-size: 12px;
-                                                           height: 24px;
-                                                           padding: 0 10px;
-                                                           border-radius: 12px;
-                                                           min-width: auto;
-                                                           background: rgba(200,50,50,0.2);
-                                                           color: #cc6666;
-                                                           border: 1px solid rgba(200,50,50,0.3)">
-                                                {% trans "Delete" %}
-                                            </button>
-                                        </form>
+                            <td class="text-right">
+                                <div class="flex-row gap-sm flex-end">
+                                    {% if scenario.scenario_type == "aces" %}
+                                        <a href="{% url 'scenario_editor:detail' scenario_id=scenario.id %}"
+                                           class="btn btn-secondary btn-row-action">{% trans "View" %}</a>
+                                    {% else %}
+                                        <a href="{% url 'scenario_editor:clone' scenario_id=scenario.id %}"
+                                           class="btn btn-secondary btn-row-action">{% trans "Clone" %}</a>
+                                        {% if not scenario.is_default %}
+                                            <a href="{% url 'scenario_editor:edit' scenario_id=scenario.id %}"
+                                               class="btn btn-secondary btn-row-action">{% trans "Edit" %}</a>
+                                        {% endif %}
+                                        <a href="{% url 'scenario_editor:export' scenario_id=scenario.id %}"
+                                           class="btn btn-secondary btn-row-action">{% trans "YAML" %}</a>
+                                        {% if not scenario.is_default %}
+                                            <form method="post"
+                                                  action="{% url 'scenario_editor:delete' scenario_id=scenario.id %}"
+                                                  class="d-inline">
+                                                {% csrf_token %}
+                                                <button type="submit"
+                                                        class="btn btn-row-action btn-delete js-scenario-delete-btn"
+                                                        data-scenario-name="{{ scenario.name }}">
+                                                    {% trans "Delete" %}
+                                                </button>
+                                            </form>
+                                        {% endif %}
                                     {% endif %}
                                 </div>
                             </td>
@@ -252,8 +163,8 @@
             </table>
         </div>
     {% else %}
-        <div class="card" style="text-align: center; padding: 48px;">
-            <p class="text-muted" style="margin-bottom: 16px;">
+        <div class="card empty-state">
+            <p class="text-muted mb-lg">
                 {% trans "No scenarios found." %}
             </p>
             <a href="{% url 'scenario_editor:create' %}"

@@ -21,7 +21,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV2_AWS_57 (Secrets Manager rotation): rotation requires a custom Lambda that knows how to update the consumer-side credential (AD Administrator password, NGFW SSH key baked into Panorama config, Cognito client secret bound to the IdP). Building one rotation Lambda per consumer is out of scope for #757; manual rotation procedures are documented in each module that owns the secret. Each affected secret carries an inline `# checkov:skip=CKV2_AWS_57` pointer back to this entry.",
+    "reason": "CKV2_AWS_57 (Secrets Manager rotation): rotation requires a custom Lambda that knows how to update the consumer-side credential (AD Administrator password, NGFW SSH key baked into Panorama config, Cognito client secret bound to the IdP). Building one rotation Lambda per remaining consumer is out of scope for #757; manual rotation procedures are documented in each module that owns the secret. Each affected secret carries an inline `# checkov:skip=CKV2_AWS_57` pointer back to this entry. The portal Redis AUTH token is excluded: it now has an automatic rotation Lambda (portal/redis/rotation.tf, #159).",
     "expires_on": "2026-11-26",
     "paths": [
       "platform/terraform/modules/engine-provisioner/",
@@ -38,7 +38,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_355 / CKV_AWS_290 / CKV_AWS_289 (IAM wildcard resource / unconstrained write / unconstrained permissions management): the engine provisioner orchestrates EC2, VPC endpoints, Security Groups, Route Tables, NAT Gateways, and Internet Gateways across arbitrary ranges. Many AWS APIs require Resource = '*' by design (e.g. CreateRouteTable, CreateSubnet, ec2:CreateTags). The runtime path is constrained by tag-based StringEquals conditions (aws:RequestTag / ec2:ResourceTag) where the API supports it. Narrowing further would require tagging at create time on every API call which is not universally supported. ELBv2 (GWLB) wildcards were narrowed in #46: the gwlb policy now scopes mutable actions to Gateway Load Balancer ARNs with ownership tag conditions and is regression-checked by scripts/check_tf_iam_elb_scope.",
+    "reason": "CKV_AWS_355 / CKV_AWS_290 / CKV_AWS_289 (IAM wildcard resource / unconstrained write / unconstrained permissions management): the engine provisioner orchestrates EC2, VPC endpoints, Security Groups, Route Tables, NAT Gateways, and Internet Gateways across arbitrary ranges. Many AWS APIs require Resource = '*' by design (e.g. CreateRouteTable, CreateSubnet, ec2:CreateTags). The runtime path is constrained by tag-based StringEquals conditions (aws:RequestTag / ec2:ResourceTag) where the API supports it. Narrowing further would require tagging at create time on every API call which is not universally supported. ELBv2 (GWLB) wildcards were narrowed in #46: the gwlb policy now scopes mutable actions to Gateway Load Balancer ARNs with ownership tag conditions and is regression-checked by scripts/check_tf_iam_elb_scope. SSM Run Command was narrowed in #1179: ssm:SendCommand instance targeting and ec2:RebootInstances are now scoped to range guest instances via ssm:resourceTag/ec2:ResourceTag conditions (instance and document authorization split), regression-checked by scripts/check_tf_iam_ssm_scope.",
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/engine-provisioner/iam.tf"
@@ -119,7 +119,15 @@
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/log-aggregation/s3.tf",
-      "platform/terraform/modules/engine-state/",
+      "platform/terraform/modules/engine-state/"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 (S3 access logging / versioning / cross-region replication / event notifications): portal user-uploads bucket stores ephemeral presigned-PUT data only; authoritative state is in RDS. Versioning is disabled to avoid retaining deleted uploads (#109). Access logging awaits the unified logging strategy (#310). Cross-region replication evaluated and rejected — CRR requires versioning, adds destination-bucket/KMS/replication-role cost, and the upload data is re-creatable; see docs/architecture/s3-bucket-hardening-preflight.md § Cross-Region Replication Evaluation (#143). Event notifications are omitted until a real consumer exists.",
+    "expires_on": "2027-05-26",
+    "paths": [
       "platform/terraform/modules/portal/s3/"
     ]
   },
@@ -163,7 +171,16 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_29 / CKV_AWS_30 / CKV_AWS_31 / CKV_AWS_191 (ElastiCache encryption at rest, in transit, auth token, CMK): enabling these on the portal Redis replication group requires Django Channels client-side TLS + auth-token plumbing (tracked under #295). Carry the inline skips on the resource itself.",
+    "reason": "CKV_GCP_46 / CKV_GCP_49 on google_project_iam_member.default_compute_cloud_build in gcp/modules/platform-core/main.tf: the gen1 Identity Platform beforeCreate blocking function is built by Cloud Build, which runs as the GCP project default compute service account. New projects no longer auto-grant Editor to default SAs, so the build fails reading its gcf-sources bucket unless granted roles/cloudbuild.builds.builder explicitly. CKV_GCP_46 (default SA at project level) and CKV_GCP_49 (a role with actAs) are both intrinsic to giving Cloud Build the minimal build-worker role; the binding is gated on enable_identity_blocking_function (off where org policy forbids the allUsers invoker the function needs) and confers no SA management beyond the Cloud Build agent. Inline checkov:skip comments on the resource point back to this entry (#615).",
+    "expires_on": "2026-11-26",
+    "paths": [
+      "platform/terraform/gcp/modules/platform-core/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "ElastiCache encryption deferral on portal Redis — single-node path only. The replication group (prod / active channel-layer path) is fully encrypted: #938 enabled in-transit encryption (CKV_AWS_30) and AUTH (CKV_AWS_31), and #1059 enabled at-rest encryption (CKV_AWS_29) under a dedicated customer-managed KMS CMK (CKV_AWS_191), so those replication-group skips are removed. Single-node path (dev-only / private-subnet, unused — dev sets enable_redis=false): retains plaintext, so CKV_AWS_30 (in transit) and CKV_AWS_31 (at rest) stay skipped with a documented threat-model acceptance block on the resource (#938). Carry the inline skips on the single-node resource itself.",
     "expires_on": "2026-11-26",
     "paths": [
       "platform/terraform/modules/portal/redis/main.tf"
@@ -172,10 +189,20 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "Cognito pre-signup Lambda (CKV_AWS_50 / CKV_AWS_115 / CKV_AWS_116 / CKV_AWS_117 / CKV_AWS_173 / CKV_AWS_272): invoked synchronously by Cognito from AWS-owned infrastructure. DLQ does not apply to sync invocations; reserved concurrency would block legitimate signups; VPC config forces Cognito VPC endpoints for no security gain; env vars are non-sensitive allowlists; code signing needs CodeArtifact + Signer. Inline skips carry the per-rule justification.",
+    "reason": "Cognito pre-signup Lambda (main.tf) and the operator-triggered client-secret rotation Lambda (rotation.tf, #159) (CKV_AWS_50 / CKV_AWS_115 / CKV_AWS_116 / CKV_AWS_117 / CKV_AWS_173 / CKV_AWS_272): pre-signup is invoked synchronously by Cognito from AWS-owned infrastructure; the rotation Lambda is invoked on demand by an operator and calls only public AWS APIs (Cognito, Secrets Manager, Auto Scaling). DLQ does not apply to these invocations; reserved concurrency is unnecessary; a VPC config buys no security for AWS-API-only calls; env vars are non-sensitive (allowlists / a secret ARN reference); code signing needs CodeArtifact + Signer. CKV_AWS_297 (rotation.tf): the EventBridge Scheduler reminder's input is a non-sensitive reminder message (no secret data), and the portal Secrets CMK is kms:ViaService-scoped to Secrets Manager so the scheduler cannot use it; a CMK adds no protection. Inline skips carry the per-rule justification.",
     "expires_on": "2027-05-26",
     "paths": [
-      "platform/terraform/modules/portal/cognito/main.tf"
+      "platform/terraform/modules/portal/cognito/main.tf",
+      "platform/terraform/modules/portal/cognito/rotation.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "Redis AUTH rotation Lambda + rotation resource (CKV_AWS_50 / CKV_AWS_115 / CKV_AWS_116 / CKV_AWS_173 / CKV_AWS_272 / CKV_AWS_304, #159): a scheduled Secrets Manager rotation function. DLQ and reserved concurrency do not apply (Secrets Manager invokes it serially and owns the retry/alarm lifecycle); env vars are non-sensitive (replication-group id, Redis host/port, ASG name) and the AUTH token is read from Secrets Manager, never an env var; X-Ray adds no observability over CloudWatch logs; code signing needs CodeArtifact + Signer. CKV_AWS_304: rotation IS configured and redis_auth_rotation_days is bounded to <=90 by variable validation, so the cadence is always within the 90-day window; Checkov cannot resolve the variable default. Inline skips carry the per-rule justification.",
+    "expires_on": "2027-05-26",
+    "paths": [
+      "platform/terraform/modules/portal/redis/rotation.tf"
     ]
   },
   {
@@ -215,6 +242,51 @@
     "expires_on": "2026-11-26",
     "paths": [
       "platform/terraform/modules/guacamole/ecs.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R14",
+    "owner": "@Brad-Edwards",
+    "reason": "Vendor (Prisma Cloud) AWS connector CloudFormation templates. The 12-digit account IDs in these downloaded templates are Palo Alto Networks' own published service account IDs (gcp_saas_role, dspm_scanner, etc.) and MUST stay exact for the cross-account connector roles to function. They are not Shifter infrastructure and carry no reconnaissance value about this deployment.",
+    "expires_on": "2027-06-20",
+    "paths": [
+      "platform/cloudformation/*"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R14",
+    "owner": "@Brad-Edwards",
+    "reason": "Operational state-bucket map in the mcp/ops server, which reads live Terraform state from these UUID-suffixed infra/state buckets at runtime. The bucket names do not embed the AWS account ID. Moving them to runtime config is a separate change to the agent's working-day surface and out of scope for the identifier-strip; retained explicitly here.",
+    "expires_on": "2027-06-20",
+    "paths": [
+      "mcp/ops/index.js"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R14",
+    "owner": "@Brad-Edwards",
+    "reason": "Synthetic PAN-OS firewall serial-number fixtures in unit tests. PAN firewall serials are 12 digits, structurally identical to AWS account IDs, so the pattern check cannot distinguish them. These are fabricated test serial values, not live AWS accounts or infrastructure.",
+    "expires_on": "2027-06-20",
+    "paths": [
+      "shifter/engine/provisioner/tests/test_main.py"
+    ]
+  },
+  {
+    "rule_id": "ADR-019-R1",
+    "owner": "@Brad-Edwards",
+    "reason": "SSH executor secret-masking test (#418): test_ssh_executor.py grows from 1 to 2 patches of paramiko.SSHClient. The second patch tests that command text and device output containing secrets are not logged (test_run_command_does_not_log_secret_text); the first tests host-key verification policy setup. Both test observable behavior (security properties) at the network boundary, not internal implementation. No change in internal seam count.",
+    "expires_on": "2027-06-28",
+    "paths": [
+      "scripts/adr_guard/boundary_mock_baseline.json"
+    ]
+  },
+  {
+    "rule_id": "ADR-019-R1",
+    "owner": "@Brad-Edwards",
+    "reason": "Bootstrap deploy test split (#687): scripts/bootstrap/tests/test_deploy.py was mechanically decomposed into behavior-focused test files. The baseline entries moved from the deleted monolithic file to the new split files so the ratchet still covers the same legacy seams; after porting the latest dev GCP/GDC tests, the aggregate bootstrap allowance shrank from 215 to 214 and no new internal patch target family was introduced.",
+    "expires_on": "2027-06-30",
+    "paths": [
+      "scripts/adr_guard/boundary_mock_baseline.json"
     ]
   }
 ]

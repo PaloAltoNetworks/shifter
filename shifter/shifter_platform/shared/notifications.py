@@ -44,6 +44,11 @@ class NotificationRegistration:
 _registry: dict[str, NotificationRegistration] = {}
 
 
+def notifications_enabled() -> bool:
+    """Return whether the shared persisted notification subsystem is active (issue #941)."""
+    return bool(getattr(settings, "WEBSOCKET_NOTIFICATIONS_ENABLED", False))
+
+
 def _identity_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     """Return a shallow JSON-style payload copy."""
     return dict(payload)
@@ -216,7 +221,13 @@ def publish_notification(
     recipient_ids: Iterable[int],
     event_id: uuid.UUID | str | None = None,
 ) -> list[WebSocketNotification]:
-    """Persist and fan out a browser notification to recipient topic groups."""
+    """Persist and fan out a browser notification to recipient topic groups.
+
+    No-op when the shared notification subsystem is disabled (issue #941): no
+    ``WebSocketNotification`` rows are created and no channel-layer fan-out runs.
+    """
+    if not notifications_enabled():
+        return []
     registration = _registration_for_publish(notification_type, topic)
     projected_payload = dict(registration.payload_handler(dict(payload)))
     normalized_event_id = _coerce_event_id(event_id)

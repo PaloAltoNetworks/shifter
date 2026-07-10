@@ -12,11 +12,11 @@ The re-exports also rebind names that tests historically patch at
 ``audit_log``, the ``engine_*`` aliases, ``RangeInstance``) so existing
 ``unittest.mock.patch`` targets still work.
 
-The cross-layer re-exports (``cms.experiments.*``, ``cms.signals.*``) are
+The cross-layer re-export (``cms.signals.*``) is
 preserved on the facade so the layer-imports gate
 (``scripts/check_layer_imports/layer_imports.yaml``) continues to allow
 only ``cms.services`` from mission_control / ctf rather than reaching into
-``cms.experiments`` / ``cms.signals`` directly.
+``cms.signals`` directly.
 """
 
 from __future__ import annotations
@@ -29,11 +29,6 @@ from cms.assets.services import AgentUploadSpec
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.exceptions import CMSError
-from cms.experiments.exceptions import ScriptUploadError as ScriptUploadError
-from cms.experiments.services import complete_script_upload as complete_script_upload
-from cms.experiments.services import delete_script as delete_script
-from cms.experiments.services import initiate_script_upload as initiate_script_upload
-from cms.experiments.services import list_scripts as list_scripts
 from cms.models import AgentConfig, RangeInstance
 from cms.signals import range_status_changed as range_status_changed
 from engine.services import cancel_range_by_request as engine_cancel_range_by_request
@@ -41,6 +36,7 @@ from engine.services import create_range as engine_create_range
 from engine.services import destroy_range_by_request as engine_destroy_range_by_request
 from engine.services import get_instance_ips_by_uuid as engine_get_instance_ips_by_uuid
 from engine.services import pause_range as engine_pause_range
+from engine.services import reassign_range_owner_by_request as engine_reassign_range_owner
 from engine.services import resume_range as engine_resume_range
 from risk_register.services import AuditEvent, audit_log
 
@@ -82,11 +78,14 @@ from ._range_queries import (
     get_active_range,
     get_range,
     get_range_by_request_id,
+    has_ready_active_range,
     list_ranges,
 )
+from ._range_reassign import reassign_range_owner
 from ._range_resume import resume_range, resume_range_by_request_id
 from ._scenarios import (
     get_scenario,
+    list_launchable_scenarios,
     list_scenarios,
     validate_scenario_requirements,
 )
@@ -97,24 +96,22 @@ from ._uploads import (
     initiate_upload,
 )
 
-# Cross-layer re-exports preserved on cms.services so the layer-imports gate
+# Cross-layer re-export preserved on cms.services so the layer-imports gate
 # (scripts/check_layer_imports/layer_imports.yaml) can continue to allow only
 # `cms.services` from mission_control / ctf rather than reaching into
-# cms.experiments / cms.signals directly.
+# cms.signals directly.
 __all__ = (
     "AgentConfig",
     "AgentUploadSpec",
     "AuditEvent",
     "CMSError",
     "RangeInstance",
-    "ScriptUploadError",
     "assets_create_agent",
     "assets_delete_agent",
     "audit_log",
     "cancel_range",
     "cancel_range_by_request_id",
     "cancel_upload",
-    "complete_script_upload",
     "complete_upload",
     "create_agent",
     "create_credential",
@@ -122,7 +119,6 @@ __all__ = (
     "create_range",
     "delete_agent",
     "delete_credential",
-    "delete_script",
     "destroy_ngfw",
     "destroy_range",
     "destroy_range_by_request_id",
@@ -131,6 +127,7 @@ __all__ = (
     "engine_destroy_range_by_request",
     "engine_get_instance_ips_by_uuid",
     "engine_pause_range",
+    "engine_reassign_range_owner",
     "engine_resume_range",
     "find_range_instance_id_by_request",
     "get_active_range",
@@ -145,17 +142,18 @@ __all__ = (
     "get_range_target_instances",
     "get_scenario",
     "get_storage_used",
-    "initiate_script_upload",
+    "has_ready_active_range",
     "initiate_upload",
     "list_agents",
     "list_credentials",
+    "list_launchable_scenarios",
     "list_ngfws",
     "list_ranges",
     "list_scenarios",
-    "list_scripts",
     "pause_range",
     "pause_range_by_request_id",
     "range_status_changed",
+    "reassign_range_owner",
     "resume_range",
     "resume_range_by_request_id",
     "validate_scenario_requirements",

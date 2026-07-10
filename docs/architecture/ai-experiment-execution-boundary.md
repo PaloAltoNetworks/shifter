@@ -2,6 +2,10 @@
 
 Issue: #1186
 
+Superseded note: ADR-027 / issue #1195 removed the legacy experiments runtime
+path that this document described. Retain this note only as historical security
+context for any future ACES-backed experiment design.
+
 This document defines the v1 capability policy for experiment runs that invoke
 Claude Code from range infrastructure. The matching code-level policy version is
 `ai-experiment-execution-v1` in `cyberscript.script_context`.
@@ -20,9 +24,10 @@ defense in depth; they are not the security boundary.
 
 ## Execution scope
 
-Claude Code execution is allowed only from the experiment executor path that
-builds commands through `ScriptExecutionContext`. The allowed invocation prefix
-is:
+This document governs non-interactive experiment-dispatched Claude Code runs.
+Within that experiment automation boundary, Claude Code execution is allowed
+only from the experiment executor path that builds commands through
+`ScriptExecutionContext`. The allowed invocation prefix is:
 
 ```text
 claude --dangerously-skip-permissions --output-format stream-json
@@ -33,6 +38,10 @@ launched inside provisioned experiment ranges and must run non-interactively.
 Any additional Claude privilege flag, alternate output format, or bypass of
 `ScriptExecutionContext` is a security-sensitive change and must update this
 document and the policy-versioned tests in the same PR.
+
+Interactive range-box Claude startup is a separate user-terminal concern. It is
+not authorized by this experiment policy and must keep its own boundary; see
+`claude-code-autostart-preflight-180.md`.
 
 ## Files and artifacts
 

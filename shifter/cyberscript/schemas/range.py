@@ -59,18 +59,15 @@ class InstanceSpec(SpecBase):
 
     Attributes:
         name: User-friendly instance name (inherited from SpecBase).
-        uuid: Unique identifier for this instance (assigned during hydration).
+        uuid: Unique identifier for this instance (inherited from SpecBase).
         role: Instance role (attacker, victim, dc, or ngfw).
         os_type: Operating system type (kali, ubuntu, windows, or panos).
         agent: Optional agent details for agent installation.
         dc_config: Optional domain controller configuration.
         join_domain: Whether instance should join the domain (default False).
         ngfw_app: Optional NGFW app spec for NGFW instances.
-
-    TODO: Remove redundant uuid field - now inherited from SpecBase (#522).
     """
 
-    uuid: str | None = None  # TODO: Remove - inherited from SpecBase (#522)
     role: Literal["attacker", "victim", "dc", "ngfw"]
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     agent: AgentDetails | None = None
@@ -159,14 +156,20 @@ def _resolve_os_and_agent(
     Returns:
         Tuple of (resolved_os_type, agent_object or None).
     """
-    if not xdr_agent:
-        return template_os_type, None
-
+    # `from_agent` derives the victim OS from the user-provided agent, so it
+    # always needs an agent regardless of the `xdr_agent` flag (the flag gates
+    # fixed-OS agent installs, not OS resolution). Handle it before the
+    # `xdr_agent` gate so a `from_agent` instance with `xdr_agent: false` (e.g.
+    # the canonical `basic` victim) still resolves instead of leaking the
+    # literal "from_agent" into InstanceSpec validation.
     if template_os_type == "from_agent":
         agent_obj = next(iter(agents.values()), None)
         if agent_obj is None:
             raise ValueError(f"Instance '{name}' uses from_agent but no agent provided")
         return _resolve_agent_os(agent_obj), agent_obj
+
+    if not xdr_agent:
+        return template_os_type, None
 
     if template_os_type == "windows":
         return template_os_type, agents.get("windows")

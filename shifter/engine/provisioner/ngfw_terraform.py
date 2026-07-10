@@ -124,7 +124,7 @@ def run_ngfw_terraform(operation: str, request_id: str) -> None:
 
     except Exception as e:
         error_msg = str(e)[:1000]
-        logger.error("NGFW Terraform operation failed: %s", error_msg)
+        logger.exception("NGFW Terraform operation failed: %s", error_msg)
 
         if operation == "up":
             try:

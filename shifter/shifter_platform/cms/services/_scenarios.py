@@ -57,6 +57,44 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
         raise
 
 
+def list_launchable_scenarios(user: User, workflow: str = "range_launch") -> list[dict[str, Any]]:
+    """Get scenarios a given launch workflow may consume.
+
+    Staff review listings (the full catalog) use ``list_scenarios``; launch,
+    CTF event, CTF participant, and experiment selection paths use this so they
+    never offer or accept a non-launchable ACES entry. Legacy YAML/DB scenarios
+    remain launchable for every workflow.
+
+    Args:
+        user: User requesting scenarios.
+        workflow: A ``ScenarioWorkflow`` value (defaults to range launch).
+
+    Returns:
+        List of launchable scenario dicts for the workflow.
+
+    Raises:
+        TypeError: If user is None or invalid type.
+        ValueError: If user is unsaved.
+    """
+    from cms.scenarios.registry import ScenarioWorkflow
+    from cms.scenarios.registry import list_launchable_scenarios as _registry_list_launchable
+
+    _validate_caller_user(user, "list_launchable_scenarios")
+
+    try:
+        result = _registry_list_launchable(user=user, workflow=ScenarioWorkflow(workflow))
+        logger.debug(
+            "list_launchable_scenarios returning %d scenarios for user_id=%s workflow=%s",
+            len(result),
+            user.id,
+            workflow,
+        )
+        return result
+    except Exception:
+        logger.exception("Error in list_launchable_scenarios for user_id=%s", user.id)
+        raise
+
+
 def get_scenario(scenario_id: str) -> dict[str, Any]:
     """Get a single scenario template by ID.
 
@@ -103,7 +141,7 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
     Raises:
         CMSError: If validation fails (agent missing, wrong OS, etc.)
     """
-    from cms.scenarios.registry import load_scenario_template
+    from cms.scenarios.registry import load_demo_scenario_template
 
     logger.debug(
         "validate_scenario_requirements called for scenario_id=%s",
@@ -111,7 +149,7 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
     )
 
     try:
-        scenario = load_scenario_template(scenario_id)
+        scenario = load_demo_scenario_template(scenario_id)
     except ValueError as e:
         logger.error(
             "validate_scenario_requirements: scenario '%s' not found",

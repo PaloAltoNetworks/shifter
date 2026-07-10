@@ -38,7 +38,15 @@ spec:
           image: {{ include "shifter.portalImage" . }}
           imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
-          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          # readOnlyRootFilesystem is on (containerSecurityContextApp); the portal
+          # writes media under MEDIA_ROOT=/app/media (Django FileSystemStorage, also
+          # exercised by the storage health check on /health/), so it needs a
+          # writable volume there in addition to /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: media
+              mountPath: /app/media
           envFrom:
             - configMapRef:
                 name: platform-runtime
@@ -59,4 +67,10 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.portal.resources | nindent 12 }}
-      {{- include "shifter.tmpVolume" . | nindent 6 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+        - name: media
+          emptyDir:
+            sizeLimit: {{ .Values.mediaVolume.sizeLimit | quote }}

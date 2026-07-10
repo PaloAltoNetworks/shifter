@@ -114,3 +114,14 @@ variable "victim_allowed_cidrs" {
     error_message = "victim_allowed_cidrs must be a list of canonical CIDR network addresses (IPv4 or IPv6) with no duplicates; default-route prefixes (parsed prefix length 0) and host-bits-set inputs are rejected."
   }
 }
+
+variable "range_egress_mode" {
+  description = "Runtime route-table egress posture for participant subnets (bridge for shifter.yaml settings.range_egress.mode). One of allowlist, none."
+  type        = string
+  default     = "allowlist"
+
+  validation {
+    condition     = contains(["allowlist", "none"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: allowlist, none."
+  }
+}

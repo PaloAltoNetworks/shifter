@@ -75,6 +75,11 @@ output "firewall_endpoint_id" {
   value       = module.vpc.firewall_endpoint_id
 }
 
+output "range_egress_mode" {
+  description = "Runtime route-table egress posture for participant subnets (from shifter.yaml settings.range_egress)"
+  value       = var.range_egress_mode
+}
+
 # ------------------------------------------------------------------------------
 # Engine State Backend
 # ------------------------------------------------------------------------------

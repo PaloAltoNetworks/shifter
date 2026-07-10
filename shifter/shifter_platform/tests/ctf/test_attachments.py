@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import pytest
@@ -145,6 +146,14 @@ class TestAddChallengeFile:
 
         with pytest.raises(CTFValidationError, match="Maximum files"):
             add_challenge_file(challenge.id, _make_file(), "one_more.txt", actor_id=challenge.event.created_by_id)
+
+    def test_upload_failure_raises_validation_error(self, challenge, mock_s3):
+        """A failed S3 upload (inside the cap lock) surfaces as CTFValidationError (#1147)."""
+        from botocore.exceptions import ClientError
+
+        mock_s3.upload_fileobj.side_effect = ClientError({"Error": {"Code": "500", "Message": "boom"}}, "PutObject")
+        with pytest.raises(CTFValidationError, match="File upload failed"):
+            add_challenge_file(challenge.id, _make_file(), "f.txt", actor_id=challenge.event.created_by_id)
 
     def test_non_modifiable_event_rejected(self, organizer_user, mock_s3):
         """Cannot upload files when event is not content-modifiable."""
@@ -313,7 +322,7 @@ class TestGetDownloadUrl:
             actor_id=challenge.event.created_by_id,
         )
         url, filename = get_download_url(cf.id)
-        assert "amazonaws.com" in url
+        assert urlparse(url).netloc.endswith(".amazonaws.com")
         assert filename == "download_me.pcap"
 
     def test_nonexistent_file_raises(self, db, mock_s3):

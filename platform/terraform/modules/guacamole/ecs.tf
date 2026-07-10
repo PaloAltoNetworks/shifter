@@ -204,10 +204,19 @@ resource "aws_ecs_task_definition" "guacamole_client" {
 # ------------------------------------------------------------------------------
 
 resource "aws_ecs_service" "guacamole_client" {
-  name                 = "${var.name_prefix}-guacamole-client"
-  cluster              = aws_ecs_cluster.guacamole.id
-  task_definition      = aws_ecs_task_definition.guacamole_client.arn
-  desired_count        = var.guacamole_client_desired_count
+  name = "${var.name_prefix}-guacamole-client"
+
+  cluster         = aws_ecs_cluster.guacamole.id
+  task_definition = aws_ecs_task_definition.guacamole_client.arn
+
+  # Hard-pinned to one task: the client tier mints and serves Guacamole auth
+  # tokens from task-local process memory, so N>1 breaks first-click RDP (#928).
+  # The invariant lives here, at the module boundary, rather than in a per-env
+  # input, so a generated/deployed local.auto.tfvars value cannot reconcile the
+  # service back to multiple client tasks. var.guacamole_client_desired_count is
+  # validated to 1 (see variables.tf) and intentionally not wired to this count.
+  desired_count = 1
+
   launch_type          = "FARGATE"
   force_new_deployment = true
 
@@ -236,8 +245,18 @@ resource "aws_ecs_service" "guacamole_client" {
     Name = "${var.name_prefix}-guacamole-client"
   })
 
+  # No ignore_changes on desired_count: the client tier has no autoscaler
+  # (see #928) and the count is hard-pinned to 1 above, so Terraform enforces
+  # the single-task posture that keeps Guacamole token/task affinity intact.
   lifecycle {
-    ignore_changes = [desired_count]
+    # Belt-and-suspenders: the count is the literal 1 above and cannot be
+    # scaled by any input. This precondition also rejects a per-env (including
+    # generated local.auto.tfvars) value that disagrees, so the misconfig is
+    # caught at plan time rather than silently ignored (#928).
+    precondition {
+      condition     = var.guacamole_client_desired_count == 1
+      error_message = "guacamole_client_desired_count must be 1: the guacamole-client tier is single-task by design (token/task affinity, #928)."
+    }
   }
 
   depends_on = [
@@ -280,34 +299,11 @@ resource "aws_appautoscaling_policy" "guacd_cpu" {
 }
 
 # ------------------------------------------------------------------------------
-# Auto Scaling - Guacamole Client
+# Auto Scaling - Guacamole Client: intentionally none.
+#
+# The guacamole-client tier mints and serves Guacamole auth tokens from task-
+# local process memory, so it must run as a single task; scaling it to N>1
+# breaks first-click RDP (token minted on one task, served by another). guacd
+# is the per-connection capacity tier and carries the autoscaling above. See
+# issue #928 and docs/architecture/guacamole-token-affinity-preflight-928.md.
 # ------------------------------------------------------------------------------
-
-resource "aws_appautoscaling_target" "guacamole_client" {
-  count = var.enable_autoscaling ? 1 : 0
-
-  max_capacity       = var.autoscaling_max_capacity
-  min_capacity       = var.autoscaling_min_capacity
-  resource_id        = "service/${aws_ecs_cluster.guacamole.name}/${aws_ecs_service.guacamole_client.name}"
-  scalable_dimension = "ecs:service:DesiredCount"
-  service_namespace  = "ecs"
-}
-
-resource "aws_appautoscaling_policy" "guacamole_client_cpu" {
-  count = var.enable_autoscaling ? 1 : 0
-
-  name               = "${var.name_prefix}-guacamole-client-cpu-scaling"
-  policy_type        = "TargetTrackingScaling"
-  resource_id        = aws_appautoscaling_target.guacamole_client[0].resource_id
-  scalable_dimension = aws_appautoscaling_target.guacamole_client[0].scalable_dimension
-  service_namespace  = aws_appautoscaling_target.guacamole_client[0].service_namespace
-
-  target_tracking_scaling_policy_configuration {
-    predefined_metric_specification {
-      predefined_metric_type = "ECSServiceAverageCPUUtilization"
-    }
-    target_value       = var.autoscaling_cpu_target
-    scale_in_cooldown  = 300
-    scale_out_cooldown = 60
-  }
-}

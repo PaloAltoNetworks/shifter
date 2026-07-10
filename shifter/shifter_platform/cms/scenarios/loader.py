@@ -9,12 +9,26 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import yaml
+from pydantic import TypeAdapter
 
-from cms.scenarios.schema import ScenarioTemplate
+from cms.scenarios.schema import AnyScenarioTemplate, ScenarioTemplate
+from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_scenario_payload(data: dict[str, Any]) -> dict[str, Any]:
+    """Ensure legacy demo templates validate against the discriminated union."""
+    if "scenario_type" not in data:
+        return {**data, "scenario_type": "demo"}
+    return data
+
+
+_SCENARIO_ADAPTER: TypeAdapter[AnyScenarioTemplate] = TypeAdapter(AnyScenarioTemplate)
+
 
 # Directory containing scenario YAML templates
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -34,20 +48,20 @@ def _validate_scenario_id(scenario_id: str) -> str:
 
 
 @lru_cache(maxsize=32)
-def load_scenario(scenario_id: str) -> ScenarioTemplate:
+def load_scenario(scenario_id: str) -> AnyScenarioTemplate:
     """Load a scenario template by ID.
 
     Args:
         scenario_id: Unique scenario identifier (e.g., 'basic', 'ad_attack_lab')
 
     Returns:
-        ScenarioTemplate: Validated scenario template
+        ScenarioTemplate: Validated scenario template (demo or CTF)
 
     Raises:
         ValueError: If scenario not found or template is invalid
     """
     scenario_id = _validate_scenario_id(scenario_id)
-    logger.debug("load_scenario: scenario_id=%s", scenario_id)
+    logger.debug("load_scenario: scenario_id=%s", safe_log_value(scenario_id))
 
     # Resolve the candidate path and confirm it stays inside TEMPLATES_DIR.
     # The slug validation already rejects traversal; this containment check is
@@ -58,14 +72,22 @@ def load_scenario(scenario_id: str) -> ScenarioTemplate:
         raise ValueError("Invalid scenario id")
 
     if not template_path.exists():
-        logger.warning("load_scenario: not found scenario_id=%s", scenario_id)
+        logger.warning("load_scenario: not found scenario_id=%s", safe_log_value(scenario_id))
         raise ValueError(f"Scenario '{scenario_id}' not found")
 
     with open(template_path) as f:
         data = yaml.safe_load(f)
 
-    logger.debug("load_scenario: loaded scenario_id=%s", scenario_id)
-    return ScenarioTemplate(**data)
+    logger.debug("load_scenario: loaded scenario_id=%s", safe_log_value(scenario_id))
+    return _SCENARIO_ADAPTER.validate_python(_normalize_scenario_payload(data))
+
+
+def load_demo_scenario(scenario_id: str) -> ScenarioTemplate:
+    """Load a demo scenario template, rejecting CTF templates."""
+    template = load_scenario(scenario_id)
+    if not isinstance(template, ScenarioTemplate):
+        raise ValueError(f"Scenario '{scenario_id}' is not a demo scenario")
+    return template
 
 
 def list_scenario_ids() -> list[str]:
@@ -83,10 +105,10 @@ def list_scenario_ids() -> list[str]:
     return ids
 
 
-def get_all_scenarios() -> list[ScenarioTemplate]:
+def get_all_scenarios() -> list[AnyScenarioTemplate]:
     """Get all available scenarios.
 
     Returns:
-        List of validated ScenarioTemplate objects
+        List of validated scenario templates (demo or CTF)
     """
     return [load_scenario(scenario_id) for scenario_id in list_scenario_ids()]

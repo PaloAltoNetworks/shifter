@@ -195,7 +195,7 @@ resource "aws_route" "portal" {
 
 # Internet route (via AWS Network Firewall)
 resource "aws_route" "firewall" {
-  for_each = var.firewall_endpoint_id != "" ? local.subnet_map : {}
+  for_each = var.range_egress_mode == "allowlist" && var.firewall_endpoint_id != "" ? local.subnet_map : {}
 
   route_table_id         = aws_route_table.subnet[each.key].id
   destination_cidr_block = "0.0.0.0/0"
@@ -204,7 +204,7 @@ resource "aws_route" "firewall" {
 
 # S3 endpoint association
 resource "aws_vpc_endpoint_route_table_association" "s3" {
-  for_each = var.s3_endpoint_id != "" ? local.subnet_map : {}
+  for_each = var.range_egress_mode == "allowlist" && var.s3_endpoint_id != "" ? local.subnet_map : {}
 
   vpc_endpoint_id = var.s3_endpoint_id
   route_table_id  = aws_route_table.subnet[each.key].id

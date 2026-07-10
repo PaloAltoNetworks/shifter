@@ -1,0 +1,70 @@
+{
+  "capabilities": {
+    "evaluator": null,
+    "observation": null,
+    "orchestrator": null,
+    "participant_runtime": null,
+    "provisioner": {
+      "constraints": {},
+      "max_total_nodes": null,
+      "name": "shifter-provisioner",
+      "supported_account_features": [],
+      "supported_content_types": [],
+      "supported_node_types": [
+        "vm"
+      ],
+      "supported_os_families": [
+        "linux",
+        "windows"
+      ],
+      "supports_accounts": false,
+      "supports_acls": false
+    }
+  },
+  "compatibility": {
+    "processors": [
+      "aces-reference-processor"
+    ]
+  },
+  "concept_bindings": [
+    {
+      "family": "assets",
+      "scope": "capabilities.provisioner.supported_node_types"
+    },
+    {
+      "family": "assets",
+      "scope": "capabilities.provisioner.supported_os_families"
+    }
+  ],
+  "constraints": {},
+  "identity": {
+    "name": "shifter",
+    "version": "0.0.0"
+  },
+  "realization_support": [
+    {
+      "constraints": {},
+      "disclosure_kinds": [
+        "backend-manifest-v2",
+        "operation-status-v1",
+        "runtime-snapshot-v1"
+      ],
+      "domain": "runtime-realization",
+      "support_mode": "constrained",
+      "supported_constraint_kinds": [
+        "node-type",
+        "os-family"
+      ],
+      "supported_exact_requirement_kinds": [
+        "declared-capability-match"
+      ]
+    }
+  ],
+  "schema_version": "backend-manifest/v2",
+  "supported_contract_versions": [
+    "backend-manifest-v2",
+    "operation-receipt-v1",
+    "operation-status-v1",
+    "runtime-snapshot-v1"
+  ]
+}

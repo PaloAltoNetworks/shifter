@@ -49,7 +49,7 @@ describe('NGFWWizardManager', () => {
         <div id="summary-folder-row"></div>
         <div id="provisioning-progress"></div>
         <div id="success-state" style="display: none;"></div>
-        <a id="view-ngfw-btn" href="#"></a>
+        <button type="button" id="view-ngfw-btn"></button>
         <button id="step1-next"></button>
         <button id="step2-back"></button>
         <button id="step2-next"></button>
@@ -266,15 +266,6 @@ describe('NGFWWizardManager', () => {
             expect(mockWebSocket.close).toHaveBeenCalled();
         });
 
-        test('WebSocket onmessage shows success on ready status', () => {
-            wizard.ngfwId = 42;
-            wizard.connectWebSocket();
-
-            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'ready' }) });
-
-            expect(document.getElementById('success-state').style.display).toBe('block');
-        });
-
         test('WebSocket onmessage alerts on failed status', () => {
             wizard.ngfwId = 42;
             wizard.connectWebSocket();
@@ -289,6 +280,36 @@ describe('NGFWWizardManager', () => {
 
             console.error = originalError;
         });
+
+        test('WebSocket onmessage logs an unknown status as "unknown" (no raw payload)', () => {
+            wizard.ngfwId = 42;
+            wizard.connectWebSocket();
+
+            const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+            // A status outside the known set (here carrying CR/LF) must not reach
+            // the log verbatim; it is collapsed to the safe 'unknown' literal.
+            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'pending\r\nforged-log-entry' }) });
+
+            const statusLog = logSpy.mock.calls.find((args) => args[0] === 'NGFW status update:');
+            expect(statusLog).toBeDefined();
+            expect(statusLog[1]).toBe('unknown');
+
+            logSpy.mockRestore();
+        });
+
+        test('WebSocket onmessage logs a known status verbatim', () => {
+            wizard.ngfwId = 42;
+            wizard.connectWebSocket();
+
+            const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'pending' }) });
+
+            const statusLog = logSpy.mock.calls.find((args) => args[0] === 'NGFW status update:');
+            expect(statusLog).toBeDefined();
+            expect(statusLog[1]).toBe('pending');
+
+            logSpy.mockRestore();
+        });
     });
 
     describe('showSuccess', () => {
@@ -297,6 +318,30 @@ describe('NGFWWizardManager', () => {
 
             expect(document.getElementById('provisioning-progress').style.display).toBe('none');
             expect(document.getElementById('success-state').style.display).toBe('block');
+        });
+    });
+
+    describe('viewNgfwBtn', () => {
+        test('stores detail URL on the button after provisioning', () => {
+            const viewBtn = document.getElementById('view-ngfw-btn');
+            wizard.ngfwId = 99;
+            wizard._setViewNgfwDetailUrl();
+
+            expect(viewBtn.dataset.detailUrl).toBe('/ngfw/99/');
+        });
+
+        test('does not navigate when detail URL is missing', () => {
+            const viewBtn = document.getElementById('view-ngfw-btn');
+            delete viewBtn.dataset.detailUrl;
+
+            expect(() => viewBtn.click()).not.toThrow();
+        });
+
+        test('handles click when detail URL is present', () => {
+            wizard.ngfwId = 42;
+            wizard._setViewNgfwDetailUrl();
+
+            expect(() => document.getElementById('view-ngfw-btn').click()).not.toThrow();
         });
     });
 });

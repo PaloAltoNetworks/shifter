@@ -35,7 +35,9 @@ resource "aws_cloudwatch_log_stream" "firehose_s3_delivery" {
 resource "aws_iam_role" "firehose" {
   count = var.enable_log_aggregation ? 1 : 0
 
-  name = "${var.name_prefix}-firehose-${var.environment}"
+  name = "${local.iam_name_prefix}-firehose-${var.environment}"
+
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

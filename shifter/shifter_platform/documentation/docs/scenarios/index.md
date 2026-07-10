@@ -10,6 +10,7 @@ A scenario defines what your range contains. Choose based on your demo needs.
 | [AD Attack Lab](ad-attack-lab) | Kali, DC, Workstation | No | Active Directory attacks |
 | [Basic Range with NGFW](ngfw-range) | Kali, Workstation | Yes | Traffic logging demos |
 | AD Attack Lab with NGFW | Kali, DC, Workstation | Yes | AD attacks with network visibility + Cortex XDR |
+| [TechVault Purple-Team Lab](techvault) | One host: Kali + enterprise + full SOC (~31 containers) | No | Agent-driven purple teaming (attack, detect, respond) via VS Code + Claude Code |
 
 ## Quick Comparison
 
@@ -29,5 +30,6 @@ A scenario defines what your range contains. Choose based on your demo needs.
 | AD Attack Lab | 5-10 minutes |
 | Basic Range with NGFW | 3-7 minutes |
 | AD Attack Lab with NGFW | 6-12 minutes |
+| TechVault Purple-Team Lab | 3-6 minutes (pre-baked; boots + auto-starts the stack) |
 
 Times vary based on infrastructure load.

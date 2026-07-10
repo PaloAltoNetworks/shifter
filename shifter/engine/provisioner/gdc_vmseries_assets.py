@@ -286,7 +286,8 @@ def _upload_bootstrap_iso(
     key = f"bootstrap/ngfw/{instance_id}/bootstrap.iso"
     blob = client.bucket(config.bootstrap_bucket).blob(key)
     blob.upload_from_filename(str(iso_path), content_type="application/x-iso9660-image")
-    logger.info("Uploaded GDC VM-Series bootstrap ISO to %s%s/%s", _GCS_PREFIX, config.bootstrap_bucket, key)
+    gcs_fp = safe_log_fingerprint(f"{config.bootstrap_bucket}/{key}")
+    logger.info("Uploaded GDC VM-Series bootstrap ISO to gcs_fp=%s", gcs_fp)
     del request_id
     return f"{_GCS_PREFIX}{config.bootstrap_bucket}/{key}"
 
@@ -301,7 +302,7 @@ def _delete_bootstrap_iso(bootstrap_gcs_url: str) -> None:
     bucket_name, key = bucket_and_key.split("/", 1)
     try:
         storage.Client().bucket(bucket_name).blob(key).delete()
-        logger.info("Deleted GDC VM-Series bootstrap ISO %s", bootstrap_gcs_url)
+        logger.info("Deleted GDC VM-Series bootstrap ISO gcs_fp=%s", safe_log_fingerprint(bootstrap_gcs_url))
     except google_exceptions.NotFound:
         return
 

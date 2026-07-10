@@ -60,6 +60,119 @@ def _string_list(raw: object) -> list[str]:
     return [str(item).strip() for item in raw if str(item).strip()]
 
 
+_CONSOLE_EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+_MAILGUN_EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
+_GCE_RANGE_ENV_KEYS = (
+    "GCP_RANGE_PLANE",
+    "GCP_RANGE_CELL_NETWORK_MODE",
+    "RANGE_NETWORK_ZONE",
+    "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL",
+    "GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES",
+    "GCP_RANGE_LINUX_IMAGE",
+    "GCP_RANGE_LINUX_MACHINE_TYPE",
+    "GCP_RANGE_LINUX_DISK_SIZE_GB",
+    "GCP_RANGE_LINUX_DISK_TYPE",
+    "GCP_RANGE_KALI_IMAGE",
+    "GCP_RANGE_KALI_MACHINE_TYPE",
+    "GCP_RANGE_KALI_DISK_SIZE_GB",
+    "GCP_RANGE_KALI_DISK_TYPE",
+    "GCP_RANGE_WINDOWS_IMAGE",
+    "GCP_RANGE_WINDOWS_MACHINE_TYPE",
+    "GCP_RANGE_WINDOWS_DISK_SIZE_GB",
+    "GCP_RANGE_WINDOWS_DISK_TYPE",
+    "GCP_RANGE_DC_IMAGE",
+    "GCP_RANGE_DC_MACHINE_TYPE",
+    "GCP_RANGE_DC_DISK_SIZE_GB",
+    "GCP_RANGE_DC_DISK_TYPE",
+    "GCP_RANGE_EGRESS_ALLOW_CIDRS",
+    "GCP_RANGE_PRIVATE_GOOGLE_ACCESS",
+    "GCP_RANGE_HOST_MGMT_SSH_PORT",
+    "GCP_RANGE_VERTEX_PROJECT_ID",
+    "GCP_RANGE_VERTEX_REGION",
+    "GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL",
+    "GCP_RANGE_KALI_ANTHROPIC_MODEL",
+    "GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL",
+    "POLARIS_TESTS_BUCKET",
+    "POLARIS_TESTS_KEY",
+)
+
+
+def _email_runtime_values(outputs: dict[str, object]) -> dict[str, str]:
+    """Optional transactional-email runtime env for GCP (PLAT-002, #671).
+
+    Email is **optional**: when no ``email_config`` Terraform output is present
+    the runtime explicitly selects the console backend. When the output *is*
+    present it must be complete — ``backend`` and
+    ``api_key_secret_id`` are both required — so a half-configured deployment
+    fails at render time rather than silently dropping mail.
+
+    Only the secret **reference** (``EMAIL_API_KEY_SECRET_ID``) is emitted here;
+    the ESP API key itself is hydrated from Secret Manager by ``entrypoint.sh``
+    and never travels through this ConfigMap-bound env (same posture as the
+    Redis AUTH bundle, ADR-008).
+    """
+    raw = outputs.get("email_config")
+    config = raw.get("value") if isinstance(raw, dict) else None
+    if not isinstance(config, dict) or not config:
+        return {"EMAIL_BACKEND": _CONSOLE_EMAIL_BACKEND}
+
+    backend = str(config.get("backend", "")).strip()
+    secret_id = str(config.get("api_key_secret_id", "")).strip()
+    from_email = str(config.get("from_email", "")).strip()
+    sender_domain = str(config.get("sender_domain", "")).strip()
+
+    # Fail closed on an enabled-but-unusable sender. A non-empty email_config
+    # means the operator opted into real delivery, so every field the ESP needs
+    # to send must be present: both backends need a From address (otherwise mail
+    # goes out as Django's webmaster@localhost), and Mailgun additionally needs
+    # its sender domain. Surface the gap at render time, not as a runtime send
+    # failure.
+    missing = []
+    if not backend:
+        missing.append("backend")
+    if not secret_id:
+        missing.append("api_key_secret_id")
+    if not from_email:
+        missing.append("from_email")
+    if backend == _MAILGUN_EMAIL_BACKEND and not sender_domain:
+        missing.append("sender_domain")
+    if missing:
+        raise ValueError(
+            "GCP email_config is incomplete (missing: " + ", ".join(missing) + "); "
+            "refusing to render an email runtime that cannot send"
+        )
+
+    email_values = {
+        "EMAIL_BACKEND": backend,
+        "EMAIL_API_KEY_SECRET_ID": secret_id,
+        "DEFAULT_FROM_EMAIL": from_email,
+    }
+    if backend == _MAILGUN_EMAIL_BACKEND:
+        email_values["MAILGUN_SENDER_DOMAIN"] = sender_domain
+    return email_values
+
+
+def _optional_gce_range_values() -> dict[str, str]:
+    return {key: value for key in _GCE_RANGE_ENV_KEYS if (value := os.environ.get(key, "").strip())}
+
+
+def _project_from_self_link(self_link: object) -> str:
+    """Extract the GCP project id from a ``projects/<project>/...`` self-link.
+
+    The range VPC self-link (``range_network_id`` Terraform output) always
+    carries the real range project, which is what the GCE range-cell backend
+    must target for Compute API calls and image URLs — independent of the
+    control-plane ``GCP_PROJECT_ID`` (which may be a deploy-overlay placeholder).
+    """
+    text = str(self_link or "").strip()
+    parts = text.split("/")
+    if "projects" in parts:
+        index = parts.index("projects")
+        if index + 1 < len(parts) and parts[index + 1]:
+            return parts[index + 1]
+    return ""
+
+
 def _validated_image_tag(image_tag: str) -> str:
     tag = image_tag.strip()
     if not tag:
@@ -98,6 +211,12 @@ def render_env(outputs: dict[str, object], *, image_tag: str) -> str:
     range_network_cidr = _value(outputs, "range_network_cidr")
     range_network_region = _value(outputs, "range_network_region")
     portal_network_cidrs = _value(outputs, "portal_network_cidrs")
+    # The real deploy GCP project. Google client libraries use GCP_PROJECT_ID /
+    # GOOGLE_CLOUD_PROJECT as the default quota/consumer project, so a placeholder
+    # here makes every API call bill an invalid project (CONSUMER_INVALID). Derive
+    # it from the Identity Platform project (the deploy project), falling back to
+    # the project in the range VPC self-link.
+    real_project = str(identity_platform_project_id).strip() or _project_from_self_link(range_network_id)
 
     if not public_hostname or not managed_tls_enabled:
         raise ValueError(
@@ -134,8 +253,6 @@ def render_env(outputs: dict[str, object], *, image_tag: str) -> str:
         "QUEUE_ENGINE_PUBLISHER_ID": topic_id,
         "QUEUE_MC_CONSUMER_ID": subscriptions["mc"],
         "QUEUE_MC_PUBLISHER_ID": topic_id,
-        "QUEUE_EXPERIMENTS_CONSUMER_ID": subscriptions["experiments"],
-        "QUEUE_EXPERIMENTS_PUBLISHER_ID": topic_id,
         "DB_SECRET_ID": secret_ids["db"],
         "APP_SECRET_ID": secret_ids["app"],
         "GUACAMOLE_SECRET_ID": secret_ids["guacamole-json-auth"],
@@ -164,6 +281,10 @@ def render_env(outputs: dict[str, object], *, image_tag: str) -> str:
         "ENGINE_TASK_IMAGE": f"{image_roots['pulumi-provisioner']}:{pinned_image_tag}",
         # GCP deployments authenticate against Identity Platform in every case.
         "AUTH_PROVIDER": "identity_platform",
+        # Real deploy project (not the overlay placeholder), so Google client
+        # libraries bill the correct quota/consumer project.
+        "GCP_PROJECT_ID": real_project,
+        "GOOGLE_CLOUD_PROJECT": real_project,
         "IDENTITY_PLATFORM_API_KEY": identity_platform_api_key,
         "IDENTITY_PLATFORM_PROJECT_ID": identity_platform_project_id,
         "IDENTITY_PLATFORM_AUTH_DOMAIN": f"{identity_platform_project_id}.firebaseapp.com",
@@ -176,6 +297,14 @@ def render_env(outputs: dict[str, object], *, image_tag: str) -> str:
         "RANGE_NETWORK_CIDR": range_network_cidr,
         "RANGE_NETWORK_REGION": range_network_region,
         "PORTAL_NETWORK_CIDRS": ",".join(_unique(portal_network_cidrs)),
+        "GCP_RANGE_BACKEND": os.environ.get("GCP_RANGE_BACKEND", "gce").strip() or "gce",
+        # Real range project (from the range VPC self-link), so the GCE
+        # range-cell backend targets it directly even when the control-plane
+        # GCP_PROJECT_ID is a deploy-overlay placeholder. An explicit
+        # GCP_RANGE_CELL_PROJECT_ID env override wins.
+        "GCP_RANGE_CELL_PROJECT_ID": (
+            os.environ.get("GCP_RANGE_CELL_PROJECT_ID", "").strip() or _project_from_self_link(range_network_id)
+        ),
         "GDC_RANGE_NAMESPACE_PREFIX": "range",
         "GDC_NETWORK_INTERFACE": "vxlan0",
         "GDC_NETWORK_DNS_NAMESERVERS": "8.8.8.8",
@@ -215,6 +344,12 @@ def render_env(outputs: dict[str, object], *, image_tag: str) -> str:
         )
     values["REDIS_TLS"] = "true"
     values["REDIS_SECRET_ID"] = redis_secret_id
+
+    # Optional transactional-email runtime env (PLAT-002, #671). Absent ->
+    # console backend; present -> SendGrid/Mailgun via anymail with the API key
+    # hydrated from Secret Manager by the entrypoint.
+    values.update(_email_runtime_values(outputs))
+    values.update(_optional_gce_range_values())
 
     return "".join(f"{key}={value}\n" for key, value in values.items())
 

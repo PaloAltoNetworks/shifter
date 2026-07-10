@@ -15,22 +15,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from _gdc_vm_naming import _sanitize_name
 from config import GDCNetworkAccessConfig, GDCVMRuntimeConfig
 
 if TYPE_CHECKING:
-    from kubernetes.client import CustomObjectsApi
+    from kubernetes.client import CoreV1Api, CustomObjectsApi
     from kubernetes.client.exceptions import ApiException
 
 
 @dataclass(frozen=True)
 class _KubeAccess:
-    """Bundle the kubernetes API handle and ApiException type for a runner call."""
+    """Bundle the kubernetes API handles and ApiException type for a runner call."""
 
     custom_api: CustomObjectsApi
     api_exception: type[ApiException]
+    core_api: CoreV1Api
+    client_module: ModuleType
 
 
 @dataclass(frozen=True)

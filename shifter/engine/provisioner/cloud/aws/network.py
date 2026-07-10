@@ -28,7 +28,7 @@ class AWSNetworkInventory:
             response = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [network_id]}])
             return [subnet["CidrBlock"] for subnet in response.get("Subnets", []) if subnet.get("CidrBlock")]
         except (ClientError, BotoCoreError) as e:
-            logger.error("list_subnet_cidrs: failed vpc_id=%s error=%s", network_id, e)
+            logger.exception("list_subnet_cidrs: failed vpc_id=%s error=%s", network_id, e)
             raise CloudNetworkInventoryError(f"Failed to list AWS subnet CIDRs: {e}") from e
 
     def publish_subnet_exhaustion_alarm(
@@ -54,7 +54,7 @@ class AWSNetworkInventory:
                 ],
             )
         except (ClientError, BotoCoreError) as e:
-            logger.error("publish_subnet_exhaustion_alarm: failed vpc_id=%s error=%s", network_id, e)
+            logger.exception("publish_subnet_exhaustion_alarm: failed vpc_id=%s error=%s", network_id, e)
             raise CloudNetworkInventoryError(f"Failed to publish AWS subnet exhaustion alarm: {e}") from e
 
         logger.error(

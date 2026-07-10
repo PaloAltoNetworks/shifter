@@ -74,6 +74,23 @@ unwaived. The work split as follows:
 Every waiver maps 1:1 to a `docs/adr/exceptions.yaml` entry with owner,
 reason, expiry, and affected paths.
 
+## Module inline skips (issue #147)
+
+Checkov does not propagate inline `# checkov:skip=CKV_*` comments from a
+module **definition** to the **module call site** in an environment root.
+That upstream limitation is tracked in bridgecrewio/checkov#610.
+
+Repo posture:
+
+- Put inline skips on the **resource block** inside
+  `platform/terraform/modules/**` when the waiver is resource-specific.
+- Run Checkov with `--download-external-modules` on both pre-commit and
+  CI so relative `module { source = ... }` paths load module files into
+  the scan graph (enforced by `scripts/check_checkov_invocation_parity/`).
+- When a rule must be waived repo-wide or Checkov cannot see the module
+  file, add `skip-check` here and an ADR-004-R11 exception — do not re-enable
+  Terraform `--soft-fail`.
+
 ## Anti-patterns
 
 - Do not add a Checkov `skip-check` or inline `# checkov:skip=…` without

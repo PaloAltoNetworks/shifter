@@ -22,14 +22,22 @@ posture, decoupled from the portal ``enable_autoscaling`` topology:
 Once the backend resolves to Redis, the connection posture is derived from
 the env, in order of preference:
     1. REDIS_HOST, no TLS -> channels_redis tuple host form (plaintext Redis
-                             on a private network — the AWS and pre-#963 GCP
-                             shape).
+                             on a private network — the pre-hardening shape).
     2. REDIS_HOST + REDIS_TLS -> rediss://<password>@host:port/0 URL host.
                                  REDIS_PASSWORD is hydrated by entrypoint.sh
                                  from Secret Manager (ADR-008-R6).
 
-Fail closed when the TLS flag is on but no password / CA was hydrated —
-silent fallback to plaintext is the failure mode #963 was opened to close.
+When TLS is on, REDIS_CA_MODE selects how the server certificate is trusted:
+    - pem (default when unset): verify against the CA bundle in REDIS_CA_PEM.
+      GCP Memorystore uses a private CA, so a missing CA fails closed (#963).
+    - system: verify against the OS trust store. AWS ElastiCache (#938)
+      presents a server cert chained to a public Amazon CA already in the
+      system trust store, so no REDIS_CA_PEM is needed; certificate
+      verification still stays required.
+
+Fail closed when the TLS flag is on but no password was hydrated, the chosen
+trust mode is unknown, or REDIS_CA_MODE=pem with no CA — silent fallback to
+plaintext (or to unverified TLS) is the failure mode #963 was opened to close.
 """
 
 from __future__ import annotations
@@ -46,6 +54,13 @@ _logger = logging.getLogger(__name__)
 _IN_MEMORY = "in_memory"
 _REDIS = "redis"
 _VALID_BACKENDS = (_IN_MEMORY, _REDIS)
+
+# REDIS_CA_MODE selects how the TLS server certificate is trusted (see module
+# docstring). `pem` is the default so the GCP fail-closed behaviour (#963) is
+# preserved for any environment that does not explicitly opt into system trust.
+_CA_MODE_PEM = "pem"
+_CA_MODE_SYSTEM = "system"
+_VALID_CA_MODES = (_CA_MODE_PEM, _CA_MODE_SYSTEM)
 
 
 def _resolve_backend(env: Mapping[str, str]) -> str:
@@ -96,44 +111,56 @@ def _build_redis_layer(env: Mapping[str, str]) -> dict[str, dict[str, object]]:
                 "REDIS_TLS=true requires REDIS_PASSWORD (hydrated by entrypoint.sh "
                 "from Secret Manager); refusing to fall back to a plaintext connection"
             )
+        ca_mode = env.get("REDIS_CA_MODE", "").strip().lower() or _CA_MODE_PEM
+        if ca_mode not in _VALID_CA_MODES:
+            raise ImproperlyConfigured(f"REDIS_CA_MODE must be one of {_VALID_CA_MODES}, got {ca_mode!r}")
         # channels_redis (>= 4) accepts dict-form host entries; the dict is
         # unpacked into `aioredis.ConnectionPool.from_url(address, **rest)`
         # (see channels_redis/utils.py::create_pool), so redis-py's SSL
-        # kwargs flow through. SERVER_AUTHENTICATION on GCP Memorystore
-        # needs the instance CA to verify the server cert — when present,
-        # the CA PEM is passed via `ssl_ca_data` so we never have to write
-        # the cert to disk or mutate the system trust store. When absent
-        # (tests, or environments that haven't shipped the CA bundle yet),
-        # redis-py falls back to the system trust store with cert_reqs
-        # still required.
-        ca_pem = env.get("REDIS_CA_PEM", "")
-        if not ca_pem.strip():
-            # ADR-008-R6 fail-closed: the GCP runtime delivers the
-            # Memorystore server CA alongside the AUTH token in Secret
-            # Manager, and entrypoint.sh exports both as a unit. If the
-            # CA didn't make it into the env, either Terraform hasn't
-            # been re-applied with the new payload yet or the entrypoint
-            # block was bypassed — both are misconfigurations, not
-            # "fall back to system trust" cases. Memorystore uses a
-            # private CA, so the system trust store could not validate
-            # the cert anyway; this guard surfaces the misconfiguration
-            # at startup rather than as an opaque TLS handshake failure
-            # later.
-            raise ImproperlyConfigured(
-                "REDIS_TLS=true requires REDIS_CA_PEM (hydrated by entrypoint.sh "
-                "from the Memorystore server_ca_cert in Secret Manager); refusing "
-                "to fall back to the system trust store, which cannot validate the "
-                "Memorystore private CA"
-            )
+        # kwargs flow through. `ssl_cert_reqs=required` is set in both trust
+        # modes, so the server certificate is always verified.
         address = f"rediss://:{password}@{host}:{port}/0"
-        # Use the raw CA value (do not strip) — the PEM block's
-        # trailing newline matters for some TLS implementations and the
-        # canonical form ends with one.
-        host_entry = {
+        host_entry: dict[str, object] = {
             "address": address,
             "ssl_cert_reqs": "required",
-            "ssl_ca_data": ca_pem,
         }
+        if ca_mode == _CA_MODE_PEM:
+            # ADR-008-R6 fail-closed (#963): GCP Memorystore uses a private CA
+            # delivered alongside the AUTH token in Secret Manager, exported by
+            # entrypoint.sh as REDIS_CA_PEM. A missing CA is a misconfiguration
+            # — the system trust store could not validate a private CA anyway —
+            # so surface it at startup rather than as an opaque TLS handshake
+            # failure later. The CA is passed via `ssl_ca_data` so the cert is
+            # never written to disk or merged into the system trust store.
+            # The private CA is itself the trust anchor (it only signs the
+            # Memorystore instance cert), so chain validation already binds the
+            # session to that instance — no separate hostname check is needed,
+            # and Memorystore is reached by IP where a hostname check would not
+            # apply.
+            ca_pem = env.get("REDIS_CA_PEM", "")
+            if not ca_pem.strip():
+                raise ImproperlyConfigured(
+                    "REDIS_TLS with REDIS_CA_MODE=pem requires REDIS_CA_PEM (hydrated by "
+                    "entrypoint.sh from the Memorystore server_ca_cert in Secret Manager); "
+                    "refusing to fall back to the system trust store, which cannot validate "
+                    "the Memorystore private CA"
+                )
+            # Use the raw CA value (do not strip) — the PEM block's trailing
+            # newline matters for some TLS implementations and the canonical
+            # form ends with one.
+            host_entry["ssl_ca_data"] = ca_pem
+        else:
+            # ca_mode == system (AWS ElastiCache, #938): the server cert chains
+            # to a public Amazon CA already in the OS trust store, so no
+            # ssl_ca_data is supplied. Because the public trust store would
+            # validate the chain of ANY publicly-trusted cert, hostname
+            # verification is required to bind the session to the configured
+            # ElastiCache endpoint — without it a MITM could present a valid
+            # public cert issued for a different name, complete the TLS
+            # handshake, capture the AUTH exchange, and replay the token.
+            # REDIS_HOST must therefore be the ElastiCache DNS endpoint (it is:
+            # the module exports primary_endpoint_address), not an IP.
+            host_entry["ssl_check_hostname"] = True
         hosts: list[object] = [host_entry]
     else:
         hosts = [(host, port)]
@@ -175,6 +202,7 @@ def describe_channel_layer_posture(env: Mapping[str, str]) -> dict[str, object]:
         "redis_host_present": bool(host),
         "redis_port": int(env.get("REDIS_PORT", "6379")) if host else None,
         "redis_tls": env.get("REDIS_TLS", "").strip().lower() == "true",
+        "redis_ca_mode": env.get("REDIS_CA_MODE", "").strip().lower() or None,
     }
 
 
@@ -187,10 +215,12 @@ def log_channel_layer_posture(env: Mapping[str, str], *, logger: logging.Logger 
     log = logger or _logger
     posture = describe_channel_layer_posture(env)
     log.info(
-        "channel-layer posture: backend=%s explicit_backend=%s redis_host_present=%s redis_port=%s redis_tls=%s",
+        "channel-layer posture: backend=%s explicit_backend=%s redis_host_present=%s "
+        "redis_port=%s redis_tls=%s redis_ca_mode=%s",
         safe_log_value(posture["backend"]),
         safe_log_value(posture["explicit_backend"]),
         posture["redis_host_present"],
         posture["redis_port"],
         posture["redis_tls"],
+        safe_log_value(posture["redis_ca_mode"]),
     )

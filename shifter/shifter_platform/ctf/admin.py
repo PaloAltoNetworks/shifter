@@ -195,6 +195,7 @@ class CTFEventAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
                     "team_mode",
                     "team_size_limit",
                     "max_participants",
+                    "scoring_mode",
                 ],
             },
         ),

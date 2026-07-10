@@ -113,6 +113,14 @@ resource "aws_lb" "this" {
   drop_invalid_header_fields = true
   enable_deletion_protection = var.enable_deletion_protection
 
+  # Explicit idle timeout for the portal's long-lived WebSocket workload
+  # (terminal SSH, notification/range-status sockets, and the Guacamole
+  # /guacamole RDP/SSH tunnel, which share this ALB). Sized well above the
+  # WebSocket keepalive interval (uvicorn ws_ping, default 20s) so an idle
+  # terminal is never silently reaped (issue #931). idle_timeout is a
+  # load-balancer attribute only; it does not change listener or SG exposure.
+  idle_timeout = var.idle_timeout_seconds
+
   access_logs {
     bucket  = var.logs_bucket_name
     prefix  = "alb/${var.name_prefix}"
@@ -135,6 +143,11 @@ resource "aws_lb_target_group" "this" {
   port     = var.app_port
   protocol = "HTTP"
   vpc_id   = var.vpc_id
+
+  # Allow in-flight terminal/WebSocket connections to drain when a target is
+  # deregistered (ASG instance refresh / scale-in) before the connection is
+  # closed (issue #931). Sized to overlap the ASG termination-drain window.
+  deregistration_delay = var.deregistration_delay_seconds
 
   health_check {
     enabled             = true

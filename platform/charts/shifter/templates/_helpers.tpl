@@ -69,10 +69,6 @@ volumes:
 {{ toJson .Values.runtimeEnv | sha256sum }}
 {{- end }}
 
-{{- define "shifter.guacamoleSecretChecksum" -}}
-{{ toJson .Values.guacamoleRuntimeSecret.stringData | sha256sum }}
-{{- end }}
-
 {{- define "shifter.portalImage" -}}
 {{ printf "%s:%s" .Values.images.portal.repository .Values.images.portal.tag }}
 {{- end }}

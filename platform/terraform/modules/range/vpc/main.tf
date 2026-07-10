@@ -11,6 +11,7 @@ locals {
   common_tags = merge(var.tags, {
     Module = "range-vpc"
   })
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
 }
 
 # ------------------------------------------------------------------------------
@@ -81,7 +82,9 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 resource "aws_iam_role" "flow_logs" {
   count = var.enable_flow_logs ? 1 : 0
 
-  name = "${var.name_prefix}-flow-logs-role"
+  name = "${local.iam_name_prefix}-flow-logs-role"
+
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

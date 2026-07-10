@@ -1,6 +1,8 @@
 """Shared fixtures for SSH connection tests."""
 
-from unittest.mock import AsyncMock, MagicMock
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -40,3 +42,21 @@ def mock_asyncssh_process():
     process.close = MagicMock()
     process.change_terminal_size = MagicMock()
     return process
+
+
+@contextmanager
+def patch_asyncssh(connection, *, imported_key=None):
+    """Patch the real ``asyncssh`` library boundary (key import + connect).
+
+    ``engine.ssh`` calls ``asyncssh.import_private_key`` and
+    ``asyncssh.connect`` directly; patching the library functions exercises the
+    real first-party connect logic over a mocked SSH transport boundary. Returns
+    a namespace exposing the two mocks for call assertions. Exception classes on
+    the real ``asyncssh`` module are left intact so ``except`` clauses match.
+    """
+    key = imported_key if imported_key is not None else MagicMock()
+    with (
+        patch("asyncssh.import_private_key", MagicMock(return_value=key)) as import_key,
+        patch("asyncssh.connect", AsyncMock(return_value=connection)) as connect,
+    ):
+        yield SimpleNamespace(import_private_key=import_key, connect=connect, key=key)

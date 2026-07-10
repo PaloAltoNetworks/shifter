@@ -1,7 +1,6 @@
 """Tests for CMS Credential and CredentialType models."""
 
 from datetime import timedelta
-from unittest.mock import patch
 
 import pytest
 from django.utils import timezone
@@ -22,7 +21,7 @@ def scm_credential_type():
             "id": 1,
             "name": "SCM Registration",
             "slug": "scm",
-            "spec_class": "shared.schemas.SCMCredentialSpec",
+            "spec_slug": "credential.scm",
         }
     )
     return ct
@@ -39,7 +38,7 @@ def deployment_profile_type():
             "id": 2,
             "name": "NGFW Deployment Profile",
             "slug": "deployment_profile",
-            "spec_class": "shared.schemas.DeploymentProfileSpec",
+            "spec_slug": "credential.deployment_profile",
         }
     )
     return ct
@@ -91,6 +90,18 @@ def _make_credential(user, name, credential_type, data, **kwargs):
     return cred
 
 
+def _real_user(suffix):
+    from django.contrib.auth import get_user_model
+
+    return get_user_model().objects.create_user(username=f"cred-{suffix}@e.com", email=f"cred-{suffix}@e.com")
+
+
+def _real_ct(slug, spec):
+    from cms.models import CredentialType
+
+    return CredentialType.objects.get_or_create(slug=slug, defaults={"name": slug, "spec_slug": spec})[0]
+
+
 # ---------------------------------------------------------------------------
 # TestCredentialType
 # ---------------------------------------------------------------------------
@@ -99,30 +110,17 @@ def _make_credential(user, name, credential_type, data, **kwargs):
 class TestCredentialType:
     """Tests for the CredentialType model."""
 
+    @pytest.mark.django_db
     def test_create_credential_type(self):
         """CredentialType can be created with required fields."""
         from cms.models import CredentialType
 
-        ct = CredentialType.__new__(CredentialType)
-        ct.__dict__.update(
-            {
-                "id": 99,
-                "name": "Test Type",
-                "slug": "test",
-                "spec_class": "shared.schemas.SCMCredentialSpec",
-            }
-        )
+        cred_type = CredentialType.objects.create(name="Test Type", slug="test-cred-type", spec_slug="credential.scm")
 
-        with patch.object(CredentialType.objects, "create", return_value=ct):
-            cred_type = CredentialType.objects.create(
-                name="Test Type",
-                slug="test",
-                spec_class="shared.schemas.SCMCredentialSpec",
-            )
-
-        assert cred_type.name == "Test Type"
-        assert cred_type.slug == "test"
-        assert cred_type.spec_class == "shared.schemas.SCMCredentialSpec"
+        persisted = CredentialType.objects.get(pk=cred_type.pk)
+        assert persisted.name == "Test Type"
+        assert persisted.slug == "test-cred-type"
+        assert persisted.spec_slug == "credential.scm"
 
     def test_get_spec_class_loads_scm_spec(self, scm_credential_type):
         """get_spec_class() should load SCMCredentialSpec."""
@@ -186,10 +184,13 @@ class TestCredentialType:
 class TestCredential:
     """Tests for the Credential model."""
 
-    def test_create_credential_with_type(self, mock_user, scm_credential_type):
+    @pytest.mark.django_db
+    def test_create_credential_with_type(self):
         """Credential can be created with a CredentialType FK."""
         from cms.models import Credential
 
+        user = _real_user("with-type")
+        ct = _real_ct("scm", "shared.schemas.SCMCredentialSpec")
         data = {
             "scm_folder_name": "folder",
             "scm_pin_id": "PIN123",
@@ -197,25 +198,13 @@ class TestCredential:
             "sls_region": "americas",
         }
 
-        mock_instance = _make_credential(
-            user=mock_user,
-            name="My Credential",
-            credential_type=scm_credential_type,
-            data=data,
-        )
+        cred = Credential.objects.create(user=user, name="My Credential", credential_type=ct, data=data)
 
-        with patch.object(Credential.objects, "create", return_value=mock_instance):
-            cred = Credential.objects.create(
-                user=mock_user,
-                name="My Credential",
-                credential_type=scm_credential_type,
-                data=data,
-            )
-
-        assert cred.name == "My Credential"
-        assert cred.credential_type == scm_credential_type
-        assert cred.credential_type.slug == "scm"
-        assert cred.data["scm_folder_name"] == "folder"
+        persisted = Credential.objects.get(pk=cred.pk)
+        assert persisted.name == "My Credential"
+        assert persisted.credential_type == ct
+        assert persisted.credential_type.slug == "scm"
+        assert persisted.data["scm_folder_name"] == "folder"
 
     def test_is_deleted_property(self, mock_user, deployment_profile_type):
         """is_deleted reflects deleted_at state."""
@@ -273,67 +262,33 @@ class TestCredential:
         cred.expires_at = timezone.now() + timedelta(days=60)
         assert cred.expires_soon is False
 
-    def test_unique_name_per_user_constraint(self, mock_user, deployment_profile_type):
+    @pytest.mark.django_db
+    def test_unique_name_per_user_constraint(self):
         """User cannot have two active credentials with the same name."""
-        from django.db import IntegrityError
+        from django.db import IntegrityError, transaction
 
         from cms.models import Credential
 
-        first_cred = _make_credential(
-            user=mock_user,
-            name="Duplicate Name",
-            credential_type=deployment_profile_type,
-            data={},
-        )
+        user = _real_user("unique")
+        ct = _real_ct("deployment_profile", "shared.schemas.DeploymentProfileSpec")
+        Credential.objects.create(user=user, name="Duplicate Name", credential_type=ct, data={})
 
-        with patch.object(Credential.objects, "create") as mock_create:
-            # First create succeeds
-            mock_create.return_value = first_cred
-            Credential.objects.create(
-                user=mock_user,
-                name="Duplicate Name",
-                credential_type=deployment_profile_type,
-                data={},
-            )
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Credential.objects.create(user=user, name="Duplicate Name", credential_type=ct, data={})
 
-            # Second create raises IntegrityError (unique constraint)
-            mock_create.side_effect = IntegrityError
-            with pytest.raises(IntegrityError):
-                Credential.objects.create(
-                    user=mock_user,
-                    name="Duplicate Name",
-                    credential_type=deployment_profile_type,
-                    data={},
-                )
-
-    def test_deleted_credential_allows_same_name(self, mock_user, deployment_profile_type):
+    @pytest.mark.django_db
+    def test_deleted_credential_allows_same_name(self):
         """Deleted credential should allow creating new one with same name."""
         from cms.models import Credential
 
-        # Create and soft-delete
-        cred1 = _make_credential(
-            user=mock_user,
-            name="Reusable Name",
-            credential_type=deployment_profile_type,
-            data={},
-        )
+        user = _real_user("reuse")
+        ct = _real_ct("deployment_profile", "shared.schemas.DeploymentProfileSpec")
+
+        cred1 = Credential.objects.create(user=user, name="Reusable Name", credential_type=ct, data={})
         cred1.deleted_at = timezone.now()
+        cred1.save(update_fields=["deleted_at"])
 
-        # New credential with same name succeeds
-        cred2 = _make_credential(
-            user=mock_user,
-            name="Reusable Name",
-            credential_type=deployment_profile_type,
-            data={},
-        )
-
-        with patch.object(Credential.objects, "create", return_value=cred2):
-            result = Credential.objects.create(
-                user=mock_user,
-                name="Reusable Name",
-                credential_type=deployment_profile_type,
-                data={},
-            )
-
+        result = Credential.objects.create(user=user, name="Reusable Name", credential_type=ct, data={})
         assert result.name == "Reusable Name"
+        assert result.deleted_at is None
         assert result.is_deleted is False

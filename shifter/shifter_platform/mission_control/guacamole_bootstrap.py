@@ -12,7 +12,7 @@ from threading import BoundedSemaphore
 from uuid import UUID
 
 from django.conf import settings
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
 from django.utils import timezone
 
 from mission_control.models import GuacamoleBootstrapRequest
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_WORKERS = 4
 _DEFAULT_TTL_SECONDS = 300
+_DEFAULT_PRUNE_BATCH_SIZE = 500
 
 _slot_limit: int | None = None
 _slots: BoundedSemaphore | None = None
@@ -148,6 +149,14 @@ def _run_bootstrap(request_id: UUID, build_url: Callable[[], str], slots: Bounde
             _finish_failure(bootstrap, started, "Guacamole session bootstrap failed", 500)
             return
 
+        if bootstrap.is_expired:
+            # A slow build finished after expiry. Never persist a token URL the
+            # status endpoint would refuse to deliver (it returns 410 for an
+            # expired row); record the expiry instead so no token is parked at
+            # rest until pruning.
+            _finish_failure(bootstrap, started, "Guacamole session request expired", 410)
+            return
+
         duration_ms = _duration_ms(started)
         bootstrap.status = GuacamoleBootstrapRequest.Status.SUCCEEDED
         bootstrap.result_url = result_url
@@ -204,3 +213,57 @@ def _finish_failure(
 def _duration_ms(started: float) -> int:
     """Return elapsed milliseconds since a monotonic start time."""
     return max(0, int((time.perf_counter() - started) * 1000))
+
+
+def _prune_batch_size() -> int:
+    """Return the configured bounded prune batch size."""
+    return max(1, int(getattr(settings, "GUACAMOLE_BOOTSTRAP_PRUNE_BATCH_SIZE", _DEFAULT_PRUNE_BATCH_SIZE)))
+
+
+def consume_ready_url(*, request_id: UUID, user_id: int) -> str | None:
+    """Atomically deliver and clear the ready Guacamole URL exactly once.
+
+    The status endpoint is the delivery boundary: the first owner-scoped poll
+    that finds a ready URL consumes it and clears the token material from the
+    row in the same transaction, so a repeated poll (a second tab, the opener
+    plus the JS client, a retry) can never replay the same token. Returns the
+    URL on the single delivering call; returns ``None`` when the row is not
+    deliverable for this caller — not found, not succeeded, expired, or already
+    delivered — clearing any token still parked on an expired success.
+    """
+    with transaction.atomic():
+        row = GuacamoleBootstrapRequest.objects.select_for_update().filter(pk=request_id, user_id=user_id).first()
+        if row is None or row.status != GuacamoleBootstrapRequest.Status.SUCCEEDED:
+            return None
+        if row.is_expired or row.delivered_at is not None or not row.result_url:
+            # Not deliverable: clear any token still parked on an expired success
+            # before refusing, so it does not sit at rest until pruning.
+            if row.result_url:
+                row.result_url = ""
+                row.save(update_fields=("result_url", "updated_at"))
+            return None
+        url = row.result_url
+        row.result_url = ""
+        row.delivered_at = timezone.now()
+        row.save(update_fields=("result_url", "delivered_at", "updated_at"))
+        return url
+
+
+def prune_expired_bootstrap_requests(*, batch_size: int | None = None) -> int:
+    """Delete expired bootstrap rows in a bounded batch; return the count.
+
+    Expired rows are no longer usable by any client, so deleting them removes
+    any token URL still parked on an abandoned ``succeeded`` row and bounds
+    table growth. The delete is bounded by ``batch_size`` and ordered oldest
+    first; non-expired ``pending`` / ``running`` work is never touched.
+    """
+    limit = _prune_batch_size() if batch_size is None else max(1, int(batch_size))
+    ids = list(
+        GuacamoleBootstrapRequest.objects.filter(expires_at__lte=timezone.now())
+        .order_by("expires_at")
+        .values_list("pk", flat=True)[:limit]
+    )
+    if not ids:
+        return 0
+    deleted, _details = GuacamoleBootstrapRequest.objects.filter(pk__in=ids).delete()
+    return deleted

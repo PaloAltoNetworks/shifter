@@ -7,11 +7,14 @@ load from destabilizing the portal during live events.
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from django.contrib.auth import get_user_model
 
 from shared.enums import WebSocketCloseCode
+
+User = get_user_model()
 
 
 @pytest.fixture(autouse=True)
@@ -61,6 +64,18 @@ def authenticated_scope():
         "user": user,
         "url_route": {"kwargs": {"instance_uuid": "test-uuid-1234"}},
     }
+
+
+@pytest.fixture
+def real_user(db):
+    return User.objects.create_user(username="ssh-cap@example.com", email="ssh-cap@example.com")
+
+
+@pytest.fixture
+def seeded_ssh_range(range_ssh_instance, real_user):
+    """A real READY engine Range owned by ``real_user`` with one SSH instance."""
+    _rng, instance = range_ssh_instance(real_user)
+    return real_user, instance
 
 
 class TestTerminalSessionRegistry:
@@ -124,45 +139,55 @@ class TestSSHConsumerCapacity:
         # Fill the single global slot with another session.
         await consumers_mod._session_registry.try_acquire(99, 1, 100)
 
-        with patch("engine.services.connect_terminal") as mock_connect:
-            await consumer.connect()
+        await consumer.connect()
 
+        # SERVICE_UNAVAILABLE (not NOT_FOUND) proves the cap rejected the
+        # connection before any range/SSH work was attempted.
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.SERVICE_UNAVAILABLE)
-        # Rejected before any SSH work.
-        mock_connect.assert_not_called()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
-    async def test_releases_slot_on_ssh_failure(self, consumer, authenticated_scope, settings):
+    async def test_releases_slot_on_ssh_failure(self, consumer, seeded_ssh_range, secrets_boundary, settings):
         settings.TERMINAL_MAX_SESSIONS = 5
         settings.TERMINAL_MAX_SESSIONS_PER_USER = 5
-        consumer.scope = authenticated_scope
+        user, instance = seeded_ssh_range
+        consumer.scope = {
+            "type": "websocket",
+            "user": user,
+            "url_route": {"kwargs": {"instance_uuid": instance["uuid"]}},
+        }
 
         from mission_control import consumers as consumers_mod
 
-        mock_ssh = AsyncMock()
-        mock_ssh.connect.side_effect = ConnectionError("SSH failed")
-        with patch("engine.services.connect_terminal", return_value=mock_ssh):
+        # Real connect_terminal succeeds; the real SSH connect fails on the
+        # opaque test key, so the reserved slot must be returned.
+        with secrets_boundary():
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.SSH_CONNECTION_FAILED)
-        # The reserved slot was returned, so the registry is empty again.
         assert consumers_mod._session_registry.snapshot()["active_sessions"] == 0
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
-    async def test_releases_slot_on_disconnect(self, consumer, settings):
+    async def test_releases_slot_on_disconnect(self, consumer):
+        from asgiref.sync import sync_to_async
+
         from mission_control import consumers as consumers_mod
+        from risk_register.models import AuditLog
 
         consumer._user_id = 1
         consumer._session_acquired = True
         await consumers_mod._session_registry.try_acquire(1, 5, 5)
         assert consumers_mod._session_registry.snapshot()["active_sessions"] == 1
 
-        # disconnect() audits the session, which writes to the DB; patch it so
-        # this stays a fast unit test focused on slot release.
-        with patch("mission_control.consumers.audit_session_event"):
-            await consumer.disconnect(close_code=1000)
+        await consumer.disconnect(close_code=1000)
 
+        # Slot released, and the real session audit row was written.
         assert consumers_mod._session_registry.snapshot()["active_sessions"] == 0
+        session_audit_written = await sync_to_async(
+            AuditLog.objects.filter(entity_type=AuditLog.EntityType.SESSION, actor_id=1).exists
+        )()
+        assert session_audit_written
 
     @pytest.mark.asyncio
     async def test_release_is_idempotent(self, consumer, settings):

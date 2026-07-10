@@ -4,7 +4,7 @@ name: Deploy
 on:
   pull_request:
   push:
-    branches: [main, dev, aws-dev, gcp-dev]
+    branches: [main, dev, aws-dev, aws-proof, gcp-dev]
   workflow_dispatch:
     inputs:
       gcp_require_active_certificate:
@@ -89,6 +89,7 @@ jobs:
               - '.github/workflows/_range.yml'
             shifter_engine:
               - 'shifter/engine/provisioner/**'
+              - 'shifter/cyberscript/**'
               # NB: module is `engine-provisioner`, not the historical
               # `pulumi-provisioner` name; the latter was a stale typo
               # the path filter inherited from before the rename.
@@ -135,6 +136,7 @@ jobs:
             # trigger Terraform plans, image builds, or environment deploys.
             quality_only:
               - '.github/workflows/_quality.yml'
+              - '.github/quality-path-filters.yaml'
               - 'scripts/polaris-aws-range/**'
               - 'scenario-dev/polaris/tests/**'
               # Guardrail scripts that the Quality workflow invokes
@@ -166,10 +168,8 @@ jobs:
               - 'shifter/engine/provisioner/cloud/gcp/**'
               - 'shifter/shifter_platform/config/settings.py'
               - 'shifter/shifter_platform/engine/ecs.py'
-              - 'shifter/shifter_platform/cms/experiments/ecs.py'
               - 'shifter/shifter_platform/entrypoint.sh'
               - 'shifter/shifter_platform/entrypoint-lib.sh'
-              - 'shifter/shifter_platform/cms/experiments/events.py'
               - 'shifter/shifter_platform/shared/management/commands/run_worker.py'
               - 'shifter/shifter_platform/requirements-gcp.txt'
               - 'shifter/shifter_platform/requirements-gcp.lock'
@@ -202,6 +202,8 @@ jobs:
             guardrail_docs:
               - '.github/pull_request_template.md'
               - '.github/copilot-instructions.md'
+              - '.gc/plan-rules.md'
+              - 'changelog.d/README.md'
               - 'docs/adr/**'
               - 'shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md'
 
@@ -237,6 +239,13 @@ jobs:
                 RUN_AWS="true"
                 APPLY_AWS="true"
                 ;;
+              aws-proof)
+                AWS_ENV="proof"
+                AWS_IS_DEV="false"
+                AWS_GITHUB_ENV="aws-proof"
+                RUN_AWS="true"
+                APPLY_AWS="true"
+                ;;
               gcp-dev)
                 RUN_GCP="true"
                 DEPLOY_GCP="true"
@@ -251,6 +260,13 @@ jobs:
             BRANCH="${GITHUB_REF#refs/heads/}"
             case "$BRANCH" in
               aws-dev)
+                RUN_AWS="true"
+                APPLY_AWS="true"
+                ;;
+              aws-proof)
+                AWS_ENV="proof"
+                AWS_IS_DEV="false"
+                AWS_GITHUB_ENV="aws-proof"
                 RUN_AWS="true"
                 APPLY_AWS="true"
                 ;;
@@ -327,7 +343,10 @@ jobs:
     # so the same SHA already passed Quality on its dev push and re-running
     # here is pure duplicate work. Deploy jobs already tolerate skipped
     # Quality via `(needs.quality.result == 'success' || ... == 'skipped')`.
+    # The proof tenant standup path (manual dispatch on aws-proof) also skips
+    # Quality: it redeploys a SHA already validated on dev.
     if: |
+      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/aws-proof') &&
       (github.event_name == 'pull_request' ||
        github.event_name == 'workflow_dispatch' ||
        github.ref == 'refs/heads/dev') &&
@@ -336,7 +355,11 @@ jobs:
        github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
     with:
+      # Commit-message / label-based test skips are not accepted on protected
+      # branches (ADR-003-R2, #760). Unit-test jobs honor skip_tests inside
+      # _quality.yml, but lint, architecture, and security jobs do not.
       skip_tests: false
+      run_full_matrix: ${{ github.event_name == 'workflow_dispatch' }}
       # Build + boot the production portal image when the image's own inputs
       # change (portal_image), the portal platform Terraform changes
       # (shifter_platform), or the smoke's own implementation changes
@@ -422,6 +445,15 @@ jobs:
     secrets:
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      # Deployment-owned identity/config values consumed by _gcp-dev.yml's
+      # render steps. Must be forwarded here: the reusable workflow only sees
+      # secrets the caller passes, so an omitted one renders empty and the
+      # deploy fails loud (e.g. "GCP_PROJECT_ID is not set").
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_PUBLIC_HOSTNAME: ${{ secrets.GCP_PUBLIC_HOSTNAME }}
+      GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN: ${{ secrets.GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN }}
+      GCP_MASTER_AUTHORIZED_CIDRS: ${{ secrets.GCP_MASTER_AUTHORIZED_CIDRS }}
+      SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
       GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
       GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
       PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
@@ -452,6 +484,13 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+      TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+      TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+      TF_VARS_DEV_CORE: ${{ secrets.TF_VARS_DEV_CORE }}
+      TF_VARS_PROOF_CORE: ${{ secrets.TF_VARS_PROOF_CORE }}
+      TF_VARS_PROD_CORE: ${{ secrets.TF_VARS_PROD_CORE }}
 
   range:
     name: Range
@@ -478,8 +517,16 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
       TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
+      TF_VARS_PROOF_RANGE: ${{ secrets.TF_VARS_PROOF_RANGE }}
       TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
+      SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
+      SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
+      SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
+      TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+      TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+      TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
 
   shifter-engine:
     name: Shifter Engine
@@ -508,17 +555,20 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
 
   shifter_platform:
     name: Shifter Platform
     needs: [changes, quality, core, range, shifter-engine]
     # `_shifter-platform.yml` jobs (plan, push-guacamole-images, apply,
-    # build, deploy) all request `id-token: write` (AWS OIDC) and
-    # `pull-requests: write` (plan comments). Caller grants the union.
+    # build, deploy, post-deploy-smoke) request `id-token: write` (AWS OIDC),
+    # `pull-requests: write` (plan comments), and `issues: write` (smoke
+    # failure issues). Caller grants the union.
     permissions:
       contents: read
       id-token: write
       pull-requests: write
+      issues: write
     if: |
       always() &&
       github.event_name != 'pull_request' &&
@@ -546,7 +596,15 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
       PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
       TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
       TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
+      TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+      TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+      TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+      TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
+      SMOKE_TEST_USER_EMAIL: ${{ secrets.SMOKE_TEST_USER_EMAIL }}
+      SMOKE_LINUX_AGENT_ID: ${{ secrets.SMOKE_LINUX_AGENT_ID }}
+      SMOKE_WINDOWS_AGENT_ID: ${{ secrets.SMOKE_WINDOWS_AGENT_ID }}

@@ -186,6 +186,9 @@ class NGFWAppContext(BaseModel):
     Attributes:
         app_id: UUID of the CMS App record.
         instance_id: UUID of the CMS Instance record (for correlation).
+        request_id: UUID of the provisioning Request — the cross-layer
+            correlation key shared with the Engine, used to resolve the Engine
+            NGFW Instance (and the ranges attached to it).
         name: User-friendly NGFW name.
         app_type: Discriminator field, always 'ngfw'.
         status: NGFW lifecycle status (synced from Engine via events).
@@ -195,6 +198,7 @@ class NGFWAppContext(BaseModel):
 
     app_id: UUID
     instance_id: UUID
+    request_id: UUID
     name: str
     app_type: Literal["ngfw"] = "ngfw"
     status: str

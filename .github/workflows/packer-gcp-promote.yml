@@ -1,0 +1,114 @@
+name: Packer GCE Image Promote to Prod
+
+# Promotes a Shifter GCE image from dev to prod, parallel to packer-promote.yml
+# for AWS AMIs (issue #505, PLAT-001.10). Promotion copies the newest image in
+# the dev family `shifter-<type>` into the prod project's `shifter-<type>`
+# family and deprecates the previous prod head. Image families are the version
+# pointer (no SSM equivalent). Gated by the `prod` GitHub Environment for
+# approval; authenticates with Workload Identity Federation (no SA keys).
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_type:
+        description: 'GCE image to promote'
+        required: true
+        type: choice
+        options:
+          - ubuntu
+          - brokenbk
+          - kali
+          - windows
+          - dc
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.image_type }} GCE image to prod
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_TYPE: ${{ inputs.image_type }}
+      IMAGE_FAMILY: shifter-${{ inputs.image_type }}
+    steps:
+      # Run from the dispatched ref (github.sha), gated by workflow_dispatch
+      # permission plus the `prod` environment approval. No free-form
+      # `inputs.ref`: a cloud-credentialed promotion must not execute code from
+      # an arbitrary caller-supplied branch (#505 codex security review).
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Ensure GCP promote auth is configured
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_DEV_PROJECT_ID: ${{ secrets.GCP_DEV_PROJECT_ID }}
+        run: |
+          missing=""
+          [ -z "${GCP_SERVICE_ACCOUNT}" ] && missing="${missing} GCP_SERVICE_ACCOUNT"
+          [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ] && missing="${missing} GCP_WORKLOAD_IDENTITY_PROVIDER"
+          [ -z "${GCP_PROJECT_ID}" ] && missing="${missing} GCP_PROJECT_ID(prod)"
+          [ -z "${GCP_DEV_PROJECT_ID}" ] && missing="${missing} GCP_DEV_PROJECT_ID(source)"
+          if [ -n "${missing}" ]; then
+            echo "::error::Required secret(s) not set:${missing}. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: ">= 416.0.0"
+
+      - name: Promote image dev family -> prod family
+        env:
+          PROD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          DEV_PROJECT: ${{ secrets.GCP_DEV_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          # Resolve the newest image in the dev family.
+          SRC_IMAGE=$(gcloud compute images describe-from-family "${IMAGE_FAMILY}" \
+            --project="${DEV_PROJECT}" --format='value(name)')
+          if [ -z "${SRC_IMAGE}" ]; then
+            echo "::error::No image found in dev family ${IMAGE_FAMILY} (project ${DEV_PROJECT}). Build it first."
+            exit 1
+          fi
+          echo "Source dev image: ${SRC_IMAGE}"
+
+          # Capture the current prod head (if any) so it can be deprecated after
+          # the new image takes over the family.
+          PREV_PROD_IMAGE=$(gcloud compute images describe-from-family "${IMAGE_FAMILY}" \
+            --project="${PROD_PROJECT}" --format='value(name)' 2>/dev/null || true)
+
+          NEW_PROD_IMAGE="${IMAGE_FAMILY}-$(date -u +%Y%m%d%H%M%S)"
+          gcloud compute images create "${NEW_PROD_IMAGE}" \
+            --project="${PROD_PROJECT}" \
+            --source-image="${SRC_IMAGE}" \
+            --source-image-project="${DEV_PROJECT}" \
+            --family="${IMAGE_FAMILY}" \
+            --labels=project=shifter,managed-by=packer,image-type="${IMAGE_TYPE}",channel=prod
+
+          if [ -n "${PREV_PROD_IMAGE}" ] && [ "${PREV_PROD_IMAGE}" != "${NEW_PROD_IMAGE}" ]; then
+            gcloud compute images deprecate "${PREV_PROD_IMAGE}" \
+              --project="${PROD_PROJECT}" \
+              --state=DEPRECATED \
+              --replacement="${NEW_PROD_IMAGE}"
+            echo "Deprecated previous prod image ${PREV_PROD_IMAGE}"
+          fi
+
+          {
+            echo "## Prod GCE Image Promotion Complete"
+            echo "- **Type:** ${IMAGE_TYPE}"
+            echo "- **Promoted image:** \`${NEW_PROD_IMAGE}\` (family \`${IMAGE_FAMILY}\`)"
+            echo "- **Source dev image:** \`${SRC_IMAGE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

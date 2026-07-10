@@ -95,18 +95,27 @@ class TestRangeContextValidation:
         assert ctx.range_id is None
 
     def test_computed_is_ready(self):
-        """RangeContext.is_ready returns True when status is READY."""
+        """RangeContext.is_ready is True only when status is READY."""
         from cyberscript.enums import ResourceStatus
         from cyberscript.schemas import RangeContext
 
-        ctx = RangeContext(
+        ready_ctx = RangeContext(
             request_id=uuid4(),
             scenario_id="test-scenario",
             user_id=1,
             status=ResourceStatus.READY,
             instances=[],
         )
-        assert ctx.is_ready is True
+        assert ready_ctx.is_ready is True
+
+        pending_ctx = RangeContext(
+            request_id=uuid4(),
+            scenario_id="test-scenario",
+            user_id=1,
+            status=ResourceStatus.PENDING,
+            instances=[],
+        )
+        assert pending_ctx.is_ready is False
 
     def test_computed_is_terminal(self):
         """RangeContext.is_terminal returns True for terminal statuses."""
@@ -190,6 +199,22 @@ class TestInstanceSpecValidation:
                 os_type=os_type,
             )
             assert spec.os_type == os_type
+
+    def test_uuid_inherited_from_spec_base_not_redeclared(self):
+        """InstanceSpec must inherit uuid from SpecBase, not redeclare it."""
+        from cyberscript.schemas import InstanceSpec
+        from cyberscript.schemas.base import SpecBase
+
+        assert "uuid" not in InstanceSpec.__annotations__
+        assert "uuid" in InstanceSpec.model_fields
+        spec = InstanceSpec(
+            name="test-instance",
+            role="attacker",
+            os_type="kali",
+            uuid="abc-123",
+        )
+        assert spec.uuid == "abc-123"
+        assert isinstance(spec, SpecBase)
 
 class TestInstanceContextPrivateIp:
     """Tests for the optional InstanceContext.private_ip display field."""

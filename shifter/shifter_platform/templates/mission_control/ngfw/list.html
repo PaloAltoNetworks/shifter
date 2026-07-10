@@ -3,119 +3,7 @@
 {% extends "mission_control/base.html" %}
 {% load static i18n %}
 {% block extra_css %}
-    <style>
-    /* NGFW Status badges */
-    .status {
-        display: inline-flex;
-        align-items: center;
-        font-size: 12px;
-    }
-
-    .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-right: 6px;
-    }
-
-    /* Status colors */
-    .status-ready .status-dot,
-    .status-active .status-dot { background: #22c55e; }
-    .status-provisioning .status-dot,
-    .status-starting .status-dot,
-    .status-stopping .status-dot,
-    .status-deprovisioning .status-dot { background: #faad14; animation: pulse 1.5s infinite; }
-    .status-stopped .status-dot { background: #707070; }
-    .status-failed .status-dot { background: #ff4d4f; }
-    .status-not_provisioned .status-dot { background: #484848; }
-
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
-    }
-
-    /* NGFW cards grid */
-    .ngfw-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-        gap: 16px;
-    }
-
-    .ngfw-card {
-        background: var(--theme-surface);
-        border: 1px solid var(--theme-border);
-        border-radius: 4px;
-        padding: 16px;
-        transition: border-color 0.2s ease;
-    }
-
-    .ngfw-card:hover {
-        border-color: #484848;
-    }
-
-    .ngfw-card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 16px;
-    }
-
-    .ngfw-card-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--theme-text);
-        margin: 0;
-    }
-
-    .ngfw-card-meta {
-        font-size: 12px;
-        color: var(--theme-text-secondary);
-        margin-top: 4px;
-    }
-
-    .ngfw-card-actions {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
-
-    /* Page header with action button */
-    .page-header-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 24px;
-    }
-
-    .page-header-content {
-        flex: 1;
-    }
-
-    .page-subtitle {
-        font-size: 14px;
-        color: var(--theme-text-secondary);
-        margin: 4px 0 0;
-    }
-
-    /* Refresh button styling */
-    .ngfw-refresh-btn {
-        background: transparent !important;
-        border: none !important;
-        cursor: pointer;
-        color: var(--theme-text-secondary);
-        transition: color 0.2s ease;
-    }
-
-    .ngfw-refresh-btn:hover {
-        color: var(--theme-text);
-    }
-
-    .ngfw-refresh-btn svg {
-        display: block;
-        fill: currentColor;
-        stroke: currentColor;
-    }
-    </style>
+    <link rel="stylesheet" href="{% static 'css/mc-ngfw-list.css' %}">
 {% endblock %}
 {% block content %}
     <div class="page-header-row">
@@ -157,20 +45,18 @@
                                 {% trans "Created" %} {{ ngfw.created_at|date:"M d, Y" }}
                             </div>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="flex-row gap-sm">
                             <div class="status status-{{ ngfw.status }}">
                                 <span class="status-dot"></span>
                                 <span>{{ ngfw.get_status_display }}</span>
                             </div>
                             <button class="ngfw-refresh-btn"
                                     data-ngfw-id="{{ ngfw.app_id }}"
-                                    aria-label='{% trans "Refresh NGFW Status" %}'
-                                    style="padding: 4px">
+                                    aria-label='{% trans "Refresh NGFW Status" %}'>
                                 <svg viewBox="0 0 20 22"
                                      xmlns="http://www.w3.org/2000/svg"
                                      width="20"
-                                     height="22"
-                                     style="display: block">
+                                     height="22">
                                     <g fill="currentColor" fill-rule="evenodd">
                                     <path d="M7.22 18.973a.186.186 0 0 1-.057-.01 8.903 8.903 0 0 1-.54-.194.188.188 0 0 1
                                         .138-.35c.169.068.343.131.518.188a.188.188 0 0 1-.058.366M1.57 13.192a.188.188 0
@@ -245,7 +131,7 @@
                 <p>
                     {% trans "Set up a persistent NGFW to enable traffic logging to XDR for your ranges" %}
                 </p>
-                <div style="margin-top: 16px;">
+                <div class="mt-lg">
                     <a href="{% url 'mission_control:ngfw_wizard' %}"
                        class="btn btn-primary">{% trans "Setup NGFW" %}</a>
                 </div>
@@ -270,9 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const response = await fetch('{% url "mission_control:api_ngfw_list" %}');
                 const data = await response.json();
 
-                // Find this NGFW in the response
-                const ngfw = data.ngfws.find(n => n.id === ngfwId);
-                if (ngfw) {
+                // Confirm this NGFW is present in the response
+                const ngfwPresent = data.ngfws.some(n => n.id === ngfwId);
+                if (ngfwPresent) {
                     // Reload page to show updated status
                     globalThis.location.reload();
                 }

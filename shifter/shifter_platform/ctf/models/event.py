@@ -21,6 +21,7 @@ from ctf.enums import (
     AttemptLimitMode,
     EventStatus,
     RatingVisibility,
+    ScoringMode,
 )
 
 from ._base import CTFBaseModel
@@ -151,6 +152,15 @@ class CTFEvent(CTFBaseModel):
         default=RatingVisibility.PUBLIC.value,
         help_text="Challenge rating visibility: public, organizer-only, or disabled",
     )
+    scoring_mode = models.CharField(
+        max_length=20,
+        choices=ScoringMode.choices(),
+        default=ScoringMode.STANDARD.value,
+        help_text=(
+            "Scoring strategy for this event. 'standard' awards each challenge's "
+            "fixed point value (less hint penalties), independent of solve count."
+        ),
+    )
     scoreboard_visible = models.BooleanField(
         default=True,
         help_text="Whether the scoreboard is visible to participants. When False, participants see a hidden message.",
@@ -169,6 +179,10 @@ class CTFEvent(CTFBaseModel):
         max_length=50,
         default="UTC",
         help_text="IANA timezone for displaying event times in emails (e.g. 'America/New_York')",
+    )
+    spare_range_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Desired size of the event's prewarmed spare-range recovery pool",
     )
 
     class Meta:
@@ -238,10 +252,18 @@ class CTFEvent(CTFBaseModel):
 
     @property
     def is_scoreboard_frozen(self) -> bool:
-        """Return True if scoreboard is currently frozen for participants."""
+        """Return True if scoreboard is currently frozen for participants.
+
+        Pausing must not lift the freeze: a frozen board stays frozen while the
+        event is ACTIVE or PAUSED, so an organizer pausing during the freeze
+        window does not leak post-freeze standings (#1143).
+        """
         if not self.scoreboard_freeze_at:
             return False
-        return timezone.now() >= self.scoreboard_freeze_at and self.status == EventStatus.ACTIVE.value
+        return timezone.now() >= self.scoreboard_freeze_at and self.status in (
+            EventStatus.ACTIVE.value,
+            EventStatus.PAUSED.value,
+        )
 
     @property
     def is_modifiable(self) -> bool:
@@ -260,6 +282,14 @@ class CTFEvent(CTFBaseModel):
         """
         try:
             return EventStatus(self.status) in {EventStatus.DRAFT, EventStatus.REGISTRATION}
+        except ValueError:
+            return False
+
+    @property
+    def is_live_flag_repairable(self) -> bool:
+        """Return True when organizers may perform narrow live flag repairs."""
+        try:
+            return EventStatus(self.status) in {EventStatus.ACTIVE, EventStatus.PAUSED}
         except ValueError:
             return False
 

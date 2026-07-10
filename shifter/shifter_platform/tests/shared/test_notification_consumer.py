@@ -27,6 +27,17 @@ def clear_notification_registry():
     clear_notification_registry()
 
 
+@pytest.fixture(autouse=True)
+def _enable_notifications(settings):
+    """Enable the shared notification subsystem (off by default since #941).
+
+    This file exercises the live consumer behavior, which is parked when the
+    subsystem is disabled. The disabled-mode rejection has its own test that
+    re-disables the flag in the test body.
+    """
+    settings.WEBSOCKET_NOTIFICATIONS_ENABLED = True
+
+
 @pytest.fixture
 def user(db):
     """Create a test user."""
@@ -55,6 +66,18 @@ def consumer():
     c.accept = AsyncMock()
     c.send = AsyncMock()
     return c
+
+
+@pytest.mark.asyncio
+async def test_rejects_when_subsystem_disabled(consumer, settings):
+    """When the subsystem is parked (default since #941), connect closes SERVICE_UNAVAILABLE."""
+    settings.WEBSOCKET_NOTIFICATIONS_ENABLED = False
+    consumer.scope = {"type": "websocket", "user": MagicMock(is_authenticated=True, id=1)}
+
+    await consumer.connect()
+
+    consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.SERVICE_UNAVAILABLE)
+    consumer.accept.assert_not_awaited()
 
 
 @pytest.mark.asyncio

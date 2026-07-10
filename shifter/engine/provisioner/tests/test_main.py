@@ -494,7 +494,7 @@ class TestGdcProvisioning:
         )
         monkeypatch.setattr("terraform_ops._update_range_config", MagicMock())
         monkeypatch.setattr(
-            "terraform_ops._build_range_terraform_variables",
+            "terraform_ops.build_range_variables",
             MagicMock(return_value={"range_id": 42, "subnets": range_spec["subnets"]}),
         )
         monkeypatch.setattr(
@@ -514,7 +514,9 @@ class TestGdcProvisioning:
         ):
             _run_terraform_provision("req-123", 42, 7, range_spec)
 
-        mock_setup.assert_called_once_with(instances_output=terraform_output["instances"], range_spec=range_spec)
+        mock_setup.assert_called_once_with(
+            instances_output=terraform_output["instances"], range_spec=range_spec, range_id=42
+        )
         mock_write_state.assert_called_once_with(
             range_id=42,
             subnets=terraform_output["subnets"],
@@ -571,8 +573,10 @@ class TestGdcProvisioning:
             assert instance_data["instance_id"] == "i-polaris"
             assert spec.set_local_password is False
 
-        def record_bootstrap(*, instance_id, dc_ip, public_key):
+        def record_bootstrap(*, instance_data, instance_id, dc_ip, public_key, range_id):
             events.append(("bootstrap", dc_ip, public_key))
+            assert instance_data["instance_id"] == "i-polaris"
+            assert range_id == 9
 
         def record_container_password(*, instance_data, instance_id, container_name, ssh_user):
             events.append(("password", container_name, ssh_user))
@@ -613,6 +617,96 @@ class TestGdcProvisioning:
             ("bootstrap", "10.1.2.8", "ssh-rsa AAAA"),
             ("password", "a14-kali", "kali"),
         ]
+
+    def test_polaris_bootstrap_gcp_routes_ssh_and_skips_imds(self, monkeypatch):
+        """GCP polaris bootstrap uses the routed executor, a gcp plan, and no IMDS mutation."""
+        import polaris_bootstrap
+
+        captured = {}
+
+        class _FakeExecution:
+            executor = MagicMock()
+            target = "10.50.2.3"
+            document_name = "AWS-RunShellScript"
+
+            def close(self):
+                captured["closed"] = True
+
+        def fake_build_context(instance_data, *, os_type, role):
+            captured["target_instance"] = instance_data["instance_id"]
+            return _FakeExecution()
+
+        class _FakeOrchestrator:
+            def __init__(self, *, executor):
+                captured["executor"] = executor
+
+            def orchestrate(self, target, plan, context, document_name):
+                captured["target"] = target
+                captured["plan_provider"] = plan.provider
+                captured["document_name"] = document_name
+                return SimpleNamespace(success=True, error=None)
+
+        monkeypatch.setattr(polaris_bootstrap, "build_guest_execution_context", fake_build_context)
+        monkeypatch.setattr(polaris_bootstrap, "SetupOrchestrator", _FakeOrchestrator)
+        imds = MagicMock()
+        monkeypatch.setattr(polaris_bootstrap, "_set_aws_imds_hop_limit", imds)
+        monkeypatch.setenv("POLARIS_TESTS_BUCKET", "gcs-bucket")
+        monkeypatch.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "proj-123")
+
+        polaris_bootstrap._run_polaris_range_bootstrap(
+            instance_data={"instance_id": "shifter-r-9-polaris-kali", "os": "kali", "role": "attacker"},
+            instance_id="shifter-r-9-polaris-kali",
+            dc_ip="10.50.2.4",
+            public_key="ssh-ed25519 AAAA",
+            provider="gcp",
+        )
+
+        assert captured["plan_provider"] == "gcp"
+        assert captured["target"] == "10.50.2.3"
+        imds.assert_not_called()
+        assert captured["closed"] is True
+
+    def test_polaris_bootstrap_aws_sets_imds_hop_limit(self, monkeypatch):
+        """AWS polaris bootstrap raises the IMDS hop limit and uses the aws plan."""
+        import polaris_bootstrap
+
+        captured = {}
+
+        class _FakeExecution:
+            executor = MagicMock()
+            target = "i-polaris"
+            document_name = "AWS-RunShellScript"
+
+            def close(self):
+                pass
+
+        def fake_build_context(instance_data, *, os_type, role):
+            return _FakeExecution()
+
+        class _FakeOrchestrator:
+            def __init__(self, *, executor):
+                pass
+
+            def orchestrate(self, target, plan, context, document_name):
+                captured["plan_provider"] = plan.provider
+                return SimpleNamespace(success=True, error=None)
+
+        monkeypatch.setattr(polaris_bootstrap, "build_guest_execution_context", fake_build_context)
+        monkeypatch.setattr(polaris_bootstrap, "SetupOrchestrator", _FakeOrchestrator)
+        imds = MagicMock()
+        monkeypatch.setattr(polaris_bootstrap, "_set_aws_imds_hop_limit", imds)
+        monkeypatch.setenv("AGENT_S3_BUCKET", "s3-bucket")
+
+        polaris_bootstrap._run_polaris_range_bootstrap(
+            instance_data={"instance_id": "i-polaris", "os": "kali", "role": "attacker"},
+            instance_id="i-polaris",
+            dc_ip="10.1.2.8",
+            public_key="ssh-rsa AAAA",
+            provider="aws",
+        )
+
+        assert captured["plan_provider"] == "aws"
+        imds.assert_called_once_with("i-polaris")
 
     def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self):
         from terraform_vars import _build_range_terraform_variables
@@ -714,6 +808,60 @@ class TestGdcProvisioning:
         assert variables["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
         assert variables["kali_ami_id"] == "ami-deadbeef"
 
+    def test_build_range_terraform_variables_aws_range_egress_mode_from_env(self):
+        """AWS range tfvars carry range_egress_mode for the runtime module (#1171)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.setenv("RANGE_EGRESS_MODE", "none")
+            mp.setenv("S3_ENDPOINT_ID", "vpce-s3-test")
+            mp.setattr(
+                "terraform_vars.load_range_network_config",
+                MagicMock(
+                    return_value=SimpleNamespace(
+                        network_id="vpc-test",
+                        network_cidr="10.1.0.0/16",
+                        primary_portal_cidr="10.0.0.0/16",
+                    )
+                ),
+            )
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-east-2a"))
+            mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+            mp.setattr("terraform_vars.generate_presigned_url", MagicMock(return_value="https://signed.example/agent"))
+
+            variables = _build_range_terraform_variables(
+                request_id="req-aws-none",
+                range_id=1,
+                user_id=2,
+                range_spec={
+                    "ngfw": False,
+                    "subnets": [
+                        {
+                            "name": "attack",
+                            "uuid": "u1",
+                            "cidr": "10.1.1.0/28",
+                            "instances": [
+                                {
+                                    "uuid": "i1",
+                                    "name": "kali",
+                                    "role": "attacker",
+                                    "os_type": "kali",
+                                    "agent": {"s3_key": "agents/xdr.deb"},
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+        assert variables["range_egress_mode"] == "none"
+        assert variables["s3_endpoint_id"] == ""
+        assert variables["subnets"][0]["instances"][0]["agent_presigned_url"] == ""
+
     def test_build_range_terraform_variables_aws_raises_when_secrets_kms_key_arn_missing(self):
         """Fail-fast on missing SECRETS_KMS_KEY_ARN for AWS range path (#213)."""
         from terraform_vars import _build_range_terraform_variables
@@ -744,6 +892,87 @@ class TestGdcProvisioning:
                     user_id=2,
                     range_spec={"ngfw": False, "subnets": []},
                 )
+
+    def test_build_range_variables_gce_preserves_scenario_intent(self):
+        """GCE range-cell variables keep ami_key/os_type/dc_config and never AWS-translate."""
+        from terraform_vars import build_range_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "gcp")
+            mp.setenv("GCP_RANGE_BACKEND", "gce")
+            variables = build_range_variables(
+                request_id="req-gce",
+                range_id=42,
+                user_id=7,
+                range_spec={
+                    "subnets": [
+                        {
+                            "name": "polaris",
+                            "uuid": "s1",
+                            "cidr": "10.50.2.0/28",
+                            "instances": [
+                                {
+                                    "uuid": "i1",
+                                    "name": "kali",
+                                    "role": "attacker",
+                                    "os_type": "kali",
+                                    "ami_key": "polaris-vm",
+                                    "instance_type": "m5.2xlarge",
+                                },
+                                {
+                                    "uuid": "i2",
+                                    "name": "dc01",
+                                    "role": "dc",
+                                    "os_type": "windows",
+                                    "ami_key": "polaris-dc",
+                                    "dc_config": {"domain_name": "boreas.local"},
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+        assert variables["range_id"] == 42
+        assert variables["request_uuid"] == "req-gce"
+        host, dc = variables["subnets"][0]["instances"]
+        assert host["ami_key"] == "polaris-vm"
+        assert host["os_type"] == "kali"
+        # No AWS ami_id translation in the GCE shape.
+        assert "ami_id" not in host
+        assert dc["dc_config"] == {"domain_name": "boreas.local"}
+
+    def test_build_range_variables_aws_routes_to_terraform_vars(self):
+        """Without the GCE backend, the dispatcher returns AWS Terraform variables."""
+        from terraform_vars import build_range_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setattr(
+                "terraform_vars.load_range_network_config",
+                MagicMock(
+                    return_value=SimpleNamespace(
+                        network_id="vpc-test",
+                        network_cidr="10.1.0.0/16",
+                        primary_portal_cidr="10.0.0.0/16",
+                    )
+                ),
+            )
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-east-2a"))
+            mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+
+            variables = build_range_variables(
+                request_id="req-aws",
+                range_id=1,
+                user_id=2,
+                range_spec={"ngfw": False, "subnets": []},
+            )
+
+        # AWS-only variables are present; the GCE shape omits these.
+        assert "secrets_kms_key_arn" in variables
+        assert variables["kali_ami_id"] == "ami-deadbeef"
 
     def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, monkeypatch):
         from terraform_ops import run_range_terraform
@@ -865,24 +1094,40 @@ class TestPollForSerialAndCert:
 class TestDcSetupRouting:
     """Tests for provider-aware DC setup behavior."""
 
-    def test_should_promote_dc_at_runtime_defaults_by_provider(self):
+    def test_should_promote_dc_at_runtime_is_always_disabled(self):
+        # Runtime DC promotion is intentionally unreachable for every provider:
+        # DCs must be pre-promoted at bake time.
         from state_helpers import _should_promote_dc_at_runtime
 
         with pytest.MonkeyPatch.context() as mp:
             mp.delenv("DC_RUNTIME_PROMOTION", raising=False)
             assert _should_promote_dc_at_runtime("aws") is False
-            assert _should_promote_dc_at_runtime("gcp") is True
+            assert _should_promote_dc_at_runtime("gcp") is False
 
-    def test_should_promote_dc_at_runtime_honors_override(self):
+    def test_should_promote_dc_at_runtime_has_no_env_enable_path(self):
+        # The former DC_RUNTIME_PROMOTION escape hatch must not re-enable it;
+        # re-enabling runtime promotion requires an explicit future decision.
         from state_helpers import _should_promote_dc_at_runtime
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("DC_RUNTIME_PROMOTION", "false")
+            mp.setenv("DC_RUNTIME_PROMOTION", "true")
+            assert _should_promote_dc_at_runtime("aws") is False
             assert _should_promote_dc_at_runtime("gcp") is False
 
+    def test_should_run_dc_bootstrap_plan_is_always_disabled(self):
+        # The DC bootstrap plan renames the guest (runtime DC mutation), so it is
+        # unreachable for every provider and has no env enable path; a pre-promoted
+        # DC gets SSH from the guest metadata startup script instead.
+        from state_helpers import _should_run_dc_bootstrap_plan
+
         with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("DC_RUNTIME_PROMOTION", "true")
-            assert _should_promote_dc_at_runtime("aws") is True
+            mp.delenv("DC_BOOTSTRAP_VIA_SETUP_PLAN", raising=False)
+            assert _should_run_dc_bootstrap_plan("aws") is False
+            assert _should_run_dc_bootstrap_plan("gcp") is False
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("DC_BOOTSTRAP_VIA_SETUP_PLAN", "true")
+            assert _should_run_dc_bootstrap_plan("gcp") is False
 
     def test_run_dc_setup_bootstraps_and_promotes_for_gcp(self, monkeypatch):
         from dc_setup import _run_dc_setup

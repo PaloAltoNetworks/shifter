@@ -15,10 +15,11 @@ from django.http import HttpRequest
 from firebase_admin import auth as firebase_auth
 
 from config.bootstrap_admin import apply_bootstrap_admin_flags
-from management.services import get_user_profile, update_cognito_sub
+from config.cognito_groups import sync_cognito_groups_from_claims
+from config.user_type_sync import sync_user_type
+from management.services import update_cognito_sub
 from risk_register.models import AuditLog
-from risk_register.services import AuthPrincipal, audit_auth_event
-from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
+from risk_register.services import AuthPrincipal, audit_auth_event, get_client_ip
 
 if TYPE_CHECKING:
     # Aliased to avoid clashing with the ``User = get_user_model()`` runtime
@@ -184,27 +185,26 @@ def _assert_account_can_create_app_session(*, id_token: str, claims: IdentityUse
         raise IdentityPlatformMFAEnrollmentRequired("Corporate login requires an enrolled multi-factor authenticator.")
 
 
-def _sync_user_type_from_claims(user: DjangoUser, claims: dict[str, Any]) -> None:
-    """Keep the profile user_type aligned with custom claims when present."""
+def _sync_user_type_from_claims(
+    user: DjangoUser,
+    claims: dict[str, Any],
+    request: HttpRequest | None = None,
+) -> None:
+    """Align CTF group membership and profile user_type from Identity claims.
+
+    Delegates to the shared, audited :func:`config.user_type_sync.sync_user_type`
+    so Identity Platform, OIDC, and dev-login share one mapping and one
+    fail-closed audit trail (issue #937 SEC-5).
+    """
     claim_user_type = claims.get("user_type") or claims.get("custom:user_type")
-    if claim_user_type not in {"standard", "ctf_organizer", "ctf_participant", None}:
-        return
-
-    profile = get_user_profile(user)
-    if claim_user_type and profile.user_type != claim_user_type:
-        profile.user_type = claim_user_type
-        profile.save(update_fields=["user_type"])
-
-    if claim_user_type == "standard":
-        user.groups.remove(*user.groups.filter(name__in=[CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP]))
+    sync_user_type(user, claim_user_type, source="identity_platform", request=request)
 
 
 def _request_audit_context(request: HttpRequest | None) -> tuple[str | None, str]:
     """Return ``(source_ip, user_agent)`` for audit logging, tolerating a missing request."""
     if request is None:
         return None, ""
-    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    source_ip = xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR")
+    source_ip = get_client_ip(request)
     user_agent = request.META.get("HTTP_USER_AGENT", "")[:500]
     return source_ip, user_agent
 
@@ -235,7 +235,8 @@ class IdentityPlatformBackend(BaseBackend):
 
         apply_bootstrap_admin_flags(user, claims.email)
         update_cognito_sub(user, claims.sub)
-        _sync_user_type_from_claims(user, identity_claims)
+        _sync_user_type_from_claims(user, identity_claims, request)
+        sync_cognito_groups_from_claims(user, identity_claims, request)
 
         source_ip, user_agent = _request_audit_context(request)
         audit_auth_event(

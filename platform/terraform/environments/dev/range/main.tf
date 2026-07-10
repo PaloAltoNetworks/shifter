@@ -12,8 +12,12 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
-  name_prefix = "${var.environment}-range"
+  name_prefix                      = "${var.environment}-range"
+  iam_name_prefix                  = "shifter-${var.environment}-range"
+  ci_role_permissions_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/shifter-${var.environment}-ci-role-boundary"
 }
 
 # ------------------------------------------------------------------------------
@@ -23,10 +27,12 @@ locals {
 module "vpc" {
   source = "../../../modules/range/vpc"
 
-  name_prefix     = local.name_prefix
-  vpc_cidr        = var.vpc_cidr
-  portal_vpc_cidr = var.portal_vpc_cidr
-  tags            = var.tags
+  name_prefix              = local.name_prefix
+  iam_name_prefix          = local.iam_name_prefix
+  permissions_boundary_arn = local.ci_role_permissions_boundary_arn
+  vpc_cidr                 = var.vpc_cidr
+  portal_vpc_cidr          = var.portal_vpc_cidr
+  tags                     = var.tags
 
   # Phase 5: VPC Flow Logs
   enable_flow_logs = var.enable_flow_logs

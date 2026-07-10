@@ -48,6 +48,8 @@ jobs:
           # security-extended adds higher-confidence security queries on top of
           # the default suite (per GitHub's documented query suites).
           queries: security-extended
+          # Path filters (excludes intentionally-vulnerable scenario targets).
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Autobuild
         # github/codeql-action v4.35.4

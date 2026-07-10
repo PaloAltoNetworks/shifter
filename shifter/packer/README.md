@@ -2,6 +2,11 @@
 
 Reproducible AMI builds for Shifter range instances.
 
+> **GCP (GCE) builds** live in [`gcp/`](gcp/README.md) — a separate
+> `googlecompute` template set parallel to these AWS `amazon-ebs` templates
+> (issue #505). `packer` invoked here never sees the `gcp/` templates, so the
+> AWS flow below is unaffected.
+
 ## Prerequisites
 
 - [Packer](https://www.packer.io/downloads) 1.9+

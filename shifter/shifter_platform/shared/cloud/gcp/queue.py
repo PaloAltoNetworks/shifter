@@ -42,7 +42,7 @@ class GCPQueueConsumer:
         except Exception as e:
             if e.__class__.__name__ == "DeadlineExceeded":
                 return []
-            logger.error("receive_messages: failed queue=%s error=%s", queue_id, e)
+            logger.exception("receive_messages: failed queue=%s error=%s", queue_id, e)
             raise CloudQueueError(f"Failed to receive Pub/Sub messages: {e}") from e
 
     def delete_message(self, queue_id: str, receipt_handle: str) -> None:
@@ -54,7 +54,7 @@ class GCPQueueConsumer:
         except ImportError as e:
             raise CloudQueueError(_PUBSUB_IMPORT_ERROR) from e
         except Exception as e:
-            logger.error("delete_message: failed queue=%s error=%s", queue_id, e)
+            logger.exception("delete_message: failed queue=%s error=%s", queue_id, e)
             raise CloudQueueError(f"Failed to ack Pub/Sub message: {e}") from e
 
 
@@ -71,5 +71,5 @@ class GCPQueuePublisher:
         except ImportError as e:
             raise CloudQueueError(_PUBSUB_IMPORT_ERROR) from e
         except Exception as e:
-            logger.error("send_message: failed queue=%s error=%s", queue_id, e)
+            logger.exception("send_message: failed queue=%s error=%s", queue_id, e)
             raise CloudQueueError(f"Failed to publish Pub/Sub message: {e}") from e

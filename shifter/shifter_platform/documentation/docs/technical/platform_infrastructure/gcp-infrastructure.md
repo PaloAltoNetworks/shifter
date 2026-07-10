@@ -26,7 +26,7 @@ Single module provisions the entire GCP control plane.
 | **Node Pools** (×3) | GKE | `web` (portal, Guacamole), `workers` (domain workers), `provisioner` (range provisioning jobs) |
 | **Cloud SQL** | Cloud SQL | PostgreSQL. Hosts platform DB and Guacamole DB. Private IP only. |
 | **Memorystore** | Memorystore | Redis. Channel layer and worker coordination. |
-| **Pub/Sub** | Pub/Sub | Event topic with per-domain subscriptions (cms, engine, mc, experiments). |
+| **Pub/Sub** | Pub/Sub | Event topic with per-domain subscriptions (cms, engine, mc). |
 | **Artifact Registry** | Artifact Registry | Container repositories (portal, guacd, guacamole-client, pulumi-provisioner). |
 | **Secret Manager** | Secret Manager | Runtime secret bundles (app, db, guacamole-db, oidc, guacamole-json-auth). |
 | **Cloud DNS** | Cloud DNS | Optional. Public hostname with Google-managed TLS certificate. |
@@ -117,6 +117,40 @@ The GCP deploy flow executed by CI:
 `gcp-dev` intentionally skips the repo-wide quality workflow on branch pushes so GCP break/fix work can iterate quickly. The provider-local validation in `_gcp-dev.yml` remains mandatory before deploy, while the full lint/test/security matrix still runs on PRs and on `dev`; production deploys are manual dispatches from `main`.
 
 `gdc-bootstrap` remains the operator bootstrap and recovery harness for first-time setup and controlled break-glass work, but it is no longer the normal deploy contract.
+
+## Email delivery
+
+GCP has no native Amazon SES equivalent, so a GCP deployment sends transactional mail (sign-up verification, password reset, invitations) through an operator-chosen SaaS, SendGrid or Mailgun, using `django-anymail`. The AWS deployment is unaffected: it keeps using `django-ses` over its IAM role.
+
+Email is optional. With `email_backend` unset (the default), the portal uses Django's console backend and no email secret is created. To enable it:
+
+1. Set the email variables in your Terraform environment override (`local.auto.tfvars`, or rendered from CI secrets):
+
+   ```hcl
+   # SendGrid
+   email_backend      = "anymail.backends.sendgrid.EmailBackend"
+   email_from_address = "noreply@your-domain.example"
+
+   # or Mailgun (also needs the sender domain)
+   email_backend       = "anymail.backends.mailgun.EmailBackend"
+   email_from_address  = "noreply@your-domain.example"
+   email_sender_domain = "mg.your-domain.example"
+   ```
+
+2. Apply Terraform. This creates an **unseeded** Secret Manager secret `${project_prefix}-email` for the ESP API key. The key is never stored in Terraform state, tfvars, Helm values, or this repo.
+
+3. Populate the secret with the API key as a JSON bundle, reading the key from a silent prompt so it never reaches shell history:
+
+   ```bash
+   read -rs -p "ESP API key: " ESP_API_KEY && echo
+   printf '{"api_key":"%s"}' "$ESP_API_KEY" \
+     | gcloud secrets versions add "${PROJECT_PREFIX}-email" --data-file=- --project "$PROJECT_ID"
+   unset ESP_API_KEY
+   ```
+
+4. Redeploy. The runtime renderer emits `EMAIL_BACKEND`, `DEFAULT_FROM_EMAIL`, the secret reference `EMAIL_API_KEY_SECRET_ID`, and (for Mailgun) `MAILGUN_SENDER_DOMAIN`; `entrypoint.sh` hydrates the key into `EMAIL_API_KEY` at startup, and `config/_email.py` selects the backend.
+
+If `email_backend` is set without `email_from_address` (or without `email_sender_domain` for Mailgun), the renderer fails closed at deploy time rather than sending as `webmaster@localhost`. See `platform/terraform/gcp/README.md` for the operator runbook.
 
 ## Current `gcp-dev` concrete values
 

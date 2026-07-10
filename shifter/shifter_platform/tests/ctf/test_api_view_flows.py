@@ -50,7 +50,8 @@ class TestEventApi:
         body["event_start"] = (now + timedelta(days=7)).isoformat()
         body["event_end"] = (now + timedelta(days=7, hours=8)).isoformat()
         resp = _json(authenticated_organizer_client, "post", "api_event_list", body=body)
-        assert resp.status_code in (201, 400)
+        # Body is deliberately valid; the create must succeed (201), not silently 4xx.
+        assert resp.status_code == 201
 
     def test_create_post_invalid_json(self, authenticated_organizer_client: Client):
         url = reverse("ctf:api_event_list")
@@ -79,13 +80,15 @@ class TestEventApi:
             kwargs={"event_id": ctf_event_draft.id},
             body={"name": "Renamed Event"},
         )
-        assert resp.status_code in (200, 400)
+        # Valid rename of a draft event must succeed (200).
+        assert resp.status_code == 200
 
     def test_detail_delete(self, authenticated_organizer_client: Client, ctf_event_draft: CTFEvent):
         resp = _json(
             authenticated_organizer_client, "delete", "api_event_detail", kwargs={"event_id": ctf_event_draft.id}
         )
-        assert resp.status_code in (204, 400)
+        # Deleting a draft event must succeed (204).
+        assert resp.status_code == 204
 
     def test_force_delete_missing_confirmation(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
         resp = _json(
@@ -127,7 +130,8 @@ class TestChallengeApi:
             kwargs={"event_id": ctf_event_draft.id},
             body=create_challenge_data(),
         )
-        assert resp.status_code in (201, 400, 403)
+        # Valid challenge data against a draft event must create (201).
+        assert resp.status_code == 201
 
     def test_list_forbidden(self, client: Client, second_organizer_user, ctf_event: CTFEvent):
         client.force_login(second_organizer_user)
@@ -153,13 +157,15 @@ class TestChallengeApi:
             kwargs={"challenge_id": ctf_challenge.id},
             body={"name": "Renamed"},
         )
-        assert resp.status_code in (200, 400)
+        # Valid challenge rename must succeed (200).
+        assert resp.status_code == 200
 
     def test_detail_delete(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
         resp = _json(
             authenticated_organizer_client, "delete", "api_challenge_detail", kwargs={"challenge_id": ctf_challenge.id}
         )
-        assert resp.status_code in (204, 400)
+        # Deleting an existing challenge must succeed (204).
+        assert resp.status_code == 204
 
 
 class TestFlagHintFileApi:
@@ -171,7 +177,8 @@ class TestFlagHintFileApi:
             kwargs={"challenge_id": ctf_challenge.id},
             body={"flag": "FLAG{added}", "flag_type": "static"},
         )
-        assert resp.status_code in (201, 400)
+        # Valid flag payload must be created (201).
+        assert resp.status_code == 201
 
     def test_add_flag_missing_value(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
         resp = _json(
@@ -186,7 +193,8 @@ class TestFlagHintFileApi:
     def test_remove_flag(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
         flag = CTFFlag.objects.create(challenge=ctf_challenge, flag_hash="$2b$12$x", flag_type="static", order=0)
         resp = _json(authenticated_organizer_client, "post", "api_remove_flag", kwargs={"flag_id": flag.id})
-        assert resp.status_code in (200, 400)
+        # Removing an existing flag must succeed (200).
+        assert resp.status_code == 200
 
     def test_remove_flag_not_found(self, authenticated_organizer_client: Client):
         resp = _json(authenticated_organizer_client, "post", "api_remove_flag", kwargs={"flag_id": uuid4()})
@@ -207,15 +215,19 @@ class TestFlagHintFileApi:
             kwargs={"challenge_id": ctf_challenge.id},
             body={"text": "a hint", "penalty": 10, "order": 0},
         )
-        assert resp.status_code in (201, 400)
+        # Valid hint payload must be created (201).
+        assert resp.status_code == 201
 
     def test_hint_delete(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
         hint = CTFHint.objects.create(challenge=ctf_challenge, text="h", penalty=5, order=0)
         resp = _json(authenticated_organizer_client, "post", "api_hint_delete", kwargs={"hint_id": hint.id})
-        assert resp.status_code in (204, 400)
+        # Deleting an existing hint must succeed (204).
+        assert resp.status_code == 204
 
     def test_hint_delete_not_found(self, authenticated_organizer_client: Client):
         resp = _json(authenticated_organizer_client, "post", "api_hint_delete", kwargs={"hint_id": uuid4()})
+        # Unknown hint id: a client error is the correct outcome (400 bad id / 404
+        # missing). This is an error-path test; success (2xx) would be the bug.
         assert resp.status_code in (400, 404)
 
     def test_files_get(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
@@ -271,6 +283,9 @@ class TestParticipantScopedApi:
             kwargs={"challenge_id": ctf_challenge.id},
             body={"flag": "FLAG{guess}"},
         )
+        # The flag value is deliberately wrong, so the outcome is intentionally not
+        # the happy path: 200 (submission accepted, marked incorrect), 400 (rejected),
+        # or 429 (rate-limited) are all valid; this test exercises dispatch, not a win.
         assert resp.status_code in (200, 400, 429)
 
     def test_submit_flag_missing(
@@ -304,7 +319,12 @@ class TestParticipantScopedApi:
         resp = _json(
             authenticated_participant_client, "post", "api_use_hint", kwargs={"challenge_id": ctf_challenge.id}, body={}
         )
-        assert resp.status_code in (200, 400)
+        # The hint exists, but use_hint enforces the same availability policy as
+        # flag submission (ctf.services.challenge.assert_challenge_available_for_participant):
+        # the ctf_event fixture is not in an active window, so the unlock is
+        # deterministically refused with 400. This pins the precondition outcome
+        # rather than accepting an unreachable 200.
+        assert resp.status_code == 400
 
     def test_rate_challenge(
         self, authenticated_participant_client: Client, ctf_participant: CTFParticipant, ctf_challenge: CTFChallenge
@@ -316,7 +336,11 @@ class TestParticipantScopedApi:
             kwargs={"challenge_id": ctf_challenge.id},
             body={"value": 5},
         )
-        assert resp.status_code in (200, 400, 404)
+        # value=5 is well-formed, but rate_challenge requires the participant to
+        # have solved the challenge first (ctf.services.submission.rate_challenge);
+        # the fixture participant has no solve, so the rating is deterministically
+        # rejected with 400. This pins the precondition outcome, not an unreachable 200.
+        assert resp.status_code == 400
 
     def test_rate_challenge_bad_value(
         self, authenticated_participant_client: Client, ctf_participant: CTFParticipant, ctf_challenge: CTFChallenge
@@ -385,7 +409,8 @@ class TestParticipantManagementApi:
             "api_participant_detail",
             kwargs={"participant_id": ctf_participant.id},
         )
-        assert resp.status_code in (200, 404)
+        # Deleting an existing participant must succeed (200).
+        assert resp.status_code == 200
 
     def test_resend_invite(self, authenticated_organizer_client: Client, ctf_participant_invited: CTFParticipant):
         with patch("ctf.services.resend_invite", return_value=ctf_participant_invited):
@@ -395,7 +420,8 @@ class TestParticipantManagementApi:
                 "api_participant_resend_invite",
                 kwargs={"participant_id": ctf_participant_invited.id},
             )
-        assert resp.status_code in (200, 400)
+        # The resend service is stubbed to succeed, so the endpoint must return 200.
+        assert resp.status_code == 200
 
     def test_assign_bracket_remove(self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant):
         resp = _json(
@@ -504,21 +530,91 @@ class TestNotificationApi:
             kwargs={"event_id": ctf_event.id, "notification_type": ntype},
         )
         assert delete.status_code == 200
+        assert not CTFEmailTemplate.objects.filter(event=ctf_event, notification_type=ntype).exists()
+
+    def test_email_template_put_rejects_template_tags(
+        self, authenticated_organizer_client: Client, ctf_event: CTFEvent
+    ):
+        ntype = NotificationType.INVITE.value
+        resp = _json(
+            authenticated_organizer_client,
+            "put",
+            "api_event_email_template",
+            kwargs={"event_id": ctf_event.id, "notification_type": ntype},
+            body={
+                "subject": "S",
+                "html_body": "{% load i18n %}<p>{{ event_name }}</p>",
+                "text_body": "{{ event_name }}",
+            },
+        )
+        assert resp.status_code == 400
+        assert not CTFEmailTemplate.objects.filter(event=ctf_event, notification_type=ntype).exists()
+
+    def test_email_template_put_rejects_attribute_traversal(
+        self, authenticated_organizer_client: Client, ctf_event: CTFEvent
+    ):
+        ntype = NotificationType.INVITE.value
+        resp = _json(
+            authenticated_organizer_client,
+            "put",
+            "api_event_email_template",
+            kwargs={"event_id": ctf_event.id, "notification_type": ntype},
+            body={
+                "subject": "S",
+                "html_body": "<p>{{ event.created_by.password }}</p>",
+                "text_body": "hi",
+            },
+        )
+        assert resp.status_code == 400
+        assert not CTFEmailTemplate.objects.filter(event=ctf_event, notification_type=ntype).exists()
+
+    def test_email_template_put_accepts_allowlisted_placeholders(
+        self, authenticated_organizer_client: Client, ctf_event: CTFEvent
+    ):
+        ntype = NotificationType.INVITE.value
+        resp = _json(
+            authenticated_organizer_client,
+            "put",
+            "api_event_email_template",
+            kwargs={"event_id": ctf_event.id, "notification_type": ntype},
+            body={
+                "subject": "S",
+                "html_body": "<p>Hi {{ participant_name }}, join {{ event_name }}: {{ registration_url }}</p>",
+                "text_body": "Hi {{ participant_name }}",
+            },
+        )
+        assert resp.status_code == 200
+        assert CTFEmailTemplate.objects.filter(event=ctf_event, notification_type=ntype).exists()
 
 
 class TestRangeApi:
     def test_provision_ranges(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        with patch("ctf.services.range.provision_event_ranges", return_value={"provisioned": 0}):
-            resp = _json(
-                authenticated_organizer_client, "post", "api_provision_ranges", kwargs={"event_id": ctf_event.id}
-            )
-        assert resp.status_code == 200
+        """Provision-all enqueues a background spin-up task and returns 202 immediately."""
+        from ctf.enums import ScheduledTaskStatus, ScheduledTaskType
+        from ctf.models import CTFScheduledTask
+
+        resp = _json(authenticated_organizer_client, "post", "api_provision_ranges", kwargs={"event_id": ctf_event.id})
+
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "queued"
+        # A real due-now spin-up task was created for the scheduler to run.
+        task = CTFScheduledTask.objects.get(
+            event=ctf_event,
+            task_type=ScheduledTaskType.SPIN_UP_RANGES.value,
+        )
+        assert str(task.pk) == body["task_id"]
+        assert task.status == ScheduledTaskStatus.PENDING.value
 
     def test_range_list(
         self, authenticated_organizer_client: Client, ctf_event: CTFEvent, ctf_participant: CTFParticipant
     ):
         resp = _json(authenticated_organizer_client, "get", "api_range_list", kwargs={"event_id": ctf_event.id})
         assert resp.status_code == 200
+        body = resp.json()
+        # Progress projection rides on the existing range-list endpoint.
+        assert body["progress"]["counts"]["total"] == 1
+        assert "task" in body["progress"]
 
     @pytest.mark.parametrize(
         ("route", "service_fn"),
@@ -585,7 +681,8 @@ class TestAdminViewFlows:
         resp = authenticated_organizer_client.get(
             reverse("ctf:admin_challenge_edit", kwargs={"challenge_id": ctf_challenge.id})
         )
-        assert resp.status_code in (200, 302)
+        # The edit page for an existing challenge must render (200), not redirect.
+        assert resp.status_code == 200
 
     def test_notification_create_get(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
         resp = authenticated_organizer_client.get(
@@ -666,8 +763,9 @@ class TestAdminChallengeFormPosts:
             reverse("ctf:admin_challenge_create", kwargs={"event_id": ctf_event_draft.id}),
             data=self._form_data(),
         )
-        # 302 on create success, 200 if the form re-renders with errors.
-        assert resp.status_code in (200, 302)
+        # _form_data() is complete and valid, so the create must redirect (302);
+        # a 200 here would mean the form re-rendered with errors.
+        assert resp.status_code == 302
 
     def test_edit_post_valid(self, authenticated_organizer_client: Client, ctf_event_draft: CTFEvent):
         from ctf.enums import ChallengeCategory, ChallengeDifficulty
@@ -687,4 +785,5 @@ class TestAdminChallengeFormPosts:
             reverse("ctf:admin_challenge_edit", kwargs={"challenge_id": challenge.id}),
             data=self._form_data(name="Edited"),
         )
-        assert resp.status_code in (200, 302)
+        # _form_data() is complete and valid, so the edit must redirect (302).
+        assert resp.status_code == 302

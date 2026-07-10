@@ -38,7 +38,11 @@ if ($Role -eq "victim") {
 
     # Install XAMPP silently
     Write-Host "Installing XAMPP..."
-    Start-Process -FilePath "C:\Windows\Temp\$xamppInstaller" -ArgumentList "--mode unattended --launchapps 0" -Wait -NoNewWindow
+    $proc = Start-Process -FilePath "C:\Windows\Temp\$xamppInstaller" -ArgumentList "--mode unattended" -Wait -NoNewWindow -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Error "FATAL: XAMPP installation failed with exit code $($proc.ExitCode)"
+        exit 1
+    }
 
     # Configure XAMPP services to start automatically
     if (Test-Path "$xamppPath\apache\bin\httpd.exe") {

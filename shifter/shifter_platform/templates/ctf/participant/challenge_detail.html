@@ -114,13 +114,14 @@
                                 <ul class="list-unstyled mt-1">
                                     {% for file in challenge_files %}
                                         <li class="mb-1">
-                                            <a href="#"
-                                               class="btn btn-sm btn-outline-primary"
-                                               data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-primary"
+                                                    data-download-url="
+                                                        {% url 'ctf:api_file_download' file_id=file.pk %}">
                                                 {% blocktrans with v1=file.display %}
                                                     &#128196; {{ v1 }}
                                                 {% endblocktrans %}
-                                            </a>
+                                            </button>
                                             <small class="text-muted ms-1">{{ file.file_size_display }}</small>
                                         </li>
                                     {% endfor %}
@@ -477,15 +478,31 @@ function submitFlag(e) {
         },
         body: JSON.stringify({ flag: flag }),
     })
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
+    .then(function(response) {
+        return response.json().then(function(data) {
+            return { response: response, data: data };
+        });
+    })
+    .then(function(result) {
+        var response = result.response;
+        var data = result.data;
         resultDiv.classList.remove('d-none');
-        if (data.correct) {
+        if (response.status === 429) {
+            resultDiv.className = 'alert alert-warning mb-3';
+            var retrySecs = data.retry_after_seconds || response.headers.get('Retry-After');
+            var msg = '<strong>Please wait.</strong> You are submitting too quickly.';
+            if (retrySecs) {
+                msg += ' Try again in ' + retrySecs + ' seconds.';
+            }
+            resultDiv.innerHTML = msg;
+            btn.disabled = false;
+            btn.textContent = 'Submit';
+        } else if (response.ok && data.correct) {
             resultDiv.className = 'alert alert-success mb-3';
             resultDiv.innerHTML = '<strong>Correct!</strong> You earned ' + data.points_awarded + ' points.';
             document.getElementById('flag-form').style.display = 'none';
             setTimeout(function() { location.reload(); }, 1500);
-        } else {
+        } else if (response.ok) {
             resultDiv.className = 'alert alert-danger mb-3';
             var msg = '<strong>Incorrect.</strong>';
             if (data.message) {
@@ -495,6 +512,11 @@ function submitFlag(e) {
             btn.disabled = false;
             btn.textContent = 'Submit';
             document.getElementById('flag-input').value = '';
+        } else {
+            resultDiv.className = 'alert alert-danger mb-3';
+            resultDiv.textContent = data.error || 'An error occurred. Please try again.';
+            btn.disabled = false;
+            btn.textContent = 'Submit';
         }
     })
     .catch(function(err) {

@@ -10,15 +10,20 @@ This module provides Django forms for:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django import forms
 from django.core.exceptions import ValidationError
 
 from ctf.models import CTFBracket, CTFChallenge, CTFEvent, CTFNotification, CTFParticipant
 
+# SonarCloud S1192: extracted duplicated string literals.
+DATETIME_SECONDS_FORMAT = "%Y-%m-%dT%H:%M:%S"
+DATETIME_LOCAL_FORMAT = "%Y-%m-%dT%H:%M"
+CANCEL_EVENT_LABEL = "Cancel Event"
+
 if TYPE_CHECKING:
-    pass
+    from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +70,7 @@ class CTFEventForm(forms.ModelForm):
             "attempt_limit_mode",
             "attempt_limit_cooldown_seconds",
             "rating_visibility",
+            "scoring_mode",
             "scoreboard_visible",
             "scoreboard_freeze_at",
         ]
@@ -72,19 +78,19 @@ class CTFEventForm(forms.ModelForm):
             "description": forms.Textarea(attrs={"rows": 4}),
             "event_start": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
-                format="%Y-%m-%dT%H:%M",
+                format=DATETIME_LOCAL_FORMAT,
             ),
             "event_end": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
-                format="%Y-%m-%dT%H:%M",
+                format=DATETIME_LOCAL_FORMAT,
             ),
             "registration_deadline": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
-                format="%Y-%m-%dT%H:%M",
+                format=DATETIME_LOCAL_FORMAT,
             ),
             "scoreboard_freeze_at": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
-                format="%Y-%m-%dT%H:%M",
+                format=DATETIME_LOCAL_FORMAT,
             ),
         }
 
@@ -97,33 +103,40 @@ class CTFEventForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self._user = user
 
-        # Populate scenario dropdown from CMS registry
-        if user is not None:
-            from ctf.bridges import cms_list_scenarios
-
-            scenario_choices = [("", "Select a scenario...")]
-            scenario_choices += cms_list_scenarios(user)
-            self.fields["scenario_id"].choices = scenario_choices
-        else:
-            # No user context — accept any value (used in tests / programmatic use)
-            self.fields["scenario_id"] = forms.CharField(max_length=50)
-
-        # Set input formats for datetime fields
-        datetime_fields = ["event_start", "event_end", "registration_deadline", "scoreboard_freeze_at"]
-        for field_name in datetime_fields:
-            if field_name in self.fields:
-                self.fields[field_name].input_formats = [
-                    "%Y-%m-%dT%H:%M",
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%d %H:%M:%S",
-                    "%Y-%m-%d %H:%M",
-                ]
+        self._populate_scenario_choices(user)
+        self._apply_datetime_input_formats()
 
         # Populate ngfw_enabled from range_config on edit
         if self.instance and self.instance.pk:
             rc = self.instance.range_config or {}
             self.fields["ngfw_enabled"].initial = rc.get("ngfw_enabled", False)
 
+        self._apply_bootstrap_css_classes()
+
+    def _populate_scenario_choices(self, user: User | None) -> None:
+        """Populate the scenario dropdown from the CMS registry, or accept any value."""
+        if user is not None:
+            from ctf.bridges import cms_list_scenarios
+
+            scenario_choices = [("", "Select a scenario...")]
+            scenario_choices += cms_list_scenarios(user)
+            self.fields["scenario_id"].choices = scenario_choices  # type: ignore[attr-defined]
+        else:
+            # No user context — accept any value (used in tests / programmatic use)
+            self.fields["scenario_id"] = forms.CharField(max_length=50)
+
+    def _apply_datetime_input_formats(self) -> None:
+        datetime_fields = ["event_start", "event_end", "registration_deadline", "scoreboard_freeze_at"]
+        for field_name in datetime_fields:
+            if field_name in self.fields:
+                self.fields[field_name].input_formats = [  # type: ignore[attr-defined]
+                    DATETIME_LOCAL_FORMAT,
+                    DATETIME_SECONDS_FORMAT,
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                ]
+
+    def _apply_bootstrap_css_classes(self) -> None:
         # Add CSS classes for styling
         for _field_name, field in self.fields.items():
             existing_classes = field.widget.attrs.get("class", "")
@@ -142,28 +155,32 @@ class CTFEventForm(forms.ModelForm):
         if cleaned_data is None:
             return {}
 
-        # Only validate if we have the values (required field errors handled separately)
+        self._validate_event_times(cleaned_data)
+        self._validate_team_settings(cleaned_data)
+        self._validate_scenario(cleaned_data)
+        return cleaned_data
+
+    def _validate_event_times(self, cleaned_data: dict[str, Any]) -> None:
         event_start = cleaned_data.get("event_start")
         event_end = cleaned_data.get("event_end")
         registration_deadline = cleaned_data.get("registration_deadline")
-        team_mode = cleaned_data.get("team_mode", False)
-        team_size_limit = cleaned_data.get("team_size_limit")
 
-        # Validate event times
         if event_start and event_end and event_end <= event_start:
             self.add_error(
                 "event_end",
                 "Event end must be after event start.",
             )
 
-        # Validate registration deadline
         if registration_deadline and event_start and registration_deadline > event_start:
             self.add_error(
                 "registration_deadline",
                 "Registration deadline must be before event start.",
             )
 
-        # Validate team settings
+    def _validate_team_settings(self, cleaned_data: dict[str, Any]) -> None:
+        team_mode = cleaned_data.get("team_mode", False)
+        team_size_limit = cleaned_data.get("team_size_limit")
+
         if team_mode:
             if not team_size_limit:
                 self.add_error(
@@ -174,7 +191,7 @@ class CTFEventForm(forms.ModelForm):
             # Clear team_size_limit if team_mode is disabled
             cleaned_data["team_size_limit"] = None
 
-        # Validate scenario_id exists in the registry
+    def _validate_scenario(self, cleaned_data: dict[str, Any]) -> None:
         scenario_id = cleaned_data.get("scenario_id")
         if scenario_id and self._user is not None:
             from ctf.bridges import cms_list_scenarios
@@ -182,8 +199,6 @@ class CTFEventForm(forms.ModelForm):
             valid_ids = {sid for sid, _ in cms_list_scenarios(self._user)}
             if scenario_id not in valid_ids:
                 self.add_error("scenario_id", "Selected scenario is not available.")
-
-        return cleaned_data
 
     def save(self, commit: bool = True) -> CTFEvent:
         """Save event with range_config packed from form fields."""
@@ -253,7 +268,7 @@ class CTFChallengeForm(forms.ModelForm):
             "solution": forms.Textarea(attrs={"rows": 6}),
             "release_time": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
-                format="%Y-%m-%dT%H:%M",
+                format=DATETIME_LOCAL_FORMAT,
             ),
         }
 
@@ -269,8 +284,8 @@ class CTFChallengeForm(forms.ModelForm):
         # Set input formats for datetime fields
         if "release_time" in self.fields:
             self.fields["release_time"].input_formats = [
-                "%Y-%m-%dT%H:%M",
-                "%Y-%m-%dT%H:%M:%S",
+                DATETIME_LOCAL_FORMAT,
+                DATETIME_SECONDS_FORMAT,
                 "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%d %H:%M",
             ]
@@ -461,7 +476,7 @@ class CTFNotificationForm(forms.ModelForm):
             "body": forms.Textarea(attrs={"rows": 6}),
             "scheduled_at": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
-                format="%Y-%m-%dT%H:%M",
+                format=DATETIME_LOCAL_FORMAT,
             ),
         }
 
@@ -477,8 +492,8 @@ class CTFNotificationForm(forms.ModelForm):
         # Set input formats for datetime fields
         if "scheduled_at" in self.fields:
             self.fields["scheduled_at"].input_formats = [
-                "%Y-%m-%dT%H:%M",
-                "%Y-%m-%dT%H:%M:%S",
+                DATETIME_LOCAL_FORMAT,
+                DATETIME_SECONDS_FORMAT,
                 "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%d %H:%M",
             ]
@@ -500,7 +515,7 @@ class EventStatusForm(forms.Form):
             ("resume", "Resume Event"),
             ("complete", "End Event"),
             ("archive", "Archive Event"),
-            ("cancel", "Cancel Event"),
+            ("cancel", CANCEL_EVENT_LABEL),
         ],
     )
 
@@ -521,17 +536,17 @@ class EventStatusForm(forms.Form):
             status = event.status
 
             if status == EventStatus.DRAFT.value:
-                available_actions = [("schedule", "Open Registration"), ("cancel", "Cancel Event")]
+                available_actions = [("schedule", "Open Registration"), ("cancel", CANCEL_EVENT_LABEL)]
             elif status == EventStatus.REGISTRATION.value:
-                available_actions = [("activate", "Activate Event"), ("cancel", "Cancel Event")]
+                available_actions = [("activate", "Activate Event"), ("cancel", CANCEL_EVENT_LABEL)]
             elif status == EventStatus.ACTIVE.value:
                 available_actions = [
                     ("pause", "Pause Event"),
                     ("complete", "End Event"),
-                    ("cancel", "Cancel Event"),
+                    ("cancel", CANCEL_EVENT_LABEL),
                 ]
             elif status == EventStatus.PAUSED.value:
-                available_actions = [("resume", "Resume Event"), ("cancel", "Cancel Event")]
+                available_actions = [("resume", "Resume Event"), ("cancel", CANCEL_EVENT_LABEL)]
             elif status == EventStatus.ENDED.value:
                 available_actions = [("archive", "Archive Event")]
 

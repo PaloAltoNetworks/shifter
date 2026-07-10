@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import secrets
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -21,6 +23,9 @@ from ctf.enums import (
 )
 
 from ._base import CTFBaseModel
+
+if TYPE_CHECKING:
+    from .event import CTFEvent
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +123,28 @@ class CTFTeam(CTFBaseModel):
         related_name="captained_teams",
         help_text="Team captain",
     )
+    # Materialized leaderboard state (issue #850). Derived from authoritative
+    # CTFSubmission/CTFAward rows of eligible members; maintained by the
+    # ctf.services.scoring recompute helpers and rebuildable via the
+    # ctf_recompute_leaderboard command. Read by the live (unfrozen, no-bracket)
+    # team scoreboard; frozen or bracket-filtered views recompute from source.
+    cached_score = models.IntegerField(
+        default=0,
+        help_text="Materialized team score (eligible members' submissions + awards); see issue #850",
+    )
+    cached_solve_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Materialized count of distinct challenges solved by eligible members",
+    )
+    cached_member_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Materialized count of eligible team members",
+    )
+    last_solve_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Materialized timestamp of the team's most recent correct solve (tie-breaker)",
+    )
 
     class Meta:
         """Django model metadata."""
@@ -132,6 +159,9 @@ class CTFTeam(CTFBaseModel):
                 condition=Q(deleted_at__isnull=True),
                 name="unique_active_team_name_per_event",
             ),
+        ]
+        indexes = [
+            models.Index(fields=["event", "-cached_score", "last_solve_at"], name="ctf_team_event_score_idx"),
         ]
 
     def __str__(self) -> str:
@@ -305,6 +335,24 @@ class CTFParticipant(CTFBaseModel):
         blank=True,
         help_text="Last activity timestamp",
     )
+    # Materialized leaderboard state (issue #850). Derived from authoritative
+    # CTFSubmission/CTFAward rows; maintained by the ctf.services.scoring
+    # recompute helpers and rebuildable via the ctf_recompute_leaderboard
+    # command. Read by the live (unfrozen) scoreboard and the participant-rank
+    # path; frozen views recompute from source.
+    cached_score = models.IntegerField(
+        default=0,
+        help_text="Materialized total score (submissions + awards); see issue #850",
+    )
+    cached_solve_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Materialized count of correctly solved challenges",
+    )
+    last_solve_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Materialized timestamp of the most recent correct solve (tie-breaker)",
+    )
 
     class Meta:
         """Django model metadata."""
@@ -323,6 +371,7 @@ class CTFParticipant(CTFBaseModel):
         indexes = [
             models.Index(fields=["event", "status"]),
             models.Index(fields=["event", "team"]),
+            models.Index(fields=["event", "-cached_score", "last_solve_at"], name="ctf_part_event_score_idx"),
         ]
 
     def __str__(self) -> str:
@@ -334,18 +383,23 @@ class CTFParticipant(CTFBaseModel):
         if not self.invite_token:
             self.invite_token = secrets.token_urlsafe(32)
         if not self.invite_token_expires:
-            from datetime import timedelta
-
-            from django.conf import settings
-
-            hours = getattr(settings, "MAGIC_LINK_EXPIRY_HOURS", 24)
-            config_expiry = timezone.now() + timedelta(hours=hours)
-            if hasattr(self, "event") and self.event_id and self.event.event_end:
-                # Use the earlier of event end or configured expiry
-                self.invite_token_expires = min(self.event.event_end, config_expiry)
-            else:
-                self.invite_token_expires = config_expiry
+            event = self.event if hasattr(self, "event") and self.event_id else None
+            self.invite_token_expires = self.default_invite_token_expiry(event)
         super().save(*args, **kwargs)
+
+    @staticmethod
+    def default_invite_token_expiry(event: CTFEvent | None, *, now: datetime | None = None) -> datetime:
+        """Return the default expiry for a participant magic-link token."""
+        current_time = now or timezone.now()
+        if event and event.event_end:
+            event_max_hours = getattr(settings, "MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS", None)
+            if event_max_hours is not None:
+                event_max_expiry = current_time + timedelta(hours=event_max_hours)
+                return min(event.event_end, event_max_expiry)
+            return event.event_end
+
+        hours = getattr(settings, "MAGIC_LINK_EXPIRY_HOURS", 24)
+        return current_time + timedelta(hours=hours)
 
     def clean(self) -> None:
         """Validate participant data."""

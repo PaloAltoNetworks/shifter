@@ -49,13 +49,16 @@ self-heals as other sessions end, without a permanent failure for the user.
 
 ## Controls
 
-Defined in `config/settings.py`, read by `mission_control.consumers`. A value
-`<= 0` disables that individual limit.
+Defined in `config/settings.py`, read by `mission_control.consumers`, and wired
+through SSM/tfvars for retuning without an image rebuild (#930; see "Tuning
+without an image rebuild"). A value `<= 0` disables that individual limit. The
+session caps are per Gunicorn worker process; see "Effective capacity" for the
+per-instance figures.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `TERMINAL_MAX_SESSIONS` | 200 | Active terminal sessions per ASGI process. |
-| `TERMINAL_MAX_SESSIONS_PER_USER` | 10 | Active terminal sessions per user, per process. |
+| `TERMINAL_MAX_SESSIONS` | 200 | Active terminal sessions per worker process. |
+| `TERMINAL_MAX_SESSIONS_PER_USER` | 10 | Active terminal sessions per user, per worker process. |
 | `TERMINAL_IDLE_TIMEOUT_SECONDS` | 1800 | Close a session after this much inactivity (no input or output). |
 | `TERMINAL_MAX_SESSION_SECONDS` | 28800 | Hard ceiling on a single session's lifetime. |
 | `TERMINAL_READ_POLL_SECONDS` | 30 | How often an idle read loop wakes to enforce timeouts and notice EOF. Does not bound output latency. |
@@ -64,8 +67,11 @@ Defined in `config/settings.py`, read by `mission_control.consumers`. A value
 
 Deployment facts (verified):
 
-- The portal runs a single Daphne process per pod or instance, so one event
-  loop serves all websockets and HTTP on that node (`entrypoint.sh`).
+- The portal runs Gunicorn with `PORTAL_WEB_WORKERS` Uvicorn workers per
+  container (`entrypoint.sh`, #174), so there are `PORTAL_WEB_WORKERS` event
+  loops per instance, each serving HTTP and websockets. The per-session figures
+  below are therefore *per worker*; see "Effective capacity" for the
+  per-instance and fleet ceilings.
 - GCP runs 2 `portal-web` replicas by default
   (`platform/k8s/gcp/base/web-deployment.yaml`, pod memory limit 1Gi). AWS runs
   the portal container on EC2, single instance or ASG.
@@ -87,15 +93,46 @@ what keeps non-terminal HTTP, range-status websockets, and Guacamole URL
 bootstrap responsive while terminals are open.
 
 The binding ceiling is file descriptors. At the default cap of 200 sessions a
-process needs ~400 FDs for terminals alone, plus HTTP sockets, DB connections,
-and the Redis channel layer. A container `nofile` limit of 1024 (a common
-default) leaves thin headroom. The default cap of 200 is chosen to stay well
-under that; raising the cap requires confirming the container FD limit first
-(see Follow-ups).
+worker process needs ~400 FDs for terminals alone, plus HTTP sockets, DB
+connections, and the Redis channel layer. A container `nofile` limit of 1024 (a
+common default) leaves thin headroom *per worker*. The default cap of 200 is
+chosen to stay well under that; raising the cap requires confirming the
+container FD limit first (see Follow-ups). More workers also multiply DB and
+Redis connections, sockets, and memory, so a higher `PORTAL_WEB_WORKERS`
+consumes headroom even where the terminal-cap arithmetic looks larger.
 
-With defaults, cluster capacity is ~200 concurrent terminals per AWS instance
-and ~400 across the two GCP replicas. Size the caps for the event from expected
-concurrent participants times terminals per participant, leaving FD headroom.
+### Effective capacity
+
+The `TerminalSessionRegistry` is process-local (one registry per worker), so the
+defaults bind *per worker*, not per instance. The real ceilings are:
+
+```text
+per-instance cap        = PORTAL_WEB_WORKERS * TERMINAL_MAX_SESSIONS
+per-user worst-case cap = PORTAL_WEB_WORKERS * TERMINAL_MAX_SESSIONS_PER_USER
+fleet cap               = in-service instances * PORTAL_WEB_WORKERS * TERMINAL_MAX_SESSIONS
+```
+
+With the deployed defaults that is ~400 concurrent terminals on dev
+(`t3.large`, 2 workers x 200) and ~800 on prod (`t3.xlarge`, 4 workers x 200) per
+instance, plus the ASG instance count for the fleet, and ~400 across the two GCP
+replicas. Size the caps for the event from expected concurrent participants
+times terminals per participant, divided across `PORTAL_WEB_WORKERS`, leaving FD
+headroom per worker.
+
+### Tuning without an image rebuild (#930)
+
+`PORTAL_WEB_WORKERS` and all five `TERMINAL_*` knobs are published as SSM
+`String` parameters under `/shifter/<environment>/portal/` by the
+`portal/ssm` Terraform module and read by both container hydration paths
+(`platform/terraform/modules/portal/ec2/user_data.sh` on first boot and
+`scripts/portal-deploy/deploy_portal.sh` on SSM redeploy), which validate them
+as integers before they reach the Docker argv. Steady-state values live in each
+environment's `terraform.tfvars`; `PORTAL_WEB_WORKERS` is sized to the instance
+vCPU count. "Without an image rebuild" means update the parameter (via tfvars or
+a deliberate event-time SSM override) and converge/restart the container. It is
+**not** a hot reload of already-running Gunicorn workers. A manual SSM override
+must be reconciled back to tfvars after the event, since Terraform owns the
+steady-state parameters.
 
 ## Ownership boundaries
 
@@ -107,11 +144,15 @@ authorization logic moves into the transport layer.
 | WebSocket transport lifecycle and capacity enforcement | `mission_control.consumers.SSHConsumer`, `_TerminalSessionRegistry` |
 | User ownership, active-range, readiness, instance, and secret-reference checks | `engine.services.connect_terminal` / `get_ssh_connection_info` |
 | SSH client mechanics, including `at_eof()` | `engine.ssh.SSHConnection` |
-| Capacity and timeout policy values | `config/settings.py` environment knobs |
+| Capacity and timeout policy values | `config/settings.py` environment knobs, published via SSM/tfvars (`portal/ssm`, #930) |
 
-The session registry is process-local by design. It protects each ASGI process
-individually and needs no shared state. A future cross-process or cross-pod
-global cap would require a shared store and is out of scope here.
+The session registry is process-local by design. It protects each Gunicorn
+worker process individually and needs no shared state, so the deployed cap is
+per worker and the per-instance ceiling is `PORTAL_WEB_WORKERS *
+TERMINAL_MAX_SESSIONS` (see "Effective capacity"). A true per-instance or
+cross-pod global cap would require shared accounting (atomic reserve/release in
+a shared store) and is out of scope here; process-local counters plus
+documentation are not a global cap.
 
 ## Follow-ups
 

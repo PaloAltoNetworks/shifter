@@ -26,9 +26,37 @@ class ObjectStorage(Protocol):
 
     def copy_object(self, bucket: str, src_key: str, dst_key: str) -> None: ...
 
+    def copy_object_conditional(
+        self,
+        bucket: str,
+        src_key: str,
+        dst_key: str,
+        *,
+        expected_identity: dict[str, Any],
+    ) -> None:
+        """Copy ``src_key`` to ``dst_key`` only if the source still matches
+        ``expected_identity`` and the destination does not already exist.
+
+        ``expected_identity`` is an opaque object-identity mapping as returned by
+        :meth:`head_object` (provider-specific keys such as ``etag`` and
+        ``generation``); the adapter selects the appropriate provider
+        precondition. Raises ``ObjectPreconditionError`` when the precondition
+        fails (source changed or destination present) and ``CloudStorageError``
+        for any other failure. Fails closed if the identity lacks the field the
+        provider needs.
+        """
+        ...
+
     def object_exists(self, bucket: str, key: str) -> bool: ...
 
-    def head_object(self, bucket: str, key: str) -> dict[str, Any]: ...
+    def head_object(self, bucket: str, key: str) -> dict[str, Any]:
+        """Return object metadata/identity.
+
+        Always includes ``content_length`` and ``etag``. Providers may include
+        additional identity fields (for example GCS ``generation``) used as the
+        strongest available precondition by :meth:`copy_object_conditional`.
+        """
+        ...
 
     def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes: ...
 
@@ -93,3 +121,15 @@ class SecretsStore(Protocol):
     """Protocol for secrets retrieval (Secrets Manager, Secret Manager, etc.)."""
 
     def get_secret(self, secret_id: str) -> str: ...
+
+
+@runtime_checkable
+class EventBus(Protocol):
+    """Protocol for publishing events to a topic (SNS, Pub/Sub, etc.)."""
+
+    def publish(
+        self,
+        topic_id: str,
+        message: str,
+        attributes: dict[str, str] | None = None,
+    ) -> None: ...

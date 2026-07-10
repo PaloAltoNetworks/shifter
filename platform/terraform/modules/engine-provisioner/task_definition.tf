@@ -47,6 +47,7 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "S3_ENDPOINT_ID", value = var.s3_endpoint_id },
       { name = "FIREWALL_ENDPOINT_ID", value = var.firewall_endpoint_id },
+      { name = "RANGE_EGRESS_MODE", value = var.range_egress_mode },
       { name = "SSM_ENDPOINTS_SUBNET_CIDR", value = var.ssm_endpoints_subnet_cidr },
       { name = "PORTAL_VPC_CIDR", value = var.portal_vpc_cidr },
       { name = "PORTAL_VPC_PEERING_ID", value = var.portal_vpc_peering_id },

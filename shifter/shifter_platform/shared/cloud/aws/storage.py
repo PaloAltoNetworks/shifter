@@ -1,8 +1,8 @@
 """AWS S3 adapter implementing ObjectStorage protocol.
 
 The actual S3 logic will be extracted from cms/assets/s3.py and
-cms/experiments/s3.py in Sub-Issue 2 (#812). This stub satisfies the
-protocol interface so the factory can return it.
+CTF storage helpers in Sub-Issue 2 (#812). This stub satisfies the protocol
+interface so the factory can return it.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 
-from shared.cloud.exceptions import CloudStorageError
+from shared.cloud.exceptions import CloudStorageError, ObjectPreconditionError
 from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,68 @@ class AWSObjectStorage:
             )
             raise CloudStorageError(f"Failed to copy S3 object: {e}") from e
         logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+
+    def copy_object_conditional(
+        self,
+        bucket: str,
+        src_key: str,
+        dst_key: str,
+        *,
+        expected_identity: dict[str, Any],
+    ) -> None:
+        """Server-side copy gated on the source ETag.
+
+        ``CopySourceIfMatch`` binds the copy to the exact validated object
+        version, so a still-valid presigned PUT that overwrote the source after
+        validation makes the copy fail (S3 returns ``412 PreconditionFailed``),
+        surfaced as ``ObjectPreconditionError`` (fail closed). Destination
+        absence is not asserted with a request precondition here: the caller
+        supplies a freshly-minted, server-controlled install key that the client
+        never sees and cannot pre-create, and relying on a destination
+        ``IfNoneMatch`` on ``CopyObject`` is not portable across botocore
+        versions or S3-compatible endpoints. The source precondition is the
+        security-critical guarantee (installed bytes == validated bytes).
+        """
+        etag = expected_identity.get("etag")
+        if not etag:
+            raise CloudStorageError("conditional copy requires a source etag")
+        safe_src = safe_log_value(src_key)
+        safe_dst = safe_log_value(dst_key)
+        logger.debug("copy_object_conditional: bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+        try:
+            client = self._get_client()
+            owner_kwargs = self._owner_kwargs()
+            copy_source_kwargs = (
+                {"ExpectedSourceBucketOwner": owner_kwargs["ExpectedBucketOwner"]} if owner_kwargs else {}
+            )
+            client.copy_object(
+                Bucket=bucket,
+                CopySource={"Bucket": bucket, "Key": src_key},
+                Key=dst_key,
+                CopySourceIfMatch=etag,
+                **owner_kwargs,
+                **copy_source_kwargs,
+            )
+        except ClientError as e:
+            code = (e.response.get("Error") or {}).get("Code")
+            status = (e.response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+            if code in {"PreconditionFailed", "ConditionalRequestConflict"} or status in {412, 409}:
+                logger.warning(
+                    "copy_object_conditional: precondition failed bucket=%s src=%s dst=%s code=%s",
+                    bucket,
+                    safe_src,
+                    safe_dst,
+                    code,
+                )
+                raise ObjectPreconditionError(
+                    "S3 conditional copy precondition failed (source changed or destination exists)"
+                ) from e
+            logger.exception("copy_object_conditional: failed bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+            raise CloudStorageError(f"Failed to conditionally copy S3 object: {e}") from e
+        except BotoCoreError as e:
+            logger.exception("copy_object_conditional: failed bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+            raise CloudStorageError(f"Failed to conditionally copy S3 object: {e}") from e
+        logger.info("copy_object_conditional: success bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
 
     def head_object(self, bucket: str, key: str) -> dict[str, Any]:
         safe_key = safe_log_value(key)

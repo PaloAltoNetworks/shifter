@@ -271,12 +271,11 @@ class TestOrchestrateEdgeCases:
 
         orchestrator = SetupOrchestrator(executor=mock_executor)
 
-        with pytest.raises((SetupError, KeyError, Exception)) as exc_info:
+        with pytest.raises(SetupError) as exc_info:
             orchestrator.orchestrate("i-12345", plan, {"other_var": "value"})
 
-        # Should have a clear error about missing variable
-        error_msg = str(exc_info.value).lower()
-        assert "missing" in error_msg or "undefined" in error_msg or "key" in error_msg
+        # Error must name the missing variable so the caller can diagnose it
+        assert "missing_var" in str(exc_info.value)
 
     def test_orchestrate_script_special_chars_render(self):
         """Script with special chars ($, {, etc) renders correctly."""
@@ -365,6 +364,32 @@ class TestSensitiveOutputMasking:
 
         caplog.set_level(logging.INFO, logger="orchestrators.setup_orchestrator")
         orchestrator.orchestrate("i-12345", plan, {})
+
+        assert secret not in caplog.text
+        assert "[REDACTED]" in caplog.text
+
+    def test_masks_context_password_key_from_success_logs(self, caplog):
+        """Context keys containing 'password' are redacted from success-path stdout/stderr logs."""
+        secret = "DsrmPass789!"
+        mock_executor = MagicMock(spec=SSMExecutor)
+        mock_executor.run_command.return_value = CommandResult(
+            success=True,
+            exit_code=0,
+            stdout=f"DSRM mode set with {secret}",
+            stderr="",
+        )
+        plan = MockSetupPlan(
+            steps=[SetupStep(name="set_dsrm", script="set dsrm", timeout_seconds=60)],
+            verify_step=None,
+        )
+        orchestrator = SetupOrchestrator(executor=mock_executor)
+
+        caplog.set_level(logging.INFO, logger="orchestrators.setup_orchestrator")
+        orchestrator.orchestrate(
+            "i-12345",
+            plan,
+            {"dsrm_password": secret},
+        )
 
         assert secret not in caplog.text
         assert "[REDACTED]" in caplog.text
@@ -539,9 +564,10 @@ class TestRebootTimeout:
             document_name="AWS-RunPowerShellScript",
         )
 
-        # Reboot timeout should be at least as long as step timeout
+        # Reboot timeout must honour the step's timeout_seconds (900s here),
+        # not be capped at DEFAULT_REBOOT_TIMEOUT (300s).
         reboot_call = mock_executor.reboot_and_wait.call_args
         reboot_timeout = reboot_call.kwargs.get("timeout_seconds") or reboot_call[1].get("timeout_seconds")
-        assert reboot_timeout >= 300  # At least 5 minutes for reboot
+        assert reboot_timeout >= plan.steps[0].timeout_seconds  # Must be >= 900, not just >= DEFAULT_REBOOT_TIMEOUT
         # Should pass document_name
         assert reboot_call.kwargs.get("document_name") == "AWS-RunPowerShellScript"

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/block-agent-attribution-shell.sh",
+        "matcher": "git .*commit|gh pr (create|edit)",
+        "failClosed": false
+      }
+    ]
+  }
+}

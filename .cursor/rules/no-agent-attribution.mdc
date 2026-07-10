@@ -1,0 +1,15 @@
+---
+description: Never add AI or agent attribution to commits, PRs, or other artifacts
+alwaysApply: true
+---
+
+# No AI / Agent Attribution
+
+Never add any of the following to commit messages, PR titles, PR bodies, issue comments, changelogs, or other repo artifacts:
+
+- Git trailer lines (`Co-authored-by` / `Co-Authored-By`) naming Cursor, Claude, Codex, Composer, or similar agents
+- Cursor product marketing footers (markdown link to cursor.com)
+- Claude Code branding lines, `Made-with: Cursor` trailers, or equivalent agent advertising
+- Any other attribution that advertises the coding agent or IDE
+
+This repository blocks these markers in pre-commit and ADR guard. Keep authorship human-only.

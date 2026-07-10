@@ -20,6 +20,7 @@ from psycopg import sql
 
 from events import STATUS_DESTROYED
 from executors.ngfw_executor import NGFWExecutor
+from log_redact import safe_log_fingerprint
 from ngfw_polling import poll_for_serial_number, wait_for_autocommit
 from orchestrators.setup_orchestrator import SetupOrchestrator
 from plans.base import DynamicPlan, SetupPlan
@@ -210,9 +211,9 @@ def configure_ngfw_subnets(
 ) -> None:
     """Configure NGFW with routes for range subnets."""
     logger.info(
-        "Configuring NGFW: %d subnets, next_hop=%s",
+        "Configuring NGFW: %d subnets, next_hop_fp=%s",
         len(subnets),
-        route_next_hop_ip,
+        safe_log_fingerprint(route_next_hop_ip),
     )
 
     from cloud import get_secrets_store
@@ -222,7 +223,7 @@ def configure_ngfw_subnets(
 
     ssh_executor = NGFWExecutor(private_key=private_key)
 
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    logger.info("Waiting for SSH on NGFW at host_fp=%s...", safe_log_fingerprint(management_ip))
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
 
     logger.info("Verifying NGFW management plane is ready...")
@@ -315,7 +316,7 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict[str, Any]], range_id: i
     private_key = secrets.get_secret(ssh_key_secret_arn)
 
     ssh_executor = NGFWExecutor(private_key=private_key)
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    logger.info("Waiting for SSH on NGFW at host_fp=%s...", safe_log_fingerprint(management_ip))
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
 
     logger.info("Verifying NGFW management plane is ready...")

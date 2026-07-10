@@ -7,12 +7,19 @@ from typing import Any, cast
 from django.conf import settings
 from django.http import HttpRequest
 
-from cms.services import get_active_range, get_scenario
+from cms.services import get_active_range, get_scenario, has_ready_active_range
 from mission_control.utils import build_connection_urls
 from shared.auth import is_ctf_participant_only
 from shared.schemas import InstanceContext, RangeContext
 
 logger = logging.getLogger(__name__)
+
+# The terminal page is the only render that consumes the full active-range
+# payload (instances, runtime IP overlay, connection URLs, terminal JSON).
+# Every other authenticated page needs only the cheap ``has_active_range``
+# indicator, so the depth is selected server-side from the resolved URL pattern
+# (never from client input) — the ``nav`` / ``terminal_full`` seam from #898.
+_TERMINAL_VIEW_NAME = "mission_control:terminal"
 
 
 def terminal_cdn_assets(_request: HttpRequest) -> dict[str, Any]:
@@ -98,11 +105,41 @@ def _build_active_range_context(
     }
 
 
+def _needs_terminal_payload(request: HttpRequest) -> bool:
+    """True only for the terminal render, the one page that reads the full payload.
+
+    Derived from the resolved URL pattern (server-owned), never from a query
+    string, header, or other client-selectable input.
+    """
+    match = request.resolver_match
+    return bool(match and match.view_name == _TERMINAL_VIEW_NAME)
+
+
+def _nav_active_range(request: HttpRequest) -> dict[str, Any]:
+    """``nav``-tier context: the cheap ``has_active_range`` sidebar indicator only.
+
+    Avoids the terminal-only FK joins, runtime IP overlay, scenario lookup, and
+    terminal JSON construction on every non-terminal authenticated render (#898).
+    """
+    from django.contrib.auth.models import User
+
+    user = cast(User, request.user)
+    context = _empty_active_range_context()
+    try:
+        context["has_active_range"] = has_ready_active_range(user)
+    except Exception:
+        logger.exception("Error computing has_active_range for user_id=%s", user.id)
+    return context
+
+
 def active_range(request: HttpRequest) -> dict[str, Any]:
     """
     Add active range information to template context.
 
     Uses CMS service to get the user's active range as a RangeContext.
+
+    The full payload is built only for the terminal render; every other
+    authenticated page gets the cheap ``has_active_range`` indicator (#898).
 
     Provides:
         - has_active_range: Boolean indicating if user has a ready range
@@ -111,7 +148,9 @@ def active_range(request: HttpRequest) -> dict[str, Any]:
     """
     if not request.user.is_authenticated:
         return _empty_active_range_context()
-    return _safe_active_range(request)
+    if _needs_terminal_payload(request):
+        return _safe_active_range(request)
+    return _nav_active_range(request)
 
 
 def _safe_active_range(request: HttpRequest) -> dict[str, Any]:

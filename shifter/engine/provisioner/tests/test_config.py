@@ -13,6 +13,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
+    GCERangeCellConfig,
+    GCERangeImageProfile,
     GDCNetworkAccessConfig,
     GDCPaloAltoVMSeriesConfig,
     GDCVMRuntimeConfig,
@@ -23,8 +25,11 @@ from config import (
     SubnetConfig,
     decrypt_field,
     generate_presigned_url,
+    get_gcp_range_backend,
     get_range_availability_zone,
     get_range_from_db,
+    is_gce_range_cell_backend,
+    load_gce_range_cell_config,
     load_gdc_network_access_config,
     load_gdc_palo_alto_vmseries_config,
     load_gdc_vmruntime_config,
@@ -257,6 +262,24 @@ class TestDataclassDefaults:
 class TestRangeNetworkEnv:
     """Tests for provider-neutral range network env parsing."""
 
+    def test_gcp_range_backend_defaults_to_gce(self, mocker):
+        mocker.patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True)
+
+        assert get_gcp_range_backend() == "gce"
+        assert is_gce_range_cell_backend() is True
+
+    def test_gcp_range_backend_still_selects_gdc_explicitly(self, mocker):
+        mocker.patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gdc"}, clear=True)
+
+        assert get_gcp_range_backend() == "gdc"
+        assert is_gce_range_cell_backend() is False
+
+    def test_gcp_range_backend_accepts_gce(self, mocker):
+        mocker.patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gce"}, clear=True)
+
+        assert get_gcp_range_backend() == "gce"
+        assert is_gce_range_cell_backend() is True
+
     def test_load_range_network_config_prefers_generic_env_names(self, mocker):
         mocker.patch.dict(
             os.environ,
@@ -353,6 +376,7 @@ class TestRangeNetworkEnv:
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gdc",
                 "GDC_ACCESS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-access",
                 "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
                 "RANGE_NETWORK_ID": "projects/test/global/networks/legacy-range",
@@ -378,11 +402,292 @@ class TestRangeNetworkEnv:
         assert config.network_region == "us-central1"
         assert config.portal_network_cidrs == ("10.40.0.0/20", "10.44.0.0/16")
 
+    def test_load_range_network_config_uses_gce_pool_id_when_backend_is_gce(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "RANGE_NETWORK_CIDR": "10.50.0.0/16",
+                "GCP_REGION": "us-central1",
+            },
+            clear=True,
+        )
+
+        config = load_range_network_config()
+
+        assert config.network_id == "gcp-range-cells:test-project"
+        assert config.network_cidr == "10.50.0.0/16"
+        assert config.network_region == "us-central1"
+
+    def test_load_gce_range_cell_config_reads_live_fire_contract(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "GCP_RANGE_LINUX_IMAGE": "projects/debian-cloud/global/images/family/debian-12",
+                "GCP_RANGE_KALI_IMAGE": "projects/kali/global/images/kali",
+                "GCP_RANGE_KALI_MACHINE_TYPE": "e2-standard-4",
+                "GCP_RANGE_DC_IMAGE": "projects/windows-cloud/global/images/family/windows-2022",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "PORTAL_NETWORK_CIDRS": "10.40.0.0/20",
+                "GCP_RANGE_EGRESS_ALLOW_CIDRS": "10.60.0.0/16",
+            },
+            clear=True,
+        )
+
+        config = load_gce_range_cell_config()
+
+        assert config == GCERangeCellConfig(
+            project_id="test-project",
+            region="us-central1",
+            zone="us-central1-b",
+            network_mode="shared-vpc",
+            network_id="projects/test-project/global/networks/range-net",
+            service_account_email="range-host@test-project.iam.gserviceaccount.com",
+            linux=GCERangeImageProfile(
+                source_image="projects/debian-cloud/global/images/family/debian-12",
+                machine_type="e2-standard-2",
+                disk_size_gb=50,
+            ),
+            kali=GCERangeImageProfile(
+                source_image="projects/kali/global/images/kali",
+                machine_type="e2-standard-4",
+                disk_size_gb=80,
+            ),
+            windows=GCERangeImageProfile(
+                source_image="",
+                machine_type="e2-standard-4",
+                disk_size_gb=100,
+            ),
+            dc=GCERangeImageProfile(
+                source_image="projects/windows-cloud/global/images/family/windows-2022",
+                machine_type="e2-standard-4",
+                disk_size_gb=100,
+            ),
+            portal_network_cidrs=("10.40.0.0/20",),
+            egress_allow_cidrs=("10.60.0.0/16",),
+        )
+
+    def test_load_gce_range_cell_config_shared_vpc_requires_range_network_id(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "GCP_RANGE_KALI_IMAGE": "projects/shifter/global/images/polaris-vm",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="RANGE_NETWORK_ID"):
+            load_gce_range_cell_config()
+
+    def test_load_gce_range_cell_config_supports_vpc_per_range_mode(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "GCP_RANGE_KALI_IMAGE": "projects/shifter/global/images/polaris-vm",
+                "GCP_RANGE_CELL_NETWORK_MODE": "vpc-per-range",
+            },
+            clear=True,
+        )
+
+        config = load_gce_range_cell_config()
+
+        assert config.network_mode == "vpc-per-range"
+        assert config.network_id == ""
+
+    def test_load_gce_range_cell_config_rejects_unknown_network_mode(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "GCP_RANGE_KALI_IMAGE": "projects/shifter/global/images/polaris-vm",
+                "GCP_RANGE_CELL_NETWORK_MODE": "bogus",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="GCP_RANGE_CELL_NETWORK_MODE"):
+            load_gce_range_cell_config()
+
+    def test_load_gce_range_cell_config_requires_host_service_account(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_LINUX_IMAGE": "projects/debian-cloud/global/images/family/debian-12",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL"):
+            load_gce_range_cell_config()
+
+    def test_load_gce_range_cell_config_reads_host_mgmt_ssh_port(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "GCP_RANGE_KALI_IMAGE": "projects/shifter/global/images/polaris-vm",
+                "GCP_RANGE_DC_IMAGE": "projects/shifter/global/images/polaris-dc",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "GCP_RANGE_HOST_MGMT_SSH_PORT": "2229",
+            },
+            clear=True,
+        )
+
+        config = load_gce_range_cell_config()
+
+        assert config.host_mgmt_ssh_port == 2229
+
+    def test_gce_range_cell_config_host_mgmt_ssh_port_defaults_to_2222(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "GCP_RANGE_KALI_IMAGE": "projects/shifter/global/images/polaris-vm",
+            },
+            clear=True,
+        )
+
+        assert load_gce_range_cell_config().host_mgmt_ssh_port == 2222
+
+    def test_load_gce_range_cell_config_reads_private_google_access(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "GCP_RANGE_KALI_IMAGE": "projects/shifter/global/images/polaris-vm",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "GCP_RANGE_PRIVATE_GOOGLE_ACCESS": "true",
+            },
+            clear=True,
+        )
+
+        config = load_gce_range_cell_config()
+
+        assert config.private_google_access is True
+
+    def test_gce_range_cell_config_get_profile_selects_guest_family(self):
+        linux = GCERangeImageProfile(
+            source_image="projects/debian-cloud/global/images/family/debian-12",
+            machine_type="e2-small",
+            disk_size_gb=20,
+        )
+        kali = GCERangeImageProfile(
+            source_image="projects/kali/global/images/kali",
+            machine_type="e2-standard-2",
+            disk_size_gb=40,
+        )
+        windows = GCERangeImageProfile(
+            source_image="projects/windows-cloud/global/images/family/windows-2022",
+            machine_type="e2-standard-4",
+            disk_size_gb=80,
+        )
+        dc = GCERangeImageProfile(
+            source_image="projects/windows-cloud/global/images/family/windows-2022-dc",
+            machine_type="e2-standard-8",
+            disk_size_gb=100,
+        )
+        config = GCERangeCellConfig(
+            project_id="test-project",
+            region="us-central1",
+            zone="us-central1-b",
+            network_mode="vpc-per-range",
+            linux=linux,
+            kali=kali,
+            windows=windows,
+            dc=dc,
+        )
+
+        assert config.get_profile(role="dc", os_type="windows") == dc
+        assert config.get_profile(role="attacker", os_type="kali") == kali
+        assert config.get_profile(role="victim", os_type="windows") == windows
+        assert config.get_profile(role="victim", os_type="ubuntu") == linux
+
+        override = config.get_profile(role="victim", os_type="ubuntu", requested_type="n2-standard-4")
+        assert override == GCERangeImageProfile(
+            source_image=linux.source_image,
+            machine_type="n2-standard-4",
+            disk_size_gb=linux.disk_size_gb,
+            disk_type=linux.disk_type,
+        )
+
+    def test_gce_range_cell_config_get_profile_falls_back_for_kali_without_image(self):
+        linux = GCERangeImageProfile(source_image="projects/debian-cloud/global/images/family/debian-12")
+        config = GCERangeCellConfig(
+            project_id="test-project",
+            region="us-central1",
+            zone="us-central1-b",
+            network_mode="vpc-per-range",
+            linux=linux,
+            kali=GCERangeImageProfile(),
+        )
+
+        assert config.get_profile(role="attacker", os_type="kali") == linux
+
+    def test_gce_range_cell_config_get_profile_requires_selected_image(self):
+        config = GCERangeCellConfig(
+            project_id="test-project",
+            region="us-central1",
+            zone="us-central1-b",
+            network_mode="vpc-per-range",
+            linux=GCERangeImageProfile(),
+            windows=GCERangeImageProfile(),
+        )
+
+        with pytest.raises(RuntimeError, match="Missing GCE range image"):
+            config.get_profile(role="victim", os_type="windows")
+
     def test_load_gdc_vmruntime_config_reads_image_contract(self, mocker):
         mocker.patch.dict(
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gdc",
                 "GDC_VM_STORAGE_CLASS": "local-shared",
                 "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
                 "GDC_KALI_IMAGE_URL": "gs://images/kali.qcow2",
@@ -427,6 +732,7 @@ class TestRangeNetworkEnv:
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gdc",
                 "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
             },
             clear=True,
@@ -443,6 +749,7 @@ class TestRangeNetworkEnv:
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gdc",
                 "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
                 "GDC_VMSERIES_BOOTSTRAP_BUCKET": "shifter-gcp-dev-vmseries-bootstrap",
                 "GDC_VMSERIES_STORAGE_CLASS": "local-shared",
@@ -487,6 +794,7 @@ class TestRangeNetworkEnv:
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gdc",
                 "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
             },
             clear=True,

@@ -17,6 +17,7 @@ from shared.models import WebSocketNotification
 from shared.notifications import (
     authorize_subscription,
     mark_notification_delivered,
+    notifications_enabled,
     pending_notifications_for,
     validate_topic,
 )
@@ -34,6 +35,13 @@ class SharedNotificationConsumer(AsyncWebsocketConsumer):
 
     async def connect(self) -> None:
         """Accept authenticated notification sockets."""
+        if not notifications_enabled():
+            # The shared notification subsystem is parked (issue #941): reject the
+            # connection with a bounded close code instead of accepting a socket
+            # that will never receive a fan-out.
+            await self.close(code=WebSocketCloseCode.SERVICE_UNAVAILABLE)
+            return
+
         user = self.scope.get("user")
         if not user or isinstance(user, AnonymousUser) or not getattr(user, "is_authenticated", False):
             logger.warning("Unauthenticated notification WebSocket connection attempt")

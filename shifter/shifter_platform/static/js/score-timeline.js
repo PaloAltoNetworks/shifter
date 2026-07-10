@@ -10,7 +10,7 @@
 /* global Chart */
 
 function initScoreTimeline(canvasId, apiUrl) {
-    var canvas = document.getElementById(canvasId);
+    const canvas = document.getElementById(canvasId);
     if (!canvas) return;
 
     fetch(apiUrl)
@@ -19,20 +19,20 @@ function initScoreTimeline(canvasId, apiUrl) {
         })
         .then(function (data) {
             if (!data.timeline || data.timeline.length === 0) {
-                var parent = canvas.parentElement;
+                const parent = canvas.parentElement;
                 parent.removeChild(canvas);
                 parent.textContent = "No score data yet.";
                 return;
             }
 
-            var labels = [];
-            var scores = [];
-            var tooltipLabels = [];
+            const labels = [];
+            const scores = [];
+            const tooltipLabels = [];
 
             data.timeline.forEach(function (entry) {
                 labels.push(new Date(entry.timestamp));
                 scores.push(entry.cumulative);
-                var pointsText =
+                const pointsText =
                     entry.points > 0
                         ? " (+" + entry.points + ")"
                         : entry.points < 0

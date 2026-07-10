@@ -13,10 +13,9 @@
             </h1>
             <p class="page-subtitle">
                 {% trans "Create an editable copy of" %} <strong>{{ source.name }}</strong>
-                <span style="font-family: monospace;
-                             color: var(--theme-text-secondary)">
-                             {% blocktrans with v1=source.id %}({{ v1 }}){% endblocktrans %}
-                             </span>
+                <span class="mono-id-secondary">
+                    {% blocktrans with v1=source.id %}({{ v1 }}){% endblocktrans %}
+                </span>
             </p>
         </div>
     </div>
@@ -31,7 +30,7 @@
     {% endif %}
     <form method="post">
         {% csrf_token %}
-        <div class="card" style="margin-bottom: 16px;">
+        <div class="card mb-lg">
             <div class="card-title">
                 {% trans "Clone Settings" %}
             </div>
@@ -71,43 +70,40 @@
             </div>
         </div>
         <!-- Source summary -->
-        <div class="card" style="margin-bottom: 16px;">
+        <div class="card mb-lg">
             <div class="card-title">
                 {% trans "Source Scenario" %}
             </div>
-            <table style="width: 100%;">
+            <table class="meta-table">
                 <tr>
-                    <th scope="row"
-                        class="text-muted"
-                        style="padding: 4px 0;
-                               width: 120px">
+                    <th scope="row" class="text-muted label-col-narrow">
                         {% trans "Name" %}
                     </th>
-                    <td style="padding: 4px 0;">
+                    <td>
                         {{ source.name }}
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                    <th scope="row" class="text-muted">
                         {% trans "Instances" %}
                     </th>
-                    <td style="padding: 4px 0;">
+                    <td>
                         {{ source.instances|length }}
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                    <th scope="row" class="text-muted">
                         {% trans "Subnets" %}
                     </th>
-                    <td style="padding: 4px 0;">
+                    <td>
                         {{ source.subnets|length }}
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                    <th scope="row" class="text-muted">
                         {% trans "NGFW" %}
                     </th>
-                    <td style="padding: 4px 0;">
+                    <td>
                         {% if source.ngfw %}
                             {% trans "Yes" %}
                         {% else %}

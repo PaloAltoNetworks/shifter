@@ -5,7 +5,7 @@ connect, receive status updates, disconnect.
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
@@ -56,7 +56,14 @@ def unauthenticated_scope():
 
 
 class TestRangeStatusConsumerConnect:
-    """Tests for connect() behavior."""
+    """Tests for connect() behavior.
+
+    The range-lookup connect paths (success-hydrates-status, not-found,
+    other-user) are driven against real ``cms.services.get_range_by_request_id``
+    + real DB rows in ``tests/integration/engine/test_consumers_integration.py``
+    (``TestRangeStatusConsumerIntegration``), so they are not re-mocked here.
+    Only the no-DB unauthenticated guard is unit-tested.
+    """
 
     @pytest.mark.asyncio
     async def test_rejects_unauthenticated_user(self, consumer, unauthenticated_scope):
@@ -67,40 +74,6 @@ class TestRangeStatusConsumerConnect:
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_AUTHENTICATED)
         consumer.accept.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_rejects_when_range_not_found(self, consumer, authenticated_scope):
-        """Returns NOT_FOUND when CMS raises error."""
-        from shared.exceptions import CMSError
-
-        consumer.scope = authenticated_scope
-
-        with patch("cms.services.get_range_by_request_id", side_effect=CMSError("Not found")):
-            await consumer.connect()
-
-        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
-
-    @pytest.mark.asyncio
-    async def test_accepts_and_hydrates_on_success(self, consumer, authenticated_scope):
-        """Successful connect accepts WebSocket and sends initial status."""
-        consumer.scope = authenticated_scope
-        mock_range = MagicMock(status=ResourceStatus.READY.value)
-
-        with patch("cms.services.get_range_by_request_id", return_value=mock_range):
-            await consumer.connect()
-
-        # Should accept connection
-        consumer.accept.assert_awaited_once()
-
-        # Should join channel group
-        consumer.channel_layer.group_add.assert_awaited_once()
-
-        # Should send initial status (hydration)
-        consumer.send.assert_awaited_once()
-        message = json.loads(consumer.send.call_args[1]["text_data"])
-        assert message["type"] == "status"
-        assert message["request_id"] == TEST_REQUEST_ID
-        assert message["status"] == ResourceStatus.READY.value
 
 
 class TestRangeStatusConsumerDisconnect:
@@ -150,6 +123,29 @@ class TestRangeStatusConsumerRangeStatus:
             "status": ResourceStatus.READY.value,
             "error_message": None,
         }
+
+    @pytest.mark.asyncio
+    async def test_prefers_range_ref_payload(self, consumer):
+        """range_status() hydrates from RangeRef when range_ref is present."""
+        consumer.request_id = TEST_REQUEST_ID
+
+        event = {
+            "type": "range_status",
+            "range_ref": {
+                "request_id": TEST_REQUEST_ID,
+                "range_id": 7,
+                "user_id": 42,
+                "status": ResourceStatus.PROVISIONING.value,
+            },
+            "request_id": TEST_REQUEST_ID,
+            "new_status": ResourceStatus.READY.value,
+            "error_message": None,
+        }
+        await consumer.range_status(event)
+
+        message = json.loads(consumer.send.call_args[1]["text_data"])
+        assert message["request_id"] == TEST_REQUEST_ID
+        assert message["status"] == ResourceStatus.PROVISIONING.value
 
     @pytest.mark.asyncio
     async def test_includes_error_message_on_failure(self, consumer):

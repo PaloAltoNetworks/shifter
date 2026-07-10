@@ -91,7 +91,6 @@ class ProcessRole(StrEnum):
     PORTAL = "portal"
     WORKER = "worker"
     PROVISIONER = "provisioner"
-    EXPERIMENT_TASK = "experiment-task"
     RANGE_TASK = "range-task"
 
 
@@ -203,6 +202,33 @@ def _config_issues_from_validation_error(exc: ValidationError, *, prefix: str) -
     ]
 
 
+def _validate_argv_token(index: int, arg: object) -> None:
+    """Validate one argv token: non-empty string, no whitespace/metachars/abs-path/traversal."""
+    if not isinstance(arg, str) or not arg or arg != arg.strip():
+        raise ValueError(f"argv[{index}] must be a non-empty string with no surrounding whitespace")
+    if any(ch.isspace() for ch in arg):
+        raise ValueError(
+            f"argv[{index}] {arg!r} must not contain internal whitespace; "
+            "this is an argv array — each token is a separate element, not a shell string"
+        )
+    bad = "".join(sorted(set(arg) & _SHELL_METACHARACTERS))
+    if bad:
+        raise ValueError(
+            f"argv[{index}] {arg!r} contains shell metacharacters {bad!r}; "
+            "registry commands are argv arrays, not shell strings"
+        )
+    # Backend metadata must resolve to repo-owned entrypoints / argv specs, never
+    # absolute host paths or path traversal — the executable is resolved on PATH
+    # and any path argument is relative to the repository.
+    if arg.startswith("/"):
+        raise ValueError(
+            f"argv[{index}] {arg!r} must not be an absolute host path; "
+            "use a PATH-resolved executable and repository-relative path arguments"
+        )
+    if ".." in arg.split("/"):
+        raise ValueError(f"argv[{index}] {arg!r} must not contain a '..' path segment")
+
+
 class CommandSpec(_ContractModel):
     """A backend check/renderer invocation, as an argv array (never a shell string)."""
 
@@ -215,29 +241,7 @@ class CommandSpec(_ContractModel):
         if not v:
             raise ValueError("must be a non-empty argv array (the executable plus its arguments)")
         for index, arg in enumerate(v):
-            if not isinstance(arg, str) or not arg or arg != arg.strip():
-                raise ValueError(f"argv[{index}] must be a non-empty string with no surrounding whitespace")
-            if any(ch.isspace() for ch in arg):
-                raise ValueError(
-                    f"argv[{index}] {arg!r} must not contain internal whitespace; "
-                    "this is an argv array — each token is a separate element, not a shell string"
-                )
-            bad = "".join(sorted(set(arg) & _SHELL_METACHARACTERS))
-            if bad:
-                raise ValueError(
-                    f"argv[{index}] {arg!r} contains shell metacharacters {bad!r}; "
-                    "registry commands are argv arrays, not shell strings"
-                )
-            # Backend metadata must resolve to repo-owned entrypoints / argv specs, never
-            # absolute host paths or path traversal — the executable is resolved on PATH
-            # and any path argument is relative to the repository.
-            if arg.startswith("/"):
-                raise ValueError(
-                    f"argv[{index}] {arg!r} must not be an absolute host path; "
-                    "use a PATH-resolved executable and repository-relative path arguments"
-                )
-            if ".." in arg.split("/"):
-                raise ValueError(f"argv[{index}] {arg!r} must not contain a '..' path segment")
+            _validate_argv_token(index, arg)
         if not _EXECUTABLE_NAME_RE.match(v[0]):
             raise ValueError(
                 f"argv[0] {v[0]!r} must be a bare executable name resolved on PATH "

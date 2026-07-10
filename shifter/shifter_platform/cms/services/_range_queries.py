@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from cms.exceptions import CMSError
 from cms.models import RangeInstance
 from shared.constants import USER_CANNOT_BE_NONE
+from shared.log_sanitize import safe_log_value
 
 from ._common import (
     _instance_contexts_from_range_spec,
@@ -23,6 +24,7 @@ from ._common import (
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+    from shared.enums import RangeSource
     from shared.schemas.range import RangeContext
 
 logger = logging.getLogger(__name__)
@@ -177,11 +179,12 @@ def get_range(user: User, range_id: int) -> RangeInstance:
         raise
 
 
-def get_active_range(user: User) -> RangeContext | None:
+def get_active_range(user: User, range_source: RangeSource | None = None) -> RangeContext | None:
     """Get user's active (non-deleted) range as a RangeContext projection.
 
     Returns the most recently created range that:
     - Belongs to the user
+    - Matches the given range_source (default: MISSION_CONTROL)
     - Is not soft-deleted (deleted_at is None)
 
     Note: Terminal statuses (DESTROYED, FAILED) automatically set deleted_at
@@ -195,17 +198,23 @@ def get_active_range(user: User) -> RangeContext | None:
 
     Args:
         user: User whose active range to retrieve
+        range_source: Provenance filter — which product path to query.
+            Defaults to MISSION_CONTROL so existing MC callers need no edits.
 
     Returns:
-        RangeContext if user has an active range, None otherwise
+        RangeContext if user has an active range for the given source, None otherwise
 
     Raises:
         TypeError: If user is None or invalid type
         ValidationError: If RangeContext creation fails validation
         Exception: Database errors are logged and propagated
     """
+    from shared.enums import RangeSource as _RangeSource
     from shared.enums import ResourceStatus
     from shared.schemas import InstanceContext, RangeContext
+
+    if range_source is None:
+        range_source = _RangeSource.MISSION_CONTROL
 
     if user is None:
         logger.error("get_active_range called with None user")
@@ -219,12 +228,13 @@ def get_active_range(user: User) -> RangeContext | None:
         msg = f"user must be a User instance, got {type(user).__name__}"
         raise TypeError(msg)
 
-    logger.debug("get_active_range called for user_id=%s", user.id)
+    logger.debug("get_active_range called for user_id=%s range_source=%s", user.id, range_source.value)
 
     try:
         instance = (
-            RangeInstance.objects.filter(user_id=user.id)
+            RangeInstance.objects.filter(user_id=user.id, range_source=range_source.value)
             .exclude(status=ResourceStatus.DESTROYING.value)
+            .select_related("agent", "request")
             .order_by("-created_at")
             .first()
         )
@@ -271,6 +281,46 @@ def get_active_range(user: User) -> RangeContext | None:
         return None
 
 
+def has_ready_active_range(user: User, range_source: RangeSource | None = None) -> bool:
+    """Return whether the user's latest active range for a source is READY, cheaply.
+
+    Mirrors :func:`get_active_range`'s ownership filter and ``has_active_range``
+    semantics (the most recently created non-DESTROYING range is READY) but reads
+    only the ``status`` column — no FK joins, runtime-IP overlay, scenario lookup,
+    or instance-context projection. Used by the ``nav`` context tier so the shared
+    sidebar's ``has_active_range`` indicator does not pay terminal-page cost on
+    every authenticated render (#898).
+
+    Args:
+        user: User whose active-range readiness to check.
+        range_source: Provenance filter. Defaults to MISSION_CONTROL so the
+            MC sidebar indicator reflects only Mission Control ranges.
+
+    Returns:
+        True if the user's most recent non-DESTROYING range for the source is READY.
+
+    Raises:
+        TypeError: If user is None or an invalid type.
+        ValueError: If user is unsaved (id is None).
+    """
+    from shared.enums import RangeSource as _RangeSource
+    from shared.enums import ResourceStatus
+
+    if range_source is None:
+        range_source = _RangeSource.MISSION_CONTROL
+
+    _validate_caller_user(user, "has_ready_active_range")
+
+    status = (
+        RangeInstance.objects.filter(user_id=user.id, range_source=range_source.value)
+        .exclude(status=ResourceStatus.DESTROYING.value)
+        .order_by("-created_at")
+        .values_list("status", flat=True)
+        .first()
+    )
+    return status == ResourceStatus.READY.value
+
+
 def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     """Get range by request_id (UUID string).
 
@@ -298,7 +348,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     logger.debug(
         "get_range_by_request_id called: user_id=%s request_id=%s",
         user.id,
-        request_id,
+        safe_log_value(request_id),
     )
 
     instance = RangeInstance.objects.filter(
@@ -309,7 +359,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     if not instance:
         logger.warning(
             "get_range_by_request_id: not found or not owned: request_id=%s user_id=%s",
-            request_id,
+            safe_log_value(request_id),
             user.id,
         )
         raise CMSError("Range not found")

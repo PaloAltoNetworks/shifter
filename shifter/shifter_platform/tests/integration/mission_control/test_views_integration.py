@@ -57,7 +57,7 @@ def scm_credential_type(db):
         slug="scm",
         defaults={
             "name": "SCM Credential",
-            "spec_class": "shared.schemas.SCMCredentialSpec",
+            "spec_slug": "credential.scm",
         },
     )
     return cred_type
@@ -70,7 +70,7 @@ def deployment_profile_type(db):
         slug="deployment_profile",
         defaults={
             "name": "Deployment Profile",
-            "spec_class": "shared.schemas.DeploymentProfileSpec",
+            "spec_slug": "credential.deployment_profile",
         },
     )
     return cred_type
@@ -198,8 +198,9 @@ class TestCredentialsListViewIntegration:
         response = authenticated_client.get("/mission-control/credentials/")
 
         assert response.status_code == 200
-        # Context should have counts (we verify via rendered content)
-        # The template uses these counts for UI badges
+        content = response.content.decode()
+        assert "SCM (3)" in content
+        assert "Profiles (2)" in content
 
 
 # =============================================================================

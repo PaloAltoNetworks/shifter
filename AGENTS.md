@@ -117,6 +117,7 @@ reconciliation.
 
 - Cross-layer access goes through service boundaries.
 - Shared contracts live under `shared`.
+- Only `shared` may import `cyberscript` directly; all other `shifter_platform` layers must use `shared` shims. New non-DSL contracts belong in `shared` natively — `cyberscript` is for scenario DSL contracts only and should shrink over time ahead of the `aces-sdl` swap.
 - Do not weaken CI or local enforcement silently.
 - If a rule needs an exception, record it in `docs/adr/exceptions.yaml` with an owner and expiry.
 - Guardrail-file changes should also update the ADR enforcement docs or registry in the same change.

@@ -4,7 +4,8 @@
 # Used by ECS to pull container images and write logs
 
 resource "aws_iam_role" "ecs_execution" {
-  name = "${var.name_prefix}-pulumi-ecs-execution"
+  name                 = "${local.iam_name_prefix}-pulumi-ecs-execution"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -102,7 +103,8 @@ resource "aws_iam_role_policy" "ecs_execution_kms" {
 # Used by the engine provisioner container for AWS operations
 
 resource "aws_iam_role" "ecs_task" {
-  name = "${var.name_prefix}-pulumi-ecs-task"
+  name                 = "${local.iam_name_prefix}-pulumi-ecs-task"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -843,17 +845,51 @@ resource "aws_iam_role_policy" "ssm_run_command" {
     Version = "2012-10-17"
     Statement = [
       {
+        # SendCommand instance authorization. Scoped to Shifter range guest
+        # instances via SSM resource-tag conditions so a provisioner compromise
+        # cannot run commands on portal, GitHub-runner, or other EC2 instances.
+        # Range guests carry shifter:system / shifter:environment plus the
+        # range-specific shifter:range_id tag (see the range Terraform module);
+        # portal and runner instances do not, so they are denied. The generic
+        # ownership tags alone are insufficient because non-range infrastructure
+        # can share them, hence the required shifter:range_id presence.
         Effect = "Allow"
         Action = [
           "ssm:SendCommand"
         ]
         Resource = [
-          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "ssm:resourceTag/shifter:system"      = "shifter"
+            "ssm:resourceTag/shifter:environment" = var.environment
+          }
+          Null = {
+            # The range-id tag must be present on the target instance.
+            "ssm:resourceTag/shifter:range_id" = "false"
+          }
+        }
+      },
+      {
+        # SendCommand document authorization. A SendCommand call must be
+        # authorized for both the instance resource(s) AND the document
+        # resource, so this unconditioned document statement cannot re-broaden
+        # instance targeting. Pinned to the two AWS-managed documents already in
+        # use; do not widen.
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand"
+        ]
+        Resource = [
           "arn:aws:ssm:${local.region}::document/AWS-RunPowerShellScript",
           "arn:aws:ssm:${local.region}::document/AWS-RunShellScript"
         ]
       },
       {
+        # Result polling is a distinct permission from command execution. AWS
+        # requires Resource=* for these read APIs; keep them separate and
+        # enumerated rather than folding them into the SendCommand statement.
         Effect = "Allow"
         Action = [
           "ssm:GetCommandInvocation",
@@ -869,11 +905,21 @@ resource "aws_iam_role_policy" "ssm_run_command" {
         Resource = "*"
       },
       {
+        # Reboot is EC2, not SSM command execution. Scope it with the same
+        # ownership tag conditions as the EC2 instance lifecycle statement so it
+        # cannot reboot instances the provisioner does not own.
         Effect = "Allow"
         Action = [
           "ec2:RebootInstances"
         ]
         Resource = "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/shifter:system"      = "shifter"
+            "ec2:ResourceTag/shifter:environment" = var.environment
+            "ec2:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
       }
     ]
   })

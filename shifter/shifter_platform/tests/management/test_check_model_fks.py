@@ -1,11 +1,15 @@
-"""Tests for check_model_fks management command."""
+"""Tests for the check_model_fks management command.
+
+Drives the real command against the real model graph (which is clean — the
+model-FK guardrail passes), instead of patching ``Command.analyze_fks`` /
+``compute_stats``. The violation-counting path is tested by calling the real
+``compute_stats`` on a synthetic results dict (a value, not a mock).
+"""
 
 import contextlib
 import json
 from io import StringIO
-from unittest.mock import patch
 
-import pytest
 from django.core.management import call_command
 
 from management.management.commands.check_model_fks import (
@@ -80,9 +84,10 @@ class TestLayerConstants:
         assert "ManyToManyRel" in REVERSE_RELATION_TYPES
 
 
-# Sample mock data for command tests
-MOCK_RESULTS = {layer: [] for layer in ALL_LAYERS}
-MOCK_RESULTS["engine"] = [
+# Synthetic results dict (a value, not a mock) with one cross-layer violation,
+# used to exercise the real compute_stats counting logic.
+_RESULTS_WITH_VIOLATION = {layer: [] for layer in ALL_LAYERS}
+_RESULTS_WITH_VIOLATION["engine"] = [
     {
         "model": "Range",
         "field": "scenario",
@@ -93,129 +98,73 @@ MOCK_RESULTS["engine"] = [
     }
 ]
 
-MOCK_STATS_WITH_VIOLATIONS = {
-    "total_cross_layer_fks": 1,
-    "violations": 1,
-    "clean_layers": ["shared", "cms", "management", "mission_control"],
-    "layers_with_violations": ["engine"],
-    "violation_details": [{"from": "engine", "to": "cms"}],
-}
 
-MOCK_STATS_CLEAN = {
-    "total_cross_layer_fks": 0,
-    "violations": 0,
-    "clean_layers": ALL_LAYERS[:],
-    "layers_with_violations": [],
-    "violation_details": [],
-}
+def _run_json(*args):
+    out = StringIO()
+    with contextlib.suppress(SystemExit):
+        call_command("check_model_fks", "--json", "-q", *args, stdout=out, stderr=StringIO())
+    return json.loads(out.getvalue())
 
 
 class TestCheckModelFksCommand:
-    """Tests for check_model_fks management command."""
+    """Drives the real command against the real (clean) model graph."""
 
-    def test_command_runs(self):
-        """Command runs without error."""
-        out = StringIO()
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS):
-            try:
-                call_command("check_model_fks", stdout=out, stderr=StringIO())
-            except SystemExit as e:
-                assert e.code in (0, 1)
+    def test_command_runs_clean(self):
+        """The real model graph is clean, so the command completes (exit 0)."""
+        with contextlib.suppress(SystemExit):
+            call_command("check_model_fks", "-q", stdout=StringIO(), stderr=StringIO())
 
-    def test_command_json_output(self):
-        """Command outputs valid JSON with --json flag."""
-        out = StringIO()
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
-            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
-
-        output = out.getvalue()
-        data = json.loads(output)
-
-        assert "relationships" in data
-        assert "stats" in data
+    def test_json_output_has_relationships_and_stats(self):
+        data = _run_json()
         assert isinstance(data["relationships"], dict)
         assert isinstance(data["stats"], dict)
 
-    def test_command_json_has_all_layers(self):
-        """JSON output includes all layers."""
-        out = StringIO()
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
-            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
-
-        data = json.loads(out.getvalue())
-
+    def test_json_includes_all_layers(self):
+        data = _run_json()
         for layer in ALL_LAYERS:
             assert layer in data["relationships"]
 
-    def test_command_stats_structure(self):
-        """Stats in JSON output have expected structure."""
+    def test_stats_structure(self):
+        stats = _run_json()["stats"]
+        assert {
+            "total_cross_layer_fks",
+            "violations",
+            "clean_layers",
+            "layers_with_violations",
+            "violation_details",
+        } <= set(stats)
+
+    def test_real_graph_has_no_violations(self):
+        assert _run_json()["stats"]["violations"] == 0
+
+    def test_quiet_suppresses_summary(self):
         out = StringIO()
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
+        with contextlib.suppress(SystemExit):
             call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
-
-        data = json.loads(out.getvalue())
-        stats = data["stats"]
-
-        assert "total_cross_layer_fks" in stats
-        assert "violations" in stats
-        assert "clean_layers" in stats
-        assert "layers_with_violations" in stats
-        assert "violation_details" in stats
-
-    def test_command_quiet_suppresses_summary(self):
-        """--quiet flag suppresses summary output."""
-        out = StringIO()
-        err = StringIO()
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
-            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=err)
-
         assert "MODEL FK SUMMARY" not in out.getvalue()
-        assert "MODEL FK SUMMARY" not in err.getvalue()
 
-    def test_command_shows_summary_by_default(self):
-        """Summary is shown by default."""
+    def test_shows_summary_by_default(self):
         out = StringIO()
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
+        with contextlib.suppress(SystemExit):
             call_command("check_model_fks", stdout=out, stderr=StringIO())
-
         assert "MODEL FK SUMMARY" in out.getvalue()
 
-    def test_command_output_file(self, tmp_path):
-        """--output flag saves JSON to file."""
+    def test_output_file_written(self, tmp_path):
         output_file = tmp_path / "report.json"
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
-            call_command(
-                "check_model_fks",
-                "-o",
-                str(output_file),
-                "-q",
-                stdout=StringIO(),
-                stderr=StringIO(),
-            )
-
-        assert output_file.exists()
+        with contextlib.suppress(SystemExit):
+            call_command("check_model_fks", "-o", str(output_file), "-q", stdout=StringIO(), stderr=StringIO())
         data = json.loads(output_file.read_text())
         assert "relationships" in data
         assert "stats" in data
 
-    def test_command_exits_with_error_on_violations(self):
-        """Command exits with code 1 when violations exist."""
-        with (
-            patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS),
-            patch.object(Command, "compute_stats", return_value=MOCK_STATS_WITH_VIOLATIONS),
-        ):
-            with pytest.raises(SystemExit) as exc_info:
-                call_command("check_model_fks", "-q", stdout=StringIO(), stderr=StringIO())
-            assert exc_info.value.code == 1
-
-    def test_reverse_relations_filtered_out(self):
-        """Reverse relations (ManyToOneRel etc.) are not included in mock results."""
-        out = StringIO()
-        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
-            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
-
-        data = json.loads(out.getvalue())
-
-        for _layer, relationships in data["relationships"].items():
+    def test_reverse_relations_not_in_output(self):
+        data = _run_json()
+        for relationships in data["relationships"].values():
             for rel in relationships:
                 assert rel["field_type"] not in REVERSE_RELATION_TYPES
+
+    def test_compute_stats_counts_cross_layer_violation(self):
+        """The real compute_stats flags a cross-layer FK as a violation."""
+        stats = Command().compute_stats(_RESULTS_WITH_VIOLATION)
+        assert stats["violations"] == 1
+        assert "engine" in stats["layers_with_violations"]

@@ -9,7 +9,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from events import publish_ngfw_event, publish_status_update
+from events import build_status_event, publish_ngfw_event
 from executors.aws_executor import AWSExecutor
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from plans.ngfw_start import NGFWStartPlan
@@ -27,6 +27,31 @@ _GCP_RANGE_LIFECYCLE_NOT_IMPLEMENTED = (
     "Pod-backed assets do not preserve runtime state across pause/resume, "
     "so the GCP lifecycle path is intentionally disabled until parity work is complete."
 )
+
+
+# (cloud_provider, asset_type) -> operation_mode for non-AWS lifecycle targets.
+_GCP_OPERATION_MODES = {
+    ("gcp", "gce_vm"): "gce_vm",
+    ("gcp", "vm_runtime_vm"): "gdc_vm_runtime",
+    ("gcp", "scenario_pod"): "gdc_scenario_pod",
+}
+
+
+def _build_aws_lifecycle_entry(
+    entry: dict[str, object], state_dict: dict[str, object], uuid: object, role: str
+) -> dict[str, object] | None:
+    """Finalize an AWS lifecycle entry, or None when the instance lacks an aws_instance_id."""
+    aws_instance_id = state_dict.get("aws_instance_id")
+    if not aws_instance_id:
+        logger.warning(
+            "Instance %s (role=%s) missing aws_instance_id in state, skipping",
+            uuid,
+            role,
+        )
+        return None
+    entry["operation_mode"] = "aws"
+    entry["aws_instance_id"] = aws_instance_id
+    return entry
 
 
 def _build_range_lifecycle_entry(
@@ -49,30 +74,16 @@ def _build_range_lifecycle_entry(
     }
 
     if cloud_provider == "aws":
-        aws_instance_id = state_dict.get("aws_instance_id")
-        if not aws_instance_id:
-            logger.warning(
-                "Instance %s (role=%s) missing aws_instance_id in state, skipping",
-                uuid,
-                role,
-            )
-            return None
-        entry["operation_mode"] = "aws"
-        entry["aws_instance_id"] = aws_instance_id
-        return entry
+        return _build_aws_lifecycle_entry(entry, state_dict, uuid, role)
 
-    if cloud_provider == "gcp" and asset_type == "vm_runtime_vm":
-        entry["operation_mode"] = "gdc_vm_runtime"
-        return entry
-
-    if cloud_provider == "gcp" and asset_type == "scenario_pod":
-        entry["operation_mode"] = "gdc_scenario_pod"
-        return entry
-
-    raise ValueError(
-        "Unsupported range lifecycle target "
-        f"for request {request_id}: cloud_provider={cloud_provider!r} asset_type={asset_type!r}"
-    )
+    operation_mode = _GCP_OPERATION_MODES.get((cloud_provider, asset_type))
+    if operation_mode is None:
+        raise ValueError(
+            "Unsupported range lifecycle target "
+            f"for request {request_id}: cloud_provider={cloud_provider!r} asset_type={asset_type!r}"
+        )
+    entry["operation_mode"] = operation_mode
+    return entry
 
 
 def get_range_instance_ids(request_id: str) -> list[dict]:
@@ -512,6 +523,9 @@ def _execute_instance_operation(
         if mode == "gdc_scenario_pod":
             raise NotImplementedError(_GCP_RANGE_LIFECYCLE_NOT_IMPLEMENTED)
 
+        if mode == "gce_vm":
+            raise NotImplementedError("GCE range pause/resume is not implemented yet.")
+
         if mode != "aws" or executor is None or orchestrator is None or plan is None:
             raise RuntimeError(f"Unsupported lifecycle execution mode {mode!r} for uuid={uuid}")
 
@@ -611,14 +625,12 @@ def run_range_pause(request_id: str) -> None:
         error_msg = f"Failed to pause {len(failures)}/{len(instances)} instances"
         logger.error("run_range_pause: %s", error_msg)
 
-        # Update status to failed
-        update_range_status(range_id, "failed", error_message=error_msg)
-        publish_status_update(
-            request_id=request_id,
-            range_id=range_id,
-            user_id=user_id,
-            new_status="failed",
+        # Update status and enqueue event atomically
+        update_range_status(
+            range_id,
+            "failed",
             error_message=error_msg,
+            outbox_event=build_status_event(request_id, range_id, user_id, "failed", error_msg),
         )
         raise RuntimeError(error_msg)
 
@@ -636,13 +648,12 @@ def run_range_pause(request_id: str) -> None:
             request_id,
         )
 
-    # Update range status to paused (after NGFW is paused)
-    update_range_status(range_id, "paused", paused_at="NOW()")
-    publish_status_update(
-        request_id=request_id,
-        range_id=range_id,
-        user_id=user_id,
-        new_status="paused",
+    # Update range status to paused and enqueue event atomically
+    update_range_status(
+        range_id,
+        "paused",
+        paused_at="NOW()",
+        outbox_event=build_status_event(request_id, range_id, user_id, "paused"),
     )
 
     logger.info(
@@ -684,14 +695,12 @@ def run_range_resume(request_id: str) -> None:
     except Exception as e:
         # Fatal: range cannot resume without NGFW
         error_msg = f"Failed to start NGFW: {e}"
-        logger.error("run_range_resume: %s request_id=%s", error_msg, request_id)
-        update_range_status(range_id, "failed", error_message=error_msg)
-        publish_status_update(
-            request_id=request_id,
-            range_id=range_id,
-            user_id=user_id,
-            new_status="failed",
+        logger.exception("run_range_resume: %s request_id=%s", error_msg, request_id)
+        update_range_status(
+            range_id,
+            "failed",
             error_message=error_msg,
+            outbox_event=build_status_event(request_id, range_id, user_id, "failed", error_msg),
         )
         raise RuntimeError(error_msg) from e
 
@@ -737,27 +746,24 @@ def run_range_resume(request_id: str) -> None:
         error_msg = f"Failed to resume {len(failures)}/{len(instances)} instances"
         logger.error("run_range_resume: %s", error_msg)
 
-        # Update status to failed
-        update_range_status(range_id, "failed", error_message=error_msg)
-        publish_status_update(
-            request_id=request_id,
-            range_id=range_id,
-            user_id=user_id,
-            new_status="failed",
+        # Update status and enqueue event atomically
+        update_range_status(
+            range_id,
+            "failed",
             error_message=error_msg,
+            outbox_event=build_status_event(request_id, range_id, user_id, "failed", error_msg),
         )
         raise RuntimeError(error_msg)
 
     # Update instance statuses in database
     _update_instance_statuses(request_id, "ready")
 
-    # Update range status to ready
-    update_range_status(range_id, "ready", ready_at="NOW()")
-    publish_status_update(
-        request_id=request_id,
-        range_id=range_id,
-        user_id=user_id,
-        new_status="ready",
+    # Update range status to ready and enqueue event atomically
+    update_range_status(
+        range_id,
+        "ready",
+        ready_at="NOW()",
+        outbox_event=build_status_event(request_id, range_id, user_id, "ready"),
     )
 
     logger.info(

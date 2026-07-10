@@ -1,13 +1,12 @@
 """Risk Register UI views."""
 
 from django.contrib import messages
-from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
+from risk_register.decorators import risk_register_access_required
 from risk_register.models import (
-    APIKey,
     AuditLog,
     Comment,
     Risk,
@@ -16,11 +15,15 @@ from risk_register.models import (
     StrideCategory,
 )
 
+# SonarCloud S1192: extracted duplicated string literals.
+RISK_FORM_TEMPLATE = "risk_register/risk_form.html"
+RISK_DETAIL_URL = "risk_register:risk_detail"
+
 
 def _get_user_id(request: HttpRequest) -> int:
     """Get authenticated user ID, raising if not authenticated.
 
-    All views using this are protected by @staff_member_required,
+    All views using this are protected by @risk_register_access_required,
     so the user is guaranteed to be authenticated.
     """
     user_id = request.user.id
@@ -32,7 +35,7 @@ def _get_user_id(request: HttpRequest) -> int:
 def _get_user(request: HttpRequest) -> User:
     """Get authenticated user, raising if not authenticated.
 
-    All views using this are protected by @staff_member_required,
+    All views using this are protected by @risk_register_access_required,
     so the user is guaranteed to be an authenticated User instance.
     """
     user = request.user
@@ -41,7 +44,7 @@ def _get_user(request: HttpRequest) -> User:
     return user
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_list(request: HttpRequest) -> HttpResponse:
     """Display list of all active risks."""
     include_deleted = request.GET.get("include_deleted") == "true"
@@ -70,7 +73,7 @@ def risk_list(request: HttpRequest) -> HttpResponse:
     return render(request, "risk_register/risk_list.html", context)
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """Display risk details with comments.
 
@@ -90,7 +93,7 @@ def risk_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "risk_register/risk_detail.html", context)
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_create(request: HttpRequest) -> HttpResponse:
     """Create a new risk."""
     if request.method == "POST":
@@ -113,7 +116,7 @@ def risk_create(request: HttpRequest) -> HttpResponse:
             messages.error(request, "Title and description are required.")
             return render(
                 request,
-                "risk_register/risk_form.html",
+                RISK_FORM_TEMPLATE,
                 {
                     "severity_choices": Severity.choices,
                     "status_choices": Status.choices,
@@ -147,7 +150,7 @@ def risk_create(request: HttpRequest) -> HttpResponse:
         )
 
         messages.success(request, f"Risk '{risk.title}' created successfully.")
-        return redirect("risk_register:risk_detail", pk=risk.pk)
+        return redirect(RISK_DETAIL_URL, pk=risk.pk)
 
     context = {
         "severity_choices": Severity.choices,
@@ -155,10 +158,10 @@ def risk_create(request: HttpRequest) -> HttpResponse:
         "stride_choices": StrideCategory.choices,
         "active_nav": "risks",
     }
-    return render(request, "risk_register/risk_form.html", context)
+    return render(request, RISK_FORM_TEMPLATE, context)
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """Edit an existing risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -196,7 +199,7 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
         )
 
         messages.success(request, f"Risk '{risk.title}' updated successfully.")
-        return redirect("risk_register:risk_detail", pk=risk.pk)
+        return redirect(RISK_DETAIL_URL, pk=risk.pk)
 
     context = {
         "risk": risk,
@@ -206,10 +209,10 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "editing": True,
         "active_nav": "risks",
     }
-    return render(request, "risk_register/risk_form.html", context)
+    return render(request, RISK_FORM_TEMPLATE, context)
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
     """Soft-delete a risk.
 
@@ -243,10 +246,10 @@ def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(request, f"Risk '{risk.title}' deleted.")
         return redirect("risk_register:risk_list")
 
-    return redirect("risk_register:risk_detail", pk=pk)
+    return redirect(RISK_DETAIL_URL, pk=pk)
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_restore(request: HttpRequest, pk: int) -> HttpResponse:
     """Restore a soft-deleted risk.
 
@@ -271,10 +274,10 @@ def risk_restore(request: HttpRequest, pk: int) -> HttpResponse:
 
         messages.success(request, f"Risk '{risk.title}' restored.")
 
-    return redirect("risk_register:risk_detail", pk=pk)
+    return redirect(RISK_DETAIL_URL, pk=pk)
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_close(request: HttpRequest, pk: int) -> HttpResponse:
     """Close a risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -300,10 +303,10 @@ def risk_close(request: HttpRequest, pk: int) -> HttpResponse:
 
         messages.success(request, f"Risk '{risk.title}' closed.")
 
-    return redirect("risk_register:risk_detail", pk=pk)
+    return redirect(RISK_DETAIL_URL, pk=pk)
 
 
-@staff_member_required
+@risk_register_access_required
 def risk_reopen(request: HttpRequest, pk: int) -> HttpResponse:
     """Reopen a closed risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -325,10 +328,10 @@ def risk_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 
         messages.success(request, f"Risk '{risk.title}' reopened.")
 
-    return redirect("risk_register:risk_detail", pk=pk)
+    return redirect(RISK_DETAIL_URL, pk=pk)
 
 
-@staff_member_required
+@risk_register_access_required
 def comment_add(request: HttpRequest, risk_pk: int) -> HttpResponse:
     """Add a comment to a risk."""
     risk = get_object_or_404(Risk, pk=risk_pk)
@@ -356,10 +359,10 @@ def comment_add(request: HttpRequest, risk_pk: int) -> HttpResponse:
         else:
             messages.error(request, "Comment cannot be empty.")
 
-    return redirect("risk_register:risk_detail", pk=risk_pk)
+    return redirect(RISK_DETAIL_URL, pk=risk_pk)
 
 
-@staff_member_required
+@risk_register_access_required
 def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
     """Soft-delete a comment."""
     comment = get_object_or_404(Comment, pk=pk, risk__pk=risk_pk)
@@ -377,80 +380,7 @@ def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
 
         messages.success(request, "Comment deleted.")
 
-    return redirect("risk_register:risk_detail", pk=risk_pk)
-
-
-@staff_member_required
-def apikey_list(request: HttpRequest) -> HttpResponse:
-    """List API keys for the current user."""
-    # Show all keys for staff, own keys for regular users
-    keys = APIKey.objects.all() if request.user.is_staff else APIKey.objects.filter(created_by=_get_user(request))
-
-    context = {
-        "keys": keys,
-        "is_admin": request.user.is_staff,
-        "active_nav": "risks",
-    }
-    return render(request, "risk_register/apikey_list.html", context)
-
-
-@staff_member_required
-def apikey_create(request: HttpRequest) -> HttpResponse:
-    """Create a new API key."""
-    if request.method == "POST":
-        name = request.POST.get("name", "").strip()
-
-        if not name:
-            messages.error(request, "Key name is required.")
-            return redirect("risk_register:apikey_list")
-
-        api_key, raw_key = APIKey.create_key(name=name, created_by=request.user)
-
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=api_key.id,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-            new_state={"name": name, "prefix": api_key.prefix},
-        )
-
-        # Show the raw key once
-        context = {
-            "api_key": api_key,
-            "raw_key": raw_key,
-            "show_key": True,
-            "active_nav": "risks",
-        }
-        return render(request, "risk_register/apikey_list.html", context)
-
-    return redirect("risk_register:apikey_list")
-
-
-@staff_member_required
-def apikey_revoke(request: HttpRequest, pk: int) -> HttpResponse:
-    """Revoke an API key."""
-    api_key = get_object_or_404(APIKey, pk=pk)
-
-    # Only allow revoking own keys unless admin
-    if not request.user.is_staff and api_key.created_by != request.user:
-        messages.error(request, "You can only revoke your own API keys.")
-        return redirect("risk_register:apikey_list")
-
-    if request.method == "POST":
-        api_key.revoke()
-
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=api_key.id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-        )
-
-        messages.success(request, f"API key '{api_key.name}' revoked.")
-
-    return redirect("risk_register:apikey_list")
+    return redirect(RISK_DETAIL_URL, pk=risk_pk)
 
 
 def _risk_to_dict(risk: Risk) -> dict:

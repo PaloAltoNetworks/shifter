@@ -112,6 +112,33 @@ private services tier:
 - **Microsegmentation**: portal RDS and Redis ingress are
   SG-to-SG references from the portal EC2 / Django security group,
   not a broad `vpc_cidr` allowlist.
+- **Default-off baseline + post-apply assertion (#932)**: enabling
+  inspection removes the direct private → NAT default route, so a stale,
+  wrong-AZ, unhealthy, or missing firewall endpoint silently blackholes
+  egress while `terraform apply` still reports success. The committed
+  dev / prod tfvars therefore set `enable_portal_inspection = false`; a
+  deploy opts in through the `TF_VARS_*_PORTAL` secret. When inspection
+  is on, the portal apply job runs
+  `scripts/assert_portal_inspection/assert_portal_inspection.py`, which
+  reads the typed `portal_inspection_assertion` Terraform output and
+  proves, against live AWS state, that the firewall config is `IN_SYNC`,
+  every per-AZ endpoint attachment is `READY` and matches the
+  Terraform-declared `firewall_status.sync_states` endpoint, every
+  firewall-targeted public / private route points at the same-AZ
+  endpoint, each private RT has a `0.0.0.0/0` default via the firewall
+  endpoint with **no** direct NAT bypass, and each firewall RT sends
+  `0.0.0.0/0` onward to the shared NAT. Any mismatch fails the deploy
+  instead of shipping a blackhole. The check is a no-op when inspection
+  is disabled.
+- **Enforce vs alert (decision)**: the firewall stays visibility-first —
+  stateful default pass with ALERT-only east-west rules — for this
+  issue. The assertion proves the inline path is wired and healthy; it
+  does **not** convert alert-only inspection into traffic enforcement. A
+  drop-by-default posture remains deferred (see the stateful trade-off
+  and v1 deferrals below) because the per-AZ endpoint topology has
+  asymmetric cross-AZ stateful flows; flipping to enforce is a later
+  architecture change with its own policy parameter, not an overload of
+  `enable_portal_inspection`.
 
 ##### v1 deferrals
 

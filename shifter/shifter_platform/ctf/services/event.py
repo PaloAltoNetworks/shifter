@@ -45,8 +45,33 @@ _EVENT_MUTABLE_FIELDS = frozenset(
         "rating_visibility",
         "scoreboard_visible",
         "scoreboard_freeze_at",
+        "scoring_mode",
     }
 )
+
+
+def _validate_scoring_mode(event_data: dict[str, Any]) -> None:
+    """Reject an unknown ``scoring_mode`` with a controlled 400.
+
+    The model field constrains choices, but the JSON API path bypasses form
+    validation, so validate here to surface a `CTFValidationError` (400) rather
+    than persisting an invalid value that would later fall back to standard.
+    """
+    from ctf.enums import ScoringMode
+
+    if "scoring_mode" not in event_data:
+        return
+    try:
+        ScoringMode(event_data["scoring_mode"])
+    except ValueError:
+        raise CTFValidationError(
+            "Invalid scoring mode",
+            code="CTF_INVALID_SCORING_MODE",
+            details={
+                "scoring_mode": event_data["scoring_mode"],
+                "valid_modes": [m.value for m in ScoringMode],
+            },
+        ) from None
 
 
 def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
@@ -82,6 +107,8 @@ def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
             code="CTF_INVALID_DATES",
         )
 
+    _validate_scoring_mode(event_data)
+
     # Filter to allowed fields only — prevent mass assignment of status,
     # created_by, id, timestamps, etc.
     safe_data = {k: v for k, v in event_data.items() if k in _EVENT_MUTABLE_FIELDS}
@@ -96,6 +123,35 @@ def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
         logger.info("Created CTF event %s: %s", event.id, event.name)
 
     return event
+
+
+def _validate_event_time_range(event_start: Any, event_end: Any) -> None:
+    """Raise when event_end is not strictly after event_start."""
+    if event_end <= event_start:
+        raise CTFValidationError(
+            "Event end must be after event start",
+            code="CTF_INVALID_DATES",
+        )
+
+
+def _reschedule_event_if_schedule_changed(
+    event: CTFEvent,
+    safe_data: dict[str, Any],
+    *,
+    old_event_end: Any,
+) -> None:
+    """Reschedule pending tasks when event times change."""
+    schedule_changed = ("event_start" in safe_data and safe_data["event_start"] != event.event_start) or (
+        "event_end" in safe_data and safe_data["event_end"] != event.event_end
+    )
+    event_end_changed = "event_end" in safe_data and safe_data["event_end"] != old_event_end
+    if schedule_changed and event.status == EventStatus.REGISTRATION.value:
+        _reschedule_event_tasks(event)
+    elif event_end_changed and event.status in (
+        EventStatus.ACTIVE.value,
+        EventStatus.PAUSED.value,
+    ):
+        _reschedule_live_event_schedule(event)
 
 
 def update_event(event_id: UUID, event_data: dict[str, Any]) -> CTFEvent:
@@ -130,35 +186,21 @@ def update_event(event_id: UUID, event_data: dict[str, Any]) -> CTFEvent:
             details={"event_id": str(event_id), "status": event.status},
         )
 
-    # Validate time changes
     new_start = event_data.get("event_start", event.event_start)
     new_end = event_data.get("event_end", event.event_end)
-    if new_end <= new_start:
-        raise CTFValidationError(
-            "Event end must be after event start",
-            code="CTF_INVALID_DATES",
-        )
+    _validate_event_time_range(new_start, new_end)
+    _validate_scoring_mode(event_data)
 
-    # Filter to allowed fields only — prevent mass assignment of status,
-    # created_by, id, timestamps, etc.
     safe_data = {k: v for k, v in event_data.items() if k in _EVENT_MUTABLE_FIELDS}
+    old_event_end = event.event_end
 
     with transaction.atomic():
-        # Track if we need to reschedule tasks
-        schedule_changed = ("event_start" in safe_data and safe_data["event_start"] != event.event_start) or (
-            "event_end" in safe_data and safe_data["event_end"] != event.event_end
-        )
-
-        # Update only allowed fields
         for key, value in safe_data.items():
             setattr(event, key, value)
         event.save()
 
         logger.info("Updated CTF event %s", event.id)
-
-        # Reschedule tasks if schedule changed
-        if schedule_changed and event.status == EventStatus.REGISTRATION.value:
-            _reschedule_event_tasks(event)
+        _reschedule_event_if_schedule_changed(event, safe_data, old_event_end=old_event_end)
 
     return event
 
@@ -218,7 +260,7 @@ def force_delete_event(
     """
     from ctf.models import CTFChallengeFile, CTFParticipant
     from ctf.s3 import delete_challenge_file
-    from ctf.services.range import _destroy_single_range
+    from ctf.services.range.lifecycle import _destroy_single_range
 
     # Use all_objects so force delete works on soft-deleted events too
     try:
@@ -495,6 +537,13 @@ def complete_event(event: CTFEvent) -> bool:
         )
         return False
 
+    # Finalize the materialized leaderboard (issue #850) from authoritative
+    # rows when the event ends, so the stored per-event scores are exact and
+    # self-heal any incremental-maintenance drift before the board goes static.
+    from ctf.services.scoring import recompute_event_leaderboard
+
+    recompute_event_leaderboard(event.pk)
+
     if event.auto_cleanup:
         from ctf.services.range import cleanup_event_ranges
 
@@ -753,6 +802,41 @@ def _schedule_event_tasks(event: CTFEvent) -> None:
             )
 
     logger.info("Scheduled tasks for event %s", event.id)
+
+
+def _reschedule_live_event_schedule(event: CTFEvent) -> None:
+    """Reschedule pending end-of-life tasks after event_end moves during a live event."""
+    from ctf.enums import ScheduledTaskStatus, ScheduledTaskType
+    from ctf.models import CTFScheduledTask
+
+    for task in CTFScheduledTask.objects.filter(
+        event=event,
+        task_type=ScheduledTaskType.EVENT_END.value,
+        status=ScheduledTaskStatus.PENDING.value,
+    ):
+        task.mark_cancelled()
+
+    CTFScheduledTask.objects.create(
+        event=event,
+        task_type=ScheduledTaskType.EVENT_END.value,
+        scheduled_for=event.event_end,
+    )
+
+    for task in CTFScheduledTask.objects.filter(
+        event=event,
+        task_type=ScheduledTaskType.CLEANUP_RANGES.value,
+        status=ScheduledTaskStatus.PENDING.value,
+    ):
+        task.mark_cancelled()
+
+    if event.auto_cleanup:
+        CTFScheduledTask.objects.create(
+            event=event,
+            task_type=ScheduledTaskType.CLEANUP_RANGES.value,
+            scheduled_for=event.get_cleanup_time(),
+        )
+
+    logger.info("Rescheduled live end tasks for event %s", event.id)
 
 
 def _reschedule_event_tasks(event: CTFEvent) -> None:

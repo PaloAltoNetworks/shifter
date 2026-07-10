@@ -234,14 +234,21 @@ def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str 
     secret reference resolved through the active provider secret store.
     No shared literal fallbacks. The DC role keeps the deployment-scoped
     ``DC_DOMAIN_PASSWORD`` lookup (separate concern — domain admin).
+
+    For a non-DC guest the RDP login user is the recorded seat user
+    (``ssh_username``) when present, otherwise the os_type default. This matters
+    when the seat user differs from the os_type default: TechVault runs the aptl
+    lab on an ``os_type: kali`` host whose actual seat (VS Code Desktop + Claude
+    Code, uid 1000) is ``ubuntu``, so RDP must land as ``ubuntu`` rather than the
+    ``kali`` default (#1465). A domain controller keeps its domain-admin login.
     """
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
-    username = _OS_DEFAULT_RDP_USERNAMES.get(os_type)
-    if username is None:
-        return None, None
     role = _first_connection_value(instance.get("role"), "instance").lower()
     if os_type == "windows" and role == "dc":
-        return username, _resolve_dc_password(instance)
+        return _OS_DEFAULT_RDP_USERNAMES.get(os_type), _resolve_dc_password(instance)
+    username = _first_connection_value(instance.get("ssh_username")) or _OS_DEFAULT_RDP_USERNAMES.get(os_type)
+    if not username:
+        return None, None
     return username, _resolve_non_dc_rdp_password(instance)
 
 

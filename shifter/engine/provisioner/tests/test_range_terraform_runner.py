@@ -4,7 +4,7 @@ Covers destroy_range variable passing (mirrors test_terraform_runner.py for NGFW
 """
 
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -47,7 +47,7 @@ class TestProviderRouting:
     ):
         from range_terraform_runner import apply_range
 
-        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gdc"}, clear=True):
             result = apply_range("req-123", {"range_id": 42, "subnets": []})
 
         assert result == {
@@ -80,12 +80,22 @@ class TestProviderRouting:
     ):
         from range_terraform_runner import destroy_range
 
-        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+        order = Mock()
+        order.attach_mock(mock_pod_destroy, "pod_destroy")
+        order.attach_mock(mock_asset_destroy, "vm_destroy")
+        order.attach_mock(mock_network_destroy, "network_destroy")
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gdc"}, clear=True):
             destroy_range("req-123", variables={"range_id": 42, "subnets": []})
 
         mock_pod_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
         mock_asset_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
         mock_network_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
+        assert order.mock_calls == [
+            call.pod_destroy("req-123", {"range_id": 42, "subnets": []}),
+            call.vm_destroy("req-123", {"range_id": 42, "subnets": []}),
+            call.network_destroy("req-123", {"range_id": 42, "subnets": []}),
+        ]
 
     def test_get_range_state_key_prefix_uses_provider_specific_paths(self):
         from range_terraform_runner import get_range_state_key_prefix
@@ -93,8 +103,50 @@ class TestProviderRouting:
         with patch.dict(os.environ, {}, clear=True):
             assert get_range_state_key_prefix() == "ranges"
 
-        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gdc"}, clear=True):
             assert get_range_state_key_prefix() == "gcp/gdc-ranges"
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gce"}, clear=True):
+            assert get_range_state_key_prefix() == "gcp/gce-range-cells"
+
+    def test_apply_range_dispatches_to_gce_range_cell_backend(self):
+        from range_terraform_runner import apply_range
+
+        variables = {"range_id": 42, "subnets": []}
+        calls = []
+
+        def fake_apply(request_uuid, received_variables):
+            calls.append((request_uuid, received_variables))
+            return {"subnets": {"attack": {"subnet_id": "shifter-r-42-attack"}}, "instances": []}
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gce"}, clear=True):
+            result = apply_range("req-123", variables, gce_apply_range_cell=fake_apply)
+
+        assert result == {"subnets": {"attack": {"subnet_id": "shifter-r-42-attack"}}, "instances": []}
+        assert calls == [("req-123", variables)]
+
+    def test_destroy_range_dispatches_to_gce_range_cell_backend(self):
+        from range_terraform_runner import destroy_range
+
+        variables = {"range_id": 42, "subnets": []}
+        calls = []
+
+        def fake_destroy(request_uuid, received_variables):
+            calls.append((request_uuid, received_variables))
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gce"}, clear=True):
+            destroy_range("req-123", variables=variables, gce_destroy_range_cell=fake_destroy)
+
+        assert calls == [("req-123", variables)]
+
+    def test_has_terraform_state_short_circuits_provider_native_gcp_backends(self):
+        from range_terraform_runner import has_terraform_state
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+            assert has_terraform_state("req-123") is False
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gce"}, clear=True):
+            assert has_terraform_state("req-123") is False
 
 
 class TestDestroyRange:

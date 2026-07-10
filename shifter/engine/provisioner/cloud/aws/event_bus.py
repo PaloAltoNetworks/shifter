@@ -38,5 +38,5 @@ class AWSEventBus(BaseAWSAdapter):
             client.publish(**kwargs)
             logger.info("publish: success topic_id=%s", topic_id)
         except (ClientError, BotoCoreError) as e:
-            logger.error("publish: failed topic_id=%s error=%s", topic_id, e)
+            logger.exception("publish: failed topic_id=%s error=%s", topic_id, e)
             raise CloudEventBusError(f"Failed to publish to SNS: {e}") from e

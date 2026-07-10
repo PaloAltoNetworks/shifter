@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
-from cms.scenarios.registry import get_scenario_detail
+from cms.scenarios.registry import get_catalog_entry
 
 from ._common import ScenarioEditorError
 from ._validation import validate_scenario_id
@@ -314,8 +314,15 @@ def clone_scenario_from_form_post(
 
 
 def toggle_scenario_metadata_flag(user: User, scenario_id: str, *, field: str, default: bool) -> bool:
-    """Toggle a boolean scenario metadata flag and return the new value."""
-    current = get_scenario_detail(scenario_id)
+    """Toggle a boolean scenario metadata flag and return the new value.
+
+    Reads the current flag from the unified catalog projection so ACES
+    package-backed entries can have their access overlay toggled alongside
+    legacy YAML defaults and DB customs.
+    """
+    current = get_catalog_entry(scenario_id)
+    if current is None:
+        raise ValueError(f"Scenario '{scenario_id}' not found")
     new_value = not current.get(field, default)
     _public_services().update_metadata(user, scenario_id, **{field: new_value})
     return new_value

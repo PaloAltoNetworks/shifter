@@ -7,8 +7,7 @@ These tests verify the AgentConfig model is:
 - Has correct meta options (ordering, verbose_name)
 """
 
-from unittest.mock import MagicMock, patch
-
+import pytest
 from django.db import models
 
 # -----------------------------------------------------------------------------
@@ -177,22 +176,38 @@ class TestAgentConfigProperties:
 class TestAgentConfigBehavior:
     """Tests for AgentConfig model behavior with mocked database access."""
 
+    @pytest.mark.django_db
     def test_active_for_user_excludes_deleted(self):
-        """active_for_user filters AgentConfig.objects (SoftDeleteManager, active-only)."""
-        from cms.models import AgentConfig
+        """active_for_user (a SoftDeleteManager) returns active rows, not deleted ones."""
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
 
-        user = MagicMock(id=1, username="testuser-active")
-        active_agent = MagicMock(name="Active Agent")
+        from cms.models import AgentConfig, OperatingSystem
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([active_agent])
-        mock_qs.__eq__ = lambda self, other: list(self) == list(other)
+        user = get_user_model().objects.create_user(username="ac-active@e.com", email="ac-active@e.com")
+        os_obj, _ = OperatingSystem.objects.get_or_create(
+            slug="windows", defaults={"name": "Windows", "extensions": [".msi"]}
+        )
 
-        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
-            result = list(AgentConfig.active_for_user(user))
+        def _agent(name, deleted=False):
+            a = AgentConfig.objects.create(
+                user=user,
+                name=name,
+                os=os_obj,
+                s3_key=f"agents/{name}.msi",
+                original_filename="a.msi",
+                file_size_bytes=1,
+            )
+            if deleted:
+                a.deleted_at = timezone.now()
+                a.save(update_fields=["deleted_at"])
+            return a
 
-        mock_filter.assert_called_once_with(user=user)
-        assert result == [active_agent]
+        _agent("Active Agent")
+        _agent("Deleted Agent", deleted=True)
+
+        result = list(AgentConfig.active_for_user(user))
+        assert [a.name for a in result] == ["Active Agent"]
 
     def test_os_foreign_key_protects_on_delete(self):
         """OS FK uses PROTECT — verified via field inspection."""

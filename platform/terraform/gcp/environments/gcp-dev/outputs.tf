@@ -129,6 +129,11 @@ output "runtime_secret_ids" {
   value       = module.platform_core.runtime_secret_ids
 }
 
+output "email_config" {
+  description = "Transactional-email runtime config for render_runtime_env.py (PLAT-002, #671); null when email is unconfigured."
+  value       = module.platform_core.email_config
+}
+
 output "control_plane_database" {
   description = "Control-plane database connection metadata."
   value       = module.platform_core.control_plane_database
@@ -147,4 +152,14 @@ output "guacamole_database" {
 output "workload_service_accounts" {
   description = "Workload service accounts for the environment."
   value       = module.platform_core.workload_service_accounts
+}
+
+output "packer_workload_identity_provider" {
+  description = "GitHub OIDC provider resource name; set as the GCP_WORKLOAD_IDENTITY_PROVIDER GitHub secret."
+  value       = module.cicd_github_oidc.workload_identity_provider
+}
+
+output "packer_build_service_account_email" {
+  description = "Packer build service account email; set as the GCP_SERVICE_ACCOUNT GitHub secret."
+  value       = module.cicd_github_oidc.packer_build_service_account_email
 }

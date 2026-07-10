@@ -20,18 +20,34 @@ Write-Host "=========================================="
 Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Write-Host "Hostname: $env:COMPUTERNAME"
 
-# Verify this is a Domain Controller
+# Verify this is a Domain Controller. AD DS (NTDS/ADWS) can take a few minutes
+# to finish starting on a freshly cloned prebaked DC, so wait for it with a
+# retry loop rather than failing on the first probe. A single probe made this
+# step flaky: it passed only when AD DS happened to be up within the
+# orchestrator's short retry window, and failed otherwise ("Not a Domain
+# Controller or AD services not running").
 Write-Host ""
-Write-Host "[Step 1] Verifying Domain Controller status..."
-try {
-    $dcInfo = Get-ADDomainController -ErrorAction Stop
-    Write-Host "  SUCCESS: This is a Domain Controller"
-    Write-Host "  Domain: $($dcInfo.Domain)"
-    Write-Host "  HostName: $($dcInfo.HostName)"
-    Write-Host "  Site: $($dcInfo.Site)"
-} catch {
-    Write-Host "  ERROR: Not a Domain Controller or AD services not running"
-    Write-Host "  Exception: $($_.Exception.Message)"
+Write-Host "[Step 1] Waiting for AD DS to be ready..."
+$maxAttempts = 15
+$delaySeconds = 20
+$dcInfo = $null
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+        $dcInfo = Get-ADDomainController -ErrorAction Stop
+        Write-Host "  SUCCESS: This is a Domain Controller (attempt $attempt)"
+        Write-Host "  Domain: $($dcInfo.Domain)"
+        Write-Host "  HostName: $($dcInfo.HostName)"
+        Write-Host "  Site: $($dcInfo.Site)"
+        break
+    } catch {
+        Write-Host "  Attempt $($attempt)/$($maxAttempts): AD DS not ready yet: $($_.Exception.Message)"
+        if ($attempt -lt $maxAttempts) {
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+}
+if (-not $dcInfo) {
+    Write-Host "  ERROR: Not a Domain Controller or AD services not running after $maxAttempts attempts"
     Write-Host "  Cannot set domain Administrator password on non-DC"
     exit 1
 }
@@ -517,8 +533,11 @@ class DCSetupPlan:
             [
                 SetupStep(
                     name="set_admin_password",
+                    # Must exceed the script's AD-DS readiness wait loop
+                    # (15 attempts x 20s ~= 300s) so the orchestrator does not
+                    # kill the step mid-wait on a slow-to-start cloned DC.
                     script=SET_ADMIN_CREDENTIAL_SCRIPT,
-                    timeout_seconds=60,
+                    timeout_seconds=420,
                 ),
                 SetupStep(
                     name="enable_ssh_password_auth",

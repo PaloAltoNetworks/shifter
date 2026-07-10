@@ -51,6 +51,7 @@ class ECSFormatter(logging.Formatter):
         "trace_id",
         "agent_config_id",
         "execution_arn",
+        "worker_queue",
     )
 
     def __init__(self, environment: str = "unknown"):

@@ -11,12 +11,14 @@ from cms.models import AgentConfig, RangeInstance
 from risk_register.models import AuditLog
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
+from shared.schemas.persistence import wrap_persisted_spec
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
     from cms.models import Request
     from cms.scenarios.schema import ScenarioTemplate
+    from shared.enums import RangeSource
     from shared.schemas.range import RangeContext, RangeSpec
 
 logger = logging.getLogger(__name__)
@@ -36,11 +38,11 @@ def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
     _cs.audit_log(_cs.AuditEvent(**kwargs))
 
 
-def _get_active_range_call(user: User) -> Any:  # NOSONAR
+def _get_active_range_call(user: User, range_source: RangeSource | None = None) -> Any:  # NOSONAR
     """Look up active range through the package to honor test patches."""
     from cms import services as _cs
 
-    return _cs.get_active_range(user)
+    return _cs.get_active_range(user, range_source)
 
 
 def _get_agent_call(user: User, agent_id: int) -> AgentConfig:
@@ -101,25 +103,43 @@ def _validate_create_range_agents_by_os(user: User, agents_by_os: dict[str, int]
         raise TypeError(msg)
 
 
-def _assert_no_active_range(user: User) -> None:
-    """Raise CMSError if the user already has an active range."""
-    existing = _get_active_range_call(user)
+def _assert_no_active_range(user: User, range_source: RangeSource | None = None) -> None:
+    """Raise CMSError if the user already has an active range for the given source."""
+    existing = _get_active_range_call(user, range_source)
     if existing:
         logger.warning(
-            "create_range: user_id=%s already has active range request_id=%s",
+            "create_range: user_id=%s already has active %s range request_id=%s",
             user.id,
+            range_source,
             existing.range_id,
         )
         msg = "You already have an active range. Please destroy it before creating a new one."
         raise CMSError(msg)
 
 
+def _assert_scenario_launchable(scenario: str) -> None:
+    """Reject a known-but-non-launchable scenario before hydration.
+
+    Unknown ids are left to ``_load_scenario_template_or_raise`` (which raises
+    the not-found CMSError), preserving existing behavior. Legacy YAML/DB
+    entries are always launchable; a non-launchable ACES entry (pending
+    conformance, unsupported profile, invalid refs, or a shadowed legacy id)
+    is rejected here with a clear error instead of an opaque not-found.
+    """
+    from cms.scenarios.registry import get_catalog_entry
+
+    entry = get_catalog_entry(scenario)
+    if entry is not None and not entry.get("launchable", True):
+        logger.warning("create_range: scenario '%s' is not launchable", scenario)
+        raise CMSError(f"Scenario '{scenario}' is not available for launch")
+
+
 def _load_scenario_template_or_raise(scenario: str) -> ScenarioTemplate:
-    """Return the scenario template or raise CMSError if not found."""
-    from cms.scenarios.registry import load_scenario_template as load_scenario
+    """Return the demo scenario template or raise CMSError if not found."""
+    from cms.scenarios.registry import load_demo_scenario_template
 
     try:
-        return load_scenario(scenario)
+        return load_demo_scenario_template(scenario)
     except ValueError as e:
         logger.error("create_range: scenario '%s' not found", scenario)
         raise CMSError(str(e)) from e
@@ -142,13 +162,12 @@ def _lookup_agents_by_os(user: User, agents_by_os: dict[str, int]) -> dict[str, 
     return {os_type: _get_agent_call(user, aid) for os_type, aid in agents_by_os.items()}
 
 
-def _create_cms_request_and_dispatch_engine(user: User, range_spec: RangeSpec) -> tuple[UUID, Request]:
-    """Create the CMS Request row, dispatch the engine, return (request_id, cms_request)."""
+def _create_cms_request(user: User) -> tuple[UUID, Request]:
+    """Create the CMS Request row and return (request_id, cms_request)."""
     from uuid import uuid4
 
     from cms.models import Request
     from shared.enums import RequestType
-    from shared.schemas import RequestSpec
 
     request_id = uuid4()
     cms_request = Request.objects.create(
@@ -161,13 +180,19 @@ def _create_cms_request_and_dispatch_engine(user: User, range_spec: RangeSpec) -
         request_id,
         user.id,
     )
+    return request_id, cms_request
+
+
+def _dispatch_engine_range(request_id: UUID, user: User, range_spec: RangeSpec) -> None:
+    """Dispatch range provisioning to engine for an already-owned CMS request."""
+    from shared.schemas import RequestSpec
+
     request_spec = RequestSpec(
         request_id=request_id,
         user_id=user.id,
         items=[range_spec],
     )
     _engine_create_range_call(request_spec)
-    return request_id, cms_request
 
 
 def _persist_range_instance_record(
@@ -176,17 +201,29 @@ def _persist_range_instance_record(
     user: User,
     agents: dict[str, AgentConfig],
     range_spec: RangeSpec,
-) -> None:
+    range_source: RangeSource | None = None,
+) -> RangeInstance:
     """Persist the RangeInstance row tying the CMS Request to the hydrated spec."""
+    from shared.enums import RangeSource
+
+    if range_source is None:
+        range_source = RangeSource.MISSION_CONTROL
     # Store first agent for backward compatibility (field is nullable).
     first_agent = next(iter(agents.values()), None)
-    RangeInstance.objects.create(
+    return RangeInstance.objects.create(
         request=cms_request,
         scenario_id=scenario,
         user_id=user.id,
         agent=first_agent,
-        range_spec=range_spec.model_dump(mode="json"),
+        range_source=range_source.value,
+        range_spec=wrap_persisted_spec("range_spec", range_spec),
     )
+
+
+def _set_range_instance_status(range_instance: RangeInstance, status: ResourceStatus) -> None:
+    """Persist CMS status for a range instance using the existing public vocabulary."""
+    range_instance.status = status.value
+    range_instance.save(update_fields=["status"])
 
 
 def _audit_range_provision(
@@ -252,6 +289,7 @@ def create_range(
     scenario: str,
     agents_by_os: dict[str, int],
     ngfw_enabled: bool = False,
+    range_source: RangeSource | None = None,
 ) -> RangeContext:
     """Validate, hydrate, and trigger range provisioning.
 
@@ -263,6 +301,9 @@ def create_range(
         scenario: Scenario ID (basic, ad_attack_lab)
         agents_by_os: Mapping of OS type to agent ID, e.g. {"windows": 123, "linux": 456}
         ngfw_enabled: Whether to deploy VM-Series NGFW inline
+        range_source: Server-derived provenance label (RangeSource enum). Defaults to
+            MISSION_CONTROL. Must be set by the product entry point (e.g. the CTF bridge
+            passes RangeSource.CTF). Never user-supplied from a request body.
 
     Returns:
         RangeContext: Template-safe projection of the created range
@@ -276,22 +317,28 @@ def create_range(
             requirements not met
     """
     from cms.scenarios.hydrator import hydrate_scenario
+    from shared.enums import RangeSource
+
+    if range_source is None:
+        range_source = RangeSource.MISSION_CONTROL
 
     _validate_create_range_user(user)
     _validate_create_range_scenario(user, scenario)
     _validate_create_range_agents_by_os(user, agents_by_os)
 
     logger.debug(
-        "create_range called for user_id=%s, scenario=%s, agents_by_os=%s, ngfw_enabled=%s",
+        "create_range called for user_id=%s, scenario=%s, agents_by_os=%s, ngfw_enabled=%s, range_source=%s",
         user.id,
         scenario,
         agents_by_os,
         ngfw_enabled,
+        range_source.value,
     )
 
     try:
-        _assert_no_active_range(user)
+        _assert_no_active_range(user, range_source)
 
+        _assert_scenario_launchable(scenario)
         scenario_template = _load_scenario_template_or_raise(scenario)
         requirements = scenario_template.get_agent_requirements()
         _check_scenario_agent_requirements(scenario, requirements, agents_by_os)
@@ -299,15 +346,22 @@ def create_range(
         agents = _lookup_agents_by_os(user, agents_by_os)
         range_spec = hydrate_scenario(scenario, user.id, agents)
 
-        request_id, cms_request = _create_cms_request_and_dispatch_engine(user, range_spec)
-        _persist_range_instance_record(cms_request, scenario, user, agents, range_spec)
+        request_id, cms_request = _create_cms_request(user)
+        range_instance = _persist_range_instance_record(cms_request, scenario, user, agents, range_spec, range_source)
+        _set_range_instance_status(range_instance, ResourceStatus.PROVISIONING)
+        try:
+            _dispatch_engine_range(request_id, user, range_spec)
+        except Exception:
+            _set_range_instance_status(range_instance, ResourceStatus.FAILED)
+            raise
         _audit_range_provision(request_id, scenario, user, agents, ngfw_enabled)
 
         logger.debug(
-            "create_range completed: request_id=%s, scenario=%s, user_id=%s",
+            "create_range completed: request_id=%s, scenario=%s, user_id=%s, range_source=%s",
             request_id,
             scenario,
             user.id,
+            range_source.value,
         )
         return _build_range_context_for_create(request_id, scenario, user, range_spec, agents)
 

@@ -173,6 +173,15 @@ range_config = {
 | `complete_upload(user, upload_token)` | Verify and finalize upload |
 | `cancel_upload(user, upload_token)` | Clean up failed upload |
 
+Agent upload cancel is a state-mutating authenticated POST. Browser-session
+callers must satisfy Django/DRF CSRF validation: explicit cancel uses JSON with
+`X-CSRFToken`, and page-unload cleanup uses a form-encoded `sendBeacon()` body
+containing `upload_token` and `csrfmiddlewaretoken`. The signed upload token is
+validated by `cms.services.cancel_upload()` and matched to the current session
+upload lock before the lock is cleared. Empty, malformed, missing-token, stale,
+wrong-user, or expired-token cancel requests leave the lock in place; stale locks
+recover through the upload lock timeout.
+
 #### User Quota
 
 | Function | Purpose |

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
 echo "=== Installing XFCE desktop and xrdp for RDP access ==="
 # Some XFCE-related packages still assume a classic inetd config exists.
@@ -95,4 +96,11 @@ ResultInactive=no
 ResultActive=yes
 EOF
 
+touch /var/tmp/shifter-desktop-ready
 echo "=== Desktop setup complete ==="
+
+# On Ubuntu 22.04, desktop package hooks have intermittently left the Packer
+# shell wrapper reporting 123 after the script's intended work completed. Keep
+# strict-mode failure behavior for every command above, then return success once
+# the desktop configuration has reached this marker.
+exit 0

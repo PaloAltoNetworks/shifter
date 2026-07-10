@@ -381,7 +381,11 @@ def test_provisioner_db_status_helpers_use_owning_module_connection(monkeypatch:
     _update_range_config(42, {"subnets": [{"name": "attack", "cidr": "10.1.2.0/28"}]})
 
     saved_spec, saved_range_id = config_cursor.execute_calls[0][1]
-    assert json.loads(saved_spec) == {"subnets": [{"name": "attack", "cidr": "10.1.2.0/28"}]}
+    assert json.loads(saved_spec) == {
+        "spec_schema": "range_spec",
+        "spec_version": "1",
+        "payload": {"subnets": [{"name": "attack", "cidr": "10.1.2.0/28"}]},
+    }
     assert saved_range_id == 42
     config_conn.commit.assert_called_once_with()
 
@@ -529,3 +533,21 @@ def test_terraform_vars_resolve_defaults_and_agent_url(monkeypatch: pytest.Monke
 
     assert _resolve_agent_presigned_url({"agent": {"s3_key": "agents/xdr.deb"}}) == "https://signed.example/agent.deb"
     generate_url.assert_called_once_with(bucket="agent-assets", key="agents/xdr.deb")
+
+
+def test_resolve_instance_type_not_required_on_gcp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On GCP the EC2 instance type is unused (GDC sizes VMs by vCPU/memory), so
+    resolution must not require the AWS ``*_INSTANCE_TYPE`` env vars (D24)."""
+    from terraform_vars import _resolve_instance_type
+
+    monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+    # Make the AWS getters explode to prove they are never consulted on GCP.
+    boom = MagicMock(side_effect=ValueError("KALI_INSTANCE_TYPE environment variable is required"))
+    monkeypatch.setattr("terraform_vars._get_kali_instance_type", boom)
+    monkeypatch.setattr("terraform_vars._get_victim_instance_type", boom)
+
+    assert _resolve_instance_type("attacker", "kali", None) == ""
+    assert _resolve_instance_type("victim", "ubuntu", None) == ""
+    # An explicit per-instance override still wins on GCP.
+    assert _resolve_instance_type("victim", "ubuntu", "custom-shape") == "custom-shape"
+    boom.assert_not_called()

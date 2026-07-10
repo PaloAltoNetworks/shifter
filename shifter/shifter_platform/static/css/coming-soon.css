@@ -1,0 +1,201 @@
+/* coming soon page.
+   Extracted from templates/coming_soon.html (issue #414). */
+
+:root {
+    --accent: #94a3b8;
+    --accent-glow: rgb(148, 163, 184, 0.4);
+    --accent-soft: rgb(148, 163, 184, 0.6);
+    --background: #1f1f1f;
+    --surface: #151515;
+    --text-primary: #eaebeb;
+    --text-secondary: #b8b8b8;
+    --text-muted: #707070;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: Lato, "Assistant", sans-serif;
+    background: var(--background);
+    color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    position: relative;
+}
+
+.bg-gradient {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
+        radial-gradient(ellipse at center, transparent 0%, var(--background) 70%),
+        radial-gradient(ellipse at 30% 70%, rgb(148, 163, 184, 0.03) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 30%, rgb(148, 163, 184, 0.02) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.container {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 2rem;
+    max-width: 600px;
+}
+
+.logo {
+    width: 96px;
+    height: 96px;
+    margin-bottom: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 1px solid #2e2e2e;
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-family: Lato, sans-serif;
+    font-weight: 700;
+    font-size: 56px;
+    letter-spacing: 0.02em;
+    animation: logo-pulse 6s ease-in-out infinite;
+    filter: drop-shadow(0 0 15px var(--accent-glow));
+}
+
+@keyframes logo-pulse {
+    0%, 100% {
+        filter: drop-shadow(0 0 15px var(--accent-glow));
+    }
+
+    50% {
+        filter: drop-shadow(0 0 25px var(--accent-soft))
+                drop-shadow(0 0 40px var(--accent-glow));
+    }
+}
+
+.wordmark {
+    font-family: Lato, sans-serif;
+    font-weight: 700;
+    font-size: 64px;
+    letter-spacing: 0.08em;
+    color: var(--text-primary);
+    margin-bottom: 1.5rem;
+    position: relative;
+    line-height: 1;
+}
+
+.wordmark-container {
+    position: relative;
+    display: inline-block;
+}
+
+.wordmark-container::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 70%);
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+}
+
+.wordmark-container:hover::before {
+    opacity: 0.3;
+}
+
+.tagline {
+    font-size: 1rem;
+    font-weight: 400;
+    color: var(--accent);
+    opacity: 0.9;
+    margin-bottom: 2.5rem;
+    letter-spacing: 0.02em;
+    line-height: 1.6;
+    max-width: 480px;
+}
+
+.launch-date {
+    font-family: Lato, "Assistant", sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.1em;
+}
+
+.cursor {
+    display: inline-block;
+    width: 8px;
+    height: 1em;
+    background: var(--accent);
+    margin-left: 4px;
+    animation: blink 1s infinite;
+    vertical-align: middle;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.footer {
+    position: fixed;
+    bottom: 1.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    z-index: 10;
+}
+
+@media (max-width: 600px) {
+    .logo {
+        width: 80px;
+        height: 80px;
+        font-size: 44px;
+    }
+
+    .wordmark {
+        font-size: 48px;
+    }
+
+    .tagline {
+        font-size: 0.9rem;
+        padding: 0 1rem;
+    }
+}
+
+@media (max-width: 400px) {
+    .logo {
+        width: 64px;
+        height: 64px;
+        font-size: 36px;
+    }
+
+    .wordmark {
+        font-size: 40px;
+    }
+
+    .tagline {
+        font-size: 0.85rem;
+    }
+}

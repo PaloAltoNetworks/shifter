@@ -17,7 +17,7 @@ from ._persistence import (
     save_scenario_updates,
     soft_delete_scenario,
 )
-from ._validation import validate_scenario_id, validate_scenario_payload
+from ._validation import structural_definition_from_detail, validate_scenario_id, validate_scenario_payload
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -67,7 +67,7 @@ def create_scenario(
         try:
             validate_scenario_id(scenario_id)
         except ScenarioEditorError:
-            logger.error(
+            logger.exception(
                 "create_scenario: invalid scenario_id format: %s, user_id=%s",
                 safe_log_value(scenario_id),
                 user.id,
@@ -245,11 +245,7 @@ def clone_scenario(
         )
         raise ScenarioEditorError(f"Source scenario '{source_scenario_id}' not found") from e
 
-    definition = {
-        "instances": source.get("instances", []),
-        "subnets": source.get("subnets", []),
-        "ngfw": source.get("ngfw", False),
-    }
+    definition = structural_definition_from_detail(source)
     return create_scenario(
         user,
         scenario_id=new_scenario_id,

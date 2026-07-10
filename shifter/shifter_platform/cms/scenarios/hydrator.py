@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from cms.exceptions import CMSError
+from cms.scenarios.schema import CTFScenarioTemplate, ScenarioTemplate
 from shared.log_sanitize import safe_log_value
-from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec, SubnetSpec
+from shared.schemas import CTFRangeSpec, InstanceSpec, NGFWAppSpec, RangeSpec, SubnetSpec
 
 from .registry import load_scenario_template as load_scenario
 
@@ -67,6 +68,11 @@ def hydrate_scenario(
     except ValueError as e:
         logger.error("Scenario not found: scenario_id=%s", scenario_id)
         raise CMSError(f"Scenario '{scenario_id}' not found") from e
+
+    if isinstance(template, CTFScenarioTemplate):
+        raise CMSError(f"Scenario '{scenario_id}' is a CTF scenario; use hydrate_ctf()")
+
+    assert isinstance(template, ScenarioTemplate)
 
     # Validate agents if required by scenario
     if template.requires_agent() and not agents:
@@ -127,6 +133,45 @@ def hydrate_scenario(
         user_id=user_id,
         subnets=subnets,
         ngfw=template.ngfw,
+    )
+
+
+def hydrate_ctf(scenario_id: str, user_id: int) -> CTFRangeSpec:
+    """Hydrate a CTF scenario template into a CTFRangeSpec for Engine consumption."""
+    try:
+        template = load_scenario(scenario_id)
+    except ValueError as e:
+        logger.error("Scenario not found: scenario_id=%s", scenario_id)
+        raise CMSError(f"Scenario '{scenario_id}' not found") from e
+
+    if not isinstance(template, CTFScenarioTemplate):
+        raise CMSError(f"Scenario '{scenario_id}' is not a CTF scenario")
+
+    range_uuid = str(uuid_module.uuid4())
+
+    logger.debug(
+        "Hydrated CTF scenario: scenario_id=%s, user_id=%s, zones=%d, assets=%d, uuid=%s",
+        scenario_id,
+        user_id,
+        len(template.zones),
+        len(template.assets),
+        range_uuid,
+    )
+
+    return CTFRangeSpec(
+        uuid=range_uuid,
+        scenario_id=scenario_id,
+        user_id=user_id,
+        subnets=[],
+        zones=template.zones,
+        networks=template.networks,
+        forests=template.forests,
+        services=template.services,
+        assets=template.assets,
+        flags=template.flags,
+        data_seeds=template.data_seeds,
+        detection=template.detection,
+        participant_access=template.participant_access,
     )
 
 

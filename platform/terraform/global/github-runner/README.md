@@ -8,6 +8,13 @@ let it deploy to both dev and prod.
 
 - `aws_instance.runner[count]`: Amazon Linux 2023, t3.large, no inbound
   rules (egress to GitHub/ECR/SSM). Access via SSM Session Manager.
+- Placement is controlled by `var.vpc_id` / `var.subnet_id` and the
+  `var.allow_default_vpc` opt-in (ADR-004-R20). By default the stack fails closed
+  on the account default VPC, where a range's private-DNS interface endpoints can
+  hijack the runner's AWS API resolution; the preferred placement is a dedicated
+  runner VPC or the portal VPC private tier. Setting `allow_default_vpc = true`
+  accepts that risk and auto-resolves the default VPC plus a subnet (no committed
+  IDs). aws-dev/aws-proof opt in today; the design is being reassessed in #1437.
 - IAM instance profile with inline SSM Session Manager and ECR push/pull
   policies. Inline policies avoid `iam:AttachRolePolicy`, which may be
   denied by AWS Organizations SCPs in fresh managed accounts.
@@ -56,25 +63,52 @@ The script reads `PANW_SHIFTER_DEV_PROFILE` from `.env`. AWS pager
 should be disabled (`export AWS_PAGER=""`) or `aws` calls will block on
 `less`.
 
-Before applying in a new account, update `dev.tfvars` with the account-local
-VPC and subnet. The runner instances need outbound internet access for GitHub,
-ECR, and SSM; the default VPC public subnet is acceptable for dev bootstrap.
+Before applying in a new account, choose a runner network that range
+provisioning cannot deploy into. Valid choices are a dedicated runner VPC or
+the portal VPC private tier. The runner subnet needs outbound egress for GitHub,
+ECR, SSM, and AWS APIs through NAT, an approved proxy, or VPC endpoints plus
+internet egress for GitHub. The account default VPC is not acceptable because
+range-created private-DNS interface endpoints affect every workload in that VPC.
+
+For the portal VPC option, use the portal Terraform outputs as the source for
+`vpc_id` and `subnet_id`:
 
 ```bash
-aws ec2 describe-vpcs \
-  --profile "$PANW_SHIFTER_DEV_PROFILE" \
-  --region us-east-2 \
-  --filters Name=is-default,Values=true \
-  --query 'Vpcs[0].VpcId' \
-  --output text
-
-aws ec2 describe-subnets \
-  --profile "$PANW_SHIFTER_DEV_PROFILE" \
-  --region us-east-2 \
-  --filters Name=default-for-az,Values=true \
-  --query 'Subnets[?AvailabilityZone==`us-east-2a`].SubnetId | [0]' \
-  --output text
+cd platform/terraform/environments/dev/portal
+terraform output vpc_id
+terraform output private_subnet_ids
 ```
+
+Do not commit live VPC or subnet IDs to the placeholder tfvars files. Keep
+deployment-specific IDs in a gitignored operator override or another approved
+deploy-time binding. See the preflight note:
+[`docs/architecture/github-runner-network-isolation-preflight-1222.md`](../../../../docs/architecture/github-runner-network-isolation-preflight-1222.md).
+
+## Health monitoring
+
+Each runner has CloudWatch alarms for EC2 instance/system status checks,
+sustained CPU (hang proxy), and runner-service liveness. A systemd timer
+(`shifter-runner-health.timer`, installed by `user_data`) publishes the
+`actions.runner.*` service state as the `Shifter/RunnerHealth:RunnerServiceActive`
+metric; its alarm treats missing data as breaching so a hung host that stops
+reporting alarms instead of going silent. Alarms notify the
+`shifter-github-runner-alerts` SNS topic
+(`terraform output runner_alerts_topic_arn`); set `alarm_email` to subscribe an
+inbox, or subscribe Slack/Teams to the topic. The system-status alarm can
+EC2-auto-recover when `enable_system_auto_recovery` is set (default on).
+
+A freshly applied host shows `RunnerServiceActive = 0` until you register the
+runner below; the `service-inactive` alarm clears once `svc.sh start` runs.
+
+The monitor installs via `user_data`, which runs only on first boot, so
+`aws_instance.runner` sets `user_data_replace_on_change = true`. Applying this
+change therefore **replaces** existing runners (re-running the install); a
+replaced runner must be re-registered. Roll out one runner at a time
+(`-target`) to avoid dropping all self-hosted capacity. See the runbook section
+on rolling out the monitor to existing runners.
+
+See the response runbook:
+[`docs/ops/github-runner-health-alerts.md`](../../../../docs/ops/github-runner-health-alerts.md).
 
 ## Registering a runner (one-time per instance)
 

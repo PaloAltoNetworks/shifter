@@ -16,6 +16,10 @@ resource "aws_lb_target_group" "guacamole" {
   vpc_id      = var.vpc_id
   target_type = "ip"
 
+  # Allow in-flight Guacamole RDP/SSH browser sessions to drain when a target
+  # is deregistered before the connection is closed (issue #931).
+  deregistration_delay = var.target_deregistration_delay_seconds
+
   health_check {
     enabled             = true
     healthy_threshold   = 2

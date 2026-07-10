@@ -8,6 +8,13 @@ on:
         required: false
         type: boolean
         default: false
+      run_full_matrix:
+        description: >-
+          Run every quality job regardless of path filters. Set by the caller
+          for workflow_dispatch full-validation runs.
+        required: false
+        type: boolean
+        default: false
       run_stack_smoke:
         description: >-
           Run the built-image stack-smoke job. Driven by the caller from the
@@ -23,6 +30,157 @@ on:
 
 jobs:
   # ===========================================================================
+  # Path detection (issue #774)
+  #
+  # Categories live in .github/quality-path-filters.yaml. Workflow-file
+  # changes force the full matrix so a broken pipeline cannot slip through.
+  # ===========================================================================
+
+  paths:
+    permissions:
+      contents: read
+    name: Detect quality paths
+    runs-on: ubuntu-latest
+    outputs:
+      run_all: ${{ steps.detect.outputs.run_all }}
+      run_sonar: ${{ steps.detect.outputs.run_sonar }}
+      ci_workflows: ${{ steps.detect.outputs.ci_workflows }}
+      shifter_platform: ${{ steps.detect.outputs.shifter_platform }}
+      provisioner: ${{ steps.detect.outputs.provisioner }}
+      cyberscript: ${{ steps.detect.outputs.cyberscript }}
+      packer: ${{ steps.detect.outputs.packer }}
+      bootstrap: ${{ steps.detect.outputs.bootstrap }}
+      gcp_scripts: ${{ steps.detect.outputs.gcp_scripts }}
+      check_layer_imports: ${{ steps.detect.outputs.check_layer_imports }}
+      check_rds_pending_modifications: ${{ steps.detect.outputs.check_rds_pending_modifications }}
+      handle_sd_replacement: ${{ steps.detect.outputs.handle_sd_replacement }}
+      assert_portal_inspection: ${{ steps.detect.outputs.assert_portal_inspection }}
+      installation: ${{ steps.detect.outputs.installation }}
+      event_load_harness: ${{ steps.detect.outputs.event_load_harness }}
+      terraform: ${{ steps.detect.outputs.terraform }}
+      k8s: ${{ steps.detect.outputs.k8s }}
+      mcp_ngfw: ${{ steps.detect.outputs.mcp_ngfw }}
+      mcp_ops: ${{ steps.detect.outputs.mcp_ops }}
+      mcp_planner: ${{ steps.detect.outputs.mcp_planner }}
+      mcp_shared: ${{ steps.detect.outputs.mcp_shared }}
+      adr_guard: ${{ steps.detect.outputs.adr_guard }}
+      ctfd_workshop: ${{ steps.detect.outputs.ctfd_workshop }}
+      polaris_aws_range: ${{ steps.detect.outputs.polaris_aws_range }}
+      scenario_smoketest: ${{ steps.detect.outputs.scenario_smoketest }}
+      stack_smoke: ${{ steps.detect.outputs.stack_smoke }}
+      mcp_lint_any: ${{ steps.detect.outputs.mcp_lint_any }}
+      mcp_test_any: ${{ steps.detect.outputs.mcp_test_any }}
+      mcp_lint_packages: ${{ steps.detect.outputs.mcp_lint_packages }}
+      mcp_test_packages: ${{ steps.detect.outputs.mcp_test_packages }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Classify changed paths
+        id: detect
+        env:
+          RUN_FULL_MATRIX: ${{ inputs.run_full_matrix }}
+          DIFF_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          DIFF_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          uv run --python 3.11 --with 'pyyaml==6.0.2' python3 <<'PY'
+          import fnmatch
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          import yaml
+
+          CONFIG = Path(".github/quality-path-filters.yaml")
+          SONAR_CATEGORIES = {
+              "shifter_platform",
+              "provisioner",
+              "packer",
+              "bootstrap",
+              "check_layer_imports",
+              "installation",
+          }
+          MCP_LINT_PACKAGES = ["ngfw", "ops", "planner", "shared"]
+          MCP_TEST_PACKAGES = ["ngfw", "ops", "planner"]
+
+          def matches(path: str, pattern: str) -> bool:
+              if pattern.endswith("/**"):
+                  prefix = pattern[:-3].rstrip("/")
+                  return path == prefix or path.startswith(prefix + "/")
+              return fnmatch.fnmatchcase(path, pattern)
+
+          def load_filters() -> dict[str, list[str]]:
+              with CONFIG.open(encoding="utf-8") as handle:
+                  data = yaml.safe_load(handle)
+              return {name: list(globs) for name, globs in data.items()}
+
+          def changed_files() -> list[str] | None:
+              if os.environ.get("RUN_FULL_MATRIX", "false").lower() == "true":
+                  return None
+              head = os.environ.get("DIFF_HEAD_SHA") or os.environ.get("GITHUB_SHA", "")
+              base = os.environ.get("DIFF_BASE_SHA", "")
+              if base and base != ("0" * 40):
+                  cmd = ["git", "diff", "--name-only", f"{base}...{head}"]
+              else:
+                  cmd = ["git", "diff", "--name-only", "HEAD~1", "HEAD"]
+              out = subprocess.check_output(cmd, text=True)
+              return [line.strip() for line in out.splitlines() if line.strip()]
+
+          filters = load_filters()
+          files = changed_files()
+          outputs: dict[str, str] = {}
+
+          if files is None:
+              run_all = "true"
+              for name in filters:
+                  outputs[name] = "true"
+          else:
+              for name, globs in filters.items():
+                  hit = any(
+                      matches(path, glob)
+                      for path in files
+                      for glob in globs
+                  )
+                  outputs[name] = "true" if hit else "false"
+              run_all = "true" if outputs.get("ci_workflows") == "true" else "false"
+
+          outputs["run_all"] = run_all
+          outputs["run_sonar"] = (
+              "true"
+              if run_all == "true"
+              or any(outputs.get(name) == "true" for name in SONAR_CATEGORIES)
+              else "false"
+          )
+
+          if run_all == "true" or outputs.get("mcp_shared") == "true":
+              lint_packages = list(MCP_LINT_PACKAGES)
+              test_packages = list(MCP_TEST_PACKAGES)
+          else:
+              lint_packages = [
+                  pkg
+                  for pkg in MCP_LINT_PACKAGES
+                  if outputs.get(f"mcp_{pkg}") == "true"
+              ]
+              test_packages = [
+                  pkg for pkg in MCP_TEST_PACKAGES if pkg in lint_packages
+              ]
+          outputs["mcp_lint_any"] = "true" if lint_packages else "false"
+          outputs["mcp_test_any"] = "true" if test_packages else "false"
+          outputs["mcp_lint_packages"] = json.dumps(lint_packages)
+          outputs["mcp_test_packages"] = json.dumps(test_packages)
+
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+          with github_output.open("a", encoding="utf-8") as handle:
+              for key, value in outputs.items():
+                  handle.write(f"{key}={value}\n")
+          PY
+
+  # ===========================================================================
   # Linting
   # ===========================================================================
 
@@ -30,6 +188,8 @@ jobs:
     permissions:
       contents: read
     name: Architecture (adr conformance)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.adr_guard == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -72,6 +232,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (GitHub Actions)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.ci_workflows == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -81,6 +243,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (terraform)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.terraform == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -122,6 +286,39 @@ jobs:
           python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py \
             platform/terraform/modules/engine-provisioner/iam.tf
 
+      # Issue #1179: SSM Run Command IAM scoping on the engine provisioner
+      # ECS task role. Mirrors check-tf-iam-ec2-scope: rejects account-wide
+      # ssm:SendCommand / ec2:RebootInstances and requires the range-instance
+      # tag conditions so a provisioner compromise cannot command portal or
+      # runner instances. Pre-commit also enforces it locally.
+      - name: Run check-tf-iam-ssm-scope
+        run: |
+          python3 scripts/check_tf_iam_ssm_scope/check_tf_iam_ssm_scope.py \
+            platform/terraform/modules/engine-provisioner/iam.tf
+
+      - name: Run check-tf-iam-role-naming
+        run: |
+          python3 scripts/check_tf_iam_role_naming/check_tf_iam_role_naming.py
+
+      # ADR-004-R20 / issue #1222: the self-hosted deploy runner must not be
+      # placed in the account default VPC (a range's private-DNS VPC endpoints
+      # can hijack its AWS API resolution). Mirrors the check-tf-runner-network
+      # pre-commit hook so a commit that skipped pre-commit cannot drop the
+      # fail-closed default-VPC precondition from the runner stack.
+      - name: Run check-tf-runner-network
+        run: |
+          python3 scripts/check_tf_runner_network/check_tf_runner_network.py
+
+      # Issue #1178: the shared range guest instance role must not grant SSM
+      # Parameter Store access on a Resource that wildcards the environment or
+      # range segment (parameter/shifter/*/range/*). Mirrors the
+      # check-tf-iam-ssm-range-scope pre-commit hook so a commit that skipped
+      # pre-commit cannot land the cross-range regression.
+      - name: Run check-tf-iam-ssm-range-scope
+        run: |
+          python3 scripts/check_tf_iam_ssm_range_scope/check_tf_iam_ssm_range_scope.py \
+            platform/terraform/modules/range/vpc/iam.tf
+
       # ADR-004-R12 / issue #140: first-party RDS instances must keep
       # IAM DB auth enabled and explicitly pin a CA identifier. Checkov
       # enforces IAM auth, but CKV_AWS_211 currently passes when the CA
@@ -131,6 +328,23 @@ jobs:
           python3 scripts/check_tf_rds_security/check_tf_rds_security.py \
             platform/terraform/modules/portal/rds/main.tf \
             platform/terraform/modules/guacamole/rds.tf
+
+      # ADR-004-R11 / issue #147: Checkov pre-commit hook args must match
+      # the security-iac job (config, directory, download_external_modules,
+      # soft_fail=false).
+      - name: Run check-checkov-invocation-parity
+        run: python3 scripts/check_checkov_invocation_parity/check_checkov_invocation_parity.py
+
+      # #911 NET-2 / #933: the portal target-service SGs (Django:8000,
+      # Guacamole client:8080) must source ingress only from a security-group
+      # reference or the ALB-only alb_ingress_subnet_cidrs output, never the
+      # whole public tier (where CTFd lives). Guards the env-root SG rules so a
+      # future edit cannot re-widen the source back to public_subnet_cidrs.
+      - name: Run check-portal-target-sg-sources
+        run: |
+          python3 scripts/check_portal_target_sg_sources/check_portal_target_sg_sources.py \
+            platform/terraform/environments/dev/portal/main.tf \
+            platform/terraform/environments/prod/portal/main.tf
 
       # Pin the behavior of the check_tf_* IAM/security checkers
       # themselves. The live-file invocations above only exercise the
@@ -146,9 +360,14 @@ jobs:
         run: |
           python3 -m unittest scripts.check_tf_iam_ec2_scope.test_check_tf_iam_ec2_scope
           python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope
+          python3 -m unittest scripts.check_tf_iam_ssm_scope.test_check_tf_iam_ssm_scope
+          python3 -m unittest scripts.check_tf_iam_role_naming.test_check_tf_iam_role_naming
+          python3 -m unittest scripts.check_tf_iam_ssm_range_scope.test_check_tf_iam_ssm_range_scope
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs
           python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
           python3 -m unittest scripts.check_tf_rds_security.test_check_tf_rds_security
+          python3 -m unittest scripts.check_portal_target_sg_sources.test_check_portal_target_sg_sources
+          python3 -m unittest scripts.check_tf_runner_network.test_check_tf_runner_network
 
   # Pin the behavior of the Polaris CTFd workshop sync helpers. Issue #702
   # shipped 38/39 challenges unsubmittable because flag-row reconciliation
@@ -162,6 +381,8 @@ jobs:
     permissions:
       contents: read
     name: Test (ctfd-workshop)
+    needs: [paths]
+    if: ${{ !inputs.skip_tests && (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.ctfd_workshop == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -174,6 +395,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (shifter_platform)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -195,6 +418,8 @@ jobs:
     permissions:
       contents: read
     name: Lint JavaScript/CSS (shifter_platform)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -202,7 +427,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19'
           cache: 'npm'
           cache-dependency-path: shifter/shifter_platform/package-lock.json
 
@@ -218,10 +443,49 @@ jobs:
         working-directory: shifter/shifter_platform
         run: npx stylelint static/css/
 
+  shifter-platform-spa:
+    permissions:
+      contents: read
+    name: SPA (shifter_platform frontend)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19'
+          cache: 'npm'
+          cache-dependency-path: shifter/shifter_platform/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform/frontend
+        run: npm ci
+
+      - name: Lint (ESLint)
+        working-directory: shifter/shifter_platform/frontend
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: shifter/shifter_platform/frontend
+        run: npm run typecheck
+
+      - name: Unit tests (Vitest + axe)
+        working-directory: shifter/shifter_platform/frontend
+        run: npm run test:coverage
+
+      - name: Build (Vite)
+        working-directory: shifter/shifter_platform/frontend
+        run: npm run build
+
   provisioner-lint:
     permissions:
       contents: read
     name: Lint (provisioner)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.provisioner == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -240,6 +504,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (packer)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.packer == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -258,6 +524,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (bootstrap)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.bootstrap == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -276,6 +544,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (gcp scripts)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.gcp_scripts == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -294,6 +564,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (check_layer_imports)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_layer_imports == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -308,10 +580,32 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  handle-sd-replacement-lint:
+    permissions:
+      contents: read
+    name: Lint (handle_sd_replacement)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.handle_sd_replacement == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Lint Python
+        working-directory: scripts/handle_sd_replacement
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   check-rds-pending-modifications-lint:
     permissions:
       contents: read
     name: Lint (check_rds_pending_modifications)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_rds_pending_modifications == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -326,10 +620,32 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  assert-portal-inspection-lint:
+    permissions:
+      contents: read
+    name: Lint (assert_portal_inspection)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.assert_portal_inspection == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Lint Python
+        working-directory: scripts/assert_portal_inspection
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   installation-lint:
     permissions:
       contents: read
     name: Lint (installation)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.installation == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -348,6 +664,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (event-load-harness)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.event_load_harness == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -366,6 +684,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (k8s manifests)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.k8s == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -417,6 +737,8 @@ jobs:
     permissions:
       contents: read
     name: Lint (k8s schemas)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.k8s == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -460,16 +782,31 @@ jobs:
             "${RUNNER_TEMP}/rendered-k8s/"*.yaml
 
   # ===========================================================================
-  # Type Checking (non-blocking quality gate)
+  # Type Checking (blocking quality gate, #564)
+  #
+  # mypy is an enforced guardrail, not advisory telemetry. Each job runs the
+  # full package mypy estate (enforced scope = the package minus the
+  # transitional dirs declared in its pyproject.toml `[tool.mypy].exclude`)
+  # and fails the job - and thus the PR Gate - on any error. Like the
+  # architecture and SAST guardrails below, these jobs do NOT honor
+  # `skip_tests`. Do NOT reintroduce `continue-on-error: true` or `|| true`:
+  # exempt a module via an explicit `[[tool.mypy.overrides]]` in the package
+  # pyproject.toml instead, so the enforced/transitional boundary stays in
+  # one place.
+  #
+  # shifter-platform-typecheck also fires on `cyberscript` changes: the
+  # platform mypy run sets `mypy_path = ".."` and type-checks the imported
+  # `cyberscript` modules, so a cyberscript-only change can break the platform
+  # estate. Triggering on that path keeps the blocking gate from having a hole.
   # ===========================================================================
 
   shifter-platform-typecheck:
     permissions:
       contents: read
     name: Type Check (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true' || needs.paths.outputs.cyberscript == 'true') }}
     runs-on: ubuntu-latest
-    continue-on-error: true  # Non-blocking - quality signal only
     steps:
       - uses: actions/checkout@v6
 
@@ -482,17 +819,24 @@ jobs:
 
       - name: Run mypy
         working-directory: shifter/shifter_platform
-        run: |
-          uv run mypy . --no-error-summary || true
-          echo "::notice::Type checking complete - see above for any type errors"
+        # The django-stubs mypy plugin imports `config.settings` to construct
+        # itself, so the run needs synthetic, non-production Django env
+        # (matching the `mypy-shifter-platform` pre-commit hook) or the plugin
+        # raises and mypy exits with an INTERNAL ERROR. PYTHONPATH=".." makes
+        # the imported `cyberscript` package resolvable at settings-import time.
+        env:
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: dummy-for-testing
+          PYTHONPATH: ".."
+        run: uv run mypy .
 
   provisioner-typecheck:
     permissions:
       contents: read
     name: Type Check (provisioner)
-    if: ${{ !inputs.skip_tests }}
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.provisioner == 'true') }}
     runs-on: ubuntu-latest
-    continue-on-error: true  # Non-blocking - quality signal only
     steps:
       - uses: actions/checkout@v6
 
@@ -505,9 +849,7 @@ jobs:
 
       - name: Run mypy
         working-directory: shifter/engine/provisioner
-        run: |
-          uv run mypy . --no-error-summary || true
-          echo "::notice::Type checking complete - see above for any type errors"
+        run: uv run mypy .
 
   # ===========================================================================
   # Architecture as Code (hard fail - zero tolerance)
@@ -517,6 +859,8 @@ jobs:
     permissions:
       contents: read
     name: Architecture (layer imports)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_layer_imports == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -536,6 +880,8 @@ jobs:
     permissions:
       contents: read
     name: Architecture (import linter)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true' || needs.paths.outputs.check_layer_imports == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -569,6 +915,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (shifter_platform)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -585,6 +933,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (provisioner)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.provisioner == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -603,6 +953,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (packer)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.packer == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -619,6 +971,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (bootstrap)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.bootstrap == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -635,6 +989,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (gcp scripts)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.gcp_scripts == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -651,6 +1007,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (check_layer_imports)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_layer_imports == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -668,6 +1026,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (installation)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.installation == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -684,6 +1044,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (event-load-harness)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.event_load_harness == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -705,8 +1067,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
-    needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
+    needs: [paths, shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')) }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -758,7 +1120,7 @@ jobs:
           DB_PASSWORD: test
         run: |
           uv run python manage.py collectstatic --noinput
-          uv run pytest tests/ --ignore=tests/documentation -m "not redis" --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml
+          uv run pytest tests/ --ignore=tests/documentation -m "not redis and not postgres" --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml
 
       # Real-stack Redis channel-layer evidence (#924). Runs only the
       # redis-marked integration tests against the Redis service, with xdist
@@ -782,6 +1144,31 @@ jobs:
         run: |
           uv run pytest tests/integration/asgi -m redis -n0 -p no:cacheprovider
 
+      # Real PostgreSQL concurrency evidence (#1182). submit_flag()'s
+      # select_for_update() guard (#1135, #1137) needs real row-level locking
+      # to prove it serializes concurrent requests, which SQLite (the main
+      # suite's backend above) cannot provide. TEST_DB_BACKEND=postgres tells
+      # tests/ctf/test_services/conftest.py to redirect the ORM at this job's
+      # postgres service instead of SQLite; TESTING stays "1" so unrelated
+      # test-mode settings are unaffected. DB_NAME/DB_USER/DB_PASSWORD match
+      # the postgres service block above. Runs with -n0 (like the redis step
+      # above): these tests drive their own thread-level concurrency, so xdist
+      # distribution adds no value and races the per-worker DB setup.
+      - name: Run CTF submission concurrency tests (PostgreSQL)
+        working-directory: shifter/shifter_platform
+        env:
+          TESTING: "1"
+          TEST_DB_BACKEND: postgres
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: shifter
+          DB_USER: test
+          DB_PASSWORD: test
+        run: |
+          uv run pytest tests/ctf/test_services/test_submission_concurrency.py -m postgres -n0 -p no:cacheprovider
+
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
@@ -794,8 +1181,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (provisioner)
-    if: ${{ !inputs.skip_tests }}
-    needs: [provisioner-lint, provisioner-sast]
+    needs: [paths, provisioner-lint, provisioner-sast]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.provisioner == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -825,8 +1212,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (packer)
-    if: ${{ !inputs.skip_tests }}
-    needs: [packer-lint]
+    needs: [paths, packer-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.packer == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -854,7 +1241,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (cyberscript)
-    if: ${{ !inputs.skip_tests }}
+    needs: [paths]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.cyberscript == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -872,8 +1260,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (bootstrap)
-    if: ${{ !inputs.skip_tests }}
-    needs: [bootstrap-lint]
+    needs: [paths, bootstrap-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.bootstrap == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -901,8 +1289,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (gcp scripts)
-    if: ${{ !inputs.skip_tests }}
-    needs: [gcp-scripts-lint]
+    needs: [paths, gcp-scripts-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.gcp_scripts == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -922,7 +1310,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (polaris-aws-range)
-    if: ${{ !inputs.skip_tests }}
+    needs: [paths]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.polaris_aws_range == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -940,8 +1329,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (check_layer_imports)
-    if: ${{ !inputs.skip_tests }}
-    needs: [check-layer-imports-lint]
+    needs: [paths, check-layer-imports-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_layer_imports == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -965,12 +1354,33 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  handle-sd-replacement-tests:
+    permissions:
+      contents: read
+    name: Tests (handle_sd_replacement)
+    needs: [paths, handle-sd-replacement-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.handle_sd_replacement == 'true')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: scripts/handle_sd_replacement
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: scripts/handle_sd_replacement
+        run: uv run pytest tests/
+
   check-rds-pending-modifications-tests:
     permissions:
       contents: read
     name: Tests (check_rds_pending_modifications)
-    if: ${{ !inputs.skip_tests }}
-    needs: [check-rds-pending-modifications-lint]
+    needs: [paths, check-rds-pending-modifications-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_rds_pending_modifications == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -986,12 +1396,33 @@ jobs:
         working-directory: scripts/check_rds_pending_modifications
         run: uv run pytest tests/
 
+  assert-portal-inspection-tests:
+    permissions:
+      contents: read
+    name: Tests (assert_portal_inspection)
+    needs: [paths, assert-portal-inspection-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.assert_portal_inspection == 'true')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: scripts/assert_portal_inspection
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: scripts/assert_portal_inspection
+        run: uv run pytest tests/
+
   installation-tests:
     permissions:
       contents: read
     name: Tests (installation)
-    if: ${{ !inputs.skip_tests }}
-    needs: [installation-lint]
+    needs: [paths, installation-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.installation == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1019,8 +1450,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (event-load-harness)
-    if: ${{ !inputs.skip_tests }}
-    needs: [event-load-harness-lint]
+    needs: [paths, event-load-harness-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.event_load_harness == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1040,8 +1471,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (migration proof)
-    if: ${{ !inputs.skip_tests }}
-    needs: [shifter-platform-lint, shifter-platform-sast]
+    needs: [paths, shifter-platform-lint, shifter-platform-sast]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1061,7 +1492,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (scenario smoketest)
-    if: ${{ !inputs.skip_tests }}
+    needs: [paths]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.scenario_smoketest == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1078,8 +1510,8 @@ jobs:
     permissions:
       contents: read
     name: Tests (adr_guard)
-    if: ${{ !inputs.skip_tests }}
-    needs: [adr-conformance]
+    needs: [paths, adr-conformance]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.adr_guard == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1102,8 +1534,8 @@ jobs:
     permissions:
       contents: read
     name: Tests JavaScript (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
-    needs: [shifter-platform-lint-js]
+    needs: [paths, shifter-platform-lint-js]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1111,7 +1543,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19'
           cache: 'npm'
           cache-dependency-path: shifter/shifter_platform/package-lock.json
 
@@ -1132,25 +1564,23 @@ jobs:
           retention-days: 1
 
   mcp-lint:
-    # Lint always runs, even when a caller sets the workflow skip_tests
-    # input, because lint is a static check independent of the test gate.
-    # Matches the shifter-platform pattern (lint-js / js-tests are
-    # separate jobs).
     permissions:
       contents: read
     name: Lint JavaScript (mcp/${{ matrix.package }})
+    needs: [paths]
+    if: ${{ needs.paths.outputs.mcp_lint_any == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [ngfw, ops, planner, shared]
+        package: ${{ fromJSON(needs.paths.outputs.mcp_lint_packages) }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19'
           cache: 'npm'
           cache-dependency-path: mcp/${{ matrix.package }}/package-lock.json
 
@@ -1166,20 +1596,20 @@ jobs:
     permissions:
       contents: read
     name: Tests JavaScript (mcp/${{ matrix.package }})
-    if: ${{ !inputs.skip_tests }}
-    needs: [mcp-lint]
+    needs: [paths, mcp-lint]
+    if: ${{ !inputs.skip_tests && needs.paths.outputs.mcp_test_any == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [ngfw, ops, planner]
+        package: ${{ fromJSON(needs.paths.outputs.mcp_test_packages) }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19'
           cache: 'npm'
           cache-dependency-path: mcp/${{ matrix.package }}/package-lock.json
 
@@ -1199,6 +1629,8 @@ jobs:
     permissions:
       contents: read
     name: Security (IaC)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.terraform == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1228,6 +1660,8 @@ jobs:
     permissions:
       contents: read
     name: Security (k8s)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.k8s == 'true') }}
     runs-on: ubuntu-latest
     # K8s Checkov is intentionally a separate policy surface from Terraform
     # Checkov (per ADR-004-R11). It stays soft-fail / continue-on-error
@@ -1254,10 +1688,117 @@ jobs:
           compact: true
           soft_fail: true
 
+  # Issue #708: advisory container/IaC and lockfile CVE signal. Exit code 0
+  # and artifact-only SARIF — findings do not block merge; gitleaks/bandit/
+  # checkov/Sonar remain the enforcement gates.
+  security-trivy-advisory:
+    permissions:
+      contents: read
+    name: Security (trivy advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Trivy (hermetic, version-pinned, checksum-verified)
+        env:
+          TRIVY_VERSION: 0.71.2
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/trivy-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/trivy.tar.gz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/trivy_checksums.txt" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt"
+          expected=$(grep "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" "${RUNNER_TEMP}/trivy_checksums.txt" | awk '{print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/trivy.tar.gz" -C "${RUNNER_TEMP}/trivy-bin" trivy
+          echo "${RUNNER_TEMP}/trivy-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/trivy-bin/trivy" --version
+
+      - name: Scan first-party Dockerfiles and Terraform (advisory)
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/trivy-results"
+          # Trivy config accepts one target root per invocation. Scan each
+          # first-party tree separately (skip temp/ via path exclusion).
+          for target in shifter/engine shifter/shifter_platform shifter/packer; do
+            slug=$(echo "$target" | tr '/' '-')
+            trivy config \
+              --exit-code 0 \
+              --format sarif \
+              --output "${RUNNER_TEMP}/trivy-results/${slug}.sarif" \
+              --skip-dirs '**/temp/**' \
+              "$target"
+          done
+          trivy config \
+            --exit-code 0 \
+            --format sarif \
+            --output "${RUNNER_TEMP}/trivy-results/terraform.sarif" \
+            platform/terraform/
+
+      - name: Upload Trivy SARIF artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-advisory-sarif
+          path: ${{ runner.temp }}/trivy-results/*.sarif
+          if-no-files-found: error
+          retention-days: 14
+
+  security-osv-advisory:
+    permissions:
+      contents: read
+    name: Security (osv-scanner advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install OSV-Scanner (hermetic, version-pinned, checksum-verified)
+        env:
+          OSV_VERSION: v2.4.0
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/osv-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_linux_amd64"
+          curl -fsSL -o "${RUNNER_TEMP}/osv-scanner_SHA256SUMS" \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_SHA256SUMS"
+          expected=$(grep 'osv-scanner_linux_amd64$' "${RUNNER_TEMP}/osv-scanner_SHA256SUMS" | awk '{print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/osv-scanner" | sha256sum -c -
+          chmod +x "${RUNNER_TEMP}/osv-scanner"
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/osv-scanner" --version
+
+      - name: Scan repo-root lockfiles (advisory)
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/osv-results"
+          sarif_out="${RUNNER_TEMP}/osv-results/package-lock.sarif"
+          # Issue #708 scope: repo-root lockfiles (package-lock.json today).
+          if [ -f package-lock.json ]; then
+            osv-scanner scan source \
+              --lockfile=package-lock.json \
+              --format sarif \
+              --output-file "${sarif_out}" \
+              ./ || true
+          fi
+          if [ ! -s "${sarif_out}" ]; then
+            # shellcheck disable=SC2016
+            SARIF_OUT="${sarif_out}" python3 -c 'import json, os, pathlib; pathlib.Path(os.environ["SARIF_OUT"]).write_text(json.dumps({"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}))'
+          fi
+
+      - name: Upload OSV-Scanner SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-scanner-advisory-sarif
+          path: ${{ runner.temp }}/osv-results/*.sarif
+          if-no-files-found: error
+          retention-days: 14
+
   secrets-gitleaks:
     permissions:
       contents: read
     name: Security (gitleaks)
+    needs: [paths]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1288,6 +1829,8 @@ jobs:
     permissions:
       contents: read
     name: Architecture (model FKs)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -1343,7 +1886,8 @@ jobs:
     permissions:
       contents: read
     name: Stack smoke (built image)
-    if: ${{ inputs.run_stack_smoke && !inputs.skip_tests }}
+    needs: [paths]
+    if: ${{ inputs.run_stack_smoke && !inputs.skip_tests && (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.stack_smoke == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1365,8 +1909,9 @@ jobs:
     # Runs after the test jobs so their coverage reports can feed the scan.
     # success() keeps the implicit needs-passed guard that a custom if:
     # would otherwise drop; skipped when tests are skipped.
-    if: ${{ success() && !inputs.skip_tests }}
+    if: ${{ always() && !cancelled() && !inputs.skip_tests && needs.paths.outputs.run_sonar == 'true' }}
     needs:
+      - paths
       - shifter-platform-tests
       - shifter-platform-js-tests
       - shifter-engine-tests
@@ -1382,40 +1927,62 @@ jobs:
           # pull-request (new-code) quality-gate analysis.
           fetch-depth: 0
 
-      # Coverage reports are produced by the test jobs and passed as
-      # artifacts; restore each at the repo-relative path that
-      # sonar-project.properties references.
+      # Coverage reports are produced only by test jobs that ran for the
+      # changed paths. Each download mirrors that job's path filter and
+      # success result so a portal-only PR does not fail Sonar waiting for
+      # skipped-job artifacts (issue #786).
       - name: Download shifter_platform coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')
+          && needs.shifter-platform-tests.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: coverage-shifter-platform
           path: shifter/shifter_platform
       - name: Download shifter_platform JS coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')
+          && needs.shifter-platform-js-tests.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: coverage-shifter-platform-js
           path: shifter/shifter_platform/coverage
       - name: Download provisioner coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.provisioner == 'true')
+          && needs.shifter-engine-tests.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: coverage-provisioner
           path: shifter/engine/provisioner
       - name: Download packer coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.packer == 'true')
+          && needs.packer-tests.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: coverage-packer
           path: shifter/packer
       - name: Download bootstrap coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.bootstrap == 'true')
+          && needs.bootstrap-tests.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: coverage-bootstrap
           path: scripts/bootstrap
       - name: Download check_layer_imports coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_layer_imports == 'true')
+          && needs.check-layer-imports-tests.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: coverage-check-layer-imports
           path: scripts/check_layer_imports
       - name: Download installation coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.installation == 'true')
+          && needs.installation-tests.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: coverage-installation

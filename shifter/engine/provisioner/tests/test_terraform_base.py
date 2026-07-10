@@ -73,7 +73,7 @@ class TestWorkspaceInitialization:
 
     @patch.dict(
         "os.environ",
-        {"TF_STATE_BUCKET": "dev-range-pulumi-state-788327019743"},
+        {"TF_STATE_BUCKET": "dev-range-pulumi-state-123456789012"},
         clear=True,
     )
     @patch("terraform_base.run_terraform")
@@ -87,14 +87,14 @@ class TestWorkspaceInitialization:
         source.mkdir(parents=True)
         (source / "main.tf").write_text("# main\n")
         monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(tmp_path / "workspace"))
-        monkeypatch.setenv("TF_STATE_BUCKET", "dev-range-pulumi-state-788327019743")
+        monkeypatch.setenv("TF_STATE_BUCKET", "dev-range-pulumi-state-123456789012")
 
         mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
         apply("ranges", "req-456", {}, source, "Range")
 
         init_args = mock_run.call_args_list[0].args[0]
         assert init_args[0] == "init"
-        assert "-backend-config=bucket=dev-range-pulumi-state-788327019743" in init_args
+        assert "-backend-config=bucket=dev-range-pulumi-state-123456789012" in init_args
         assert "-backend-config=dynamodb_table=dev-range-pulumi-locks" in init_args
 
     @patch.dict(

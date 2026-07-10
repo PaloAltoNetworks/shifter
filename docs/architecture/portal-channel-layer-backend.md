@@ -21,7 +21,7 @@ posture**, decoupled from the portal autoscaling topology.
 
 The Redis ElastiCache resource is always provisioned by the portal Terraform; the
 `enable_redis` knob governs whether it is *wired into the runtime*, not whether it
-exists. A provisioned-but-unused Redis is a legitimate (cost) posture — but it must
+exists. A provisioned-but-unused Redis is a legitimate (cost) posture, but it must
 not be silent.
 
 ## Why
@@ -58,8 +58,8 @@ write succeeded. That independence is what makes the fail-closed meaningful: a
 `redis` posture whose endpoint never arrived stops the portal at startup rather
 than letting it serve on a silent in-memory layer.
 
-Defaults preserve current effective behavior — dev stays in-memory, prod stays on
-Redis — but the choice is now explicit, observable, and decoupled from ASG.
+Defaults preserve current effective behavior (dev stays in-memory, prod stays on
+Redis), but the choice is now explicit, observable, and decoupled from ASG.
 
 ## Observability
 
@@ -85,8 +85,8 @@ channel-layer posture: backend=redis explicit_backend=redis redis_host_present=T
 
 ## Out of scope
 
-AWS ElastiCache AUTH/TLS hardening is not part of this contract. The TLS path
-(`REDIS_TLS` / `REDIS_PASSWORD` / `REDIS_CA_PEM`, ADR-008-R6) is unchanged; if AWS
-Redis later needs auth/TLS, follow the GCP Memorystore secret-hydration precedent in
-`gcp-redis-auth-tls-preflight.md` rather than putting auth material in SSM, Docker
-env literals, logs, or URLs.
+AWS ElastiCache AUTH/TLS hardening is not part of this ADR-018 contract. For the
+active AWS hardening scope, follow `aws-redis-auth-tls-preflight-938.md`: reuse
+the existing `REDIS_TLS` / `REDIS_PASSWORD` / `REDIS_CA_PEM` /
+`REDIS_SECRET_ID` seams, and keep auth material out of SSM String values,
+Docker env literals, logs, and URLs.

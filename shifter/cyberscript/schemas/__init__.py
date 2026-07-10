@@ -48,9 +48,22 @@ from .range import (
     RangeSpec,
     RangeSpecBase,
 )
-from .request import RequestSpec
+from .ctf import (
+    AssetSpec,
+    CYBERSCRIPT_VERSION_V1,
+    CTFRangeSpec,
+    DataSeedSpec,
+    DetectionStackSpec,
+    FlagSpec,
+    ForestSpec,
+    NetworkSpec,
+    ParticipantAccessSpec,
+    ScenarioOverlaySpec,
+    ServiceSpec,
+    ZoneSpec,
+)
+from .request import AnyRangeSpec, RequestSpec
 from .subnet import SubnetContext, SubnetRef, SubnetSpec
-
 
 # Rebuild models to resolve forward references after all imports complete
 # This must be done here to avoid circular import issues
@@ -69,11 +82,13 @@ def _rebuild_all_models() -> None:
     # RangeSpecBase and RangeSpec need SubnetSpec resolved
     RangeSpecBase.model_rebuild(_types_namespace=_types_namespace)
     RangeSpec.model_rebuild(_types_namespace=_types_namespace)
+    CTFRangeSpec.model_rebuild(_types_namespace=_types_namespace)
 
 
 _rebuild_all_models()
 
 __all__ = [
+    "AnyRangeSpec",
     "AgentAppContext",
     "AgentAppSpec",
     "AgentDetails",
@@ -81,6 +96,7 @@ __all__ = [
     "AppContextBase",
     "AppRef",
     "AppSpecBase",
+    "AssetSpec",
     "AttackBehaviourContext",
     "AttackBehaviourSpec",
     "BehaviourContext",
@@ -91,9 +107,15 @@ __all__ = [
     "CredentialContextBase",
     "CredentialRef",
     "CredentialSpecBase",
+    "CYBERSCRIPT_VERSION_V1",
+    "CTFRangeSpec",
+    "DataSeedSpec",
     "DCConfig",
     "DeploymentProfileContext",
     "DeploymentProfileSpec",
+    "DetectionStackSpec",
+    "FlagSpec",
+    "ForestSpec",
     "InstanceContext",
     "InstanceContextBase",
     "InstanceRef",
@@ -102,20 +124,25 @@ __all__ = [
     "NGFWAppContext",
     "NGFWAppRef",
     "NGFWAppSpec",
+    "NetworkSpec",
     "OSAppContext",
     "OSAppSpec",
     "OtherAppContext",
     "OtherAppSpec",
+    "ParticipantAccessSpec",
     "RangeContext",
     "RangeContextBase",
     "RangeRef",
     "RangeSpec",
     "RangeSpecBase",
     "RequestSpec",
+    "ScenarioOverlaySpec",
     "SCMCredentialContext",
     "SCMCredentialSpec",
+    "ServiceSpec",
     "SpecBase",
     "SubnetContext",
     "SubnetRef",
     "SubnetSpec",
+    "ZoneSpec",
 ]

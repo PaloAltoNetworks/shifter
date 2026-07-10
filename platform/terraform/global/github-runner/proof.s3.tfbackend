@@ -1,0 +1,5 @@
+bucket       = "REPLACE_AT_BOOTSTRAP"
+key            = "global/github-runner/terraform.tfstate"
+region         = "us-east-2"
+use_lockfile   = true
+encrypt        = true

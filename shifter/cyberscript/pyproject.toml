@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=82.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -12,5 +12,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["cyberscript", "cyberscript.channels", "cyberscript.messages", "cyberscript.schemas"]
+packages = ["cyberscript", "cyberscript.channels", "cyberscript.messages", "cyberscript.schemas", "cyberscript.schemas.ctf"]
 package-dir = {"cyberscript" = "."}

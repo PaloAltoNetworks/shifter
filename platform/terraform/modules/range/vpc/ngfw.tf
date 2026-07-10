@@ -170,7 +170,9 @@ resource "aws_security_group_rule" "ngfw_data_egress_all" {
 resource "aws_iam_role" "ngfw_instance" {
   count = var.enable_ngfw_infrastructure ? 1 : 0
 
-  name = "${var.name_prefix}-ngfw-instance"
+  name = "${local.iam_name_prefix}-ngfw-instance"
+
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -252,7 +254,7 @@ resource "aws_iam_role_policy" "ngfw_instance_logs" {
 resource "aws_iam_instance_profile" "ngfw_instance" {
   count = var.enable_ngfw_infrastructure ? 1 : 0
 
-  name = "${var.name_prefix}-ngfw-instance"
+  name = "${local.iam_name_prefix}-ngfw-instance"
   role = aws_iam_role.ngfw_instance[0].name
 
   tags = merge(local.common_tags, {

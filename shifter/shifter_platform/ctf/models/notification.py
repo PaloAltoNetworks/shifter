@@ -184,6 +184,27 @@ class CTFEmailTemplate(CTFBaseModel):
             ),
         ]
 
+    def clean(self) -> None:
+        """Reject unsafe placeholder syntax in custom bodies (issue #1095).
+
+        Defense-in-depth alongside the API validator: enforces the flat
+        ``{{ name }}`` placeholder policy for admin and direct model saves
+        that call ``full_clean()``.
+        """
+        super().clean()
+        from django.core.exceptions import ValidationError
+
+        from ctf.services.email_template import allowed_placeholders, find_template_violations
+
+        allowed = allowed_placeholders(self.notification_type)
+        errors = {}
+        for field in ("html_body", "text_body"):
+            violations = find_template_violations(getattr(self, field) or "", allowed)
+            if violations:
+                errors[field] = violations[0]
+        if errors:
+            raise ValidationError(errors)
+
     def __str__(self) -> str:
         """Return template description."""
         return f"{self.event.name} - {self.notification_type}"
@@ -297,3 +318,15 @@ class CTFScheduledTask(CTFBaseModel):
         self.status = ScheduledTaskStatus.CANCELLED.value
         self.save(update_fields=["status", "updated_at"])
         logger.info("Task %s cancelled: %s", self.task_type, self.pk)
+
+    def requeue_for_resume(self) -> None:
+        """Return an interrupted task to PENDING so the scheduler resumes it.
+
+        Used when a long-running handler is cut short by shutdown: the work is
+        recoverable (idempotent on the remaining items), so the task is made due
+        again rather than recorded as completed.
+        """
+        self.status = ScheduledTaskStatus.PENDING.value
+        self.scheduled_for = timezone.now()
+        self.save(update_fields=["status", "scheduled_for", "updated_at"])
+        logger.info("Task %s requeued for resume: %s", self.task_type, self.pk)

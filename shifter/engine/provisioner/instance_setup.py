@@ -55,6 +55,9 @@ class _InstanceSetupSpec:
     domain_join: _DomainJoinSpec
     set_local_password: bool = True
     local_password_target_container: str | None = None
+    # TechVault uses os_type "kali" for RDP but its host seat user is "ubuntu"
+    # (uid 1000, for aptl's wazuh certs); override the SSH/password target user.
+    ssh_user_override: str | None = None
 
 
 class _InstanceSetupCtx:
@@ -243,16 +246,42 @@ def _install_xdr_or_raise(
     if agent_presigned_url:
         plan = plan_cls()
         ctx_obj = plan.get_context({"agent_presigned_url": agent_presigned_url})
-        _run_setup_plan(
-            orchestrator,
-            execution,
-            plan,
-            ctx_obj,
-            execution.document_name,
-            failure_prefix=failure_prefix,
-        )
-        logger.info(success_log, instance_id)
-        return
+        # GDC range guests sit on an isolated L2 segment with no egress, so the
+        # agent installer (fetched from GCS) and the agent's subsequent
+        # phone-home to Cortex/PAN-OS are both unreachable. Per #615 the XDR
+        # agent is best-effort on the GDC in-range transport: log and continue
+        # so the range still provisions end-to-end. Functional XDR-on-GDC is
+        # tracked separately (it requires range-network egress). The AWS SSM
+        # path stays strict and raises. The orchestrator both raises SetupError
+        # on step retry-exhaustion AND can return result.success=False, so both
+        # paths must honour the GDC deferral.
+        is_gdc = execution.transport_name == _GDC_RANGE_TRANSPORT
+        try:
+            result = orchestrator.orchestrate(execution.target, plan, ctx_obj, document_name=execution.document_name)
+        except SetupError as exc:
+            if is_gdc:
+                logger.warning(
+                    "XDR agent install raised on %s over %s; deferring XDR on "
+                    "GDC (range has no egress) and continuing: %s",
+                    instance_id,
+                    execution.transport_name,
+                    exc,
+                )
+                return
+            raise
+        if result.success:
+            logger.info(success_log, instance_id)
+            return
+        if is_gdc:
+            logger.warning(
+                "XDR agent install did not complete on %s over %s; deferring XDR on "
+                "GDC (range has no egress) and continuing: %s",
+                instance_id,
+                execution.transport_name,
+                result.error,
+            )
+            return
+        raise SetupError(f"{failure_prefix}: {result.error}")
     if xdr_required:
         raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
     logger.info("No XDR agent URL provided for %s (not required)", instance_id)
@@ -422,6 +451,24 @@ def _dispatch_instance_setup_role(
     )
 
 
+_GDC_RANGE_TRANSPORT = "range-pod-ssh"
+_DEFAULT_SETUP_READY_TIMEOUT_SECONDS = 300
+_GDC_SETUP_READY_TIMEOUT_SECONDS = 600
+
+
+def _setup_ready_timeout(transport_name: str) -> int:
+    """SSH-ready budget for guest setup, by transport.
+
+    GDC VM Runtime guests boot on bare metal and run a full first-boot
+    cloud-init pass (datasource detection + host-key install + service restart)
+    before SSH is ready, which is materially slower than the EC2/SSM path the
+    300s default was tuned for, so the in-range transport gets a larger budget.
+    """
+    if transport_name == _GDC_RANGE_TRANSPORT:
+        return _GDC_SETUP_READY_TIMEOUT_SECONDS
+    return _DEFAULT_SETUP_READY_TIMEOUT_SECONDS
+
+
 def _run_single_instance_setup(
     instance_data: dict[str, Any],
     instance_id: str,
@@ -434,14 +481,14 @@ def _run_single_instance_setup(
     orchestrator = SetupOrchestrator(executor=execution.executor)
 
     logger.info("Waiting for %s connectivity on %s...", execution.transport_name, execution.target)
-    execution.wait_for_ready(timeout_seconds=300)
+    execution.wait_for_ready(timeout_seconds=_setup_ready_timeout(execution.transport_name))
     logger.info("Target %s is ready via %s", execution.target, execution.transport_name)
 
     ctx = _InstanceSetupCtx(
         hostname=_resolve_setup_hostname(spec.instance_name, instance_id),
         public_key=spec.public_key,
         agent_presigned_url=spec.agent_presigned_url,
-        ssh_user=get_ssh_username(spec.os_type, spec.role),
+        ssh_user=spec.ssh_user_override or get_ssh_username(spec.os_type, spec.role),
     )
 
     try:

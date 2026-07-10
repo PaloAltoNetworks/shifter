@@ -1,15 +1,18 @@
-"""Range status event handler — updates RangeInstance and fires bridges."""
+"""Range status event handler — updates RangeInstance and fires CTF bridge."""
 
 from __future__ import annotations
 
 import logging
+from typing import cast
+
+from django.db import transaction
 
 from cms.handlers.ctf_bridge import notify_ctf_range_status
-from cms.handlers.experiment_bridge import notify_experiment_on_range_ready
 from cms.models import RangeInstance
 from shared.enums import ResourceStatus
 from shared.messages.envelope import parse_sns_message
 from shared.messages.events import EVENT_TYPE_STATUS_UPDATED
+from shared.messages.payloads import RangeStatusUpdatedPayload
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,63 @@ def _lookup_range_instance(request_id, range_id, *, include_deleted=False):
             return None
     logger.warning("Missing both request_id and range_id in event")
     return None
+
+
+def apply_range_status(
+    instance: RangeInstance,
+    new_status: str,
+    *,
+    extra_update_fields: list[str] | None = None,
+) -> bool:
+    """Update a RangeInstance's status and fire downstream CTF bridge.
+
+    Idempotent: if ``instance.status`` already equals ``new_status`` this
+    function is a no-op and returns ``False``.  The caller is responsible for
+    validating ``new_status`` and enforcing any forward-only ordering before
+    calling this function.
+
+    The status write and the downstream CTF bridge effects are
+    committed as a single atomic unit.  If any bridge raises (e.g. a transient
+    publish failure), the status update rolls back together with it, so a
+    redelivered event is not seen as an already-converged no-op with the bridge
+    effect permanently skipped — the worker retry re-runs the whole unit.
+
+    Args:
+        instance: The RangeInstance to update.
+        new_status: Target status value (must already be validated).
+        extra_update_fields: Additional model fields whose values have been
+            set on ``instance`` and should be persisted in the same save
+            call (e.g. ``["range_id"]`` when the event backfills the id).
+
+    Returns:
+        ``True`` if the status was changed and bridges were fired;
+        ``False`` when the instance was already at ``new_status`` (no-op).
+    """
+    if instance.status == new_status:
+        return False
+
+    previous_status = instance.status
+    instance.status = new_status
+
+    save_fields = ["status"] + (extra_update_fields or [])
+    try:
+        with transaction.atomic():
+            instance.save(update_fields=save_fields)
+            notify_ctf_range_status(instance.pk, new_status, previous_status)
+    except Exception:
+        # Transient DB/broker failure on the save or a bridge effect. The
+        # atomic block has rolled the status write back; restore the in-memory
+        # value so the object matches the committed DB state, then propagate so
+        # the worker retry (or DLQ) re-runs the whole status+bridge unit.
+        logger.exception(
+            "Failed to apply RangeInstance status pk=%s status=%s — rolled back",
+            instance.pk,
+            new_status,
+        )
+        instance.status = previous_status
+        raise
+
+    return True
 
 
 def process_range_event(message: str | dict) -> None:
@@ -64,11 +124,15 @@ def process_range_event(message: str | dict) -> None:
         logger.debug("Ignoring event_type=%s", event_type)
         return
 
-    request_id = event.get("request_id")
-    range_id = event.get("range_id")
-    user_id = event.get("user_id")
-    new_status = event.get("new_status")
-    event_id = event.get("event_id", "unknown")
+    # event_type confirmed; narrow to the typed payload. Runtime shape/ownership
+    # validation below is retained — the payload is still untrusted input.
+    payload = cast(RangeStatusUpdatedPayload, event)
+
+    request_id = payload.get("request_id")
+    range_id = payload.get("range_id")
+    user_id = payload.get("user_id")
+    new_status = payload.get("new_status")
+    event_id = payload.get("event_id", "unknown")
 
     if new_status is None:
         logger.warning("Missing new_status in event")
@@ -95,33 +159,24 @@ def process_range_event(message: str | dict) -> None:
         return
 
     previous_status = instance.status
-    instance.status = new_status
 
-    update_fields = ["status"]
+    extra_fields: list[str] = []
     if range_id is not None and instance.range_id is None:
         instance.range_id = range_id
-        update_fields.append("range_id")
+        extra_fields.append("range_id")
 
-    try:
-        instance.save(update_fields=update_fields)
-    except Exception:
-        logger.exception("DB error saving RangeInstance: range_id=%s", range_id)
-        return
-
-    logger.info(
-        "CMS updated RangeInstance: request_id=%s range_id=%s status=%s->%s event_id=%s",
-        request_id,
-        range_id,
-        previous_status,
+    applied = apply_range_status(
+        instance,
         new_status,
-        event_id,
+        extra_update_fields=extra_fields or None,
     )
 
-    # CTF bridge: notify CTF subsystem so it can sync CTFParticipant.range_status.
-    notify_ctf_range_status(instance.pk, new_status, previous_status)
-
-    # Experiment bridge: when a range becomes READY and is linked to an
-    # experiment run, publish an event to continue execution.
-    if new_status == ResourceStatus.READY.value:
-        provisioned_instances = event.get("instances", {})
-        notify_experiment_on_range_ready(instance, provisioned_instances)
+    if applied:
+        logger.info(
+            "CMS updated RangeInstance: request_id=%s range_id=%s status=%s->%s event_id=%s",
+            request_id,
+            range_id,
+            previous_status,
+            new_status,
+            event_id,
+        )

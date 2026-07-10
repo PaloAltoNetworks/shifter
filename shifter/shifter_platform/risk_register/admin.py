@@ -1,6 +1,7 @@
 """Django admin configuration for Risk Register."""
 
 from django.contrib import admin
+from django.http import HttpRequest
 
 from risk_register.models import APIKey, AuditLog, Comment, Risk
 
@@ -75,7 +76,12 @@ class CommentAdmin(admin.ModelAdmin):
 
 @admin.register(APIKey)
 class APIKeyAdmin(admin.ModelAdmin):
-    """Admin interface for APIKey model."""
+    """Read-only archival interface for the retired APIKey model.
+
+    The ``rr_live_`` credential is retired (PLAT-106 / #1124); keys can no
+    longer be created, edited, or revoked. This admin exists only to view the
+    historical rows that ``Comment.author_apikey`` and ``AuditLog`` reference.
+    """
 
     list_display = [
         "name",
@@ -87,12 +93,32 @@ class APIKeyAdmin(admin.ModelAdmin):
     ]
     list_filter = ["revoked_at", "created_at"]
     search_fields = ["name", "prefix"]
-    readonly_fields = ["prefix", "key_hash", "created_at", "last_used_at"]
-    raw_id_fields = ["created_by"]
+    readonly_fields = [
+        "name",
+        "prefix",
+        "key_hash",
+        "created_by",
+        "created_at",
+        "last_used_at",
+        "expires_at",
+        "revoked_at",
+    ]
 
     @admin.display(boolean=True)
     def is_active(self, obj):
         return obj.is_active
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        """Minting is retired; no new keys may be created."""
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: APIKey | None = None) -> bool:
+        """Archival rows are immutable."""
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: APIKey | None = None) -> bool:
+        """Retain archival rows referenced by comments and audit logs."""
+        return False
 
 
 @admin.register(AuditLog)

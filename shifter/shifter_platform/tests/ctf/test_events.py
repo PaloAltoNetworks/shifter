@@ -34,6 +34,8 @@ from ctf.enums import EventStatus
 @pytest.fixture
 def mock_user():
     """Create a mock authenticated user (organizer)."""
+    from shared.auth import CTF_ORGANIZER_GROUP
+
     user = MagicMock()
     user.pk = 1
     user.id = 1
@@ -45,6 +47,9 @@ def mock_user():
     user.is_staff = False
     user.is_superuser = False
     user.backend = "django.contrib.auth.backends.ModelBackend"
+    # Drive the real get_user_role via group membership (the public
+    # get_user_group_names contract) instead of patching first-party topology.
+    user.groups.values_list.return_value = [CTF_ORGANIZER_GROUP]
     return user
 
 
@@ -62,6 +67,8 @@ def mock_standard_user():
     user.is_staff = False
     user.is_superuser = False
     user.backend = "django.contrib.auth.backends.ModelBackend"
+    # No CTF groups -> real get_user_role reports neither organizer nor participant.
+    user.groups.values_list.return_value = []
     return user
 
 
@@ -151,10 +158,6 @@ def _mock_auth_organizer(mock_user):
 
     Also patches context processors that would otherwise hit the DB.
     """
-    from ctf.bridges import UserRole
-
-    role = UserRole(is_ctf_organizer=True, is_ctf_participant=False, active_ctf_event=None)
-
     ctx_proc_defaults = {
         "is_ctf_user": True,
         "is_ctf_organizer": True,
@@ -170,7 +173,6 @@ def _mock_auth_organizer(mock_user):
     }
 
     with (
-        patch("ctf.views.get_user_role", return_value=role),
         patch("django.contrib.auth.get_user", return_value=mock_user),
         patch("django.contrib.auth.middleware.get_user", return_value=mock_user),
         patch("ctf.context_processors.ctf_navigation", return_value=ctx_proc_defaults),
@@ -183,12 +185,7 @@ def _mock_auth_organizer(mock_user):
 @pytest.fixture
 def _mock_auth_standard(mock_standard_user):
     """Patch Django auth to authenticate mock_standard_user as non-organizer."""
-    from ctf.bridges import UserRole
-
-    role = UserRole(is_ctf_organizer=False, is_ctf_participant=False, active_ctf_event=None)
-
     with (
-        patch("ctf.views.get_user_role", return_value=role),
         patch("django.contrib.auth.get_user", return_value=mock_standard_user),
         patch("django.contrib.auth.middleware.get_user", return_value=mock_standard_user),
     ):
@@ -237,6 +234,7 @@ class TestCTFEventForm:
             "attempt_limit_mode": "lockout",
             "attempt_limit_cooldown_seconds": 300,
             "rating_visibility": "public",
+            "scoring_mode": "standard",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -260,6 +258,7 @@ class TestCTFEventForm:
             "attempt_limit_mode": "lockout",
             "attempt_limit_cooldown_seconds": 300,
             "rating_visibility": "public",
+            "scoring_mode": "standard",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -348,6 +347,7 @@ class TestCTFEventForm:
             "attempt_limit_mode": "timeout",
             "attempt_limit_cooldown_seconds": 600,
             "rating_visibility": "organizer",
+            "scoring_mode": "standard",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -477,7 +477,8 @@ class TestEventDetailView:
         with p1, p2:
             response = organizer_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": mock_event.pk}))
         assert response.status_code == 200
-        assert "event" in response.context
+        assert "stats" in response.context
+        assert response.context["stats"]["participant_count"] == 1
 
     def test_detail_view_404_for_nonexistent(self, organizer_client: Client):
         """Detail view should 404 for nonexistent event."""

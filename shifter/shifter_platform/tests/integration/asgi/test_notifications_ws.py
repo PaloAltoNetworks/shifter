@@ -44,6 +44,27 @@ async def _connect_subscribed(asgi_application, headers, topic: str = NOTIFICATI
 class TestNotificationWebsocketRealStack:
     """SharedNotificationConsumer reached through the real composed ASGI app."""
 
+    @pytest.fixture(autouse=True)
+    def _enable_notifications(self, settings):
+        """Enable the shared notification subsystem (off by default since #941).
+
+        These tests exercise the live notification socket, which is parked when
+        the subsystem is disabled. The disabled-mode rejection has its own test
+        below that re-disables the flag in the test body.
+        """
+        settings.WEBSOCKET_NOTIFICATIONS_ENABLED = True
+
+    @pytest.mark.asyncio
+    async def test_disabled_flag_rejects_connection_service_unavailable(self, asgi_application, ws_headers, settings):
+        """When the subsystem is parked (default), the handshake is closed SERVICE_UNAVAILABLE (4503)."""
+        settings.WEBSOCKET_NOTIFICATIONS_ENABLED = False
+        communicator = WebsocketCommunicator(asgi_application, NOTIFICATIONS_PATH, headers=ws_headers)
+        connected, code = await communicator.connect()
+
+        assert connected is False
+        assert code == WebSocketCloseCode.SERVICE_UNAVAILABLE
+        await communicator.disconnect()
+
     @pytest.mark.asyncio
     async def test_unauthenticated_closed_not_authenticated(self, asgi_application, anon_headers):
         """An anonymous notification handshake is closed NOT_AUTHENTICATED (4001)."""

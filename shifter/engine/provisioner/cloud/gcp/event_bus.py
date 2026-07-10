@@ -28,5 +28,5 @@ class GCPEventBus:
         except ImportError as e:
             raise CloudEventBusError("GCP event bus support requires google-cloud-pubsub") from e
         except Exception as e:
-            logger.error("publish: failed topic_id=%s error=%s", topic_id, e)
+            logger.exception("publish: failed topic_id=%s error=%s", topic_id, e)
             raise CloudEventBusError(f"Failed to publish Pub/Sub event: {e}") from e

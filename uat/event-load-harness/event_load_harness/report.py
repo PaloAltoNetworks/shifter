@@ -74,6 +74,102 @@ def _fmt_latency(latency: dict[str, Any]) -> str:
     return f"p50 {cell('p50')} / p95 {cell('p95')} / p99 {cell('p99')} ms"
 
 
+def _metric(metrics, key: str):
+    return metrics.metrics.get(key)
+
+
+def _fmt_metric_value(value) -> str:
+    return f"{value.value:.1f} {value.unit}"
+
+
+def _max_route_tail_latency(stats_summary: dict[str, Any], percentile_name: str) -> float | None:
+    values: list[float] = []
+    for route in stats_summary.get("routes", {}).values():
+        if "close_codes" in route:
+            continue
+        latency = route.get("latency_ms", {}).get(percentile_name)
+        if isinstance(latency, (int, float)):
+            values.append(float(latency))
+    return max(values) if values else None
+
+
+def _has_server_pressure(stats_summary: dict[str, Any]) -> bool:
+    for route in stats_summary.get("routes", {}).values():
+        if "close_codes" in route:
+            continue
+        categories = route.get("errors_by_category", {})
+        if "server_error" in categories or "service_unavailable" in categories:
+            return True
+    return False
+
+
+def _db_connection_recommendation(stats_summary: dict[str, Any], metrics) -> str:
+    churn = _metric(metrics, "rds_instance.connection_churn_proxy")
+    peak = _metric(metrics, "rds_instance.databaseconnections_peak")
+    cpu = _metric(metrics, "rds_instance.cpuutilization")
+    if churn is None or peak is None:
+        return (
+            "not enough RDS connection evidence to judge materiality. "
+            "Run with `--metric-source aws --aws-rds <db-instance-id>` and compare stepped concurrency runs."
+        )
+
+    p95 = _max_route_tail_latency(stats_summary, "p95") or 0.0
+    churn_pressure = churn.value >= 1.0
+    cpu_pressure = bool(cpu and cpu.value >= 60.0)
+    connection_pressure = peak.value >= 50.0
+    rds_pressure = cpu_pressure or connection_pressure
+    latency_pressure = p95 >= 1000.0 or _has_server_pressure(stats_summary)
+    if churn_pressure and rds_pressure and latency_pressure:
+        return (
+            "treat DB connection lifecycle as a material candidate contributor; compare a controlled "
+            "connection-lifetime experiment before changing production posture."
+        )
+    return (
+        "keep the current posture for this evidence set; do not change connection lifetime unless a higher-load "
+        "run shows RDS pressure moving with portal tail latency."
+    )
+
+
+def _render_db_connection_posture(config, stats_summary: dict[str, Any], metrics) -> list[str]:
+    lines = [
+        "## Database connection posture (#853)",
+        "",
+        "- Current Django posture: `CONN_MAX_AGE=0` (no persistent Django DB connections).",
+    ]
+
+    avg = _metric(metrics, "rds_instance.databaseconnections")
+    peak = _metric(metrics, "rds_instance.databaseconnections_peak")
+    churn = _metric(metrics, "rds_instance.connection_churn_proxy")
+    cpu = _metric(metrics, "rds_instance.cpuutilization")
+    p95 = _max_route_tail_latency(stats_summary, "p95")
+    p99 = _max_route_tail_latency(stats_summary, "p99")
+
+    lines.append(f"- RDS average connections: {_fmt_metric_value(avg) if avg else 'not collected'}")
+    lines.append(f"- RDS peak connections: {_fmt_metric_value(peak) if peak else 'not collected'}")
+    if churn:
+        lines.append(f"- RDS connection churn proxy: {_fmt_metric_value(churn)} (lower-bound proxy)")
+    else:
+        lines.append("- RDS connection churn proxy: not collected")
+    lines.append(f"- RDS CPU: {_fmt_metric_value(cpu) if cpu else 'not collected'}")
+    lines.append(
+        f"- Portal tail latency during this run: max route p95 {p95:.1f} ms / p99 {p99:.1f} ms"
+        if p95 is not None and p99 is not None
+        else "- Portal tail latency during this run: not recorded"
+    )
+    lines.append(
+        "- Capacity check: persistent connections must fit `portal replicas * worker/process count * "
+        "Django connection contexts` under the database max-connection budget."
+    )
+    lines.append(f"- Recommendation: {_db_connection_recommendation(stats_summary, metrics)}")
+    if config.metric_source != "aws" or churn is None:
+        lines.append(
+            "- Exact opens/closes per second are not available from CloudWatch `DatabaseConnections`; the proxy "
+            "is a lower bound and same-sample open/close cycles remain invisible."
+        )
+    lines.append("")
+    return lines
+
+
 def render_envelope(
     config,
     run_meta: RunMeta,
@@ -156,6 +252,8 @@ def render_envelope(
         for gap in metrics.gaps:
             lines.append(f"- {gap}")
         lines.append("")
+
+    lines.extend(_render_db_connection_posture(config, stats_summary, metrics))
 
     lines.append("## Conclusion")
     lines.append("")

@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 
+from config import api_urls
 from config.dev_auth import dev_login, dev_logout
 from config.health import CoarseHealthCheckView
 from config.views import (
@@ -13,20 +14,21 @@ from config.views import (
     legacy_oidc_authenticate,
     logout_view,
     platform_login,
+    privacy_notice,
 )
 
 urlpatterns = [
     path("", home, name="home"),
+    path("privacy/", privacy_notice, name="privacy_notice"),
     path("login/", platform_login, name="platform_login"),
     path("auth/identity/session/", identity_platform_session, name="identity_platform_session"),
     path("dashboard/", dashboard_router, name="dashboard_router"),
     path("logout/", logout_view, name="logout"),
     path("mission-control/", include("mission_control.urls")),
     path("risk-register/", include("risk_register.urls")),
-    path("mission-control/experiments/", include("cms.experiments.urls")),
     path("scenario-editor/", include("cms.scenario_editor.urls")),
     path("docs/", include("documentation.urls")),
-    path("api/v1/", include("risk_register.api.urls")),
+    path("api/v1/", include((api_urls.urlpatterns, api_urls.app_name), namespace="v1")),
     path("ctf/", include("ctf.urls")),
     path("admin/", admin.site.urls),
     # /health and /health/ both resolve to the same dependency-aware probe

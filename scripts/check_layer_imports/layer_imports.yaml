@@ -4,6 +4,11 @@
 # shared is freely importable by all layers (contracts layer).
 # No model imports, no internal submodule imports, no __init__.py shortcuts.
 #
+# Direct cyberscript imports: only `shared` may import `cyberscript` (enforced
+# by scripts/check_layer_imports/check_layer_imports.py and adr_guard). All other
+# layers must consume cyberscript contracts through shared shims. New non-DSL
+# contracts belong in shared natively; cyberscript is for scenario DSL only.
+#
 # Any import not matching this config is a violation.
 
 allowed:

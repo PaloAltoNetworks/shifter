@@ -59,11 +59,14 @@ def mock_deploy(monkeypatch):
     mock.wait_for_user = MagicMock()
     mock.warn = MagicMock()
 
-    # Patch
+    # Patch both the legacy facade module and the new shared helper module.
     monkeypatch.setitem(sys.modules, "deploy", mock)
+    monkeypatch.setitem(sys.modules, "bootstrap_core", mock)
 
     yield mock
 
     # Cleanup: remove runner module so it can be reimported fresh
     if "runner" in sys.modules:
         del sys.modules["runner"]
+    if "bootstrap_core" in sys.modules:
+        del sys.modules["bootstrap_core"]

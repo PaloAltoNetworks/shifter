@@ -1,696 +1,405 @@
-"""CMS service interface tests.
+"""Behavior tests for CMS range services (list_ranges, get_range, create_range).
 
-Tests service-level behavior only:
-- Expected behavior / return values
-- Exception handling
-- Input validation (service's responsibility)
-
-Does NOT re-test model behavior (filtering, field validation, etc).
+Drives the real services against real ``RangeInstance`` rows and the full
+hydrate -> engine -> persist stack (engine ECS is unconfigured in the test
+settings, so provisioning is a no-op and no cloud mock is needed), instead of
+patching ``RangeInstance.objects`` / the engine call / the scenario loader.
 """
 
-from unittest.mock import Mock, patch
-from uuid import UUID, uuid4
+from unittest.mock import MagicMock, patch
 
 import pytest
+from django.contrib.auth import get_user_model
 
 from cms import services
+from cms.exceptions import CMSError
+from cms.models import RangeInstance
+from shared.cloud.exceptions import CloudTaskError
+from shared.enums import ResourceStatus
 from tests.conftest import INVALID_RANGE_IDS, INVALID_USERS
 
+pytestmark = pytest.mark.django_db
 
-def make_mock_request(request_id: UUID | None = None) -> Mock:
-    """Create a mock Request object with request_id attribute."""
-    mock_request = Mock()
-    mock_request.request_id = request_id or uuid4()
-    return mock_request
-
-
-def _make_mock_agent(*, pk, name, os_slug, s3_key, original_filename, sha256_hash):
-    """Create a mock agent with attributes the service accesses."""
-    mock_os = Mock()
-    mock_os.slug = os_slug
-    agent = Mock()
-    agent.pk = pk
-    agent.id = pk
-    agent.name = name
-    agent.os = mock_os
-    agent.s3_key = s3_key
-    agent.original_filename = original_filename
-    agent.sha256_hash = sha256_hash
-    return agent
+User = get_user_model()
 
 
 @pytest.fixture
-def mock_user():
-    user = Mock()
-    user.pk = 42
-    user.id = 42
-    user.email = "test@example.com"
-    return user
+def user(db):
+    return User.objects.create_user(username="cms-range@example.com", email="cms-range@example.com")
 
 
-@pytest.fixture
-def mock_windows_agent():
-    """Mock Windows agent for testing."""
-    return _make_mock_agent(
-        pk=10,
-        name="Windows Agent",
-        os_slug="windows",
-        s3_key="agents/123/agent.msi",
-        original_filename="cortex_agent.msi",
-        sha256_hash="abc123def456",
-    )
-
-
-@pytest.fixture
-def mock_linux_agent():
-    """Mock Linux agent for testing."""
-    return _make_mock_agent(
-        pk=20,
-        name="Linux Agent",
-        os_slug="linux-debian",
-        s3_key="agents/456/agent.deb",
-        original_filename="cortex_agent.deb",
-        sha256_hash="def789ghi012",
-    )
-
-
-@pytest.fixture
-def create_range_ctx(mock_user, mock_windows_agent):
-    """Fixture providing common mocks for create_range tests.
-
-    Mocks all ORM access so tests run without a database.
-    Yields a dict of mock objects; ExitStack is auto-closed on teardown.
-    """
-    from contextlib import ExitStack
-
-    from shared.schemas import (
-        AgentDetails,
-        InstanceSpec,
-        RangeSpec,
-        SubnetSpec,
-    )
-
-    mock_template = Mock()
-    mock_template.get_agent_requirements.return_value = {
-        "requires_windows": False,
-        "requires_linux": False,
-        "has_from_agent": True,
-    }
-    mock_template.ngfw = False
-
-    attacker_spec = InstanceSpec(
-        name="Attacker",
-        uuid=str(uuid4()),
-        role="attacker",
-        os_type="kali",
-    )
-    victim_spec = InstanceSpec(
-        name="Victim",
-        uuid=str(uuid4()),
-        role="victim",
-        os_type="windows",
-        agent=AgentDetails(
-            s3_key=mock_windows_agent.s3_key,
-            filename=mock_windows_agent.original_filename,
-            sha256=mock_windows_agent.sha256_hash,
-        ),
-    )
-    canned_range_spec = RangeSpec(
-        uuid=str(uuid4()),
-        scenario_id="basic",
-        user_id=mock_user.id,
-        subnets=[
-            SubnetSpec(
-                name="default",
-                uuid=str(uuid4()),
-                instances=[attacker_spec, victim_spec],
-                connected_to=[],
-            )
-        ],
-        ngfw=False,
-    )
-
-    mock_request = Mock()
-    mock_request.request_id = uuid4()
-    mock_ri = Mock()
-
-    with ExitStack() as stack:
-        mocks = {}
-        mocks["active_range"] = stack.enter_context(patch("cms.services.get_active_range", return_value=None))
-        mocks["load_scenario"] = stack.enter_context(
-            patch("cms.scenarios.registry.load_scenario_template", return_value=mock_template)
-        )
-        mocks["get_agent"] = stack.enter_context(patch("cms.services.get_agent", return_value=mock_windows_agent))
-        mocks["hydrate"] = stack.enter_context(
-            patch("cms.scenarios.hydrator.hydrate_scenario", return_value=canned_range_spec)
-        )
-        mocks["request_create"] = stack.enter_context(
-            patch("cms.models.Request.objects.create", return_value=mock_request)
-        )
-        mocks["engine"] = stack.enter_context(patch("cms.services.engine_create_range"))
-        mocks["ri_create"] = stack.enter_context(
-            patch("cms.services.RangeInstance.objects.create", return_value=mock_ri)
-        )
-        mocks["audit"] = stack.enter_context(patch("cms.services.audit_log"))
-        mocks["range_spec"] = canned_range_spec
-        yield mocks
+def _range_instance(user, *, range_id=None, scenario_id="basic", status="provisioning", agent=None, range_source=None):
+    kwargs = {"scenario_id": scenario_id, "user_id": user.id, "range_id": range_id, "status": status, "agent": agent}
+    if range_source is not None:
+        kwargs["range_source"] = range_source
+    return RangeInstance.objects.create(**kwargs)
 
 
 class TestListRanges:
-    """Tests for list_ranges() service function.
+    def test_returns_empty_when_user_has_no_ranges(self, user):
+        assert services.list_ranges(user) == []
 
-    Tests SERVICE behavior with mocked model layer:
-    - Queries Range model correctly
-    - Returns what model returns
-    - Validates input
-    - Propagates errors
-    """
+    def test_returns_the_users_ranges(self, user):
+        _range_instance(user, range_id=1)
+        _range_instance(user, range_id=2, scenario_id="ad_attack_lab")
+        result = services.list_ranges(user)
+        assert {r.range_id for r in result} == {1, 2}
 
-    # -------------------------------------------------------------------------
-    # Service calls model correctly
-    # -------------------------------------------------------------------------
+    def test_excludes_other_users_ranges(self, user, django_user_model):
+        other = django_user_model.objects.create_user(username="cms-other@e.com", email="cms-other@e.com")
+        _range_instance(user, range_id=1)
+        _range_instance(other, range_id=2)
+        result = services.list_ranges(user)
+        assert [r.range_id for r in result] == [1]
 
-    def test_calls_range_filter_with_user(self, mock_user):
-        """Service queries RangeInstance by user_id."""
-        with patch("cms.services.RangeInstance.objects.filter") as mock_filter:
-            mock_filter.return_value = []
-            services.list_ranges(mock_user)
-            mock_filter.assert_called_once_with(user_id=mock_user.id)
-
-    # -------------------------------------------------------------------------
-    # Service returns what model returns
-    # -------------------------------------------------------------------------
-
-    def test_returns_empty_list_when_model_returns_empty(self, mock_user):
-        """Service returns empty list when no ranges exist."""
-        with patch("cms.services.RangeInstance.objects.filter") as mock_filter:
-            mock_filter.return_value = []
-            result = services.list_ranges(mock_user)
-            assert result == []
-
-    def test_returns_one_range_when_model_returns_one(self, mock_user):
-        """Service returns one range when model returns one."""
-        from cms.models import RangeInstance
-
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id, scenario_id="basic")
-        with patch("cms.services.RangeInstance.objects.filter") as mock_filter:
-            mock_filter.return_value = [mock_range]
-            result = services.list_ranges(mock_user)
-            assert len(result) == 1
-            assert result[0].range_id == 42
-
-    def test_returns_all_ranges_when_model_returns_multiple(self, mock_user):
-        """Service returns all ranges model returns."""
-        from cms.models import RangeInstance
-
-        mock_ranges = [
-            Mock(spec=RangeInstance, range_id=i, user_id=mock_user.id, scenario_id="basic") for i in range(5)
-        ]
-        with patch("cms.services.RangeInstance.objects.filter") as mock_filter:
-            mock_filter.return_value = mock_ranges
-            result = services.list_ranges(mock_user)
-            assert len(result) == 5
-            assert [r.range_id for r in result] == [0, 1, 2, 3, 4]
-
-    def test_returns_ranges_of_all_scenarios(self, mock_user):
-        """Service returns ranges regardless of scenario (no filtering)."""
-        from cms.models import RangeInstance
-
-        mock_basic = Mock(spec=RangeInstance, range_id=1, user_id=mock_user.id, scenario_id="basic")
-        mock_ad = Mock(spec=RangeInstance, range_id=2, user_id=mock_user.id, scenario_id="ad_attack_lab")
-        mock_custom = Mock(spec=RangeInstance, range_id=3, user_id=mock_user.id, scenario_id="custom")
-        with patch("cms.services.RangeInstance.objects.filter") as mock_filter:
-            mock_filter.return_value = [mock_basic, mock_ad, mock_custom]
-            result = services.list_ranges(mock_user)
-            assert len(result) == 3
-            scenarios = {r.scenario_id for r in result}
-            assert scenarios == {"basic", "ad_attack_lab", "custom"}
-
-    # -------------------------------------------------------------------------
-    # Error propagation
-    # -------------------------------------------------------------------------
-
-    def test_propagates_model_exception(self, mock_user):
-        """Service propagates exceptions from model."""
-        with (
-            patch(
-                "cms.services.RangeInstance.objects.filter",
-                side_effect=ValueError("Model error"),
-            ),
-            pytest.raises(ValueError, match="Model error"),
-        ):
-            services.list_ranges(mock_user)
-
-    # -------------------------------------------------------------------------
-    # Response validation - model returns garbage
-    # -------------------------------------------------------------------------
-
-    def test_raises_on_model_returns_none(self, mock_user):
-        """Service raises TypeError if model returns None instead of list."""
-        with (
-            patch("cms.services.RangeInstance.objects.filter", return_value=None),
-            pytest.raises(TypeError),
-        ):
-            services.list_ranges(mock_user)
-
-    def test_raises_on_model_returns_string(self, mock_user):
-        """Service raises TypeError if model returns string instead of list."""
-        with (
-            patch("cms.services.RangeInstance.objects.filter", return_value="not a list"),
-            pytest.raises(TypeError),
-        ):
-            services.list_ranges(mock_user)
-
-    def test_raises_on_model_returns_list_of_wrong_type(self, mock_user):
-        """Service raises TypeError if model returns list of wrong type."""
-        with (
-            patch(
-                "cms.services.RangeInstance.objects.filter",
-                return_value=[{"id": 1}, {"id": 2}],
-            ),
-            pytest.raises(TypeError),
-        ):
-            services.list_ranges(mock_user)
-
-    # -------------------------------------------------------------------------
-    # Return type guarantee
-    # -------------------------------------------------------------------------
-
-    def test_returns_list_class_not_queryset(self, mock_user):
-        """Service returns list class, not QuerySet."""
-        from cms.models import RangeInstance
-
-        mock_qs = Mock()
-        mock_qs.__iter__ = Mock(return_value=iter([Mock(spec=RangeInstance)]))
-        with patch("cms.services.RangeInstance.objects.filter", return_value=mock_qs):
-            result = services.list_ranges(mock_user)
-            assert type(result) is list
-
-    def test_returns_list_class_not_tuple(self, mock_user):
-        """Service returns list, not tuple even if model returns tuple."""
-        from cms.models import RangeInstance
-
-        mock_range = Mock(spec=RangeInstance)
-        with patch("cms.services.RangeInstance.objects.filter", return_value=(mock_range,)):
-            result = services.list_ranges(mock_user)
-            assert type(result) is list
-
-    # -------------------------------------------------------------------------
-    # Input validation - user parameter
-    # -------------------------------------------------------------------------
+    def test_returns_a_list(self, user):
+        _range_instance(user, range_id=1)
+        assert type(services.list_ranges(user)) is list
 
     def test_requires_user_argument(self):
-        """Service raises TypeError if user not provided."""
         with pytest.raises(TypeError):
             services.list_ranges()
 
     @pytest.mark.parametrize("invalid_user", INVALID_USERS)
     def test_raises_on_invalid_user(self, invalid_user):
-        """Service raises error for invalid user values."""
         with pytest.raises((TypeError, ValueError, AttributeError)):
             services.list_ranges(invalid_user)
 
 
 class TestGetRange:
-    """Tests for get_range() service function.
+    def test_returns_range_when_found_and_owned(self, user):
+        ri = _range_instance(user, range_id=42, scenario_id="basic")
+        result = services.get_range(user, 42)
+        assert result.range_id == 42
+        assert result.scenario_id == "basic"
+        assert result.pk == ri.pk
 
-    Tests SERVICE behavior with mocked model layer:
-    - Calls model correctly
-    - Returns what model returns
-    - Validates input
-    - Propagates errors
-    - Raises CMSError for business logic failures (not found, ownership)
-    """
+    def test_raises_cms_error_when_range_not_found(self, user):
+        with pytest.raises(CMSError, match=r"not found|does not exist"):
+            services.get_range(user, 999)
 
-    # -------------------------------------------------------------------------
-    # Service calls model correctly
-    # -------------------------------------------------------------------------
-
-    def test_calls_objects_get_with_range_id(self, mock_user):
-        """Service queries RangeInstance by range_id."""
-        from cms.models import RangeInstance
-
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id)
-        with patch("cms.services.RangeInstance.objects.get", return_value=mock_range) as mock_get:
-            services.get_range(mock_user, 42)
-            mock_get.assert_called_once_with(range_id=42)
-
-    # -------------------------------------------------------------------------
-    # Service returns what model returns
-    # -------------------------------------------------------------------------
-
-    def test_returns_range_when_found_and_owned(self, mock_user):
-        """Service returns range instance when it exists and belongs to user."""
-        from cms.models import RangeInstance
-
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id)
-        with patch("cms.services.RangeInstance.objects.get", return_value=mock_range):
-            result = services.get_range(mock_user, 42)
-            assert result.range_id == 42
-
-    def test_returns_range_with_correct_attributes(self, mock_user):
-        """Service returns range instance with all attributes intact."""
-        from cms.models import RangeInstance
-
-        mock_range = Mock(
-            spec=RangeInstance,
-            range_id=42,
-            user_id=mock_user.id,
-            scenario_id="basic",
-            agent_id=5,
-        )
-        with patch("cms.services.RangeInstance.objects.get", return_value=mock_range):
-            result = services.get_range(mock_user, 42)
-            assert result.scenario_id == "basic"
-            assert result.agent_id == 5
-
-    # -------------------------------------------------------------------------
-    # Error handling - CMSError for business logic failures
-    # -------------------------------------------------------------------------
-
-    def test_raises_cms_error_when_range_not_found(self, mock_user):
-        """Service raises CMSError when range doesn't exist."""
-        from cms.exceptions import CMSError
-        from cms.models import RangeInstance
-
-        with (
-            patch(
-                "cms.services.RangeInstance.objects.get",
-                side_effect=RangeInstance.DoesNotExist,
-            ),
-            pytest.raises(CMSError),
-        ):
-            services.get_range(mock_user, 999)
-
-    def test_raises_cms_error_when_range_owned_by_other_user(self, mock_user):
-        """Service raises CMSError when range belongs to different user."""
-        from cms.exceptions import CMSError
-        from cms.models import RangeInstance
-
-        other_user_id = 999
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=other_user_id)
-        with (
-            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
-            pytest.raises(CMSError),
-        ):
-            services.get_range(mock_user, 42)
-
-    def test_cms_error_has_descriptive_message_for_not_found(self, mock_user):
-        """CMSError message indicates range not found."""
-        from cms.exceptions import CMSError
-        from cms.models import RangeInstance
-
-        with (
-            patch(
-                "cms.services.RangeInstance.objects.get",
-                side_effect=RangeInstance.DoesNotExist,
-            ),
-            pytest.raises(CMSError, match=r"not found|does not exist"),
-        ):
-            services.get_range(mock_user, 999)
-
-    def test_cms_error_has_descriptive_message_for_ownership(self, mock_user):
-        """CMSError message indicates ownership violation."""
-        from cms.exceptions import CMSError
-        from cms.models import RangeInstance
-
-        other_user_id = 999
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=other_user_id)
-        with (
-            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
-            pytest.raises(CMSError, match=r"not found|access denied|permission"),
-        ):
-            services.get_range(mock_user, 42)
-
-    # -------------------------------------------------------------------------
-    # Error propagation - non-business errors
-    # -------------------------------------------------------------------------
-
-    def test_propagates_database_exception(self, mock_user):
-        """Service propagates unexpected database errors."""
-        with (
-            patch(
-                "cms.services.RangeInstance.objects.get",
-                side_effect=Exception("DB connection failed"),
-            ),
-            pytest.raises(Exception, match="DB connection failed"),
-        ):
-            services.get_range(mock_user, 42)
-
-    # -------------------------------------------------------------------------
-    # Input validation - user parameter
-    # -------------------------------------------------------------------------
+    def test_raises_cms_error_when_range_owned_by_other_user(self, user, django_user_model):
+        other = django_user_model.objects.create_user(username="cms-other2@e.com", email="cms-other2@e.com")
+        _range_instance(other, range_id=77)
+        with pytest.raises(CMSError, match=r"not found|access denied|permission"):
+            services.get_range(user, 77)
 
     def test_requires_user_argument(self):
-        """Service raises TypeError if user not provided."""
         with pytest.raises(TypeError):
             services.get_range(range_id=42)
 
     @pytest.mark.parametrize("invalid_user", INVALID_USERS)
     def test_raises_on_invalid_user(self, invalid_user):
-        """Service raises error for invalid user values."""
         with pytest.raises((TypeError, ValueError, AttributeError)):
             services.get_range(invalid_user, 42)
 
-    # -------------------------------------------------------------------------
-    # Input validation - range_id parameter
-    # -------------------------------------------------------------------------
-
-    def test_requires_range_id_argument(self, mock_user):
-        """Service raises TypeError if range_id not provided."""
+    def test_requires_range_id_argument(self, user):
         with pytest.raises(TypeError):
-            services.get_range(mock_user)
+            services.get_range(user)
 
     @pytest.mark.parametrize("invalid_range_id", INVALID_RANGE_IDS)
-    def test_raises_on_invalid_range_id(self, mock_user, invalid_range_id):
-        """Service raises error for invalid range_id values."""
+    def test_raises_on_invalid_range_id(self, user, invalid_range_id):
         with pytest.raises((TypeError, ValueError)):
-            services.get_range(mock_user, invalid_range_id)
-
-    # -------------------------------------------------------------------------
-    # Response validation - model returns garbage
-    # -------------------------------------------------------------------------
-
-    def test_raises_on_model_returns_none(self, mock_user):
-        """Service raises TypeError if model returns None instead of range."""
-        with (
-            patch("cms.services.RangeInstance.objects.get", return_value=None),
-            pytest.raises(TypeError),
-        ):
-            services.get_range(mock_user, 42)
-
-    def test_raises_on_model_returns_wrong_type(self, mock_user):
-        """Service raises TypeError if model returns wrong type."""
-        with (
-            patch("cms.services.RangeInstance.objects.get", return_value="not a range"),
-            pytest.raises(TypeError),
-        ):
-            services.get_range(mock_user, 42)
+            services.get_range(user, invalid_range_id)
 
 
 class TestCreateRangeValidation:
-    """Tests for create_range() validation behavior."""
+    def test_raises_for_unknown_scenario(self, user, make_agent):
+        agent = make_agent(user)
+        with pytest.raises(CMSError, match=r"not found|scenario"):
+            services.create_range(user, "nonexistent_scenario", {"windows": agent.id})
 
-    @patch("cms.services.get_active_range", return_value=None)
-    def test_raises_for_unknown_scenario(self, _mock_active, mock_user, mock_windows_agent):
-        """create_range raises CMSError for unknown scenario_id."""
-        from cms.exceptions import CMSError
+    def test_raises_when_agent_not_found(self, user, hydratable_scenario):
+        with pytest.raises(CMSError, match=r"not found"):
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": 999999})
 
-        with (
-            patch(
-                "cms.scenarios.registry.load_scenario_template",
-                side_effect=ValueError("not found"),
-            ),
-            pytest.raises(CMSError, match="not found"),
-        ):
-            services.create_range(mock_user, "nonexistent_scenario", {"windows": mock_windows_agent.id})
+    def test_raises_when_user_already_has_active_range(self, user, make_agent, hydratable_scenario):
+        agent = make_agent(user)
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+        with pytest.raises(CMSError, match="already have an active range"):
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
 
-    @patch("cms.services.get_active_range", return_value=None)
-    def test_raises_when_agent_not_found(self, _mock_active, mock_user):
-        """create_range raises CMSError when agent doesn't exist."""
-        from cms.exceptions import CMSError
+    def test_raises_for_non_launchable_aces_scenario(self, user, make_agent):
+        from cms.models import AcesPackageSource
 
-        mock_template = Mock()
-        mock_template.get_agent_requirements.return_value = {
-            "requires_windows": False,
-            "requires_linux": False,
-            "has_from_agent": True,
-        }
-
-        with (
-            patch("cms.scenarios.registry.load_scenario_template", return_value=mock_template),
-            patch("cms.services.get_agent", side_effect=CMSError("Agent 99999 not found")),
-            pytest.raises(CMSError, match="not found"),
-        ):
-            services.create_range(mock_user, "basic", {"windows": 99999})
-
-    @patch("cms.services.get_active_range", return_value=None)
-    def test_raises_when_agent_belongs_to_other_user(self, _mock_active, mock_user):
-        """create_range raises CMSError when agent belongs to another user."""
-        from cms.exceptions import CMSError
-
-        mock_template = Mock()
-        mock_template.get_agent_requirements.return_value = {
-            "requires_windows": False,
-            "requires_linux": False,
-            "has_from_agent": True,
-        }
-
-        with (
-            patch("cms.scenarios.registry.load_scenario_template", return_value=mock_template),
-            patch("cms.services.get_agent", side_effect=CMSError("Agent not found")),
-            pytest.raises(CMSError, match="not found"),
-        ):
-            services.create_range(mock_user, "basic", {"windows": 999})
-
-    def test_raises_when_user_already_has_active_range(self, mock_user):
-        """create_range raises CMSError when user has an existing active range."""
-        from cms.exceptions import CMSError
-
-        mock_existing = Mock()
-        mock_existing.range_id = 100
-
-        with (
-            patch("cms.services.get_active_range", return_value=mock_existing),
-            pytest.raises(CMSError, match="already have an active range"),
-        ):
-            services.create_range(mock_user, "basic", {"windows": 10})
+        agent = make_agent(user)
+        AcesPackageSource.objects.create(
+            scenario_id="polaris-pending",
+            contract_kind="aces",
+            contract_profile="shifter",
+            package_ref="scenario-dev/polaris/content-packages/polaris",
+            package_version="1.0.0",
+            package_digest="sha256:" + "a" * 64,
+            conformance_status="pending",
+            registered_by=user,
+        )
+        with pytest.raises(CMSError, match="not available for launch"):
+            services.create_range(user, "polaris-pending", {"windows": agent.id})
 
 
-class TestCreateRangeEngineCall:
-    """Tests for create_range() engine integration."""
+class TestCreateRangeBehavior:
+    def test_creates_engine_range_in_provisioning(self, user, make_agent, hydratable_scenario):
+        from engine.models import Range as EngineRange
 
-    def test_calls_engine_create_range(self, mock_user, mock_windows_agent, create_range_ctx):
-        """create_range calls engine.create_range with RangeSpec."""
-        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        create_range_ctx["engine"].assert_called_once()
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": make_agent(user).id})
+        # The engine side persisted a real Range for this user in PROVISIONING.
+        eng = EngineRange.objects.filter(user=user).first()
+        assert eng is not None
+        assert eng.status == EngineRange.Status.PROVISIONING
 
-    def test_engine_receives_request_spec(self, mock_user, mock_windows_agent, create_range_ctx):
-        """Engine receives a RequestSpec containing RangeSpec."""
-        from shared.schemas import RangeSpec, RequestSpec
+    def test_persists_a_range_instance_record(self, user, make_agent, hydratable_scenario):
+        agent = make_agent(user)
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+        ri = RangeInstance.objects.get(user_id=user.id)
+        assert ri.scenario_id == hydratable_scenario.scenario_id
+        assert ri.agent_id == agent.id
 
-        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+    def test_records_an_audit_row(self, user, make_agent, hydratable_scenario):
+        from risk_register.models import AuditLog
 
-        call_args = create_range_ctx["engine"].call_args
-        request_spec = call_args[0][0]
+        before = AuditLog.objects.count()
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": make_agent(user).id})
+        assert AuditLog.objects.count() > before
 
-        assert isinstance(request_spec, RequestSpec)
-        assert request_spec.user_id == mock_user.id
-        assert len(request_spec.items) == 1
-        range_spec = request_spec.items[0]
-        assert isinstance(range_spec, RangeSpec)
-        assert range_spec.scenario_id == "basic"
-        assert isinstance(range_spec.all_instances, list)
+    def test_marks_owned_range_failed_when_engine_dispatch_fails(self, user, make_agent, hydratable_scenario, settings):
+        from engine.models import Range as EngineRange
+        from risk_register.models import AuditLog
 
-    def test_range_request_has_correct_scenario_id(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeSpec inside RequestSpec includes the correct scenario_id."""
-        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        settings.CLOUD_PROVIDER = "aws"
+        settings.LOCAL_PROVISIONER = None
+        settings.ENGINE_TASK_CLUSTER = "test-cluster"
+        settings.ENGINE_TASK_DEFINITION = "test-taskdef"
+        settings.ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = "sg-test"
+        settings.ENGINE_TASK_NETWORK_SUBNET_IDS = "subnet-aaa,subnet-bbb"
+        ecs_client = MagicMock()
+        ecs_client.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:CPU"}]}
 
-        request_spec = create_range_ctx["engine"].call_args[0][0]
-        range_spec = request_spec.items[0]
-        assert range_spec.scenario_id == "basic"
+        with patch("boto3.client", return_value=ecs_client), pytest.raises(CloudTaskError):
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": make_agent(user).id})
 
-    def test_range_request_has_hydrated_instances(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeSpec instances are hydrated with resolved OS and agent."""
-        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-
-        request_spec = create_range_ctx["engine"].call_args[0][0]
-        range_spec = request_spec.items[0]
-        instances = range_spec.all_instances
-
-        assert len(instances) == 2
-
-        victim = next(i for i in instances if i.role == "victim")
-        assert victim.os_type == "windows"
-        assert victim.agent is not None
-        assert victim.agent.s3_key == "agents/123/agent.msi"
-
-
-class TestCreateRangeInstance:
-    """Tests for create_range() RangeInstance storage."""
-
-    def test_creates_range_instance_record(self, mock_user, mock_windows_agent, create_range_ctx):
-        """create_range calls RangeInstance.objects.create with correct args."""
-        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-
-        create_range_ctx["ri_create"].assert_called_once()
-        call_kwargs = create_range_ctx["ri_create"].call_args[1]
-        assert call_kwargs["scenario_id"] == "basic"
-        assert call_kwargs["user_id"] == mock_user.id
-        assert call_kwargs["agent"] == mock_windows_agent
-
-    def test_range_instance_has_correct_scenario_id(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeInstance.objects.create receives the scenario_id used."""
-        canned = create_range_ctx["range_spec"]
-        canned_ad = canned.model_copy(update={"scenario_id": "ad_attack_lab"})
-        create_range_ctx["hydrate"].return_value = canned_ad
-
-        services.create_range(mock_user, "ad_attack_lab", {"windows": mock_windows_agent.id})
-
-        call_kwargs = create_range_ctx["ri_create"].call_args[1]
-        assert call_kwargs["scenario_id"] == "ad_attack_lab"
-
-    def test_range_instance_stores_integer_ids(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeInstance.objects.create receives user_id and agent as expected types."""
-        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-
-        call_kwargs = create_range_ctx["ri_create"].call_args[1]
-        assert call_kwargs["user_id"] == mock_user.id
-        assert isinstance(call_kwargs["user_id"], int)
+        range_instance = RangeInstance.all_objects.get(user_id=user.id)
+        assert range_instance.status == ResourceStatus.FAILED.value
+        assert range_instance.deleted_at is not None
+        assert EngineRange.objects.get(user=user).status == EngineRange.Status.FAILED
+        assert not AuditLog.objects.filter(
+            entity_type=AuditLog.EntityType.RANGE,
+            action=AuditLog.Action.PROVISION,
+            actor_id=user.id,
+        ).exists()
 
 
 class TestCreateRangeReturn:
-    """Tests for create_range() return value."""
+    @pytest.fixture
+    def created(self, user, make_agent, hydratable_scenario):
+        agent = make_agent(user, name="Windows Agent")
+        ctx = services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+        return ctx, agent
 
-    def test_returns_range_context(self, mock_user, mock_windows_agent, create_range_ctx):
-        """create_range returns a RangeContext."""
+    def test_returns_range_context(self, created):
         from shared.schemas.range import RangeContext
 
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        assert isinstance(result, RangeContext)
+        ctx, _ = created
+        assert isinstance(ctx, RangeContext)
 
-    def test_range_context_has_request_id(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeContext contains request_id (range_id is None for new ranges)."""
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        assert result.request_id is not None
-        assert result.range_id is None
+    def test_range_context_has_request_id_and_no_range_id(self, created):
+        ctx, _ = created
+        assert ctx.request_id is not None
+        assert ctx.range_id is None
 
-    def test_range_context_has_scenario_id(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeContext contains the scenario_id."""
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        assert result.scenario_id == "basic"
+    def test_range_context_scenario_and_user(self, created, user, hydratable_scenario):
+        ctx, _ = created
+        assert ctx.scenario_id == hydratable_scenario.scenario_id
+        assert ctx.user_id == user.id
 
-    def test_range_context_has_user_id(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeContext contains the user_id."""
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        assert result.user_id == mock_user.id
+    def test_range_context_agent_name(self, created):
+        ctx, agent = created
+        assert ctx.agent_name == agent.name
 
-    def test_range_context_has_agent_name(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeContext contains the agent_name."""
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        assert result.agent_name == "Windows Agent"
-
-    def test_range_context_has_provisioning_status(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeContext has PROVISIONING status (engine invariant on creation)."""
+    def test_range_context_status_is_provisioning(self, created):
         from shared.enums import ResourceStatus
 
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        assert result.status == ResourceStatus.PROVISIONING
+        ctx, _ = created
+        assert ctx.status == ResourceStatus.PROVISIONING
 
-    def test_range_context_has_instances(self, mock_user, mock_windows_agent, create_range_ctx):
-        """RangeContext contains instances list."""
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        assert len(result.instances) == 2  # basic scenario has attacker + victim
-
-    def test_instances_have_uuids(self, mock_user, mock_windows_agent, create_range_ctx):
-        """Each instance has a UUID."""
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        for instance in result.instances:
-            assert instance.uuid is not None
-
-    def test_instances_have_roles(self, mock_user, mock_windows_agent, create_range_ctx):
-        """Instances have correct roles from scenario."""
-        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-        roles = [i.role for i in result.instances]
+    def test_range_context_instances(self, created):
+        ctx, _ = created
+        assert len(ctx.instances) == 2
+        roles = [i.role for i in ctx.instances]
         assert "attacker" in roles
         assert "victim" in roles
+        for instance in ctx.instances:
+            assert instance.uuid is not None
+
+
+class TestHasReadyActiveRange:
+    """The cheap sidebar indicator used by the `nav` context tier (#898).
+
+    It must mirror ``get_active_range``'s ``has_active_range`` semantics
+    (latest non-DESTROYING range is READY) without building the full payload.
+    """
+
+    def test_false_when_user_has_no_range(self, user):
+        assert services.has_ready_active_range(user) is False
+
+    def test_true_when_latest_range_is_ready(self, user):
+        _range_instance(user, range_id=1, status="ready")
+        assert services.has_ready_active_range(user) is True
+
+    def test_false_when_latest_range_not_ready(self, user):
+        _range_instance(user, range_id=1, status="provisioning")
+        assert services.has_ready_active_range(user) is False
+
+    def test_excludes_destroying_range(self, user):
+        _range_instance(user, range_id=1, status="destroying")
+        assert services.has_ready_active_range(user) is False
+
+    def test_uses_most_recent_range(self, user):
+        # Older ready range, newer provisioning range -> mirrors get_active_range's
+        # "most recently created" selection, so the indicator is False.
+        _range_instance(user, range_id=1, status="ready")
+        _range_instance(user, range_id=2, status="provisioning")
+        assert services.has_ready_active_range(user) is False
+
+    def test_excludes_other_users_range(self, user, django_user_model):
+        other = django_user_model.objects.create_user(username="hr-other@e.com", email="hr-other@e.com")
+        _range_instance(other, range_id=1, status="ready")
+        assert services.has_ready_active_range(user) is False
+
+    def test_requires_user_argument(self):
+        with pytest.raises(TypeError):
+            services.has_ready_active_range()
+
+    @pytest.mark.parametrize("invalid_user", INVALID_USERS)
+    def test_raises_on_invalid_user(self, invalid_user):
+        with pytest.raises((TypeError, ValueError, AttributeError)):
+            services.has_ready_active_range(invalid_user)
+
+    def test_is_cheaper_than_full_projection(self, user):
+        """The indicator issues a single lightweight query and never resolves
+        runtime IPs, FK joins, or instance contexts the way get_active_range does."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        _range_instance(user, range_id=1, status="ready")
+        with CaptureQueriesContext(connection) as ctx:
+            services.has_ready_active_range(user)
+        assert len(ctx.captured_queries) == 1
+
+
+class TestRangeSourceAdmission:
+    """Per-source admission: a user can hold one MC range and one CTF range simultaneously.
+
+    These are the primary behavior tests for issue #450. They drive the real
+    create_range / get_active_range stack against real DB rows so the admission
+    filter and the persistence of range_source are both exercised.
+    """
+
+    def test_user_with_mc_range_can_create_ctf_range(self, user, make_agent, hydratable_scenario):
+        """Active MC range must not block a CTF range creation (root-cause fix)."""
+        from shared.enums import RangeSource
+
+        agent = make_agent(user)
+        # Create a MC range (default)
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+        # Creating a CTF range must succeed even though an MC range is active.
+        result = services.create_range(
+            user,
+            hydratable_scenario.scenario_id,
+            {"windows": agent.id},
+            range_source=RangeSource.CTF,
+        )
+        assert result is not None
+
+    def test_second_mc_range_still_blocked(self, user, make_agent, hydratable_scenario):
+        """Same-source MC admission is unchanged: second MC range is rejected."""
+        agent = make_agent(user)
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+        with pytest.raises(CMSError, match="already have an active range"):
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+
+    def test_second_ctf_range_still_blocked(self, user, make_agent, hydratable_scenario):
+        """Same-source CTF admission is unchanged: second CTF range is rejected."""
+        from shared.enums import RangeSource
+
+        agent = make_agent(user)
+        services.create_range(
+            user,
+            hydratable_scenario.scenario_id,
+            {"windows": agent.id},
+            range_source=RangeSource.CTF,
+        )
+        with pytest.raises(CMSError, match="already have an active range"):
+            services.create_range(
+                user,
+                hydratable_scenario.scenario_id,
+                {"windows": agent.id},
+                range_source=RangeSource.CTF,
+            )
+
+    def test_get_active_range_bare_call_returns_mc_range(self, user):
+        """Bare get_active_range(user) keeps MC semantics (backward-compat)."""
+        _range_instance(user, range_id=1, status="ready")  # MC default
+        result = services.get_active_range(user)
+        assert result is not None
+
+    def test_get_active_range_mc_does_not_return_ctf_range(self, user):
+        """get_active_range(user, MISSION_CONTROL) must ignore CTF rows."""
+        from shared.enums import RangeSource
+
+        _range_instance(user, range_id=1, status="ready", range_source=RangeSource.CTF.value)
+        result = services.get_active_range(user, RangeSource.MISSION_CONTROL)
+        assert result is None
+
+    def test_get_active_range_ctf_returns_ctf_range(self, user):
+        """get_active_range(user, CTF) must return a CTF-sourced row."""
+        from shared.enums import RangeSource
+
+        _range_instance(user, range_id=1, status="ready", range_source=RangeSource.CTF.value)
+        result = services.get_active_range(user, RangeSource.CTF)
+        assert result is not None
+
+    def test_get_active_range_separates_mc_and_ctf_rows(self, user):
+        """With both sources active, each get_active_range(user, source) returns its own row."""
+        from shared.enums import RangeSource
+
+        mc_ri = _range_instance(user, range_id=1, status="ready")
+        ctf_ri = _range_instance(user, range_id=2, status="ready", range_source=RangeSource.CTF.value)
+
+        mc_result = services.get_active_range(user, RangeSource.MISSION_CONTROL)
+        ctf_result = services.get_active_range(user, RangeSource.CTF)
+
+        assert mc_result is not None
+        assert ctf_result is not None
+        assert mc_result.range_id == mc_ri.range_id
+        assert ctf_result.range_id == ctf_ri.range_id
+
+    def test_range_source_defaults_to_mission_control_on_model(self, user):
+        """RangeInstance.range_source defaults to 'mission_control' for new rows."""
+        from shared.enums import RangeSource
+
+        ri = _range_instance(user, range_id=1)
+        ri.refresh_from_db()
+        assert ri.range_source == RangeSource.MISSION_CONTROL.value
+
+    def test_create_range_persists_ctf_source(self, user, make_agent, hydratable_scenario):
+        """create_range(range_source=CTF) persists 'ctf' on the RangeInstance row."""
+        from shared.enums import RangeSource
+
+        agent = make_agent(user)
+        services.create_range(
+            user,
+            hydratable_scenario.scenario_id,
+            {"windows": agent.id},
+            range_source=RangeSource.CTF,
+        )
+        ri = RangeInstance.objects.get(user_id=user.id)
+        assert ri.range_source == RangeSource.CTF.value
+
+    def test_create_range_default_persists_mc_source(self, user, make_agent, hydratable_scenario):
+        """create_range() with no range_source persists 'mission_control' on the row."""
+        from shared.enums import RangeSource
+
+        agent = make_agent(user)
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+        ri = RangeInstance.objects.get(user_id=user.id)
+        assert ri.range_source == RangeSource.MISSION_CONTROL.value

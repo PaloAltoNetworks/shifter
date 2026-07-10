@@ -8,8 +8,18 @@ workflow:
   # test_command and completion_command intentionally omitted; the
   # implement skill will fall back to asking the agent which sub-project
   # to test. A follow-up can add a top-level runner script.
+  review_disposition:
+    enabled: true
+    mode: shadow
+    max_auto_overrides: 1
+    judge:
+      enabled: true
 sonarcloud:
   project_key: Brad-Edwards_shifter
   organization: brad-edwards
+routing:
+  enabled: true
+  default_provider: claude
+  default_fallback: parent
 rules:
   plan_rules: .gc/plan-rules.md

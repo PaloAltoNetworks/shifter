@@ -9,7 +9,7 @@ This note records the architecture boundary for hardening the
 > ### Revision note
 >
 > An earlier draft of this preflight (and the first draft of ADR-014)
-> scoped the issue as **strip privileged tools** — remove secret
+> scoped the issue as **strip privileged tools**—remove secret
 > retrieval, arbitrary SQL, arbitrary SSM exec, infra mutation, and
 > the `/dev-login/` tunnel from the general MCP surface. That scope
 > assumed `mcp/ops` was a general-purpose MCP server whose connecting
@@ -37,49 +37,49 @@ layer is too large to land at once. **The forward-looking sections
 below describe behavior the layer enforces only after every phase
 ships.** Today's status:
 
-- **Phase 0 (this PR / #777) — DONE.** Architecture reframe: ADR-014
+- **Phase 0 (this PR / #777)—DONE.** Architecture reframe: ADR-014
   reframed (R1 narrowed, R5 + R6 added), this preflight note
   rewritten, `mcp/ops/SECURITY.md` rewritten.
-- **Phase 1 (this PR / #777) — DONE.** Policy seam: `.shifter.yaml`
+- **Phase 1 (this PR / #777)—DONE.** Policy seam: `.shifter.yaml`
   at repo root (`mcp_ops:` namespace), `mcp/ops/policy.js`
   (`parsePolicy`, `loadPolicy`, `profileFromEnv`, `Policy`,
   `registerTool`). `registerTool` enforces *class declaration and
-  session-profile gating only* — it forwards descriptors to
+  session-profile gating only*—it forwards descriptors to
   `server.tool` without wrapping the handler with the rest of the
   gates. Tools registered with a class disabled by the active profile
   are not registered at all; tools with no class or an undeclared
   class fail closed at registration.
-- **Phase 2 — sub-issue #1198.** Composes env policy
+- **Phase 2—sub-issue #1198.** Composes env policy
   (`confirm_env="prod"`), dry-run defaults, description redaction,
   idempotency, audit log, and secret-handle return mode onto the
   wrapper.
-- **Phase 3 — sub-issue #1199.** Adds two-phase `plan_*` →
+- **Phase 3—sub-issue #1199.** Adds two-phase `plan_*` →
   `execute_*`, session profile selection from
   `SHIFTER_OPS_PROFILE` (today the profile is read by an explicit
   caller, not yet by the server entrypoint), and rate caps.
-- **Phase 4 — sub-issue #1200.** Adds untrusted-input fencing and
+- **Phase 4—sub-issue #1200.** Adds untrusted-input fencing and
   apex out-of-band operator approval.
-- **Phase 5 — sub-issue #1201.** Converts each of the 45
+- **Phase 5—sub-issue #1201.** Converts each of the 45
   `server.tool(...)` call sites in `mcp/ops/index.js` to
   `registerTool(...)` descriptors with capability-class tags. **Until
   Phase 5 lands, every tool in `mcp/ops/index.js` is still a direct
   `server.tool(...)` registration, and `.shifter.yaml` /
   `SHIFTER_OPS_PROFILE` have no runtime effect on the live server.**
-- **Phase 6 — sub-issue #1202.** Adds `mcp/ops/tool-surface.test.js`
+- **Phase 6—sub-issue #1202.** Adds `mcp/ops/tool-surface.test.js`
   asserting the policy-layer invariants on the live registered
   surface.
 
-The rest of this note describes the design — capability classes,
-gates, cross-cutting layers, gotchas — as it stands once all six
+The rest of this note describes the design—capability classes,
+gates, cross-cutting layers, gotchas—as it stands once all six
 phases ship.
 
 ## Decision Boundary (corrected)
 
 `mcp/ops` is an operator agent MCP surface in the sense of
-ADR-014-R5. Its tools may expose privileged capability — secret
+ADR-014-R5. Its tools may expose privileged capability—secret
 retrieval, named and arbitrary SQL, named and arbitrary SSM execution,
 infrastructure mutation, and a dev-only auth-bypass tunnel for agent
-sessions that cannot complete MFA — but every tool MUST be governed by
+sessions that cannot complete MFA—but every tool MUST be governed by
 a structured per-tool policy layer.
 
 The policy layer declares each tool's capability class
@@ -110,7 +110,7 @@ dev_bypass_tunnel`) and enforces, at minimum:
 Tool descriptions reachable via `list_tools` MUST NOT contain
 auth-bypass procedures. The dev-login tunnel is retained as a tool,
 but its description is redacted (no `/dev-login/` URL text, no
-step-by-step bypass language) — the capability stays; the procedural
+step-by-step bypass language)—the capability stays; the procedural
 text does not.
 
 ## Threat model
@@ -128,7 +128,7 @@ vs server (the agent loop is trusted); it is **agent intent** vs
    to perform a destructive action it would not otherwise have chosen.
 2. **Agent error.** Hallucination, wrong instance id, dev/prod
    confusion, missing WHERE clause, double execution on retry. Not
-   malicious — just wrong.
+   malicious—just wrong.
 
 Defenses target both: the policy layer bounds blast radius regardless
 of why the agent invoked a destructive tool.
@@ -148,7 +148,7 @@ of why the agent invoked a destructive tool.
   not gate it.
 - `mcp/ngfw/SECURITY.md` and `mcp/ngfw/tool-surface.test.js`: closest
   surface-test precedent. `mcp/ops/tool-surface.test.js` follows the
-  same shape — assertions about which tools are present under which
+  same shape—assertions about which tools are present under which
   profile, and which behaviors the gates enforce.
 - `mcp/ops/SECURITY.md`: package-local security rules. Rewritten in
   this PR to describe the policy layer and operator-agent threat
@@ -200,10 +200,13 @@ of why the agent invoked a destructive tool.
 - Remote execution boundary: `ssm_send_command`,
   `ssm_get_command_output`, and `run_manage_command` are retained.
   `ssm_arbitrary` is dry-run-by-default and two-phase. `ssm_named`
-  (the allowlisted manage.py path) is direct-execute.
+  (the allowlisted manage.py path) is direct-execute, but its remote
+  SSM shell payload must still pass the structured management-command
+  argv boundary documented in
+  `mcp-ops-manage-command-ssm-boundary-preflight-1176.md`.
 - OS/runtime exposure: `start_portal_test_tunnel` and
   `stop_portal_test_tunnel` are retained under the `dev_bypass_tunnel`
-  class. Allowed only when `env=dev`. Tool description is redacted —
+  class. Allowed only when `env=dev`. Tool description is redacted:
   the capability is there for agents that need to authenticate without
   MFA, but the registry text does not document the bypass procedure.
 - Error envelopes: `err()` is updated to refuse echoing secret values,
@@ -254,7 +257,7 @@ the stored plan.
 
 The plan store is intentionally in-process and volatile. It is a
 short-lived confirmation latch, not persistence or workflow state:
-single-use, 60s TTL, random unguessable ids, bounded by a configured
+single-use, 60 seconds TTL, random unguessable ids, bounded by a configured
 or hard-coded maximum, with expired-entry reaping on every access.
 Eviction must fail closed for missing/expired/unknown ids and must not
 execute a "nearest" or recomputed plan. The audit record should include
@@ -327,7 +330,7 @@ production `terminate_ec2_instance`; production `execute_plan` for
 schema must be strict and fail closed on malformed entries or unknown
 tool/class names.
 
-Approval tokens are in-process, single-use, random, and 60s TTL. The
+Approval tokens are in-process, single-use, random, and 60 seconds TTL. The
 server prints the confirmation token to stderr only after all earlier
 policy gates have accepted the call and immediately before the
 apex-gated execution would run. The token must not appear in MCP
@@ -353,7 +356,7 @@ consumer refusal without acknowledgment, successful acknowledged
 composition with existing gates, no handler execution on refusal,
 apex defaults from `.shifter.yaml`, malformed apex config fail-closed,
 stderr-only token emission, single-use token consumption by `approve`,
-60s timeout, duplicate/unknown token refusal, headless timeout, audit
+60 seconds timeout, duplicate/unknown token refusal, headless timeout, audit
 redaction of tokens and raw SQL/command text, and ordering with
 two-phase `execute_<name>` so stored plan args cannot be modified
 while approving.
@@ -385,8 +388,10 @@ happens to accept an `env` argument:
   values must remain inside the process.
 - `ssm_arbitrary`: free-form `ssm_send_command` and command output
   retrieval.
-- `ssm_named`: `run_manage_command`, because it uses the existing
-  allowlisted `validateManageCommand` boundary.
+- `ssm_named`: `run_manage_command`, because it is intended as a
+  narrow allowlisted manage.py surface. For issue #1176, the boundary
+  is structured management-command argv validation, not first-token
+  `validateManageCommand` allowlisting alone.
 - `dev_bypass_tunnel`: portal test tunnel start/stop; descriptions
   stay redacted by class policy and the env remains dev-only.
 - `infra_mutation`: EC2 start/stop/terminate, ECS restart, and range
@@ -471,9 +476,9 @@ policy parser.
   policy wrapper fails closed if a tool is registered without one.
 - The session profile is read at startup; it gates whether a class is
   ever registered. Changing profile requires a server restart. This
-  is intentional — runtime profile flips would be a confused-deputy
+  is intentional—runtime profile flips would be a confused-deputy
   surface.
-- Plan ids are single-use and short-TTL (60s). Long agent
+- Plan ids are single-use and short-TTL (60 seconds). Long agent
   conversations cannot pre-plan-and-batch destructive ops.
 - The `[UNTRUSTED:<source>]` fence on returned text is a *cooperative*
   signal to the LLM. The actual gate is the

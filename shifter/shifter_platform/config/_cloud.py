@@ -29,8 +29,6 @@ __all__ = [
     "ENGINE_TASK_NETWORK_SUBNET_IDS",
     "ENGINE_TASK_SERVICE_ACCOUNT_NAME",
     "ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED",
-    "EXPERIMENT_TASK_DEFINITION",
-    "EXPERIMENT_TASK_DEFINITION_ARN",
     "GCP_PROJECT_ID",
     "GCP_REGION",
     "GOOGLE_CLOUD_PROJECT",
@@ -113,10 +111,6 @@ ENGINE_ECS_CLUSTER_ARN = ENGINE_TASK_CLUSTER
 ENGINE_TASK_DEFINITION_ARN = ENGINE_TASK_DEFINITION
 ENGINE_ECS_SECURITY_GROUP_ID = ENGINE_TASK_NETWORK_SECURITY_GROUP_ID
 ENGINE_PRIVATE_SUBNET_IDS = ENGINE_TASK_NETWORK_SUBNET_IDS
-EXPERIMENT_TASK_DEFINITION = os.environ.get("EXPERIMENT_TASK_DEFINITION") or os.environ.get(
-    "EXPERIMENT_TASK_DEFINITION_ARN", ""
-)
-EXPERIMENT_TASK_DEFINITION_ARN = EXPERIMENT_TASK_DEFINITION
 
 # Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
 LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
@@ -153,11 +147,6 @@ QUEUE_CONFIG = {
     "cms": _build_queue_config("CMS", "SQS_CMS_URL", "cms.handlers.process_event"),
     "engine": _build_queue_config("ENGINE", "SQS_ENGINE_URL", "engine.handlers.process_event"),
     "mc": _build_queue_config("MC", "SQS_MC_URL", "mission_control.handlers.process_event"),
-    "experiments": _build_queue_config(
-        "EXPERIMENTS",
-        "SQS_EXPERIMENTS_URL",
-        "cms.experiments.handlers.process_event",
-    ),
 }
 # Backward compat alias
 SQS_QUEUE_CONFIG = QUEUE_CONFIG

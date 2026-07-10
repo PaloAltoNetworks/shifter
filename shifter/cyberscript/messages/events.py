@@ -14,17 +14,15 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_validator
 
 from ..enums import ResourceStatus
+from ..wire_constants import (
+    EVENT_TYPE_CANCELLED,
+    EVENT_TYPE_DESTROYED,
+    EVENT_TYPE_NGFW,
+    EVENT_TYPE_PROVISIONED,
+    EVENT_TYPE_STATUS_UPDATED,
+)
 
 logger = logging.getLogger(__name__)
-
-# Event type constants - Range
-EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
-EVENT_TYPE_PROVISIONED = "range.provisioned"
-EVENT_TYPE_DESTROYED = "range.destroyed"
-EVENT_TYPE_CANCELLED = "range.cancelled"
-
-# Event type constants - NGFW
-EVENT_TYPE_NGFW = "ngfw.event"
 
 
 class BaseEvent(BaseModel):

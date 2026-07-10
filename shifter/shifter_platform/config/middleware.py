@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+
+from asgiref.sync import iscoroutinefunction, markcoroutinefunction
+
+from config.capacity_metrics import inflight_requests
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from django.http import HttpRequest, HttpResponse
 
@@ -83,3 +87,51 @@ class HealthCheckMiddleware:
         if request.path in _HEALTH_PATHS:
             request.META["HTTP_HOST"] = _HEALTH_ADMISSION_HOST
         return self.get_response(request)
+
+
+class RequestInFlightMiddleware:
+    """Track in-flight HTTP request concurrency per worker process (#940).
+
+    Brackets every HTTP request with an increment/decrement on the process-local
+    ``inflight_requests`` gauge that ``config.capacity_metrics`` publishes to the
+    ``Shifter/PortalCapacity`` namespace. The gauge is the app-side
+    ``WorkerBusyRatio`` numerator: a worker whose in-flight count sits above its
+    soft-concurrency target is queueing request-path work that average EC2 CPU
+    does not reflect.
+
+    The middleware is async-aware so it measures true event-loop concurrency
+    rather than threadpool-adapted concurrency: under the Uvicorn worker the
+    portal serves requests on the loop, and a sync-only middleware would force
+    every request through Django's limited sync threadpool and distort the very
+    signal being measured. The counter is decremented in a ``finally`` so an
+    exception in a downstream view or middleware can never leak the gauge upward.
+    It records HTTP only; terminal/websocket saturation is accounted separately
+    via ``mission_control.terminal_sessions``.
+    """
+
+    async_capable = True
+    sync_capable = True
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+        self._is_async = iscoroutinefunction(get_response)
+        if self._is_async:
+            markcoroutinefunction(self)
+
+    def __call__(self, request: HttpRequest) -> HttpResponse | Awaitable[HttpResponse]:
+        if self._is_async:
+            return self._acall(request)
+        inflight_requests.increment()
+        try:
+            return self.get_response(request)
+        finally:
+            inflight_requests.decrement()
+
+    async def _acall(self, request: HttpRequest) -> HttpResponse:
+        inflight_requests.increment()
+        try:
+            # In the async path Django passes a coroutine get_response; the class
+            # attribute is typed with the sync signature, so cast the awaitable.
+            return await cast("Awaitable[HttpResponse]", self.get_response(request))
+        finally:
+            inflight_requests.decrement()

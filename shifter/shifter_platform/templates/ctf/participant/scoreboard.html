@@ -5,6 +5,9 @@
 {% block ctf_title %}
     Scoreboard
 {% endblock %}
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/ctf-participant-scoreboard.css' %}">
+{% endblock %}
 {% block ctf_content %}
     <div class="container-fluid py-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
@@ -125,7 +128,7 @@
                         <h5 class="card-title mb-3">
                             {% trans "Your Score Timeline" %}
                         </h5>
-                        <div style="position: relative; height: 250px;">
+                        <div class="score-chart-container">
                             <canvas id="score-timeline-chart"></canvas>
                         </div>
                     </div>
@@ -185,6 +188,12 @@
 {% block extra_js %}
     <script>
 var autoRefreshInterval = null;
+// Own-row solve-history link (issue #521). Only the current participant's row
+// is linkable; empty when the participant is unresolved.
+var solveHistoryUrl = "";
+{% if participant %}
+solveHistoryUrl = "{% url 'ctf:participant_solve_history' participant_id=participant.pk %}";
+{% endif %}
 
 function refreshScoreboard() {
     var btn = document.getElementById('refresh-btn');
@@ -296,7 +305,14 @@ function rebuildScoreboardTable(rankings, teamMode) {
         var tdName = document.createElement('td');
         var nameStrong = document.createElement('strong');
         nameStrong.textContent = entry.name;
-        tdName.appendChild(nameStrong);
+        if (isCurrentUser && solveHistoryUrl) {
+            var nameLink = document.createElement('a');
+            nameLink.href = solveHistoryUrl;
+            nameLink.appendChild(nameStrong);
+            tdName.appendChild(nameLink);
+        } else {
+            tdName.appendChild(nameStrong);
+        }
         if (isCurrentUser) {
             var badge = document.createElement('span');
             badge.className = 'badge bg-primary ms-1';

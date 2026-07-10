@@ -9,9 +9,9 @@ binding the module-level constants used in the re-export.
 from __future__ import annotations
 
 import os
-import sys
 import warnings
-from pathlib import Path
+
+from config._runtime_env import AUTH_PROVIDER, IS_TEST_RUN, required_runtime_env
 
 __all__ = [
     "AUTHENTICATION_BACKENDS",
@@ -41,15 +41,16 @@ __all__ = [
     "OIDC_USERNAME_ALGO",
     "PLATFORM_BOOTSTRAP_STAFF_EMAILS",
     "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS",
+    "RISK_REGISTER_ALLOWED_COGNITO_GROUPS",
     "SESSION_COOKIE_AGE",
 ]
 
-# Re-derive the toggles the OIDC block needs. These are also defined in
-# ``config.settings`` but importing them from there would create a cycle
-# (settings.py imports this module).
-AUTH_PROVIDER = os.environ.get("AUTH_PROVIDER", "oidc").strip().lower()
-IS_TEST_RUN = os.environ.get("TESTING") == "1" or Path(sys.argv[0]).name == "pytest"
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
+
+
+def _env_list(name: str) -> list[str]:
+    """Parse comma-separated environment variables into stripped string lists."""
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
 
 
 def _env_csv(name: str) -> list[str]:
@@ -68,13 +69,24 @@ else:
         "django.contrib.auth.backends.ModelBackend",
     ]
 
-# Magic link authentication (PLAT-101)
+# Magic link authentication (PLAT-101). Event-backed CTF participant links use
+# the event end as their expiry by default; MAGIC_LINK_EXPIRY_HOURS is the
+# fallback when no event end is available. Operators that need a stricter
+# event-link ceiling can set MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS.
 MAGIC_LINK_EXPIRY_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRY_HOURS", "24"))
+_MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS = os.environ.get("MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS")
+MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS = (
+    int(_MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS) if _MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS else None
+)
 MAGIC_LINK_SINGLE_USE = os.environ.get("MAGIC_LINK_SINGLE_USE", "False").lower() == "true"
 
 # OIDC settings - loaded from environment for AWS/Cognito deployments.
-OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "test-oidc-client-id" if IS_TEST_RUN else "")
-OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "test-oidc-client-secret" if IS_TEST_RUN else "")
+if AUTH_PROVIDER == "oidc":
+    OIDC_RP_CLIENT_ID = required_runtime_env("OIDC_RP_CLIENT_ID", dev_default="test-oidc-client-id")
+    OIDC_RP_CLIENT_SECRET = required_runtime_env("OIDC_RP_CLIENT_SECRET", dev_default="test-oidc-client-secret")
+else:
+    OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "")
+    OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "")
 IDENTITY_PLATFORM_API_KEY = os.environ.get("IDENTITY_PLATFORM_API_KEY", "")
 IDENTITY_PLATFORM_PROJECT_ID = os.environ.get("IDENTITY_PLATFORM_PROJECT_ID", "")
 IDENTITY_PLATFORM_AUTH_DOMAIN = os.environ.get("IDENTITY_PLATFORM_AUTH_DOMAIN", "")
@@ -88,13 +100,6 @@ IDENTITY_PLATFORM_TOTP_DISPLAY_NAME = os.environ.get(
 PLATFORM_BOOTSTRAP_STAFF_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_STAFF_EMAILS")
 PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS")
 
-# Cognito endpoints
-# Cognito has two different base URLs:
-# - Auth domain: for OAuth endpoints (authorize, token, userInfo)
-# - Issuer URL: for JWKS (token verification)
-_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "https://auth.example.test" if IS_TEST_RUN else "")
-_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "https://issuer.example.test" if IS_TEST_RUN else "")
-
 # Always define OIDC_OP_* variables to avoid runtime errors.
 # ``_oidc_placeholder`` indirection sidesteps bandit's B105 false-positive
 # on the empty-string literal for *_TOKEN_ENDPOINT (the variable name
@@ -106,19 +111,18 @@ OIDC_OP_TOKEN_ENDPOINT = _oidc_placeholder
 OIDC_OP_USER_ENDPOINT = _oidc_placeholder
 OIDC_OP_JWKS_ENDPOINT = _oidc_placeholder
 
-if AUTH_PROVIDER == "oidc" and _oidc_auth_domain and _oidc_issuer:
+if AUTH_PROVIDER == "oidc":
+    # Cognito has two different base URLs:
+    # - Auth domain: for OAuth endpoints (authorize, token, userInfo)
+    # - Issuer URL: for JWKS (token verification)
+    _oidc_auth_domain = required_runtime_env("OIDC_AUTH_DOMAIN", dev_default="https://auth.example.test")
+    _oidc_issuer = required_runtime_env("OIDC_ISSUER_URL", dev_default="https://issuer.example.test")
     # OAuth endpoints use the auth domain
     OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_auth_domain}/oauth2/authorize"
     OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_auth_domain}/oauth2/token"
     OIDC_OP_USER_ENDPOINT = f"{_oidc_auth_domain}/oauth2/userInfo"
     # JWKS uses the issuer URL
     OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
-elif AUTH_PROVIDER == "oidc":
-    warnings.warn(
-        "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
-        RuntimeWarning,
-        stacklevel=2,
-    )
 
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
@@ -141,7 +145,7 @@ OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url" if AUTH_PROVIDER =
 OIDC_CREATE_USER = True
 
 # Use email as username (default is sha1 hash of email)
-OIDC_USERNAME_ALGO = "config.oidc.generate_username"
+OIDC_USERNAME_ALGO = "config.username.generate_username"
 
 # URLs exempt from OIDC authentication (public pages)
 # Must be URL paths starting with "/" or view names (not regex patterns)
@@ -158,6 +162,8 @@ OIDC_EXEMPT_URLS = [
     "/dev-logout/",
     # CTF magic link registration (token is the auth)
     "/ctf/register/",
+    # CTF magic link token exchange (token is the auth; CSRF-protected POST)
+    "/ctf/register/exchange/",
     # CTF help page
     "/ctf/help/",
 ]
@@ -167,3 +173,12 @@ OIDC_EXEMPT_URLS = [
 # won't expire their sessions. This ensures no surprises from Django defaults.
 # 14 days
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
+
+# Risk register Cognito group gate (issue #151). Fail closed when unset outside tests.
+RISK_REGISTER_ALLOWED_COGNITO_GROUPS = _env_list("RISK_REGISTER_ALLOWED_COGNITO_GROUPS")
+if not RISK_REGISTER_ALLOWED_COGNITO_GROUPS and not IS_TEST_RUN:
+    warnings.warn(
+        "RISK_REGISTER_ALLOWED_COGNITO_GROUPS is unset; risk register access is denied for all principals.",
+        RuntimeWarning,
+        stacklevel=2,
+    )

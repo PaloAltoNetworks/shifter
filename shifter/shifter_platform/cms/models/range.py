@@ -15,6 +15,7 @@ from django.db import models
 from cms.models.assets import AgentConfig
 from cms.models.lifecycle import apply_terminal_soft_delete
 from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
+from shared.enums import RangeSource
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,10 @@ class RangeInstance(SoftDeleteMixin, models.Model):
         user_id: ID of the user who requested creation (IntegerField, not FK)
         agent: AgentConfig used, if any (FK, nullable)
         status: Current lifecycle status (pending, provisioning, ready, etc.)
+        range_source: Server-derived provenance label — which product path created this
+            range (``mission_control`` or ``ctf``). Never user-supplied. Existing rows
+            default to ``mission_control`` to preserve Mission Control semantics. Used
+            by CMS admission to allow a user to hold one range per source (#450).
         range_spec: Hydrated RangeSpec JSON (instance specs, scenario details)
         created_at: When this record was created
         deleted_at: When this record was soft-deleted (null if active)
@@ -69,8 +74,15 @@ class RangeInstance(SoftDeleteMixin, models.Model):
         related_name="range_instances",
     )
     status = models.CharField(max_length=20, default="pending")
+    range_source = models.CharField(
+        max_length=20,
+        choices=[(s.value, s.name) for s in RangeSource],
+        default=RangeSource.MISSION_CONTROL.value,
+        help_text="Server-derived provenance: which product path created this range.",
+    )
     range_spec = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     # ``objects`` is a SoftDeleteManager: every queryset pre-filters to

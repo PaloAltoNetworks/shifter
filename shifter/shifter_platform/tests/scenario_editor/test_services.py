@@ -10,6 +10,7 @@ from django.core.exceptions import PermissionDenied
 
 import cms.scenario_editor.services as scenario_services
 from cms.models import Scenario, ScenarioMetadata
+from cms.scenario_editor._validation import structural_definition_from_detail
 from cms.scenario_editor.services import (
     ScenarioEditorError,
     clone_scenario,
@@ -27,6 +28,7 @@ from cms.scenario_editor.services import (
     validate_definition,
     validate_yaml,
 )
+from cms.scenarios.registry import get_scenario_detail
 
 User = get_user_model()
 
@@ -107,6 +109,32 @@ class TestValidateDefinition:
         )
         assert len(errors) > 0
         assert any("NonExistent" in e for e in errors)
+
+    def test_structural_definition_from_detail_excludes_metadata(self, valid_definition):
+        detail = {
+            "id": "source-scenario",
+            "name": "Source Scenario",
+            "description": "Source description",
+            "enabled": False,
+            "staff_only": True,
+            "is_default": True,
+            "agent_requirements": {"requires_windows": True},
+            "instances": valid_definition["instances"],
+            "subnets": valid_definition["subnets"],
+            "ngfw": True,
+            "scenario_type": "demo",
+            "future_field": {"nested": "value"},
+        }
+
+        definition = structural_definition_from_detail(detail)
+
+        assert definition["future_field"] == {"nested": "value"}
+        assert definition["ngfw"] is True
+        assert definition["scenario_type"] == "demo"
+        assert "enabled" not in definition
+        assert "staff_only" not in definition
+        assert "agent_requirements" not in definition
+        assert "is_default" not in definition
 
 
 class TestValidateYaml:
@@ -286,9 +314,11 @@ class TestCloneScenario:
             "basic",
             new_scenario_id="basic-clone",
         )
+        expected_definition = structural_definition_from_detail(get_scenario_detail("basic"))
+
         assert clone.scenario_id == "basic-clone"
         assert clone.name == "Copy of Basic Range"
-        assert len(clone.definition["instances"]) == 2
+        assert clone.definition == expected_definition
         persisted = Scenario.objects.get(scenario_id="basic-clone")
         assert persisted.pk == clone.pk
         assert persisted.name == "Copy of Basic Range"
@@ -300,8 +330,11 @@ class TestCloneScenario:
             new_scenario_id="custom-clone",
             new_name="My Clone",
         )
+        expected_definition = structural_definition_from_detail(get_scenario_detail("custom-test"))
+
         assert clone.scenario_id == "custom-clone"
         assert clone.name == "My Clone"
+        assert clone.definition == expected_definition
         persisted = Scenario.objects.get(scenario_id="custom-clone")
         assert persisted.pk == clone.pk
         assert persisted.name == "My Clone"
@@ -313,6 +346,17 @@ class TestCloneScenario:
                 "nonexistent",
                 new_scenario_id="clone",
             )
+
+    def test_clone_preserves_ngfw_from_yaml_default(self, staff_user, db):
+        clone = clone_scenario(
+            staff_user,
+            "basic_ngfw",
+            new_scenario_id="basic-ngfw-clone",
+        )
+        expected_definition = structural_definition_from_detail(get_scenario_detail("basic_ngfw"))
+
+        assert clone.definition == expected_definition
+        assert clone.definition["ngfw"] is True
 
 
 class TestExportScenarioYaml:

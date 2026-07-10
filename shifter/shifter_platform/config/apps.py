@@ -11,6 +11,10 @@ class PortalConfig(AppConfig):
     name = "config"
 
     def ready(self) -> None:
-        from config.health_checks import register_channel_layer_redis_health_check
+        from config.health_checks import (
+            register_audit_log_degraded_health_check,
+            register_channel_layer_redis_health_check,
+        )
 
+        register_audit_log_degraded_health_check()
         register_channel_layer_redis_health_check()

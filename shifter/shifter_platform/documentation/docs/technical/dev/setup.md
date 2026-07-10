@@ -42,9 +42,6 @@ Or run phases separately:
 # Phase 1: Bootstrap AWS account (S3 state backend, GitHub OIDC, IAM)
 ./scripts/bootstrap/deploy.py bootstrap --env prod --profile <your-prod-profile>
 
-# Or use standalone bash scripts:
-# AWS_PROFILE=<your-prod-profile> ./scripts/bootstrap/prod.sh
-
 # Phase 2: Deploy Terraform (Core → Range → Portal)
 ./scripts/bootstrap/deploy.py terraform --env prod --profile <your-prod-profile>
 ```
@@ -83,7 +80,7 @@ Copy the backend config from bootstrap output to these files:
 
 The committed `terraform.tfvars` files ship an `example.com` baseline.
 Override per-deployment values with a `local.auto.tfvars` (gitignored)
-alongside each baseline — Terraform auto-loads `*.auto.tfvars` and the
+alongside each baseline; Terraform auto-loads `*.auto.tfvars` and the
 local overrides win:
 
 ```bash
@@ -96,7 +93,7 @@ user_storage_bucket   = "shifter-user-storage-<your-account-id>"
 EOF
 ```
 
-`local.auto.tfvars` is gitignored — never commit one. The full list of
+`local.auto.tfvars` is gitignored; never commit one. The full list of
 required values, plus the CI-deploy equivalent via GitHub secrets and
 repository variables, is documented in
 [`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
@@ -201,12 +198,17 @@ Create a CNAME record pointing your domain to the ALB DNS name.
 
 ### 8. Build and Push Container
 
-The first deploy creates empty ECR repos. Push the portal container:
+The first deploy creates empty ECR repos. The portal, Guacamole, and engine
+provisioner images are built and pushed by the Deploy workflow itself, not by a
+local script. Trigger the deploy to build and push them:
 
 ```bash
-# Via CI/CD: run Deploy with workflow_dispatch on main
-# Or manually:
-./scripts/build-and-push.sh prod
+# Run the Deploy workflow with workflow_dispatch on the environment's deploy
+# branch (aws-dev for dev, main for prod). The _shifter-platform.yml "build"
+# job builds shifter/shifter_platform/Dockerfile and pushes to the
+# shifter-<env>-portal ECR repo; the "push-guacamole-images" job builds and
+# pushes guacd and guacamole-client.
+gh workflow run Deploy --ref main
 ```
 
 ### 9. Cognito Configuration
@@ -338,7 +340,7 @@ gke_master_authorized_cidrs = ["<your-operator-egress>/32"]
 EOF
 ```
 
-For CI deploys the equivalent values come from GitHub secrets — see
+For CI deploys the equivalent values come from GitHub secrets; see
 [`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
 
 ### 4. Deploy

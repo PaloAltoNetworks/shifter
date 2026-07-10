@@ -37,27 +37,53 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
+      AWS_ROLE_ARN_PROOF:
+        required: false
 
 env:
   AWS_REGION: us-east-2
 
 jobs:
+  test:
+    name: Test provisioner (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: shifter/engine/provisioner
+        run: uv sync --group dev
+
+      - name: Run provisioner tests
+        working-directory: shifter/engine/provisioner
+        env:
+          TESTING: "1"
+        run: uv run --with pytest-cov pytest tests/ --cov=. --cov-report=xml:coverage.xml
+
   validate:
     name: Validate (${{ inputs.environment }})
     # PR validation only needs a local Docker build and no cloud credentials.
     # Keep it on GitHub-hosted runners so PRs do not queue behind the
     # deployment runner pool; build/deploy remain self-hosted below.
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Build provisioner image locally
-        run: docker build --no-cache -t shifter-engine-validate ./shifter/engine/provisioner
+        run: docker build --no-cache -f shifter/engine/provisioner/Dockerfile -t shifter-engine-validate ./shifter
 
   build:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
+    # Backstop only (see #1220); generous vs. real image-build times.
+    timeout-minutes: 90
     environment: ${{ inputs.github_environment }}
-    needs: validate
+    needs: [test, validate]
     permissions:
       id-token: write
       contents: read
@@ -66,13 +92,44 @@ jobs:
       image_tag: ${{ steps.image.outputs.tag }}
       image_digest: ${{ steps.build.outputs.digest }}
     env:
-      ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
+      ECR_REPOSITORY: shifter-${{ inputs.environment }}-pulumi-provisioner
     steps:
       - uses: actions/checkout@v6
 
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -92,7 +149,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./shifter/engine/provisioner
+          context: ./shifter
+          file: ./shifter/engine/provisioner/Dockerfile
           push: true
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
@@ -101,23 +159,56 @@ jobs:
   deploy:
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
+    # Backstop only (see #1220); generous vs. real deploy times.
+    timeout-minutes: 90
     environment: ${{ inputs.github_environment }}
     permissions:
       id-token: write
-    needs: build
+    needs: [test, build]
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     env:
-      TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
+      TASK_FAMILY: ${{ inputs.environment }}-portal-pulumi-provisioner
     steps:
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update ECS task definition
         env:
           IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
-          ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
+          ECR_REPOSITORY: shifter-${{ inputs.environment }}-pulumi-provisioner
           FIRST_DEPLOY: ${{ inputs.first_deploy }}
         run: |
           if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then

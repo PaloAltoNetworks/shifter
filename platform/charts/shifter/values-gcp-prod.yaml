@@ -14,8 +14,11 @@ workers:
 guacd:
   replicas: 2
 
+# Single guacamole-client replica: tokens are minted and served from task-local
+# process memory, so N>1 replicas break first-click RDP (#928). Scale guacd for
+# capacity, not the client.
 guacamoleClient:
-  replicas: 2
+  replicas: 1
 
 ingress:
   enabled: true

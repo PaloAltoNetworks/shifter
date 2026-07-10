@@ -40,8 +40,9 @@ locals {
   common_tags = merge(var.tags, {
     Module = "guacamole"
   })
-  account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.id
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
+  account_id      = data.aws_caller_identity.current.account_id
+  region          = data.aws_region.current.id
 }
 
 # ------------------------------------------------------------------------------

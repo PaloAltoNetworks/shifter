@@ -15,6 +15,8 @@ data "aws_availability_zones" "available" {
 locals {
   azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
 
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
+
   common_tags = merge(var.tags, {
     Module = "vpc"
   })
@@ -186,6 +188,56 @@ resource "aws_route_table_association" "private" {
 }
 
 # ------------------------------------------------------------------------------
+# Public-workload subnets (for CTFd and future standalone public EC2)
+# ------------------------------------------------------------------------------
+# A public tier kept SEPARATE from the ALB ingress (`public`) tier so the
+# portal target-service security groups (Django:8000, Guacamole client:8080)
+# can admit an ALB-only source CIDR without also admitting these workloads
+# (#911 NET-2 / #933). Standalone internet-facing instances (CTFd has its own
+# EIP, public IP, and ACME/HTTPS) live here; they reach the internet directly
+# via the IGW. They are NOT routed through the portal inspection boundary —
+# that boundary inspects the ALB<->private service path, and segmentation from
+# these workloads is enforced by the target-service SGs, not by routing.
+resource "aws_subnet" "public_workload" {
+  count = var.az_count
+
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index + 2 * var.az_count)
+  availability_zone       = local.azs[count.index]
+  map_public_ip_on_launch = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-public-workload-${local.azs[count.index]}"
+    Tier = "public-workload"
+  })
+}
+
+resource "aws_route_table" "public_workload" {
+  count = var.az_count
+
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-public-workload-rt-${local.azs[count.index]}"
+  })
+}
+
+resource "aws_route" "public_workload_internet" {
+  count = var.az_count
+
+  route_table_id         = aws_route_table.public_workload[count.index].id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.this.id
+}
+
+resource "aws_route_table_association" "public_workload" {
+  count = var.az_count
+
+  subnet_id      = aws_subnet.public_workload[count.index].id
+  route_table_id = aws_route_table.public_workload[count.index].id
+}
+
+# ------------------------------------------------------------------------------
 # VPC Flow Logs
 # ------------------------------------------------------------------------------
 
@@ -204,7 +256,9 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 resource "aws_iam_role" "flow_logs" {
   count = var.enable_flow_logs ? 1 : 0
 
-  name = "${var.name_prefix}-flow-logs-role"
+  name = "${local.iam_name_prefix}-flow-logs-role"
+
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

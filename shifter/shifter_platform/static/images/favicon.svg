@@ -1,4 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Shifter">
-  <rect width="32" height="32" rx="6" fill="#1f1f1f"/>
-  <text x="16" y="22" text-anchor="middle" font-family="Lato, Arial, sans-serif" font-weight="700" font-size="20" fill="#e5e5e5">S</text>
+  <defs>
+    <linearGradient id="shifter-favicon" x1="8" y1="6" x2="26" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a84ff"/>
+      <stop offset="1" stop-color="#0a66e0"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#161618"/>
+  <path d="M10 8 L17 16 L10 24" stroke="url(#shifter-favicon)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+  <path d="M16 8 L23 16 L16 24" stroke="url(#shifter-favicon)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

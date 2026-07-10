@@ -4,7 +4,6 @@ Tests for Packer AMI build configuration.
 Run with: pytest shifter/packer/tests/test_packer.py -v
 """
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -13,6 +12,8 @@ import pytest
 
 PACKER_DIR = Path(__file__).parent.parent
 SCRIPTS_DIR = PACKER_DIR / "scripts"
+REPO_ROOT = PACKER_DIR.parent.parent
+PACKER_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "packer.yml"
 
 
 class TestScriptStructure:
@@ -165,18 +166,21 @@ class TestPackerTemplates:
     )
     def test_packer_validate(self):
         """Packer templates should be valid."""
-        os.chdir(PACKER_DIR)
         packer_path = shutil.which("packer")
 
+        # Pass cwd= rather than os.chdir() so the validate runs in PACKER_DIR
+        # without mutating the process-global working directory for the rest
+        # of the pytest session.
         # Init first
         # Security context: packer_path from shutil.which() in controlled test environment
-        subprocess.run([packer_path, "init", "."], capture_output=True)  # noqa: S603
+        subprocess.run([packer_path, "init", "."], capture_output=True, cwd=PACKER_DIR)  # noqa: S603
 
         # Validate with var-file (no defaults)
         result = subprocess.run(  # noqa: S603
             [packer_path, "validate", "-var-file=dev.pkrvars.hcl", "."],
             capture_output=True,
             text=True,
+            cwd=PACKER_DIR,
         )
         assert result.returncode == 0, f"Packer validate failed: {result.stderr}"
 
@@ -213,6 +217,40 @@ class TestClaudeCode:
         """Bedrock environment variables should be set."""
         assert "CLAUDE_CODE_USE_BEDROCK=1" in claude_content
         assert "AWS_REGION" in claude_content
+
+    def test_kali_user_bashrc(self, claude_content):
+        """Mission Control SSH uses the kali user."""
+        assert "/home/kali/.bashrc" in claude_content
+
+    def test_autostart_installer(self, claude_content):
+        """Kali bake should install the shared autostart hook."""
+        assert "/usr/local/lib/shifter/claude-autostart-install.sh" in claude_content
+        assert "install_claude_autostart /home/kali/.bashrc" in claude_content
+
+
+class TestClaudeAutostartInstall:
+    """Test shared Claude autostart installer (#180)."""
+
+    @pytest.fixture
+    def autostart_content(self):
+        return (SCRIPTS_DIR / "common" / "claude-autostart-install.sh").read_text()
+
+    def test_installer_exists(self):
+        assert (SCRIPTS_DIR / "common" / "claude-autostart-install.sh").exists()
+
+    def test_canonical_command(self, autostart_content):
+        assert "claude --dangerously-skip-permissions" in autostart_content
+
+    def test_interactive_guards(self, autostart_content):
+        assert "[[ $- != *i* ]]" in autostart_content
+        assert "[[ ! -t 0 ]]" in autostart_content
+        assert "SHIFTER_CLAUDE_AUTOSTART_DONE" in autostart_content
+
+    def test_expected_users_only(self, autostart_content):
+        assert "kali|ubuntu" in autostart_content
+
+    def test_no_exec(self, autostart_content):
+        assert "exec claude" not in autostart_content
 
 
 class TestCleanup:
@@ -325,3 +363,110 @@ class TestUbuntuClaudeCode:
         """Bedrock environment variables should be set."""
         assert "CLAUDE_CODE_USE_BEDROCK=1" in claude_content
         assert "AWS_REGION" in claude_content
+
+    def test_autostart_installer(self, claude_content):
+        """Ubuntu victim bake should install the shared autostart hook."""
+        assert "/usr/local/lib/shifter/claude-autostart-install.sh" in claude_content
+        assert "install_claude_autostart /home/ubuntu/.bashrc" in claude_content
+
+
+class TestWindowsServices:
+    """Test that Windows services.ps1 has correct XAMPP install invocation."""
+
+    @pytest.fixture
+    def services_content(self):
+        return (SCRIPTS_DIR / "windows" / "services.ps1").read_text()
+
+    def test_no_launchapps_arg(self, services_content):
+        """--launchapps is not a supported XAMPP unattended arg and must be absent."""
+        assert "--launchapps" not in services_content
+
+    def test_unattended_mode_present(self, services_content):
+        """XAMPP installer must be called with --mode unattended."""
+        assert "--mode unattended" in services_content
+
+    def test_passhru_used(self, services_content):
+        """Start-Process for XAMPP must capture the process object via -PassThru."""
+        assert "-PassThru" in services_content
+
+    def test_exitcode_guard(self, services_content):
+        """Script must check XAMPP exit code and call exit 1 on failure."""
+        assert "ExitCode" in services_content
+        assert "exit 1" in services_content
+
+
+class TestBuilderLifecycle:
+    """Regression tests for transient EC2 builder termination (issue #342)."""
+
+    LINUX_SOURCES = ("kali", "ubuntu", "brokenbk")
+    WINDOWS_SOURCES = ("windows", "dc")
+
+    @staticmethod
+    def _template_content(source: str) -> str:
+        path = PACKER_DIR / f"{source}.pkr.hcl"
+        assert path.exists(), f"Missing template: {path.name}"
+        return path.read_text()
+
+    @pytest.mark.parametrize("source", LINUX_SOURCES)
+    def test_linux_shutdown_behavior_terminates(self, source):
+        """Linux builders must terminate on shutdown so orphaned instances do not incur cost."""
+        content = self._template_content(source)
+        assert 'shutdown_behavior = "terminate"' in content
+
+    @pytest.mark.parametrize("source", WINDOWS_SOURCES)
+    def test_windows_shutdown_behavior_stops_for_sysprep(self, source):
+        """Windows builders stop (not terminate) so Packer can snapshot the sysprep image."""
+        content = self._template_content(source)
+        assert 'shutdown_behavior = "stop"' in content
+        assert "disable_stop_instance = true" in content
+
+    @pytest.mark.parametrize(
+        ("source", "builder_name"),
+        [
+            ("kali", "packer-builder-kali"),
+            ("ubuntu", "packer-builder-ubuntu"),
+            ("brokenbk", "packer-builder-brokenbk"),
+            ("windows", "packer-builder-windows"),
+            ("dc", "packer-builder-dc"),
+        ],
+    )
+    def test_run_tags_name_matches_workflow_cleanup_selector(self, source, builder_name):
+        """Workflow cleanup keys off Packer run_tags.Name; templates must stay aligned."""
+        content = self._template_content(source)
+        assert f'Name = "{builder_name}"' in content
+
+
+class TestPackerWorkflowCleanup:
+    """Workflow invariants for defensive builder cleanup after Packer runs."""
+
+    CLEANUP_STEP_NAME = "- name: Cleanup Packer builder instances"
+
+    @staticmethod
+    def _cleanup_step_body(workflow_content: str) -> str:
+        cleanup_idx = workflow_content.index(TestPackerWorkflowCleanup.CLEANUP_STEP_NAME)
+        next_step_idx = workflow_content.find("\n      - name:", cleanup_idx + 1)
+        if next_step_idx == -1:
+            return workflow_content[cleanup_idx:]
+        return workflow_content[cleanup_idx:next_step_idx]
+
+    @pytest.fixture
+    def workflow_content(self):
+        assert PACKER_WORKFLOW.exists(), "packer.yml workflow must exist"
+        return PACKER_WORKFLOW.read_text()
+
+    def test_cleanup_step_runs_always(self, workflow_content):
+        """Orphaned builders must be terminated even when the build step fails."""
+        cleanup_body = self._cleanup_step_body(workflow_content)
+        assert "if: always()" in cleanup_body
+
+    def test_cleanup_selects_builder_run_tag(self, workflow_content):
+        """Cleanup must filter on the controlled packer-builder-<ami_type> tag and terminate."""
+        cleanup_body = self._cleanup_step_body(workflow_content)
+        assert "packer-builder-${{ inputs.ami_type }}" in cleanup_body
+        assert "terminate-instances" in cleanup_body
+
+    def test_ssm_update_precedes_cleanup(self, workflow_content):
+        """SSM publication stays success-only; cleanup is defense-in-depth after it."""
+        ssm_idx = workflow_content.index("- name: Update")
+        cleanup_idx = workflow_content.index(self.CLEANUP_STEP_NAME)
+        assert ssm_idx < cleanup_idx

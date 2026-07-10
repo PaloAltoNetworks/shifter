@@ -15,6 +15,16 @@ rm -rf /var/lib/apt/lists/*
 apt-get clean
 apt-get install -y --reinstall ubuntu-keyring 2>/dev/null || true
 
+# The command-not-found apt hook (cnf-update-db, registered by
+# /etc/apt/apt.conf.d/50command-not-found) intermittently fails with exit 100
+# during `apt-get update` when its Post-Invoke-Success step races the
+# freshly-downloaded package index files ("Could not open file ...
+# _Commands-amd64"). Under `set -e` that aborts the whole build even though the
+# lists themselves fetched fine. command-not-found is a desktop convenience with
+# no role in an automated server guest image, so disable its update hook before
+# refreshing the lists.
+rm -f /etc/apt/apt.conf.d/50command-not-found
+
 echo "=== Updating package lists ==="
 apt-get -o Acquire::Retries=3 update
 

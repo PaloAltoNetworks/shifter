@@ -1,0 +1,42 @@
+/* Mission Control CTFd walkthrough page.
+   Extracted from templates/mission_control/walkthrough.html (issue #414). */
+
+.ctfd-card {
+    max-width: 760px;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.ctfd-intro {
+    color: var(--theme-text-secondary);
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+
+.ctfd-link-box {
+    background: rgb(255, 255, 255, 0.03);
+    border: 1px solid var(--theme-border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    margin-bottom: 1rem;
+    word-break: break-all;
+}
+
+.ctfd-link-box a {
+    color: var(--theme-text);
+    text-decoration: none;
+}
+
+.ctfd-open-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--theme-primary);
+    color: #0b1a10;
+    padding: 0.75rem 1.1rem;
+    border-radius: 4px;
+    font-weight: 700;
+    text-decoration: none;
+}

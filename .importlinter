@@ -6,6 +6,7 @@ root_packages =
     mission_control
     shared
     ctf
+include_external_packages = True
 
 [importlinter:contract:engine-forbidden]
 name = Engine may not depend on CMS, Mission Control, or CTF
@@ -57,4 +58,29 @@ source_modules =
 forbidden_modules =
     engine
     mission_control
+allow_indirect_imports = True
+
+# ADR-031-R1: the ACES SDL tooling (aces-sdl) may be imported only within
+# shared.aces. The realization layers must consume ACES provisioning through the
+# neutral ProvisioningSpec and shared seams, never by importing an aces_*
+# package. shared is intentionally excluded as a source module here because
+# shared.aces (the manifest builder and RuntimeTarget backend) is the one place
+# allowed to import the tooling; shared.aces.__init__ is inert so importing a
+# runtime-safe shared.aces submodule never pulls the tooling in transitively.
+[importlinter:contract:aces-sdl-confined-to-shared-aces]
+name = ACES SDL tooling is confined to shared.aces (ADR-031-R1)
+type = forbidden
+source_modules =
+    cms
+    engine
+    management
+    mission_control
+    ctf
+forbidden_modules =
+    aces_sdl
+    aces_contracts
+    aces_runtime
+    aces_processor
+    aces_conformance
+    aces_backend_protocols
 allow_indirect_imports = True

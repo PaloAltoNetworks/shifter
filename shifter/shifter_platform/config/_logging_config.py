@@ -69,11 +69,6 @@ LOGGING = {
             "level": LOG_LEVEL,
             "propagate": False,
         },
-        "cms.experiments": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
-            "propagate": False,
-        },
         "config": {
             "handlers": ["console"],
             "level": LOG_LEVEL,

@@ -3,6 +3,12 @@
  * Lightweight accessible dropdown used across the platform.
  */
 
+const ARIA_HASPOPUP_LISTBOX = 'listbox';
+const ARIA_ATTR_EXPANDED = 'aria-expanded';
+const ARIA_EXPANDED_FALSE = 'false';
+const ARIA_EXPANDED_TRUE = 'true';
+let dropdownInstanceCounter = 0;
+
 class ShifterDropdown {
     constructor(element) {
         this.element = element;
@@ -25,7 +31,43 @@ class ShifterDropdown {
         this.isOpen = false;
 
         this.element._shifterDropdown = this;
+        this._wireAccessibility();
         this.init();
+    }
+
+    _wireAccessibility() {
+        if (!this.trigger) {
+            return;
+        }
+
+        const formGroup = this.element.closest('.form-group');
+        let label = null;
+
+        if (this.hiddenInput?.id) {
+            label = formGroup?.querySelector(`label[for="${this.hiddenInput.id}"]`) || null;
+        }
+
+        if (!label && formGroup) {
+            label = formGroup.querySelector('label.form-label, label');
+        }
+
+        if (!this.trigger.id) {
+            const baseId = this.element.id || `shifter-dropdown-${++dropdownInstanceCounter}`;
+            this.trigger.id = `${baseId}-trigger`;
+        }
+
+        if (label) {
+            if (!label.id) {
+                label.id = `${this.trigger.id}-label`;
+            }
+            if (!label.getAttribute('for')) {
+                label.setAttribute('for', this.trigger.id);
+            }
+            this.trigger.setAttribute('aria-labelledby', label.id);
+        }
+
+        this.trigger.setAttribute('aria-haspopup', ARIA_HASPOPUP_LISTBOX);
+        this.trigger.setAttribute(ARIA_ATTR_EXPANDED, ARIA_EXPANDED_FALSE);
     }
 
     init() {
@@ -78,6 +120,7 @@ class ShifterDropdown {
     open() {
         this.isOpen = true;
         this.element.classList.add('open');
+        this.trigger.setAttribute(ARIA_ATTR_EXPANDED, ARIA_EXPANDED_TRUE);
         this.highlightedIndex = -1;
 
         if (this.filterInput) {
@@ -97,6 +140,7 @@ class ShifterDropdown {
     close() {
         this.isOpen = false;
         this.element.classList.remove('open');
+        this.trigger.setAttribute(ARIA_ATTR_EXPANDED, ARIA_EXPANDED_FALSE);
         this.highlightedIndex = -1;
         this.items.forEach(item => item.classList.remove('highlighted'));
     }

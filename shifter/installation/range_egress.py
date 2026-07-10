@@ -34,13 +34,16 @@ class RangeEgressMode(StrEnum):
     """Operating mode for the range egress policy.
 
     ``status-quo`` is the documented default when the operator omits the block: each
-    backend preserves its existing posture so PLAT-220 is opt-in. The other two modes
-    are active platform contracts and apply identically on AWS and GCP.
+    backend preserves its existing posture so PLAT-220 is opt-in. The other modes are
+    active platform contracts. ``none`` (ADR-026) removes the runtime default route on
+    AWS participant subnets; it is not the same as ``deny-all``, which keeps a firewall
+    default route with default-deny enforcement.
     """
 
     STATUS_QUO = "status-quo"
     DENY_ALL = "deny-all"
     ALLOWLIST = "allowlist"
+    NONE = "none"
 
 
 def _validate_cidr(value: str) -> str:
@@ -93,7 +96,12 @@ class RangeEgressPolicy(BaseModel):
                 "mode='allowlist' requires a non-empty allowed_cidrs list; use mode='deny-all' "
                 "to forbid all egress or omit the block to preserve backend status-quo"
             )
-        if self.mode != RangeEgressMode.ALLOWLIST and self.allowed_cidrs:
+        if self.mode == RangeEgressMode.NONE and self.allowed_cidrs:
+            raise ValueError(
+                "mode='none' requires an empty allowed_cidrs list; zero egress is a route-table "
+                "posture, not a CIDR allowlist"
+            )
+        if self.mode not in (RangeEgressMode.ALLOWLIST, RangeEgressMode.NONE) and self.allowed_cidrs:
             raise ValueError(
                 f"allowed_cidrs is only meaningful when mode='allowlist' (current mode={self.mode.value!r}); "
                 "set mode='allowlist' or remove the allowed_cidrs list"
@@ -107,6 +115,13 @@ class RangeEgressPolicy(BaseModel):
         if dupes:
             raise ValueError(f"duplicate CIDR(s) after normalization: {sorted(set(dupes))}")
         return self
+
+
+def aws_runtime_egress_mode(policy: RangeEgressPolicy) -> str:
+    """Map the public policy to the AWS runtime route-table bridge mode."""
+    if policy.mode == RangeEgressMode.NONE:
+        return "none"
+    return "allowlist"
 
 
 #: The reserved key under ``RootConfig.settings`` that carries the policy.

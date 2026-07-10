@@ -400,13 +400,35 @@ class TerminalManager extends TerminalLayoutBase {
     }
 
     /**
-     * Calculate retry delay with exponential backoff
+     * Uniform random fraction in [0, 1).
+     *
+     * Sourced from crypto.getRandomValues rather than Math.random(): the value
+     * only seeds reconnect-backoff jitter (no security requirement), but the
+     * crypto source avoids the weak-PRNG ambiguity static analysers flag while
+     * keeping identical statistical behaviour.
+     */
+    _randomFraction() {
+        const buf = new Uint32Array(1);
+        globalThis.crypto.getRandomValues(buf);
+        return buf[0] / 2 ** 32;
+    }
+
+    /**
+     * Calculate retry delay with exponential backoff and equal jitter.
+     *
+     * The cap is the deterministic exponential backoff (base * 2^n, clamped to
+     * maxDelayMs). The returned delay is half that cap plus a uniform random
+     * share of the other half ("equal jitter"). The floor keeps reconnects from
+     * hammering the server immediately, while the random spread prevents every
+     * terminal dropped by an ASG instance refresh from reconnecting in lockstep
+     * and stampeding the remaining instances (issue #931).
      */
     _getRetryDelay(retryCount) {
-        return Math.min(
+        const cap = Math.min(
             this.retryConfig.baseDelayMs * Math.pow(2, retryCount),
             this.retryConfig.maxDelayMs
         );
+        return Math.round(cap / 2 + this._randomFraction() * (cap / 2));
     }
 
     /**

@@ -5,6 +5,12 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "iam_name_prefix" {
+  description = "Prefix for IAM role and instance profile names (defaults to name_prefix)"
+  type        = string
+  default     = null
+}
+
 variable "vpc_id" {
   description = "ID of the VPC"
   type        = string
@@ -120,4 +126,9 @@ variable "enable_log_exports" {
 variable "log_retention_days" {
   description = "CloudWatch log retention in days for RDS logs"
   type        = number
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary ARN required on CI-created shifter-* roles"
+  type        = string
 }

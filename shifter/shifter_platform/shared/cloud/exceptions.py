@@ -21,6 +21,18 @@ class CloudStorageError(CloudError):
     """Error during object storage operations."""
 
 
+class ObjectPreconditionError(CloudStorageError):
+    """Raised when a conditional storage operation fails its precondition.
+
+    Signals that a copy/write was refused because the source object no longer
+    matches the expected identity (ETag/generation) or the destination already
+    exists. This is a security signal for upload finalization — the validated
+    bytes changed between check and use — not a transient error to retry
+    silently. Subclasses ``CloudStorageError`` so existing broad handlers still
+    catch it, while callers that care can distinguish the precondition failure.
+    """
+
+
 class CloudTaskError(CloudError):
     """Error during task/container orchestration operations."""
 
@@ -31,3 +43,7 @@ class CloudQueueError(CloudError):
 
 class CloudSecretsError(CloudError):
     """Error during secrets retrieval operations."""
+
+
+class CloudEventBusError(CloudError):
+    """Error during event bus publish operations."""

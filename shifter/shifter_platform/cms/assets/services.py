@@ -167,7 +167,7 @@ def delete_agent(agent: AgentConfig) -> None:
     try:
         s3_delete(agent.s3_key)
     except S3Error as e:
-        logger.error("delete_agent: S3 delete failed agent_id=%s error=%s", agent.id, e)
+        logger.exception("delete_agent: S3 delete failed agent_id=%s error=%s", agent.id, e)
         raise AssetError(f"Failed to delete agent from storage: {e}") from e
 
     # Capture state before deletion

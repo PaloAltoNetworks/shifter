@@ -25,7 +25,7 @@ def _json(response):
 class TestListAgents:
     def test_requires_login(self):
         response = Client().get(reverse("mission_control:list_agents"))
-        assert response.status_code == 302
+        assert response.status_code == 401
 
     def test_returns_user_agents(self, authenticated_client, make_agent):
         client, user = authenticated_client(email="agents@example.com")

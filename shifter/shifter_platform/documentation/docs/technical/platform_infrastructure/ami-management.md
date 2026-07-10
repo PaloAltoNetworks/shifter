@@ -115,12 +115,44 @@ store the password value in environment tfvars.
 | `shifter/engine/provisioner/catalog/instances.py` | Instance type definitions |
 | `shifter/engine/provisioner/plans/dc_setup.py` | DC verification (no promotion step) |
 
-## GCP/GDC
+## GCP
 
-GCP does not use AMIs or Packer. Guest images are managed differently per asset type:
+GCP keeps four distinct image concepts separate (do not conflate them with AWS
+AMIs):
 
-- **GDC VM Runtime** - OS images stored in GCS, imported as `VirtualMachineDisk` CRDs. Image URLs configured in `GDCVMRuntimeConfig`.
+### GCE guest images (Packer)
+
+Compute Engine guest images are built with Packer, parallel to the AWS AMI flow
+(issue #505, PLAT-001.10). They are **not** AMIs and their refs are **never**
+stored in AWS SSM `/shifter/ami/*`.
+
+- Templates: `shifter/packer/gcp/*.pkr.hcl` (`googlecompute` builders), a
+  separate Packer configuration from the AWS `amazon-ebs` templates one
+  directory up — `packer` invoked in either directory never sees the other.
+- **Version pointer = image family.** Each build publishes image
+  `shifter-<type>-<timestamp>` into image family `shifter-<type>`; consumers
+  resolve the newest non-deprecated image in the family (the GCP-native analog
+  of the AWS SSM parameter — there is no SSM equivalent).
+- Build: `.github/workflows/packer-gcp.yml` (`workflow_dispatch`,
+  `ubuntu-latest` + Workload Identity Federation). Promote dev→prod:
+  `.github/workflows/packer-gcp-promote.yml` (copies the newest dev-family image
+  into the prod project's family and deprecates the previous head).
+- Image types: `ubuntu`, `brokenbk`, `kali`, `windows`, `dc`. **Kali** has no
+  public GCP image and the official genericcloud disk is not GCE-bootable, so
+  its builder converts Google's `debian-12` base into Kali Rolling in its first
+  provisioning script; see `shifter/packer/gcp/README.md`.
+- Agent triggers: the `build_gce_image` / `promote_gce_image` MCP ops tools
+  (`infra_mutation`), parallel to `build_ami` / `promote_ami`.
+
+> Guest specialization that is AWS-specific in the shared provisioning scripts
+> (the SSM agent; Claude Code's Bedrock binding) is a guest-runtime / range
+> concern tracked separately from this image-build pipeline.
+
+### Other GCP image concepts (unchanged)
+
+- **GDC VM Runtime** - OS images stored in GCS, imported as `VirtualMachineDisk` CRDs. Image URLs configured in `GDCVMRuntimeConfig` (`GDC_*_IMAGE_URL`).
 - **Scenario Pods** - Standard container images from Artifact Registry.
 - **VM-Series NGFW** - OVA image stored in GCS, bootstrapped via GCS bucket.
+- **Control-plane containers** - Built and pushed to Artifact Registry by `_gcp-dev.yml`.
 
 See [GDC Provisioning](gdc-provisioning) for details.

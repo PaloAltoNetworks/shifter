@@ -36,9 +36,10 @@ from cms.models.provisioning import (
     Subnet,
 )
 from cms.models.range import RangeInstance
-from cms.models.scenarios import Scenario, ScenarioMetadata
+from cms.models.scenarios import AcesPackageSource, Scenario, ScenarioMetadata
 
 __all__ = [
+    "AcesPackageSource",
     "AgentConfig",
     "AgentType",
     "App",

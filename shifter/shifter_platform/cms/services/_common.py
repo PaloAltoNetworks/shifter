@@ -181,9 +181,15 @@ def _flatten_range_spec_instances(range_spec: dict[str, Any] | None) -> list[dic
     - Current: instances nested under subnets (`range_spec["subnets"][*]["instances"]`)
     - Legacy: a flat `range_spec["instances"]` list (preserved for backward
       compatibility with existing prod rows)
+
+    New rows may carry ``spec_schema`` / ``spec_version`` / ``payload`` metadata;
+    those are unwrapped before shape detection.
     """
+    from shared.schemas.persistence import unwrap_persisted_spec
+
     if not range_spec:
         return []
+    range_spec = unwrap_persisted_spec(range_spec)
     subnet_specs = range_spec.get("subnets")
     if subnet_specs is not None:
         return [spec for subnet in subnet_specs for spec in subnet.get("instances", [])]

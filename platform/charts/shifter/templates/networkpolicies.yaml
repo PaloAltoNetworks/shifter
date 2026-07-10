@@ -193,6 +193,33 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+{{- if .Values.networkPolicy.rangeClusterApiCidrs }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-jobs-range-cluster-egress
+  namespace: {{ .Values.namespaces.jobs }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  # GDC range provisioning runs as Jobs that drive Terraform against the
+  # range cluster's kube-apiserver. The control plane is fronted by an
+  # internal TCP load balancer on the peered range network; allow egress
+  # to that endpoint on the apiserver port (default 6444).
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- range .Values.networkPolicy.rangeClusterApiCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.rangeClusterApiPort | default 6444 }}
+{{- end }}
 {{- if .Values.networkPolicy.privateServiceCidrs }}
 ---
 apiVersion: networking.k8s.io/v1

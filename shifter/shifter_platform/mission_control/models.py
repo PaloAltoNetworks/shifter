@@ -38,6 +38,11 @@ class GuacamoleBootstrapRequest(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     expires_at = models.DateTimeField(db_index=True)
+    # Set once when the ready URL is delivered to the client. `succeeded` keeps
+    # meaning "URL ready to deliver"; this marker records that the single-use
+    # delivery happened and the token field was cleared, so lifecycle state is
+    # never inferred from a blanked secret column.
+    delivered_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         """Ordering and lookup indexes for user-scoped polling."""

@@ -1,5 +1,5 @@
 # base image: debian:12-slim
-FROM debian@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+FROM debian@sha256:fac46bff2e02f51425b6e33b0e1169f55dfb053d83511ca28aa50c09fd5ed7a4
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \

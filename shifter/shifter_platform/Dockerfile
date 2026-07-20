@@ -77,7 +77,7 @@ RUN npm run build
 # digest-only satisfies docker:S8431. Refresh per
 # docs/architecture/rev1-build-deployment-provenance.md.
 # base image: python:3.12-slim-trixie
-FROM python@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf AS production
+FROM python@sha256:311ea5bb79f1a238ee9e38f8d5f09cb3b4b244575cf49e27cf365ea7e60f11d4 AS production
 
 # Image metadata. `maintainer` is the label SonarCloud docker:S7028 requires;
 # the org.opencontainers.image.* labels are the modern OCI equivalents.

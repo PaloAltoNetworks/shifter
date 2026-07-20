@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from cms.models import ScenarioMetadata
 from cms.scenarios.registry import get_catalog_entry
-from risk_register.models import AuditLog
+from shared.audit import AuditAction
 from shared.log_sanitize import safe_log_value
 
 from ._common import ScenarioEditorError, audit_scenario_change, validate_user
@@ -82,7 +82,7 @@ def update_metadata(
         raise
 
     audit_scenario_change(
-        action=AuditLog.Action.UPDATE,
+        action=AuditAction.UPDATE,
         actor_id=user.id,
         state={"scenario_id": scenario_id, "enabled": metadata.enabled, "staff_only": metadata.staff_only},
     )

@@ -63,15 +63,16 @@ def load_scenario(scenario_id: str) -> AnyScenarioTemplate:
     scenario_id = _validate_scenario_id(scenario_id)
     logger.debug("load_scenario: scenario_id=%s", safe_log_value(scenario_id))
 
-    # Resolve the candidate path and confirm it stays inside TEMPLATES_DIR.
-    # The slug validation already rejects traversal; this containment check is
-    # the canonical path-traversal barrier (and what static analysis models).
-    templates_root = TEMPLATES_DIR.resolve()
-    template_path = (templates_root / f"{scenario_id}.yaml").resolve()
-    if not template_path.is_relative_to(templates_root):
-        raise ValueError("Invalid scenario id")
-
-    if not template_path.exists():
+    # Resolve the template by a dict-key lookup over filesystem-enumerated
+    # templates rather than constructing a path from the caller-supplied id. The
+    # path handed to open() derives only from glob() output, so a user-controlled
+    # id can never reach the filesystem sink even in principle -- defense-in-depth
+    # on top of the slug allowlist, and the shape static analysis recognizes as
+    # safe (path from a trusted enumeration, not tainted input). This is the
+    # repo's canonical path-injection remediation: dict-key, not path.
+    available = {path.stem: path for path in TEMPLATES_DIR.glob("*.yaml")}
+    template_path = available.get(scenario_id)
+    if template_path is None:
         logger.warning("load_scenario: not found scenario_id=%s", safe_log_value(scenario_id))
         raise ValueError(f"Scenario '{scenario_id}' not found")
 

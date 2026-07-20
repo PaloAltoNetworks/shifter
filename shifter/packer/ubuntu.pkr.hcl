@@ -43,6 +43,7 @@ build {
   provisioner "shell" {
     scripts = [
       "scripts/ubuntu/base.sh",
+      "scripts/aws/linux-resolved-dns.sh",
       "scripts/ubuntu/services.sh",
       "scripts/ubuntu/tools.sh",
     ]

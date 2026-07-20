@@ -1,17 +1,54 @@
 """Compute Engine operation helpers for the GCE range-cell backend.
 
-Waiting on and surfacing errors from Compute long-running operations, factored
-out of ``gcp_range_cells`` so that module stays focused on resource lifecycle.
-The helpers accept both the google-cloud-compute SDK operation objects (which
-expose ``.result()``) and the dict-shaped responses used in tests.
+Waiting on and surfacing errors from Compute long-running operations, plus the
+existence-tolerant get/delete helpers, factored out of ``gcp_range_cells`` so
+that module stays focused on resource lifecycle. The wait helpers accept both
+the google-cloud-compute SDK operation objects (which expose ``.result()``) and
+the dict-shaped responses used in tests.
 """
 
 from __future__ import annotations
 
-from gcp_range_cell_clients import GCEClients
-from gcp_range_cell_plan import RangeCellPlan
+import logging
+from collections.abc import Callable
+
+from gcp_range_cell_clients import GCEClients, GoogleExceptions
+from gcp_range_cell_types import RangeCellPlan
+from log_redact import safe_log_fingerprint
+
+logger = logging.getLogger(__name__)
 
 _OPERATION_TIMEOUT_SECONDS = 600
+
+
+def _get_or_none(
+    callable_obj: Callable[..., object],
+    exceptions: GoogleExceptions,
+    **kwargs: object,
+) -> object | None:
+    """Return a Compute resource or None when the provider reports NotFound."""
+    try:
+        return callable_obj(**kwargs)
+    except exceptions.NotFound:
+        return None
+
+
+def _delete_resource(
+    plan: RangeCellPlan,
+    clients: GCEClients,
+    getter: Callable[..., object],
+    deleter: Callable[..., object],
+    scope: str,
+    **kwargs: object,
+) -> None:
+    """Delete a Compute resource when it exists."""
+    name = str(next(reversed(kwargs.values())))
+    existing = _get_or_none(getter, clients.google_exceptions, **kwargs)
+    if existing is None:
+        return
+    operation = deleter(**kwargs)
+    _wait_for_operation(plan, clients, operation, scope)
+    logger.info("Deleted GCE range resource name_fp=%s", safe_log_fingerprint(name))
 
 
 def _operation_name(operation: object) -> str:

@@ -141,6 +141,34 @@ class TestReassignRangeOwnerHappyPath:
         assert engine_range.cms_user_id == user_b.id
         assert EngineRequest.objects.get(request_id=request_id).user_id == user_b.id
 
+    def test_reassignment_is_rejected_while_the_previous_participant_vpn_is_live(self, user_a, user_b):
+        ri = _make_owned_range(owner=user_a)
+        engine_range = EngineRange.objects.get(request__request_id=ri.request.request_id)
+        engine_range.vpn_access_binding = {
+            "version": "openvpn-binding-v1",
+            "channel": "openvpn",
+            "generation": str(ri.request.request_id),
+            "owner_user_id": user_a.id,
+            "target_ref": str(uuid4()),
+            "endpoint": "vpn.example.test",
+            "port": 1194,
+            "profile_version": "openvpn-profile-v1",
+            "secret_ref": "provider-secret-reference",
+            "ready": True,
+        }
+        engine_range.save(update_fields=["vpn_access_binding"])
+
+        assert services.range_owner_reassignment_available(ri.pk) is False
+
+        with pytest.raises(CMSError, match="destroy its participant VPN generation first"):
+            services.reassign_range_owner(ri.pk, user_b)
+
+        engine_range.refresh_from_db()
+        assert engine_range.user_id == user_a.id
+        assert engine_range.vpn_access_binding is not None
+        assert RangeInstance.objects.get(pk=ri.pk).user_id == user_a.id
+        assert CmsRequest.objects.get(request_id=ri.request.request_id).user_id == user_a.id
+
 
 class TestReassignRangeOwnerNoOp:
     def test_noop_when_already_owned_by_new_user(self, user_b):
@@ -178,3 +206,28 @@ class TestReassignRangeOwnerErrors:
         # dispatch failed must have rolled back.
         assert RangeInstance.objects.get(pk=ri.pk).user_id == user_a.id
         assert CmsRequest.objects.get(request_id=request_id).user_id == user_a.id
+
+
+class TestReassignRangeOwnerActiveRangeCollision:
+    """Reassigning into an already-occupied (user, source) slot is rejected (#307).
+
+    Database enforcement is the backstop; the service translates the predictable
+    collision into a CMSError without partially moving CMS or engine ownership.
+    """
+
+    def test_raises_and_rolls_back_when_new_owner_already_has_active_range(self, user_a, user_b):
+        # Both helpers create CTF-source ranges. user_b already holds an active
+        # CTF range, so moving user_a's CTF range to user_b would create a second
+        # active (user_b, CTF) range and trips the constraint.
+        ri = _make_owned_range(owner=user_a)
+        request_id = ri.request.request_id
+        _make_range_without_engine_range(owner=user_b)
+
+        with pytest.raises(CMSError, match="already has an active range for this source"):
+            services.reassign_range_owner(ri.pk, user_b)
+
+        # No partial move: the CMS UPDATE rolled back and the engine call (which
+        # runs only after the CMS save) never fired, so ownership is unchanged.
+        assert RangeInstance.objects.get(pk=ri.pk).user_id == user_a.id
+        assert CmsRequest.objects.get(request_id=request_id).user_id == user_a.id
+        assert EngineRange.objects.get(request__request_id=request_id).user_id == user_a.id

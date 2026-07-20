@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from cms.handlers.range_events import apply_range_status, process_range_event
 from cms.management.commands.reconcile_range_events import (
+    Command,
     reconcile_range_instances,
     stale_range_instances_queryset,
 )
@@ -32,6 +33,29 @@ from shared.enums import RequestType, ResourceStatus
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
+
+
+def test_reconciler_pass_also_expires_due_range_leases():
+    """The existing generic reconciler is the single lease-cleanup runtime."""
+    user = _user()
+    request_id = uuid4()
+    cms_req = _cms_request(user, request_id)
+    _, engine_range = _engine_request_and_range(user, request_id, engine_status=ResourceStatus.READY.value)
+    instance = _range_instance(user, cms_req, status=ResourceStatus.READY.value)
+    now = timezone.now()
+    RangeInstance.objects.filter(pk=instance.pk).update(
+        expires_at=now - timedelta(minutes=1),
+        maximum_expires_at=now + timedelta(days=1),
+    )
+
+    Command()._run_once(stale_seconds=300, batch_size=25)
+
+    instance = RangeInstance.all_objects.get(pk=instance.pk)
+    engine_range.refresh_from_db()
+    assert instance.status == ResourceStatus.DESTROYING.value
+    assert instance.deleted_at is not None
+    assert engine_range.status == ResourceStatus.DESTROYING.value
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -383,11 +407,14 @@ class TestReconcileRangeInstances:
         instance_1 = _range_instance(user, cms_req_1, status=ResourceStatus.PROVISIONING.value)
         _backdate_range_instance(instance_1)
 
-        # Row 2 — will succeed: processed normally
+        # Row 2 — will succeed: processed normally. A different user so the two
+        # stale PROVISIONING ranges don't trip the one-active-range-per-source
+        # constraint (#307); the reconciler batches stale ranges across users.
+        user2 = _user()
         req_id_2 = uuid4()
-        cms_req_2 = _cms_request(user, req_id_2)
-        _engine_request_and_range(user, req_id_2, engine_status=ResourceStatus.READY.value)
-        instance_2 = _range_instance(user, cms_req_2, status=ResourceStatus.PROVISIONING.value)
+        cms_req_2 = _cms_request(user2, req_id_2)
+        _engine_request_and_range(user2, req_id_2, engine_status=ResourceStatus.READY.value)
+        instance_2 = _range_instance(user2, cms_req_2, status=ResourceStatus.PROVISIONING.value)
         _backdate_range_instance(instance_2)
 
         pk_to_fail = instance_1.pk

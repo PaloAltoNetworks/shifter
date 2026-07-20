@@ -22,6 +22,10 @@ from cms.assets.upload_token import generate_upload_token
 from cms.exceptions import CMSError
 from cms.models import AgentConfig
 from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+)
 from shared.constants import USER_CANNOT_BE_NONE
 
 pytestmark = pytest.mark.django_db
@@ -89,9 +93,7 @@ class TestCompleteUploadSuccess:
 
     def test_audit_records_presigned_upload_method(self, user, windows_os, s3_complete):
         agent = services.complete_upload(user, _token(user))
-        row = AuditLog.objects.get(
-            entity_type=AuditLog.EntityType.AGENT, entity_id=agent.id, action=AuditLog.Action.CREATE
-        )
+        row = AuditLog.objects.get(entity_type=AuditEntityType.AGENT, entity_id=agent.id, action=AuditAction.CREATE)
         assert row.new_state["upload_method"] == "presigned"
 
     def test_tags_install_key_completed_not_staging_key(self, user, windows_os, s3_complete):
@@ -124,8 +126,9 @@ class TestCompleteUploadImmutableFinalization:
         # presigned PUT overwrote them) between check and use.
         s3_complete.copy_object.side_effect = _precondition_client_error()
 
+        token_2 = _token(user)
         with pytest.raises(CMSError):
-            services.complete_upload(user, _token(user))
+            services.complete_upload(user, token_2)
 
         s3_complete.put_object_tagging.assert_not_called()
         assert AgentConfig.objects.count() == 0
@@ -164,8 +167,9 @@ class TestCompleteUploadUserAndTokenValidation:
             services.complete_upload("not a user", "token123")
 
     def test_raises_valueerror_when_user_is_unsaved(self):
+        user_2 = User(username="unsaved")
         with pytest.raises(ValueError, match="user must be saved"):
-            services.complete_upload(User(username="unsaved"), "token123")
+            services.complete_upload(user_2, "token123")
 
     @pytest.mark.parametrize(
         "token,err", [(None, "cannot be None"), ("", "cannot be empty"), ("   ", "cannot be empty")]
@@ -192,13 +196,15 @@ class TestCompleteUploadObjectValidation:
         s3_complete.head_object.side_effect = ClientError(
             {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
         )
+        token_2 = _token(user)
         with pytest.raises(CMSError, match="Upload not found"):
-            services.complete_upload(user, _token(user))
+            services.complete_upload(user, token_2)
 
     def test_raises_on_file_size_mismatch(self, user, s3_complete):
         s3_complete.head_object.return_value = {"ContentLength": 5000, "ETag": '"etag"'}
+        token_2 = _token(user, file_size=1000)
         with pytest.raises(CMSError, match="size mismatch"):
-            services.complete_upload(user, _token(user, file_size=1000))
+            services.complete_upload(user, token_2)
 
 
 class TestCompleteUploadHeaderInspection:
@@ -206,8 +212,9 @@ class TestCompleteUploadHeaderInspection:
         s3_complete.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=_ZIP_HEADER))}
         s3_key = f"agents/{user.id}/abc_agent.msi"
 
+        token_2 = _token(user, s3_key=s3_key, filename="agent.msi")
         with pytest.raises(CMSError, match="content"):
-            services.complete_upload(user, _token(user, s3_key=s3_key, filename="agent.msi"))
+            services.complete_upload(user, token_2)
 
         s3_complete.delete_object.assert_called_once()
         assert s3_complete.delete_object.call_args.kwargs["Key"] == s3_key
@@ -217,8 +224,9 @@ class TestCompleteUploadHeaderInspection:
     def test_header_read_failure_raises_and_does_not_finalize(self, user, s3_complete):
         s3_complete.get_object.side_effect = ClientError({"Error": {"Code": "500", "Message": "boom"}}, "GetObject")
 
+        token_2 = _token(user)
         with pytest.raises(CMSError, match="inspection"):
-            services.complete_upload(user, _token(user))
+            services.complete_upload(user, token_2)
 
         s3_complete.put_object_tagging.assert_not_called()
         assert AgentConfig.objects.count() == 0
@@ -227,8 +235,9 @@ class TestCompleteUploadHeaderInspection:
         leak = b"\x50\x4b\x03\x04S3CR3T-DO-NOT-LEAK"
         s3_complete.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=leak))}
 
+        token = _token(user, filename="agent.msi")
         with caplog.at_level("WARNING", logger="cms.services"), pytest.raises(CMSError):
-            services.complete_upload(user, _token(user, filename="agent.msi"))
+            services.complete_upload(user, token)
 
         combined = " ".join(record.getMessage() for record in caplog.records)
         assert "S3CR3T-DO-NOT-LEAK" not in combined

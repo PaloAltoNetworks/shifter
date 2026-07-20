@@ -13,6 +13,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
+    AcesContentDeliveryConfig,
+    AWSPolarisAgentConfig,
     GCERangeCellConfig,
     GCERangeImageProfile,
     GDCNetworkAccessConfig,
@@ -29,6 +31,8 @@ from config import (
     get_range_availability_zone,
     get_range_from_db,
     is_gce_range_cell_backend,
+    load_aces_content_delivery_config,
+    load_aws_polaris_agent_config,
     load_gce_range_cell_config,
     load_gdc_network_access_config,
     load_gdc_palo_alto_vmseries_config,
@@ -280,6 +284,14 @@ class TestRangeNetworkEnv:
         assert get_gcp_range_backend() == "gce"
         assert is_gce_range_cell_backend() is True
 
+    def test_gcp_range_backend_rejects_unknown_value(self, mocker):
+        # The gce/gdc parse now lives in shared.range_instantiation_policy (#1348),
+        # but get_gcp_range_backend() still raises RuntimeError for provisioner callers.
+        mocker.patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "bogus"}, clear=True)
+
+        with pytest.raises(RuntimeError, match="GCP_RANGE_BACKEND must be 'gdc' or 'gce'"):
+            get_gcp_range_backend()
+
     def test_load_range_network_config_prefers_generic_env_names(self, mocker):
         mocker.patch.dict(
             os.environ,
@@ -290,6 +302,7 @@ class TestRangeNetworkEnv:
                 "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
                 "RANGE_VPC_ID": "vpc-legacy",
                 "RANGE_VPC_CIDR": "10.1.0.0/16",
+                "CLOUD_PROVIDER": "aws",
             },
             clear=True,
         )
@@ -309,6 +322,7 @@ class TestRangeNetworkEnv:
                 "RANGE_VPC_CIDR": "10.1.0.0/16",
                 "PORTAL_VPC_CIDR": "10.0.0.0/16",
                 "AWS_REGION": "us-east-2",
+                "CLOUD_PROVIDER": "aws",
             },
             clear=True,
         )
@@ -682,6 +696,95 @@ class TestRangeNetworkEnv:
         with pytest.raises(RuntimeError, match="Missing GCE range image"):
             config.get_profile(role="victim", os_type="windows")
 
+    def test_load_gce_range_cell_config_rejects_malformed_image_reference(self, mocker):
+        # A malformed image reference must fail at config load, not after the
+        # Compute Engine create call rejects it (#1343 gap 7).
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "GCP_RANGE_LINUX_IMAGE": "Not A Valid Image!!",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="GCP_RANGE_LINUX_IMAGE"):
+            load_gce_range_cell_config()
+
+    def test_load_gce_range_cell_config_rejects_unknown_disk_type(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "GCP_RANGE_LINUX_IMAGE": "projects/debian-cloud/global/images/family/debian-12",
+                "GCP_RANGE_LINUX_DISK_TYPE": "pd-bogus",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="disk type"):
+            load_gce_range_cell_config()
+
+    def test_load_gce_range_cell_config_rejects_disk_below_role_minimum(self, mocker):
+        # Role-policy floor (NOT source-image validation): the documented
+        # Windows/DC >=100 GB minimum is enforced before instance creation so an
+        # obviously-undersized disk fails at config load, not at create time.
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "GCP_RANGE_WINDOWS_IMAGE": "projects/shifter/global/images/family/shifter-windows",
+                "GCP_RANGE_WINDOWS_DISK_SIZE_GB": "50",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="smaller than"):
+            load_gce_range_cell_config()
+
+    def test_load_gce_range_cell_config_accepts_valid_image_reference_forms(self, mocker):
+        # Bare slug, family/<name>, and full projects/... paths are all valid.
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GCP_RANGE_BACKEND": "gce",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_REGION": "us-central1",
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@test-project.iam.gserviceaccount.com",
+                "RANGE_NETWORK_ID": "projects/test-project/global/networks/range-net",
+                "GCP_RANGE_LINUX_IMAGE": "debian-12",
+                "GCP_RANGE_KALI_IMAGE": "family/shifter-polaris-vm",
+                "GCP_RANGE_DC_IMAGE": "projects/shifter/global/images/shifter-polaris-dc",
+            },
+            clear=True,
+        )
+
+        config = load_gce_range_cell_config()
+
+        assert config.linux.source_image == "debian-12"
+        assert config.kali.source_image == "family/shifter-polaris-vm"
+        assert config.dc.source_image == "projects/shifter/global/images/shifter-polaris-dc"
+
     def test_load_gdc_vmruntime_config_reads_image_contract(self, mocker):
         mocker.patch.dict(
             os.environ,
@@ -804,6 +907,290 @@ class TestRangeNetworkEnv:
             load_gdc_palo_alto_vmseries_config()
 
 
+def _full_aws_polaris_agent_env() -> dict[str, str]:
+    """Return a complete, valid AWS Polaris agent config env (#1377)."""
+    return {
+        "AWS_POLARIS_AGENT_REGION": "us-east-2",
+        "AWS_POLARIS_AGENT_MAIN_MODEL_ID": "us.anthropic.claude-sonnet-4-6",
+        "AWS_POLARIS_AGENT_SMALL_MODEL_ID": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN": (
+            "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN": (
+            "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-haiku-4-5-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS": (
+            "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-6-v1:0,"
+            "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-6-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS": (
+            "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS": "900",
+        "AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS": "300",
+        "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN": "arn:aws:iam::123456789012:policy/ShifterPermissionsBoundary",
+    }
+
+
+class TestLoadAwsPolarisAgentConfig:
+    """Tests for the AWS Polaris per-range Bedrock agent config seam (#1377).
+
+    One validated seam for AWS region, approved main/small Bedrock model
+    ids, their inference-profile/backing-model ARNs, and STS session
+    lifecycle -- consumed by both Terraform agent-role rendering and
+    PolarisRangeBootstrapPlan so model/ARN defaults live in exactly one
+    place.
+    """
+
+    def test_returns_none_when_not_configured(self, mocker):
+        """No AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN -> feature not enabled here."""
+        mocker.patch.dict(os.environ, {}, clear=True)
+
+        assert load_aws_polaris_agent_config() is None
+
+    def test_reads_full_contract_from_env(self, mocker):
+        mocker.patch.dict(os.environ, _full_aws_polaris_agent_env(), clear=True)
+
+        config = load_aws_polaris_agent_config()
+
+        assert config == AWSPolarisAgentConfig(
+            region="us-east-2",
+            main_model_id="us.anthropic.claude-sonnet-4-6",
+            small_model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            main_inference_profile_arn=(
+                "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6-v1:0"
+            ),
+            small_inference_profile_arn=(
+                "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-haiku-4-5-v1:0"
+            ),
+            main_backing_model_arns=(
+                "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-6-v1:0",
+                "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-6-v1:0",
+            ),
+            small_backing_model_arns=("arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-v1:0",),
+            sts_session_duration_seconds=900,
+            refresh_window_seconds=300,
+            permissions_boundary_arn="arn:aws:iam::123456789012:policy/ShifterPermissionsBoundary",
+        )
+
+    def test_defaults_model_ids_and_sts_timing_when_unset(self, mocker):
+        """Absent optional env -> reuse the existing hardcoded defaults, not new ones.
+
+        Same Bedrock model ids PolarisRangeBootstrapPlan previously carried as
+        its own independent module constants (_AWS_DEFAULT_MODEL /
+        _AWS_DEFAULT_SMALL_FAST_MODEL) -- now the one config seam owns them.
+        """
+        env = _full_aws_polaris_agent_env()
+        del env["AWS_POLARIS_AGENT_MAIN_MODEL_ID"]
+        del env["AWS_POLARIS_AGENT_SMALL_MODEL_ID"]
+        del env["AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS"]
+        del env["AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS"]
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        config = load_aws_polaris_agent_config()
+
+        assert config.main_model_id == "us.anthropic.claude-sonnet-4-6"
+        assert config.small_model_id == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        assert config.sts_session_duration_seconds == 900
+        assert config.refresh_window_seconds == 300
+
+    @pytest.mark.parametrize(
+        "missing_key",
+        [
+            "AWS_POLARIS_AGENT_REGION",
+            "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN",
+            "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS",
+            "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS",
+            "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN",
+        ],
+    )
+    def test_rejects_missing_required_field(self, mocker, missing_key):
+        """The permissions boundary is part of the enabled-role contract (ADR-004-R21):
+        an enabled agent role (main_inference_profile_arn set) with no boundary
+        configured must fail closed here, not silently apply with
+        permissions_boundary = null downstream (#1377 codex pre-push finding)."""
+        env = _full_aws_polaris_agent_env()
+        del env[missing_key]
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match=missing_key):
+            load_aws_polaris_agent_config()
+
+    @pytest.mark.parametrize(
+        "model_key",
+        ["AWS_POLARIS_AGENT_MAIN_MODEL_ID", "AWS_POLARIS_AGENT_SMALL_MODEL_ID"],
+    )
+    def test_rejects_blank_model_id(self, mocker, model_key):
+        env = _full_aws_polaris_agent_env()
+        env[model_key] = ""
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match=f"{model_key} must not be blank"):
+            load_aws_polaris_agent_config()
+
+    @pytest.mark.parametrize(
+        "arn_key",
+        [
+            "AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN",
+            "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN",
+            "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS",
+            "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS",
+            "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN",
+        ],
+    )
+    def test_rejects_malformed_arn(self, mocker, arn_key):
+        env = _full_aws_polaris_agent_env()
+        env[arn_key] = "not-an-arn"
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match=arn_key):
+            load_aws_polaris_agent_config()
+
+    def test_rejects_permissions_boundary_arn_that_is_not_a_policy_arn(self, mocker):
+        """Boundary must be an IAM *policy* ARN specifically (arn:...:policy/...),
+        not merely any IAM ARN -- a role/user/group ARN is not a valid permissions
+        boundary target and the old generic IAM ARN pattern let it through."""
+        env = _full_aws_polaris_agent_env()
+        env["AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN"] = "arn:aws:iam::123456789012:role/SomeRole"
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match="AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN"):
+            load_aws_polaris_agent_config()
+
+    @pytest.mark.parametrize(
+        "bad_region",
+        [
+            'us-east-2"; rm -rf /',
+            "us-east-2$(whoami)",
+            "us-east-2`whoami`",
+            "US-EAST-2",
+            "not-a-region",
+            "us east 2",
+            "us-east-2;whoami",
+        ],
+    )
+    def test_rejects_shell_unsafe_or_malformed_region(self, mocker, bad_region):
+        """region is substituted verbatim into a double-quoted shell variable
+        assignment in the root-executed SSM range bootstrap scripts. A value
+        carrying a quote, command substitution, backtick, or shell metacharacter
+        must be rejected outright rather than merely checked for presence
+        (#1377 codex pre-push finding: command injection into root-executed shell)."""
+        env = _full_aws_polaris_agent_env()
+        env["AWS_POLARIS_AGENT_REGION"] = bad_region
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match="AWS_POLARIS_AGENT_REGION"):
+            load_aws_polaris_agent_config()
+
+    def test_accepts_valid_region_shape(self, mocker):
+        env = _full_aws_polaris_agent_env()
+        env["AWS_POLARIS_AGENT_REGION"] = "us-west-2"
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        config = load_aws_polaris_agent_config()
+
+        assert config.region == "us-west-2"
+
+    @pytest.mark.parametrize(
+        "model_key",
+        ["AWS_POLARIS_AGENT_MAIN_MODEL_ID", "AWS_POLARIS_AGENT_SMALL_MODEL_ID"],
+    )
+    @pytest.mark.parametrize(
+        "bad_model_id",
+        [
+            'us.anthropic.claude-sonnet-4-6"; rm -rf /',
+            "us.anthropic.claude-sonnet-4-6$(whoami)",
+            "us.anthropic.claude-sonnet-4-6`whoami`",
+            "us.anthropic claude-sonnet-4-6",
+            "us.anthropic.claude-sonnet-4-6;whoami",
+            "us.anthropic.claude-sonnet-4-6|whoami",
+            "us.anthropic.claude-sonnet-4-6&whoami",
+            "us.anthropic.claude-sonnet-4-6\nwhoami",
+        ],
+    )
+    def test_rejects_shell_unsafe_model_id(self, mocker, model_key, bad_model_id):
+        """main_model_id/small_model_id are substituted verbatim into
+        double-quoted shell assignments in the root-executed SSM bootstrap
+        scripts; only blankness was previously checked. A value carrying a
+        quote, command substitution, backtick, or shell metacharacter must be
+        rejected (#1377 codex pre-push finding: command injection)."""
+        env = _full_aws_polaris_agent_env()
+        env[model_key] = bad_model_id
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match=model_key):
+            load_aws_polaris_agent_config()
+
+    @pytest.mark.parametrize(
+        "good_model_id",
+        [
+            "us.anthropic.claude-sonnet-4-6",
+            "anthropic.claude-haiku-4-5-20251001-v1:0",
+            "us.anthropic.claude-haiku-4-5-v1:0",
+        ],
+    )
+    def test_accepts_valid_model_id_shapes(self, mocker, good_model_id):
+        env = _full_aws_polaris_agent_env()
+        env["AWS_POLARIS_AGENT_MAIN_MODEL_ID"] = good_model_id
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        config = load_aws_polaris_agent_config()
+
+        assert config.main_model_id == good_model_id
+
+    def test_rejects_sts_session_duration_below_aws_minimum(self, mocker):
+        env = _full_aws_polaris_agent_env()
+        env["AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS"] = "300"
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match="AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS"):
+            load_aws_polaris_agent_config()
+
+    def test_rejects_refresh_window_not_less_than_session_duration(self, mocker):
+        env = _full_aws_polaris_agent_env()
+        env["AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS"] = "900"
+        env["AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS"] = "900"
+        mocker.patch.dict(os.environ, env, clear=True)
+
+        with pytest.raises(RuntimeError, match="AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS"):
+            load_aws_polaris_agent_config()
+
+
+class TestLoadAcesContentDeliveryConfig:
+    """Tests for the #1564 post-boot content-delivery object-storage config."""
+
+    def test_empty_bucket_when_unconfigured(self, mocker):
+        """No bucket configured is legitimate -- most ranges have no source-backed
+        content; the bucket is validated fail-closed only where delivery actually
+        needs it, not eagerly at load time."""
+        mocker.patch.dict(os.environ, {}, clear=True)
+
+        config = load_aces_content_delivery_config()
+
+        assert config == AcesContentDeliveryConfig(bucket="", max_bytes=268435456)
+
+    def test_prefers_dedicated_bucket_env_var(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {"ACES_CONTENT_DELIVERY_BUCKET": "aces-delivery", "STORAGE_BUCKET_NAME": "platform-assets"},
+            clear=True,
+        )
+
+        assert load_aces_content_delivery_config().bucket == "aces-delivery"
+
+    def test_falls_back_to_shared_storage_bucket_name(self, mocker):
+        """Same env var name the Django CMS side reads for the assets bucket, so a
+        single shared value can configure both deployables."""
+        mocker.patch.dict(os.environ, {"STORAGE_BUCKET_NAME": "platform-assets"}, clear=True)
+
+        assert load_aces_content_delivery_config().bucket == "platform-assets"
+
+    def test_reads_max_bytes_override(self, mocker):
+        mocker.patch.dict(os.environ, {"ACES_CONTENT_DELIVERY_MAX_BYTES": "1024"}, clear=True)
+
+        assert load_aces_content_delivery_config().max_bytes == 1024
+
+
 class TestDecryptField:
     """Tests for decrypt_field function for encrypted database fields.
 
@@ -901,3 +1288,83 @@ class TestDecryptField:
 
         with pytest.raises(FieldDecryptError):
             decrypt_field(encrypted_value)
+
+
+class TestResolveCloudProvider:
+    """PLAT-2005: one validated CLOUD_PROVIDER resolution point.
+
+    ``resolve_cloud_provider`` normalizes and validates against the
+    ``installation`` registry (the single source of truth for supported
+    backends) instead of the historical scattered
+    ``os.environ.get("CLOUD_PROVIDER", "aws")`` reads. Tests pass an explicit
+    ``env`` mapping so behavior does not depend on ambient process env or
+    pytest's own invocation context, except where that context (running
+    under pytest) is itself the thing under test.
+    """
+
+    def test_valid_aws_is_normalized(self):
+        from config import resolve_cloud_provider
+
+        assert resolve_cloud_provider({"CLOUD_PROVIDER": "AWS"}) == "aws"
+
+    def test_valid_gcp_is_normalized(self):
+        from config import resolve_cloud_provider
+
+        assert resolve_cloud_provider({"CLOUD_PROVIDER": " gcp "}) == "gcp"
+
+    def test_unknown_provider_fails_closed(self):
+        from cloud.exceptions import CloudProviderNotImplementedError
+        from config import resolve_cloud_provider
+
+        with pytest.raises(CloudProviderNotImplementedError, match="azure"):
+            resolve_cloud_provider({"CLOUD_PROVIDER": "azure"})
+
+    def test_missing_allows_historical_aws_default_under_testing_flag(self):
+        from config import resolve_cloud_provider
+
+        assert resolve_cloud_provider({"TESTING": "1"}) == "aws"
+
+    def test_missing_allows_historical_aws_default_under_environment_build(self):
+        from config import resolve_cloud_provider
+
+        assert resolve_cloud_provider({"ENVIRONMENT": "build"}) == "aws"
+
+    def test_missing_allows_historical_aws_default_under_django_debug(self):
+        from config import resolve_cloud_provider
+
+        assert resolve_cloud_provider({"DJANGO_DEBUG": "true"}) == "aws"
+
+    def test_missing_allows_historical_aws_default_under_pytest_invocation(self, monkeypatch):
+        """No explicit dev-signal env key: falls back to the pytest-argv0 signal."""
+        from config import resolve_cloud_provider
+
+        monkeypatch.setattr("sys.argv", ["pytest"])
+
+        assert resolve_cloud_provider({}) == "aws"
+
+    def test_missing_environment_development_does_not_allow_default(self, monkeypatch):
+        """ENVIRONMENT=development/dev is NOT a dev-default signal (deployed dev
+        provisioners must receive CLOUD_PROVIDER explicitly)."""
+        from cloud.exceptions import CloudProviderNotImplementedError
+        from config import resolve_cloud_provider
+
+        monkeypatch.setattr("sys.argv", ["/usr/bin/provisioner"])
+
+        with pytest.raises(CloudProviderNotImplementedError):
+            resolve_cloud_provider({"ENVIRONMENT": "development"})
+
+    def test_missing_fails_closed_with_no_dev_signals(self, monkeypatch):
+        from cloud.exceptions import CloudProviderNotImplementedError
+        from config import resolve_cloud_provider
+
+        monkeypatch.setattr("sys.argv", ["/usr/bin/provisioner"])
+
+        with pytest.raises(CloudProviderNotImplementedError):
+            resolve_cloud_provider({})
+
+    def test_defaults_to_process_environ_when_no_env_mapping_given(self, mocker):
+        from config import resolve_cloud_provider
+
+        mocker.patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True)
+
+        assert resolve_cloud_provider() == "gcp"

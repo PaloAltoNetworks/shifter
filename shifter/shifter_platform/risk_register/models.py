@@ -6,6 +6,11 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+)
 from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 
 # SonarCloud S1192: extracted duplicated string literals.
@@ -252,63 +257,15 @@ class AuditLog(models.Model):
     be modified or deleted through the application.
     """
 
-    class Action(models.TextChoices):
-        # Entity lifecycle
-        CREATE = "create", "Create"
-        UPDATE = "update", "Update"
-        DELETE = "delete", "Delete"
-        RESTORE = "restore", "Restore"
-        CLOSE = "close", "Close"
-        REOPEN = "reopen", "Reopen"
-        # Authentication
-        LOGIN = "login", "Login"
-        LOGOUT = "logout", "Logout"
-        LOGIN_FAILED = "login_failed", "Login Failed"
-        ACCESS_DENIED = "access_denied", "Access Denied"
-        # Authorization
-        ROLE_SYNC = "role_sync", "Role Sync"
-        # Sessions
-        CONNECT = "connect", "Connect"
-        DISCONNECT = "disconnect", "Disconnect"
-        # Resource lifecycle
-        PROVISION = "provision", "Provision"
-        DEPROVISION = "deprovision", "Deprovision"
-        READY = "ready", "Ready"
-        FAILED = "failed", "Failed"
-        PAUSE = "pause", "Pause"
-        RESUME = "resume", "Resume"
-        CANCEL = "cancel", "Cancel"
-        RECOVER = "recover", "Recover"
-        SPARE_PROVISION = "spare_provision", "Spare Provision"
-
-    class EntityType(models.TextChoices):
-        # Risk Register entities
-        RISK = "risk", "Risk"
-        COMMENT = "comment", "Comment"
-        APIKEY = "apikey", API_KEY_LABEL
-        # Platform entities
-        RANGE = "range", "Range"
-        CREDENTIAL = "credential", "Credential"
-        AGENT = "agent", "Agent"
-        USER = "user", "User"
-        SESSION = "session", "Session"
-        NGFW = "ngfw", "NGFW"
-        CONFIG = "config", "Configuration"
-        EXPERIMENT = "experiment", "Experiment"
-        SCENARIO = "scenario", "Scenario"
-        SCRIPT = "script", "Script"
-
-    class ActorType(models.TextChoices):
-        USER = "user", "User"
-        APIKEY = "apikey", API_KEY_LABEL
-        SYSTEM = "system", "System"
-        COGNITO = "cognito", "Cognito"
-
-    entity_type = models.CharField(max_length=20, choices=EntityType.choices)
+    # The audit vocabulary is owned by ``shared.audit`` (ADR-001, #1523); the
+    # ORM field ``choices`` derive from it so there is one vocabulary and one
+    # event shape. Values/labels are identical to the historical nested enums,
+    # so no data migration is required.
+    entity_type = models.CharField(max_length=20, choices=AuditEntityType.choices)
     entity_id = models.PositiveIntegerField()
-    action = models.CharField(max_length=20, choices=Action.choices)
+    action = models.CharField(max_length=20, choices=AuditAction.choices)
 
-    actor_type = models.CharField(max_length=10, choices=ActorType.choices)
+    actor_type = models.CharField(max_length=10, choices=AuditActorType.choices)
     actor_id = models.PositiveIntegerField(null=True, blank=True)
 
     timestamp = models.DateTimeField(auto_now_add=True)

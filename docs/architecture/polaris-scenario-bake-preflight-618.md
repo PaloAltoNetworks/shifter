@@ -6,6 +6,18 @@ drift and reduce repo->AMI content gap".
 This note records the architecture boundary for the future implementation. It
 is intentionally not an implementation plan.
 
+> **Superseded in part by #1469 (2026-07-13).** The polaris bake was migrated
+> from the hand-rolled Terraform bake range + `create-image` lifecycle
+> (`.github/workflows/polaris-scenario-bake.yml`, now deleted) to a Packer source
+> (`shifter/packer/polaris-vm.pkr.hcl`, dispatched via `.github/workflows/packer.yml`
+> `ami_type=polaris-vm`). Packer now owns builder launch/provision/image/teardown.
+> The content boundaries this note protects are preserved: the private build
+> tarball stays operator-supplied out of band, per-range runtime setup stays in
+> `PolarisRangeBootstrapPlan`, and `check_range_health.py` / the 17-container
+> contract are unchanged. The "reuse the Terraform bake range" guidance below
+> applied to the pre-#1469 mechanism only; `scripts/polaris-aws-range/**` remains
+> the runtime user-range definition.
+
 ## Decision
 
 Polaris has two legitimate delivery paths, and the implementation must keep

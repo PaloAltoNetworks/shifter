@@ -7,12 +7,18 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from risk_register.decorators import risk_register_access_required
 from risk_register.models import (
-    AuditLog,
     Comment,
     Risk,
     Severity,
     Status,
     StrideCategory,
+)
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+    AuditEvent,
+    audit_log,
 )
 
 # SonarCloud S1192: extracted duplicated string literals.
@@ -140,13 +146,15 @@ def risk_create(request: HttpRequest) -> HttpResponse:
         )
 
         # Create audit log
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.RISK,
-            entity_id=risk.id,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-            new_state=_risk_to_dict(risk),
+        audit_log(
+            AuditEvent(
+                entity_type=AuditEntityType.RISK,
+                entity_id=risk.id,
+                action=AuditAction.CREATE,
+                actor_type=AuditActorType.USER,
+                actor_id=_get_user_id(request),
+                new_state=_risk_to_dict(risk),
+            )
         )
 
         messages.success(request, f"Risk '{risk.title}' created successfully.")
@@ -188,14 +196,16 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
         risk.save()
 
         # Create audit log
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.RISK,
-            entity_id=risk.id,
-            action=AuditLog.Action.UPDATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-            previous_state=previous_state,
-            new_state=_risk_to_dict(risk),
+        audit_log(
+            AuditEvent(
+                entity_type=AuditEntityType.RISK,
+                entity_id=risk.id,
+                action=AuditAction.UPDATE,
+                actor_type=AuditActorType.USER,
+                actor_id=_get_user_id(request),
+                previous_state=previous_state,
+                new_state=_risk_to_dict(risk),
+            )
         )
 
         messages.success(request, f"Risk '{risk.title}' updated successfully.")
@@ -233,14 +243,16 @@ def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
         previous_state = _risk_to_dict(risk)
         risk.soft_delete()
 
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.RISK,
-            entity_id=risk.id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-            previous_state=previous_state,
-            new_state=_risk_to_dict(risk),
+        audit_log(
+            AuditEvent(
+                entity_type=AuditEntityType.RISK,
+                entity_id=risk.id,
+                action=AuditAction.DELETE,
+                actor_type=AuditActorType.USER,
+                actor_id=_get_user_id(request),
+                previous_state=previous_state,
+                new_state=_risk_to_dict(risk),
+            )
         )
 
         messages.success(request, f"Risk '{risk.title}' deleted.")
@@ -262,14 +274,16 @@ def risk_restore(request: HttpRequest, pk: int) -> HttpResponse:
         previous_state = _risk_to_dict(risk)
         risk.restore()
 
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.RISK,
-            entity_id=risk.id,
-            action=AuditLog.Action.RESTORE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-            previous_state=previous_state,
-            new_state=_risk_to_dict(risk),
+        audit_log(
+            AuditEvent(
+                entity_type=AuditEntityType.RISK,
+                entity_id=risk.id,
+                action=AuditAction.RESTORE,
+                actor_type=AuditActorType.USER,
+                actor_id=_get_user_id(request),
+                previous_state=previous_state,
+                new_state=_risk_to_dict(risk),
+            )
         )
 
         messages.success(request, f"Risk '{risk.title}' restored.")
@@ -290,15 +304,17 @@ def risk_close(request: HttpRequest, pk: int) -> HttpResponse:
         risk.resolution_reason = resolution_reason
         risk.save()
 
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.RISK,
-            entity_id=risk.id,
-            action=AuditLog.Action.CLOSE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-            previous_state=previous_state,
-            new_state=_risk_to_dict(risk),
-            context=resolution_reason,
+        audit_log(
+            AuditEvent(
+                entity_type=AuditEntityType.RISK,
+                entity_id=risk.id,
+                action=AuditAction.CLOSE,
+                actor_type=AuditActorType.USER,
+                actor_id=_get_user_id(request),
+                previous_state=previous_state,
+                new_state=_risk_to_dict(risk),
+                context=resolution_reason,
+            )
         )
 
         messages.success(request, f"Risk '{risk.title}' closed.")
@@ -316,14 +332,16 @@ def risk_reopen(request: HttpRequest, pk: int) -> HttpResponse:
         risk.status = Status.OPEN
         risk.save()
 
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.RISK,
-            entity_id=risk.id,
-            action=AuditLog.Action.REOPEN,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
-            previous_state=previous_state,
-            new_state=_risk_to_dict(risk),
+        audit_log(
+            AuditEvent(
+                entity_type=AuditEntityType.RISK,
+                entity_id=risk.id,
+                action=AuditAction.REOPEN,
+                actor_type=AuditActorType.USER,
+                actor_id=_get_user_id(request),
+                previous_state=previous_state,
+                new_state=_risk_to_dict(risk),
+            )
         )
 
         messages.success(request, f"Risk '{risk.title}' reopened.")
@@ -346,13 +364,15 @@ def comment_add(request: HttpRequest, risk_pk: int) -> HttpResponse:
                 author_user=_get_user(request),
             )
 
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.COMMENT,
-                entity_id=comment.id,
-                action=AuditLog.Action.CREATE,
-                actor_type=AuditLog.ActorType.USER,
-                actor_id=_get_user_id(request),
-                new_state={"risk_id": risk.id, "content": content},
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.COMMENT,
+                    entity_id=comment.id,
+                    action=AuditAction.CREATE,
+                    actor_type=AuditActorType.USER,
+                    actor_id=_get_user_id(request),
+                    new_state={"risk_id": risk.id, "content": content},
+                )
             )
 
             messages.success(request, "Comment added.")
@@ -370,12 +390,14 @@ def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
     if request.method == "POST":
         comment.soft_delete()
 
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.COMMENT,
-            entity_id=comment.id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=_get_user_id(request),
+        audit_log(
+            AuditEvent(
+                entity_type=AuditEntityType.COMMENT,
+                entity_id=comment.id,
+                action=AuditAction.DELETE,
+                actor_type=AuditActorType.USER,
+                actor_id=_get_user_id(request),
+            )
         )
 
         messages.success(request, "Comment deleted.")

@@ -6,6 +6,13 @@ Date: 2026-06-29
 
 Tracking issue: <https://github.com/Brad-Edwards/shifter/issues/450>
 
+> **Later contract note (2026-07-13):** issue #307 was resolved to **preserve**
+> this note's per-source admission policy (a user may hold one Mission Control
+> range and one CTF range at the same time), not supersede it. #307 hardens the
+> policy against a concurrency race by adding a database-level partial unique
+> constraint on `(user_id, range_source)` for active ranges, behind the existing
+> friendly service pre-check. See `single-active-range-admission-preflight-307.md`.
+
 This note is intentionally not an implementation plan. Issue #450 is
 requirement-free; the GitHub issue is the contract. The upcoming change should
 allow a user to hold one Mission Control range and one CTF participant range at

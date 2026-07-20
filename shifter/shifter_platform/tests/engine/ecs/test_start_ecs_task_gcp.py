@@ -14,6 +14,8 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import UUID
 
+import pytest
+
 GCP_ENV = {
     "ENVIRONMENT": "gcp-dev",
     "CLOUD_PROVIDER": "gcp",
@@ -127,6 +129,21 @@ class TestGcpTaskConfig:
         assert task_definition.endswith("pulumi-provisioner:latest")
         assert network_config is None
 
+    def test_raises_for_unsupported_provider(self, settings):
+        """A future third backend must fail closed rather than silently being
+        dispatched through the AWS ECS task config (the previous
+        ``gcp ? gcp_config : aws_config`` shape treated any non-gcp value as AWS)."""
+        from django.core.exceptions import ImproperlyConfigured
+
+        from engine.ecs import _get_engine_task_config
+
+        settings.CLOUD_PROVIDER = "azure"
+        settings.ENGINE_TASK_CLUSTER = "shifter-jobs"
+        settings.ENGINE_TASK_DEFINITION = "some-task-def"
+
+        with pytest.raises(ImproperlyConfigured, match="azure"):
+            _get_engine_task_config()
+
 
 class TestGcpProvisionerEnvOverrides:
     def test_returns_none_for_non_gcp(self, settings):
@@ -198,13 +215,11 @@ class TestGcpProvisionerEnvOverrides:
 
 
 class TestGcpTaskDispatch:
-    def test_public_start_functions_dispatch_with_gcp_env_overrides(self, settings, monkeypatch):
+    def test_launcher_worker_dispatches_with_gcp_env_overrides(self, settings, monkeypatch):
         from engine.ecs import (
             PROVISIONER_CONTAINER_NAME,
             _get_gcp_provisioner_env_overrides,
-            start_ngfw_provisioning,
-            start_provisioning,
-            start_range_provisioning,
+            dispatch_provisioner_command,
         )
 
         _configure_gcp_task_settings(settings)
@@ -214,9 +229,18 @@ class TestGcpTaskDispatch:
 
         with patch.dict(os.environ, GCP_ENV, clear=True):
             expected_env = _get_gcp_provisioner_env_overrides()
-            assert start_provisioning(range_id=42, user_id=7) == "shifter-jobs/job-range-legacy"
-            assert start_range_provisioning(range_request_id) == "shifter-jobs/job-range-request"
-            assert start_ngfw_provisioning(ngfw_request_id) == "shifter-jobs/job-ngfw"
+            assert (
+                dispatch_provisioner_command(["range", "provision", "--range-id", "42", "--user-id", "7"])
+                == "shifter-jobs/job-range-legacy"
+            )
+            assert (
+                dispatch_provisioner_command(["range", "provision", "--request-id", str(range_request_id)])
+                == "shifter-jobs/job-range-request"
+            )
+            assert (
+                dispatch_provisioner_command(["ngfw", "provision", "--request-id", str(ngfw_request_id)])
+                == "shifter-jobs/job-ngfw"
+            )
 
         assert expected_env is not None
         assert "GDC_WINDOWS_ADMIN_PASSWORD" not in expected_env

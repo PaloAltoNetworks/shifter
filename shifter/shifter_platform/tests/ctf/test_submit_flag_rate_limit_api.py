@@ -68,8 +68,11 @@ def test_submit_flag_rate_limited_returns_retry_envelope(
         body={"flag": "FLAG{second}"},
     )
     assert second.status_code == 429
-    assert second.headers.get("Retry-After")
+    # On the /api/v1 mount the canonical error envelope conveys the retry delay
+    # via the Retry-After header (the flat ``retry_after_seconds`` body field is
+    # dropped by the shared envelope); the header still carries a positive delay.
+    retry_after = second.headers.get("Retry-After")
+    assert retry_after
+    assert int(retry_after) > 0
     body = second.json()
-    assert body.get("retry_after_seconds")
-    assert int(body["retry_after_seconds"]) > 0
     assert body.get("error")

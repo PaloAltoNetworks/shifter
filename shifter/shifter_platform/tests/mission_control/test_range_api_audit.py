@@ -13,6 +13,10 @@ from django.test import Client
 from django.urls import reverse
 
 from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -20,18 +24,23 @@ GHOST_REQUEST_ID = "00000000-0000-0000-0000-000000000000"
 
 
 def _range_audit(action):
-    return AuditLog.objects.filter(entity_type=AuditLog.EntityType.RANGE, action=action)
+    return AuditLog.objects.filter(entity_type=AuditEntityType.RANGE, action=action)
 
 
 def _has_http_audit(action, *, actor_id, request_id, scenario=None):
     """True if an HTTP-layer audit row for this action carries the request context.
 
     Both the view (HTTP boundary) and the CMS service layer audit a lifecycle
-    action, so we assert the HTTP-layer row is present rather than that it is
-    the only row.
+    action. Only the HTTP-boundary call goes through ``audit_log_from_request``,
+    which resolves and records the client ``source_ip``; the CMS service-layer
+    row has no source IP. Requiring ``source_ip`` here means this check can only
+    be satisfied by the HTTP-boundary row, so deleting or breaking the view's
+    audit call fails the test rather than being masked by the CMS row.
     """
     for row in _range_audit(action):
         state = row.new_state or {}
+        if row.source_ip is None:
+            continue
         if row.actor_id != actor_id or state.get("request_id") != request_id:
             continue
         if scenario is not None and state.get("scenario") != scenario:
@@ -49,7 +58,7 @@ class TestRangeLifecycleAudit:
 
         # The HTTP boundary recorded a PROVISION audit row carrying the actor
         # and request context.
-        assert _has_http_audit(AuditLog.Action.PROVISION, actor_id=user.id, request_id=request_id, scenario=scenario_id)
+        assert _has_http_audit(AuditAction.PROVISION, actor_id=user.id, request_id=request_id, scenario=scenario_id)
 
     def test_cancel_records_cancel_audit(self, authenticated_client, launch_range_via_api):
         client, user = authenticated_client(email="audit-cancel@example.com")
@@ -57,30 +66,30 @@ class TestRangeLifecycleAudit:
         request_id = json.loads(launch_resp.content)["range"]["request_id"]
 
         response = client.post(
-            reverse("mission_control:cancel_range"),
+            reverse("v1:mission_control:range-cancel"),
             data=json.dumps({"request_id": request_id}),
             content_type="application/json",
         )
         assert response.status_code == 200
 
-        assert _has_http_audit(AuditLog.Action.CANCEL, actor_id=user.id, request_id=request_id)
+        assert _has_http_audit(AuditAction.CANCEL, actor_id=user.id, request_id=request_id)
 
     def test_failed_action_does_not_audit(self, authenticated_client):
         client, _user = authenticated_client(email="audit-fail@example.com")
         response = client.post(
-            reverse("mission_control:destroy_range"),
+            reverse("v1:mission_control:range-destroy"),
             data=json.dumps({"request_id": GHOST_REQUEST_ID}),
             content_type="application/json",
         )
         assert response.status_code == 400
         # A rejected action records no DEPROVISION audit row.
-        assert not _range_audit(AuditLog.Action.DEPROVISION).exists()
+        assert not _range_audit(AuditAction.DEPROVISION).exists()
 
     def test_requires_login_records_no_audit(self):
         response = Client().post(
-            reverse("mission_control:launch_range"),
+            reverse("v1:mission_control:range-launch"),
             data="{}",
             content_type="application/json",
         )
         assert response.status_code == 401
-        assert not _range_audit(AuditLog.Action.PROVISION).exists()
+        assert not _range_audit(AuditAction.PROVISION).exists()

@@ -7,6 +7,7 @@ from typing import Any
 import boto3
 
 import terraform_runner
+from config import resolve_cloud_provider
 from events import (
     STATUS_DESTROYED,
     STATUS_DESTROYING,
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def _cleanup_ngfw_bootstrap_objects(instance_id: str) -> None:
     """Delete sensitive AWS S3 bootstrap objects after NGFW readiness."""
-    if os.environ.get("CLOUD_PROVIDER", "aws") != "aws":
+    if resolve_cloud_provider() != "aws":
         return
 
     bootstrap_bucket = os.environ.get("NGFW_BOOTSTRAP_BUCKET", "").strip()

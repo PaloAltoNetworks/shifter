@@ -16,6 +16,7 @@ __all__ = [
     "IS_TEST_RUN",
     "require_environment",
     "required_runtime_env",
+    "resolve_cloud_provider",
     "runtime_allows_dev_defaults",
 ]
 
@@ -48,6 +49,33 @@ def required_runtime_env(name: str, *, dev_default: str | None = None, env: Mapp
     if dev_default is not None and runtime_allows_dev_defaults(source):
         return dev_default
     raise ImproperlyConfigured(f"{name} environment variable is required")
+
+
+def resolve_cloud_provider(env: Mapping[str, str] | None = None) -> str:
+    """Return the validated active cloud backend for this process (PLAT-2005).
+
+    ``CLOUD_PROVIDER`` is the deploy-time projection of the selected backend
+    (``installation`` root config -> backend runtime-env renderer), delivered to
+    every consuming process role. This resolves it at the composition root:
+    normalize to lowercase and validate against the ``installation`` registry --
+    the single source of truth for supported backends -- rather than re-reading
+    the environment with an implicit ``aws`` default at every call site.
+
+    Fails closed with ``ImproperlyConfigured`` when the value is missing in a
+    deployed process (the ``aws`` default is allowed only under
+    :func:`runtime_allows_dev_defaults`) or names an unsupported backend, so a
+    misconfigured deploy cannot silently behave as AWS.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+    from installation.registry import KNOWN_BACKENDS
+
+    provider = required_runtime_env("CLOUD_PROVIDER", dev_default="aws", env=env).lower()
+    if provider not in KNOWN_BACKENDS:
+        raise ImproperlyConfigured(
+            f"CLOUD_PROVIDER '{provider}' is not a supported backend; "
+            f"supported backends: {', '.join(sorted(KNOWN_BACKENDS))}"
+        )
+    return provider
 
 
 def require_environment(env: Mapping[str, str] | None = None) -> str:

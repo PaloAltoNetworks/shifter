@@ -29,8 +29,11 @@ permissions:
 
 jobs:
   destroy:
+    # Runs on the GCP tenant's own runner (label gcp-dev, issue #1546), not the
+    # AWS fleet. The runner lives in a Terraform root separate from the platform
+    # root, so this platform destroy never removes the runner it runs on.
     name: Destroy (gcp-dev)
-    runs-on: self-hosted
+    runs-on: gcp-dev
     permissions:
       contents: read
       id-token: write
@@ -51,6 +54,8 @@ jobs:
           fi
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
 
       - name: Ensure GCP auth is configured
         run: |

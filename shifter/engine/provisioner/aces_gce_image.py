@@ -5,10 +5,17 @@ Composes the backend-owned realization policy for one ACES node into a concrete
 *authored* identity (image ``source`` + ``resources``), never on os_family:
 
 1. Resolve the authored image ``source`` (name + version) against the
-   tenant-managed registry candidates (exact version, then any-version fallback).
+   tenant-managed registry candidates (exact pin, else the any-version default).
 2. If no registry mapping exists but the authored ``source.name`` is already a
    concrete GCE image reference, pass it through.
-3. Otherwise fail loud -- never guess an image from os_family.
+3. Otherwise fail loud -- never guess an image from os_family for an *authored*
+   source.
+
+A node that declares **no** source is different: it still needs a boot OS, so the
+backend supplies a base image from the registry keyed on ``os_family`` (ADR-032 --
+a base-OS default for a source-less node is legitimate backend policy, not the
+prohibited "sniff an authored source to hardcode a scenario"). Fails loud when no
+base image is registered for the os_family.
 
 Machine type precedence: the registry entry's ``machine_type`` (a tenant-pinned
 size) wins; otherwise the authored ``resources`` (vcpus + ram) derive a GCE
@@ -50,9 +57,7 @@ def resolve_gce_image(node: AcesPlanNode, candidates: Sequence[dict[str, Any]]) 
     """
     image = node.image
     if image is None or not image.name:
-        raise AcesGceImageError(
-            f"node {node.address!r} declares no image source; register an ACES image mapping for it"
-        )
+        return _resolve_base_os(node, candidates)
 
     resolved = resolve_from_candidates(candidates, version=image.version)
     if resolved is not None:
@@ -64,6 +69,25 @@ def resolve_gce_image(node: AcesPlanNode, candidates: Sequence[dict[str, Any]]) 
     version = image.version or "*"
     raise AcesGceImageError(
         f"no GCE image mapping for source {image.name!r} (version {version}); register an ACES image mapping"
+    )
+
+
+def _resolve_base_os(node: AcesPlanNode, candidates: Sequence[dict[str, Any]]) -> GCERangeImageProfile:
+    """Resolve a base OS image for a source-less node from its os_family.
+
+    A node that declares no ``source`` still needs a boot OS, so the backend
+    supplies one from the tenant registry keyed on ``os_family`` (the caller
+    passes the os_family candidates). Per ADR-032 this base-OS default for a
+    source-*less* node is legitimate backend policy, distinct from sniffing an
+    *authored* source to hardcode a scenario (which is prohibited). Fails loud when
+    no base image is registered for the os_family.
+    """
+    resolved = resolve_from_candidates(candidates, version=None)
+    if resolved is not None:
+        return _profile(node, resolved.image_ref, resolved.machine_type, resolved.disk_size_gb, resolved.disk_type)
+    os_family = node.os_family or "linux"
+    raise AcesGceImageError(
+        f"source-less node {node.address!r} needs a base-OS image mapping for os_family {os_family!r}"
     )
 
 

@@ -1,7 +1,12 @@
 """Cloud provider abstraction layer.
 
-Factory functions that return provider-specific implementations based on
-the CLOUD_PROVIDER Django setting. Defaults to "aws".
+Factory functions that return provider-specific implementations based on the
+``CLOUD_PROVIDER`` Django setting. That setting is resolved and validated once at
+the Django composition root (``config._cloud.resolve_cloud_provider``) against the
+``installation`` registry, so every factory below consumes one validated backend
+selection rather than re-reading the environment with an implicit ``aws`` default
+(PLAT-2005). Each factory also validates that the selected backend declares the
+capability it needs before constructing an adapter, and fails closed otherwise.
 
 Usage:
     from shared.cloud import get_object_storage, get_task_runner
@@ -14,6 +19,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from installation.contract import BackendCapability
+from installation.registry import get_backend_bundle
 
 from shared.cloud.exceptions import CloudProviderNotImplementedError
 
@@ -38,12 +45,22 @@ if TYPE_CHECKING:
 
 
 def _get_provider() -> str:
-    return getattr(settings, "CLOUD_PROVIDER", "aws")
+    return settings.CLOUD_PROVIDER
+
+
+def _require_capability(capability: BackendCapability) -> str:
+    """Return the validated active backend, failing closed when it does not
+    declare ``capability`` in the installation registry (PLAT-2005)."""
+    provider = _get_provider()
+    bundle = get_backend_bundle(provider)
+    if bundle is None or capability not in bundle.capabilities:
+        raise CloudProviderNotImplementedError(provider, capability)
+    return provider
 
 
 def get_object_storage() -> ObjectStorage:
     """Return an ObjectStorage implementation for the configured provider."""
-    provider = _get_provider()
+    provider = _require_capability(BackendCapability.STORAGE)
     if provider == "aws":
         from shared.cloud.aws.storage import AWSObjectStorage
 
@@ -52,12 +69,12 @@ def get_object_storage() -> ObjectStorage:
         from shared.cloud.gcp.storage import GCPObjectStorage
 
         return GCPObjectStorage()
-    raise CloudProviderNotImplementedError(provider)
+    raise CloudProviderNotImplementedError(provider, BackendCapability.STORAGE)
 
 
 def get_task_runner() -> TaskRunner:
     """Return a TaskRunner implementation for the configured provider."""
-    provider = _get_provider()
+    provider = _require_capability(BackendCapability.TASK_RUNNER)
     if provider == "aws":
         from shared.cloud.aws.task_runner import AWSTaskRunner
 
@@ -66,12 +83,12 @@ def get_task_runner() -> TaskRunner:
         from shared.cloud.gcp.task_runner import GCPTaskRunner
 
         return GCPTaskRunner()
-    raise CloudProviderNotImplementedError(provider)
+    raise CloudProviderNotImplementedError(provider, BackendCapability.TASK_RUNNER)
 
 
 def get_queue_consumer() -> QueueConsumer:
     """Return a QueueConsumer implementation for the configured provider."""
-    provider = _get_provider()
+    provider = _require_capability(BackendCapability.QUEUE_CONSUMER)
     if provider == "aws":
         from shared.cloud.aws.queue import AWSQueueConsumer
 
@@ -80,12 +97,12 @@ def get_queue_consumer() -> QueueConsumer:
         from shared.cloud.gcp.queue import GCPQueueConsumer
 
         return GCPQueueConsumer()
-    raise CloudProviderNotImplementedError(provider)
+    raise CloudProviderNotImplementedError(provider, BackendCapability.QUEUE_CONSUMER)
 
 
 def get_queue_publisher() -> QueuePublisher:
     """Return a QueuePublisher implementation for the configured provider."""
-    provider = _get_provider()
+    provider = _require_capability(BackendCapability.QUEUE_PUBLISHER)
     if provider == "aws":
         from shared.cloud.aws.queue import AWSQueuePublisher
 
@@ -94,12 +111,12 @@ def get_queue_publisher() -> QueuePublisher:
         from shared.cloud.gcp.queue import GCPQueuePublisher
 
         return GCPQueuePublisher()
-    raise CloudProviderNotImplementedError(provider)
+    raise CloudProviderNotImplementedError(provider, BackendCapability.QUEUE_PUBLISHER)
 
 
 def get_secrets_store() -> SecretsStore:
     """Return a SecretsStore implementation for the configured provider."""
-    provider = _get_provider()
+    provider = _require_capability(BackendCapability.SECRETS)
     if provider == "aws":
         from shared.cloud.aws.secrets import AWSSecretsStore
 
@@ -108,12 +125,12 @@ def get_secrets_store() -> SecretsStore:
         from shared.cloud.gcp.secrets import GCPSecretsStore
 
         return GCPSecretsStore()
-    raise CloudProviderNotImplementedError(provider)
+    raise CloudProviderNotImplementedError(provider, BackendCapability.SECRETS)
 
 
 def get_event_bus() -> EventBus:
     """Return an EventBus implementation for the configured provider."""
-    provider = _get_provider()
+    provider = _require_capability(BackendCapability.EVENT_BUS)
     if provider == "aws":
         from shared.cloud.aws.event_bus import AWSEventBus
 
@@ -122,4 +139,4 @@ def get_event_bus() -> EventBus:
         from shared.cloud.gcp.event_bus import GCPEventBus
 
         return GCPEventBus()
-    raise CloudProviderNotImplementedError(provider)
+    raise CloudProviderNotImplementedError(provider, BackendCapability.EVENT_BUS)

@@ -1,7 +1,7 @@
 # TechVault Golden AMI Bake Runbook
 
 Region: `us-east-2` (all resources)
-Scenario: [`cms/scenarios/templates/techvault.yaml`](../../shifter/shifter_platform/cms/scenarios/templates/techvault.yaml)
+Scenario: [`cms/scenarios/templates/techvault.yaml`](https://github.com/Brad-Edwards/shifter/blob/dev/shifter/shifter_platform/cms/scenarios/templates/techvault.yaml)
 User docs: `documentation/docs/scenarios/techvault.md`
 Precedent: this mirrors the POLARIS bake pattern. See
 [`docs/architecture/polaris-scenario-bake-preflight-618.md`](../architecture/polaris-scenario-bake-preflight-618.md).
@@ -42,7 +42,9 @@ cannot touch a live deployment:
 - Tag everything `Project=techvault-bake` for clean teardown.
 
 Launch the bake host: Ubuntu 24.04, **r5.2xlarge**, ~**100 GB** gp3 root,
-the SSM instance profile, IMDSv2 required.
+the SSM instance profile, IMDSv2 required. The root volume must be encrypted
+with the target account's EBS encryption posture; the range provisioner refuses
+AMI launches that would create unencrypted root volumes.
 
 ## Bake procedure
 
@@ -52,6 +54,12 @@ Run everything through SSM against the bake host.
 
 ```bash
 curl -fsSL https://get.docker.com | sh && systemctl enable --now docker
+# The stack is baked as the ubuntu user (uid 1000, see step 2), and aptl's
+# first docker operation (the Suricata named-volume seed) runs as ubuntu.
+# Installing docker as root does not add ubuntu to the docker group, so grant
+# it explicitly or `aptl lab start` fails at "Preparing Suricata runtime
+# volumes" with a docker.sock permission-denied (surfaced as BackendSeedError).
+usermod -aG docker ubuntu
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs
 npm install -g @anthropic-ai/claude-code
 apt-get install -y pipx jq
@@ -77,10 +85,12 @@ sudo -u ubuntu env HOME=/home/ubuntu bash -c '
 '
 ```
 
-Expect **31 running `aptl-*` containers** (`aptl lab status`). Note:
+Expect **30 running `aptl-*` containers** (`aptl lab status`). Note:
 `techvault-operational` is the public startup contract and deliberately
 **excludes** the `mail` and `reverse` containers even with those groups enabled.
-31 containers is the full operational stack.
+30 long-running containers is the full operational stack; aptl 4.1.2 also runs a
+one-shot `aptl-cortex-index-init` that exits 0 once Cortex is indexed, so
+`docker ps --filter status=running` settles at 30, not 31.
 
 ### 3. Seat: VS Code over RDP (the Shifter access pattern)
 
@@ -104,7 +114,8 @@ records `ssh_username=ubuntu` and sets the per-range RDP password.
 ### 4. Quiesce and image (leave the stack RUNNING)
 
 Do **not** `aptl lab stop`. Kill any transient test processes, then create the
-image with the stack running so the containers auto-start on the next boot:
+image with the stack running so the containers auto-start on the next boot. The
+resulting AMI must have an encrypted root snapshot before it is registered:
 
 ```bash
 aws ec2 create-image --instance-id <bake-host> --name "techvault-golden-4.1.2-ide-<date>" \
@@ -114,6 +125,9 @@ aws ec2 create-image --instance-id <bake-host> --name "techvault-golden-4.1.2-id
 
 `create-image` (default, no `--no-reboot`) stops the instance for a consistent
 snapshot; on boot docker restarts the `unless-stopped`/`always` containers.
+If the bake host root volume is not encrypted, do not publish this AMI. Re-launch
+or copy into an encrypted AMI, then verify the final AMI's root snapshot
+encryption state before updating `/shifter/ami/techvault`.
 
 ### 5. Golden verify (non-negotiable)
 
@@ -150,16 +164,33 @@ participant work plus Claude Code (which is remote compute via Bedrock).
 
 ## Automated pipeline
 
-The reproducible path is the `workflow_dispatch` workflow
-`.github/workflows/techvault-scenario-bake.yml` ("TechVault Scenario Bake"),
-which automates the manual steps above: it stands up the stack, installs the
-VS Code seat, images the running stack, golden-verifies, and updates
-`/shifter/ami/techvault`. It follows the `workflow_dispatch`-only bake boundary
-from `docs/architecture/polaris-scenario-bake-preflight-618.md` (never wired to
-push, pull_request, or schedule).
+The reproducible path is the shared `workflow_dispatch` workflow
+`.github/workflows/packer.yml` ("Packer AMI Build"), dispatched with
+`ami_type=techvault`. Its `bake-scenario` job automates the manual steps above:
+Packer stands up the builder over the no-inbound AWS Session Manager
+communicator, runs the bake phases from `shifter/packer/scripts/techvault/`
+(`toolchain.sh` → `stack.sh` → `seat.sh` → `wait-stack.sh`), images the running
+stack (Packer stops-to-snapshot; containers auto-start on boot), then the
+workflow verifies the AMI is encrypted, golden-verifies a fresh instance, and
+publishes `/shifter/ami/techvault`. The Packer source is
+`shifter/packer/techvault.pkr.hcl`. It follows the `workflow_dispatch`-only bake
+boundary from `docs/architecture/polaris-scenario-bake-preflight-618.md` (never
+wired to push, pull_request, or schedule).
 
-The workflow is self-contained: it drives the bake inline over SSM RunCommand
-and has no separate `scripts/` bake range. The operator supplies the isolated
-bake subnet, security group, and SSM instance profile (plus the pinned
-`aptl_version`) as inputs. Run this workflow for a normal rebake; the manual
+> Migrated to Packer in #1469 (was the hand-rolled `run-instances` /
+> SSM-RunCommand-shell / `create-image` workflow `techvault-scenario-bake.yml`,
+> now deleted). Packer owns builder launch, provisioning, image creation, and
+> teardown; the bake phases and the encryption + golden-verify gates are
+> unchanged. Note: the scenario builds use Packer's Session Manager SSH tunnel,
+> which needs `ssm:StartSession` on the deploy role, added to
+> `platform/terraform/global/iam/github-oidc.tf` in the same change and applied
+> by an IAM `terraform apply`.
+
+The workflow must publish only an encrypted AMI. See
+`docs/architecture/techvault-encrypted-ami-preflight-1455.md` for the encryption
+boundary and guardrails.
+
+The operator supplies the isolated bake subnet, no-inbound security group, and
+SSM-enabled builder instance profile (plus the pinned `aptl_version`) as
+`workflow_dispatch` inputs. Run this workflow for a normal rebake; the manual
 steps above are the reference for what it does and for debugging.

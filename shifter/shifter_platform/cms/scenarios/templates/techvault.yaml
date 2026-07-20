@@ -28,6 +28,12 @@ instances:
     # KALI_INSTANCE_TYPE default for this instance only.
     instance_type: r5.2xlarge
 
+participant_access:
+  - target: techvault
+    channel: ssh
+  - target: techvault
+    channel: rdp
+
 subnets:
   - name: techvault
     instances: [techvault]

@@ -8,10 +8,14 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
+from shared.range_cells import build_scenario_artifact
+from shared.remote_access import parse_openvpn_capability
 from shared.schemas import RangeRef, RangeSpec, RequestSpec
 from shared.schemas.persistence import wrap_persisted_spec
 
-from ._common import EngineError, _resolve_instance_host
+from ._common import EngineError, _persist_task_arn, _resolve_instance_host
+from ._range_backend_binding import backend_binding_fields, verify_existing_binding
+from ._range_by_request import cancel_range_by_request, destroy_range_by_request
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager as ContextManager
@@ -19,24 +23,9 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
     from engine.models import Range
+    from shared.range_instantiation_policy import BackendAdmission
 
 logger = logging.getLogger(__name__)
-
-_TASK_ARN_FIELDS = {
-    "provision": "provisioning_task_arn",
-    "destroy": "teardown_task_arn",
-}
-
-
-def _persist_task_arn(range_obj: Range, operation: str, task_arn: str | None) -> None:
-    """Store an ECS task identifier on the operation-specific Range field."""
-    if not task_arn:
-        return
-    field_name = _TASK_ARN_FIELDS.get(operation)
-    if field_name is None:
-        raise ValueError(f"Unknown range task operation: {operation}")
-    setattr(range_obj, field_name, task_arn)
-    range_obj.save(update_fields=[field_name])
 
 
 def _range_ref_from_range(range_obj: Range, request_spec: RequestSpec, range_spec: RangeSpec) -> RangeRef:
@@ -56,11 +45,22 @@ def _atomic() -> ContextManager[None]:
     return _es.transaction.atomic()
 
 
-def create_range(request_spec: RequestSpec) -> RangeRef:
+def create_range(
+    request_spec: RequestSpec,
+    *,
+    backend_admission: BackendAdmission | None = None,
+    remote_access_capability: dict[str, object] | None = None,
+) -> RangeRef:
     """Provision infrastructure for range.
 
     Interprets the RequestSpec into Engine models (Request, Instance),
     creates a Range record for backward compat, and triggers ECS provisioning.
+
+    ``backend_admission`` is the trusted #1348 CMS admission result, carried
+    beside (never inside) the RequestSpec. When present (GCP), the normalized
+    (backend, purpose) is persisted as the write-once #1666 ownership binding in
+    the same transaction as the Range, before dispatch, so destroy/reconcile
+    route from it instead of the mutable process selector. ``None`` on non-GCP.
     """
     from django.contrib.auth import get_user_model
 
@@ -88,12 +88,25 @@ def create_range(request_spec: RequestSpec) -> RangeRef:
         len(range_spec.all_instances),
     )
 
+    normalized_remote_access = (
+        parse_openvpn_capability(remote_access_capability).as_dict() if remote_access_capability is not None else None
+    )
     existing_range = Range.objects.filter(request__request_id=request_spec.request_id).first()
     if existing_range is not None:
         logger.info("create_range: reusing existing range request_id=%s", request_spec.request_id)
+        verify_existing_binding(existing_range, request_spec.request_id, backend_admission)
+        if existing_range.remote_access_capability != normalized_remote_access:
+            raise EngineError("Existing range remote-access capability does not match the create request")
         return _range_ref_from_range(existing_range, request_spec, range_spec)
 
-    range_obj = _persist_range_atomically(request_spec, range_spec, user_model, Range)
+    range_obj = _persist_range_atomically(
+        request_spec,
+        range_spec,
+        user_model,
+        Range,
+        backend_admission,
+        normalized_remote_access,
+    )
 
     try:
         task_arn = start_range_provisioning(request_spec.request_id)
@@ -114,10 +127,22 @@ def _persist_range_atomically(
     range_spec: RangeSpec,
     user_model: type[User],
     range_model: type[Range],
+    backend_admission: BackendAdmission | None = None,
+    remote_access_capability: dict[str, object] | None = None,
 ) -> Range:
-    """Run the interpret + Range + Subnet inserts under a single transaction."""
+    """Run the interpret + Range + Subnet inserts under a single transaction.
+
+    The #1666 backend/purpose ownership binding (when present) is written on the
+    Range in this same transaction, before any launch dispatch, so it is durable
+    ownership from the instant the range exists.
+    """
     from engine.interpreter import interpret
     from engine.models import Subnet
+
+    binding_fields = backend_binding_fields(backend_admission)
+    remote_access_fields = (
+        {"remote_access_capability": remote_access_capability} if remote_access_capability is not None else {}
+    )
 
     with _atomic():
         request = interpret(request_spec)
@@ -125,6 +150,7 @@ def _persist_range_atomically(
 
         user = user_model.objects.get(id=range_spec.user_id)
         subnet_index = range_model.allocate_subnet_index()
+        range_artifact = build_scenario_artifact(wrap_persisted_spec("range_spec", range_spec))
 
         range_uuid = range_spec.uuid
         if range_uuid:
@@ -137,7 +163,9 @@ def _persist_range_atomically(
                 cms_user_id=range_spec.user_id,
                 status=range_model.Status.PROVISIONING,
                 subnet_index=subnet_index,
-                range_config=wrap_persisted_spec("range_spec", range_spec),
+                range_config=range_artifact,
+                **remote_access_fields,
+                **binding_fields,
             )
         else:
             range_obj = range_model.objects.create(
@@ -146,7 +174,9 @@ def _persist_range_atomically(
                 cms_user_id=range_spec.user_id,
                 status=range_model.Status.PROVISIONING,
                 subnet_index=subnet_index,
-                range_config=wrap_persisted_spec("range_spec", range_spec),
+                range_config=range_artifact,
+                **remote_access_fields,
+                **binding_fields,
             )
 
         logger.info(
@@ -292,96 +322,6 @@ def cancel_range(range_ref: RangeRef) -> None:
     logger.info("cancel_range: cancelled range_id=%s", range_id)
 
 
-def destroy_range_by_request(request_id: UUID) -> bool:
-    """Tear down range infrastructure by request_id.
-
-    Follows same pattern as destroy_ngfw(). Looks up Range via Request FK
-    and triggers ECS teardown.
-    """
-    from engine.ecs import start_range_teardown
-    from engine.models import Range
-
-    logger.debug("destroy_range_by_request: request_id=%s", request_id)
-    range_obj = Range.objects.filter(request__request_id=request_id).first()
-    if not range_obj:
-        logger.warning("destroy_range_by_request: no range for request_id=%s", request_id)
-        return False
-    return _apply_destroy_by_request(range_obj, request_id, start_range_teardown)
-
-
-def _apply_destroy_by_request(
-    range_obj: Range,
-    request_id: UUID,
-    start_range_teardown: Callable[[UUID], str | None],
-) -> bool:
-    """Status-branch helper for ``destroy_range_by_request`` (same shape as ``_apply_destroy_to_range``)."""
-    if range_obj.status == ResourceStatus.DESTROYED.value:
-        logger.warning("destroy_range_by_request: already destroyed request_id=%s", request_id)
-        return False
-    if range_obj.status == ResourceStatus.DESTROYING.value:
-        logger.info("destroy_range_by_request: already destroying request_id=%s", request_id)
-        return True
-
-    previous_status = range_obj.status
-    range_obj.status = ResourceStatus.DESTROYING.value
-    range_obj.save(update_fields=["status"])
-    logger.info(
-        "destroy_range_by_request: set DESTROYING request_id=%s range_id=%s",
-        request_id,
-        range_obj.id,
-    )
-
-    try:
-        task_arn = start_range_teardown(request_id)
-    except Exception:
-        range_obj.status = previous_status
-        range_obj.save(update_fields=["status", "updated_at"])
-        raise
-    if task_arn:
-        _persist_task_arn(range_obj, "destroy", task_arn)
-        logger.info("destroy_range_by_request: started ECS task=%s", task_arn)
-    return True
-
-
-def cancel_range_by_request(request_id: UUID) -> bool:
-    """Cancel in-progress range provisioning by request_id.
-
-    Only works for ranges in PENDING or PROVISIONING status.
-    """
-    from engine.models import Range
-
-    logger.debug("cancel_range_by_request: request_id=%s", request_id)
-    range_obj = Range.objects.filter(request__request_id=request_id).first()
-    if not range_obj:
-        logger.warning("cancel_range_by_request: no range for request_id=%s", request_id)
-        accepted = False
-    elif range_obj.status == Range.Status.DESTROYING:
-        logger.info(
-            "cancel_range_by_request: already destroying request_id=%s range_id=%s",
-            request_id,
-            range_obj.id,
-        )
-        accepted = True
-    elif range_obj.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
-        logger.warning(
-            "cancel_range_by_request: not cancellable status=%s request_id=%s",
-            range_obj.status,
-            request_id,
-        )
-        accepted = False
-    else:
-        range_obj.status = Range.Status.DESTROYING
-        range_obj.save(update_fields=["status"])
-        logger.info(
-            "cancel_range_by_request: cancelled request_id=%s range_id=%s",
-            request_id,
-            range_obj.id,
-        )
-        accepted = True
-
-    return accepted
-
-
 def get_instance_ips_by_uuid(range_id: int) -> dict[str, str]:
     """Return a {uuid: internal_ip} map for the range's provisioned instances."""
     status = get_range_status(range_id)
@@ -400,52 +340,6 @@ def get_instance_ips_by_uuid(range_id: int) -> dict[str, str]:
             continue
         result[uuid_value.strip()] = ip_value
     return result
-
-
-def reassign_range_owner_by_request(request_id: UUID, new_user: User) -> bool:
-    """Reassign the ``Range``/``Request`` owner for ``request_id`` to ``new_user``.
-
-    Used by CMS's cross-owner range-recovery path (``cms.services.reassign_range_owner``,
-    called from ``ctf.services.range.recovery`` via ``ctf.bridges``) to transfer
-    terminal/Guacamole access -- which resolves strictly by ``Range.user``
-    (``Range.resolve_active_for_instance`` / ``Range.get_active_for_user``) -- to a
-    new participant. Idempotent: returns True without writing when the range is
-    already owned by ``new_user``.
-
-    Returns:
-        True if a range was found (and reassigned or already owned by
-        ``new_user``), False if no range exists for ``request_id``.
-    """
-    from engine.models import Range
-
-    range_obj = Range.objects.filter(request__request_id=request_id).select_related("request").first()
-    if not range_obj:
-        logger.warning("reassign_range_owner_by_request: no range for request_id=%s", request_id)
-        return False
-
-    if range_obj.user_id == new_user.id:
-        logger.info(
-            "reassign_range_owner_by_request: already owned by user_id=%s request_id=%s",
-            new_user.id,
-            request_id,
-        )
-        return True
-
-    range_obj.user = new_user
-    range_obj.cms_user_id = new_user.id
-    range_obj.save(update_fields=["user", "cms_user_id"])
-
-    if range_obj.request is not None:
-        range_obj.request.user = new_user
-        range_obj.request.save(update_fields=["user"])
-
-    logger.info(
-        "reassign_range_owner_by_request: reassigned range_id=%s request_id=%s to user_id=%s",
-        range_obj.id,
-        request_id,
-        new_user.id,
-    )
-    return True
 
 
 def get_range_status(range_id: int) -> dict[str, Any] | None:

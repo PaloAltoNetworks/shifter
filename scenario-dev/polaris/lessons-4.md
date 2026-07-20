@@ -1,4 +1,4 @@
-# Lessons — Vancity / May 2026 event (in-progress notes)
+# Lessons—Vancity / May 2026 event (in-progress notes)
 
 Live observations from the May 7, 2026 cohort (20 participants, ~4 hr session).
 Captured during the run for post-event review.
@@ -19,7 +19,7 @@ Captured during the run for post-event review.
   briefing finished, there was a gap before participants knew what to do
   with their browser tabs. Reflex fix for next event: as part of the
   briefing closing, walk through the literal click path on a projected
-  screen — magic link → orientation → Kali Quickstart → ENTER RANGE.
+  screen—magic link → orientation → Kali Quickstart → ENTER RANGE.
 
 ## CTFd flag-submission format
 
@@ -43,7 +43,7 @@ Captured during the run for post-event review.
   bumped from `db.t3.small` to `db.m5.xlarge` (commit `c7b3af2db` on
   2026-05-07). It got applied via the deploy pipeline but the
   `dev-portal-guacamole-db` is still running `db.t3.small` because the
-  RDS module doesn't set `apply_immediately = true` — the class change
+  RDS module doesn't set `apply_immediately = true`—the class change
   is sitting in `PendingModifiedValues` waiting for the next maintenance
   window. So at event time the DB is still the undersized one.
 - **Action items for the rds module:**
@@ -51,7 +51,7 @@ Captured during the run for post-event review.
     through from the wrapper) so future class/parameter changes take
     effect on the next reconcile rather than the next maintenance window.
   - Also consider: the same module is used by `dev-portal-db` (the main
-    portal DB) — same flag should apply. For prod, gate with explicit
+    portal DB)—same flag should apply. For prod, gate with explicit
     maintenance windows.
 - **Mid-event mitigation that was NOT taken:** running
   `aws rds modify-db-instance --apply-immediately` to force the queued
@@ -64,22 +64,22 @@ Captured during the run for post-event review.
 - Mid-event participants reported submissions being rejected for the
   Mission 1 "Company Info" flag (`FLAG{8f3a2c1e9b7d4056}`). Investigation
   found the challenge in CTFd had **zero flags configured**. Same for
-  every other Mission 1-5 challenge — only the warm-up had a flag
+  every other Mission 1-5 challenge—only the warm-up had a flag
   attached. 38 of 39 challenges were unsubmittable.
 - **Fix at runtime:** posted the missing flags directly via
   `POST /api/v1/flags` for each challenge (one round-trip per challenge,
   ~5 sec total). Participants resubmitting succeeded.
-- **Root cause** (suspected — needs confirmation post-event in
+- **Root cause** (suspected—needs confirmation post-event in
   `scripts/ctfd-workshop/sync_polaris_ctfd.py`): the sync upserts
   challenges by name. On the *first* sync the script also creates flag
   rows. On a subsequent re-sync (challenge already exists → "update
   challenge" path) it appears to skip the flags-sync block. Multiple
   re-syncs were run today (M6-9 trim, Ottawa/Discord removal,
-  Before-You-Begin callout, etc.) — at some point along the way the
+  Before-You-Begin callout, etc.)—at some point along the way the
   flag rows were lost or never re-created and the sync didn't notice.
 - **Action items:**
   - Audit `sync_polaris_ctfd.py`. It must idempotently ensure flags
-    exist on every run, not just on initial create. Same for hints —
+    exist on every run, not just on initial create. Same for hints—
     the warm-up's hints synced via `create hint:` log lines but I
     didn't verify mission-challenge hints; those may also be missing.
   - Add a verify pass at end-of-sync: for every challenge, GET its
@@ -87,13 +87,13 @@ Captured during the run for post-event review.
   - Consider switching from name-keyed to id-keyed sync (challenge id
     in the source JSON) so updates are unambiguous.
 
-## Follow the Money — flag missing from PDF (LIVE-EVENT BUG)
+## Follow the Money—flag missing from PDF (LIVE-EVENT BUG)
 
 - 6 participants finished M1 except "Follow the Money." Investigation
   showed the PDF at `http://boreas-systems.ctf/internal/boreas-annual-2025.pdf`
   contains the supplier hint (`Kursk Heavy Industries - actuator
   assemblies $12,000,000`) but the literal `FLAG{c6f8d2b3e91a4507}` is
-  not in the file — not in body text, not in metadata
+  not in the file—not in body text, not in metadata
   (Author/Subject/Keywords), not in raw bytes. Same regression as a
   prior event.
 - **Root cause:** `content-packages/polaris/boreas-annual-report/package.yaml`
@@ -102,7 +102,7 @@ Captured during the run for post-event review.
   The bake-time PDF generator did not substitute these placeholders
   with the real flag value, so the rendered PDF ships placeholder text
   (or no flag at all). The hint copy says "search for the buried Kursk
-  Heavy Industries line item" — that buried line was supposed to be
+  Heavy Industries line item"—that buried line was supposed to be
   the flag.
 - **Live-event fix:** patched the CTFd flag entry for "Follow the
   Money" via `PATCH /api/v1/flags/{id}` from `static FLAG{c6f8d2b3e91a4507}`
@@ -117,10 +117,10 @@ Captured during the run for post-event review.
   - Add a smoke test to the bake: for every challenge with a flag,
     verify the literal flag string appears somewhere in the rendered
     artefact (PDF, HTML, etc.). Fail the bake if missing.
-  - Consider eliminating placeholder substitution entirely — embed
+  - Consider eliminating placeholder substitution entirely—embed
     the actual flag in the YAML and hide via styling/encoding.
 
-## What worked — keep this
+## What worked—keep this
 
 A counterweight to the bug list above. Real wins from the cohort.
 
@@ -131,13 +131,13 @@ Kanagavel**) rode the entire designed campaign from M1 through the M4
 trigger and into the bunker, in ~5 hours, in their **first** red-team
 CTF:
 
-- M1 OSINT — front company recon, employee directory, careers page,
+- M1 OSINT—front company recon, employee directory, careers page,
   DNS reconnaissance, supplier finance audit
-- M2 corporate compromise — intranet → mail → fileshare → AD →
+- M2 corporate compromise—intranet → mail → fileshare → AD →
   Kerberoast → DCSync → Pass-the-Hash → Domain Admin
-- M2 / M4 entry pivot — analyst desk for the on-call engineer,
+- M2 / M4 entry pivot—analyst desk for the on-call engineer,
   ssh into A15
-- M4 Lights Out — modbus writes to A5 SCADA generator (regs
+- M4 Lights Out—modbus writes to A5 SCADA generator (regs
   200/100/10/11) to deliberately crash the plant; recovered
   `FLAG{a7f2c8d0e5b34169}` from the post-failure HMI page
 - Splice watcher fires automatically on each of the three ranges —
@@ -153,7 +153,7 @@ of them ran the chain anyway.
 ### Infrastructure held up under load
 
 - 21 ranges (20 cohort + 1 spare) provisioned in **208 seconds** via
-  `provision_event_ranges` — single API call, fully concurrent ECS
+  `provision_event_ranges`—single API call, fully concurrent ECS
   Fargate provisioner tasks, all 21 hit READY without a single failure.
 - Splice watcher fired correctly on three independent ranges with
   zero operator intervention. The systemd service detected the SCADA
@@ -169,12 +169,12 @@ of them ran the chain anyway.
 
 - CTFd page edits (Ottawa/Discord/M6-9 cleanup, Before-You-Begin
   callout, Start Here link) shipped via `sync_polaris_ctfd.py` page
-  upsert — live within seconds, no aws-dev push.
+  upsert—live within seconds, no aws-dev push.
 - Missing CTFd flags (38/39 challenges had no flag rows) patched in
-  via `POST /api/v1/flags` directly — bypassed the broken sync path.
+  via `POST /api/v1/flags` directly—bypassed the broken sync path.
 - Follow the Money's missing-flag-in-PDF unblocked by switching the
   CTFd flag entry from a static string to a case-insensitive regex on
-  "Kursk Heavy Industries" — single PATCH, six participants instantly
+  "Kursk Heavy Industries"—single PATCH, six participants instantly
   unstuck.
 - Per-participant magic-link resend via `ctf.services.resend_invite`
   worked cleanly for ad-hoc fixes (Brad's verify, Ranjeet's swap,
@@ -185,8 +185,8 @@ of them ran the chain anyway.
 - **Ripping the claude-smoke-test gate from the bedrock shard step.**
   The smoke test caught the Sonnet-4.5-deprecation regression (good)
   but at the cost of tying every range provision to Bedrock latency
-  and a 60s timeout. Standard scenarios don't gate on claude. Removing
-  the gate let the 21 ranges come up in 208s instead of being
+  and a 60-second timeout. Standard scenarios don't gate on claude. Removing
+  the gate let the 21 ranges come up in 208 seconds instead of being
   bottlenecked. Keep this discipline.
 - **No-magic-link-send-until-confirmed.** Created participants via
   `invite_participant` (no email), held the bulk send until the
@@ -200,8 +200,8 @@ of them ran the chain anyway.
 
 ## Bedrock model deprecation (LIVE-EVENT BUG)
 
-- Pre-flight test of `claude` inside `a14-kali` was timing out (60s
-  `timeout` killed it) on every range. Network, VPCE, IAM, IMDS hop
+- Pre-flight test of `claude` inside `a14-kali` was timing out (`timeout`
+  killed it after 60 seconds) on every range. Network, VPCE, IAM, IMDS hop
   limit all checked out. Direct `aws bedrock-runtime invoke-model`
   from operator laptop (different network, same account) returned
   `AccessDeniedException: ... aws-marketplace:Subscribe ... `.
@@ -222,7 +222,7 @@ of them ran the chain anyway.
   - `shifter/packer/scripts/kali/claude-code.sh`
   - `shifter/packer/scripts/ubuntu/claude-code.sh`
   - `scripts/config-claude.sh` (local dev)
-  Haiku 4.5 is unchanged — still the small/fast model.
+  Haiku 4.5 is unchanged—still the small/fast model.
 - **Action items:**
   - Treat the model id as a release-managed input. Bake AMIs are
     immutable and embed the value in the kali AMI's
@@ -247,7 +247,7 @@ of them ran the chain anyway.
   container (`a14-kali`) inside a 17-container compose stack baked
   into the polaris-vm Ubuntu AMI. The container is built from
   `scenario-dev/polaris/containers/boreas-kali/Dockerfile`, which
-  installs `kali-linux-top10`, `nodejs`, `npm`, etc. — but **does
+  installs `kali-linux-top10`, `nodejs`, `npm`, etc.—but **does
   NOT install `@anthropic-ai/claude-code`** and does NOT write the
   `/etc/profile.d/claude-bedrock.sh` env file.
 - The runtime workaround is the `polaris_kali_bedrock_shard` step in
@@ -267,14 +267,14 @@ of them ran the chain anyway.
   - Or: bake `claude-code` directly into the `boreas-kali` Dockerfile
     (mirroring `packer/scripts/kali/claude-code.sh`), and remove the
     runtime shard step entirely. The shard step exists only because
-    the baked container is missing the install — fix the bake and
+    the baked container is missing the install—fix the bake and
     the shard becomes unnecessary.
 
 ## Terminal copy/paste was never wired (UX bug)
 
 - Mission Control's in-browser terminal uses xterm.js. xterm.js
   *renders* the selection (highlight visible) but does **not** push
-  selected text to the system clipboard, nor accept paste — those are
+  selected text to the system clipboard, nor accept paste—those are
   the embedding application's responsibility. The shifter wrapper
   (`shifter/shifter_platform/static/js/terminal.js`) had no
   copy/paste wiring at all. Mouse highlight worked visually; nothing
@@ -285,7 +285,7 @@ of them ran the chain anyway.
   - `Ctrl+Shift+V` → `navigator.clipboard.readText()` → `sendInput()`
   Falls through silently on permission denial. Consistent with native
   Linux terminal-emulator conventions.
-- Test suite was NOT updated — `terminal.test.js` mock for `Terminal`
+- Test suite was NOT updated—`terminal.test.js` mock for `Terminal`
   doesn't include `attachCustomKeyEventHandler`. Jest will fail until
   the mock is patched. CI deploy on `aws-dev` doesn't run jest, so
   this didn't block the release. Action item: add mock method + test
@@ -294,12 +294,12 @@ of them ran the chain anyway.
 ## CTFd auth model for cohort events
 
 - Two parallel auth systems are in play and they don't share state:
-  1. **CTFd accounts** (board / flag submission) — pre-created via
+  1. **CTFd accounts** (board / flag submission)—pre-created via
      `scripts/ctfd-workshop/create_users.py` with `--default-password`.
      Username = email. Cohort uses one shared password
      (`vancity` for this event). Skips CTFd's registration flow
      entirely.
-  2. **Mission Control magic links** (range access) — created via
+  2. **Mission Control magic links** (range access)—created via
      `ctf.services.participant.invite_participant` and emailed via
      `send_invitations` (or `resend_invite` per-participant). Token
      auto-rotates on each `resend_invite`.
@@ -326,7 +326,7 @@ Caught during live operations.
   302-redirects to `/login` even with a valid admin token. Other
   endpoints (`/users`, `/challenges`, `/pages`, `/flags`) tolerate
   missing Content-Type on GET; configs do not.
-- **Flag entries need explicit `data` field** when patching — the
+- **Flag entries need explicit `data` field** when patching—the
   PATCH body must include `id`, `type`, `content`, `data`,
   `challenge_id`, `challenge`. A partial PATCH with only `type` and
   `content` returned `success: true` but didn't always persist the
@@ -337,7 +337,7 @@ Caught during live operations.
 
 ## IMDS + VPCE plumbing for in-container AWS SDK
 
-- Default IMDS hop limit on a fresh EC2 is 1 — sufficient for
+- Default IMDS hop limit on a fresh EC2 is 1—sufficient for
   processes on the host but **not** for processes inside a docker
   container reaching IMDS through the docker bridge (one extra hop).
 - Without hop=2, the kali container has no AWS creds at runtime.
@@ -351,7 +351,7 @@ Caught during live operations.
   isn't VPC-aware and forwards `bedrock-runtime.us-east-2.amazonaws.com`
   to upstream resolvers, which return the public Bedrock IP. From
   inside the VPC, hitting the public IP instead of the VPCE private
-  IP usually fails (depending on egress rules) — and the smoke test
+  IP usually fails (depending on egress rules)—and the smoke test
   treated it as a hard failure.
 - Fix is the `/etc/hosts` override the shard step drops into the
   container. Better fix is to teach the `dns` container to forward
@@ -368,7 +368,7 @@ range; Chintan as new participant → spare2's range). Capture for reuse.
    and `cms.RangeInstance` (filter `user_id=...` exclude `destroyed`).
 2. If swapping out an existing range, soft-destroy it: set
    `engine.Range.status = DESTROYED`, set `destroyed_at`. Set
-   `cms.RangeInstance.status = "destroyed"`. (EC2 lingers — terminate
+   `cms.RangeInstance.status = "destroyed"`. (EC2 lingers—terminate
    manually post-event.)
 3. Reassign the source range's `user_id` on both `engine.Range`
    and `cms.RangeInstance` to the target participant's `user_id`.
@@ -387,14 +387,14 @@ container.
 Distilled from this run. Run all of these in order before sending
 magic links to a cohort:
 
-1. **Bedrock model invoke from operator laptop** — for every model id
+1. **Bedrock model invoke from operator laptop**—for every model id
    used by the engine and by baked AMIs. If any returns
    `AccessDeniedException`, fix before proceeding.
 2. **Provision N test ranges concurrently** (3–5 minimum). Watch all
    of them hit READY in the engine. Confirm `participant.range_status`
    gets set, not just `engine.Range.status`.
 3. **For each test range**: SSM into `a14-kali` and run
-   `claude -p "ok"`. Should return inside 30s.
+   `claude -p "ok"`. Should return inside 30 seconds.
 4. **CTFd flag verification sweep**: for every challenge in CTFd,
    `GET /api/v1/challenges/{id}/flags` and assert non-empty. Run
    after every `sync_polaris_ctfd.py` invocation, including re-syncs.
@@ -408,7 +408,7 @@ magic links to a cohort:
    `splice-link` automatically, confirm the flag is on the post-failure
    HMI page.
 7. **Submit one flag end-to-end via CTFd UI** (don't just hit the API)
-   — confirms the participant-facing `/api/v1/challenges/attempt`
+   —confirms the participant-facing `/api/v1/challenges/attempt`
    path works.
 8. **Magic-link round-trip**: send to operator's own email, click,
    land on `/participant/range/`, verify the range card renders.
@@ -480,7 +480,7 @@ the campaign content itself.
      a maintenance window). Either set `apply_immediately = true`
      in the rds module, or schedule a pre-event reboot to flush.
   2. The first-attempt success rate for Guacamole load must be very
-     high — measure this in the post-event review. If it's not,
+     high—measure this in the post-event review. If it's not,
      investigate guacd/guacamole-client connection-establishment
      code path, not just DB sizing. The DB is only one possible
      bottleneck.
@@ -489,28 +489,28 @@ the campaign content itself.
 
 - After the splice flip, a14-kali is on `splice-link` and the A9
   splice-relay host is reachable at `172.20.50.5:22`. Participants
-  must SSH into A9 to reach the bunker controllers — A9 is the only
+  must SSH into A9 to reach the bunker controllers—A9 is the only
   host with a route to 172.20.50.10/11/12/50.
 - The SSH credentials are `root:splice2025`. **That password is not
-  in any in-range artifact** — `grep -r splice2025` across
+  in any in-range artifact**—`grep -r splice2025` across
   `scenario-dev/polaris/{build,content-packages}/` returns zero
   hits outside `a9/Dockerfile` (build-time only, not in the running
   container) and the operator walkthroughs (not exposed to
   participants).
 - **Live-event evidence:** at least one of the three top scorers
   (with no prior red-team CTF experience) explicitly reported being
-  blocked here in post-event feedback — they got the SCADA blackout,
+  blocked here in post-event feedback—they got the SCADA blackout,
   triggered the splice, found A9 on port 22 via nmap, and could not
   authenticate. They got no bunker flags as a result. Two of three
   bunker-eligible operators stalled here.
 - **Fix options:**
-  1. Embed the credentials in a discoverable in-range artifact —
-     e.g., a forensic note in the splice-watcher service file on
+  1. Embed the credentials in a discoverable in-range artifact—
+     for example, a forensic note in the splice-watcher service file on
      a14-kali ("recovered relay creds: root / splice2025"), or in
      a maintainer log on A9 itself reachable via guest banner /
      pre-auth.
   2. Replace password auth with an SSH key pre-staged on a14-kali
-     (e.g., `/home/kali/.ssh/splice_relay_key` deployed by the
+     (for example, `/home/kali/.ssh/splice_relay_key` deployed by the
      splice-watcher step). Participants discover the key file once
      attached to splice-link.
   3. Both. The SSH key is more robust; the documented credential
@@ -526,10 +526,13 @@ the campaign content itself.
   private half at `/home/kali/.ssh/splice_relay` on a14-kali (mode
   0600). `~/.ssh/config` aliases `splice-relay` to that IdentityFile
   so the participant verb is still `ssh root@splice-relay`. The
-  scenario_smoketest harness gained a challenge-31 adapter that
-  proves the evidence file, the SSH auth, and the Modbus device-id
-  chain end-to-end from a14-kali.
+  then-current in-tree scenario harness gained a challenge-31 adapter that
+  proved the evidence file, the SSH auth, and the Modbus device-id chain
+  end-to-end from a14-kali. Issue #1293 later removed scenario-specific
+  adapters and answer material from core. That participant-path proof is now
+  owned by a separately installed, explicitly selected verification plugin;
+  the shared core framework contains no Polaris topology or answer data.
 
-(Add as the event continues — fill in further confusions, blockers,
+(Add as the event continues—fill in further confusions, blockers,
 unexpected issues, and any operator/facilitator notes worth carrying
 forward to the next cohort.)

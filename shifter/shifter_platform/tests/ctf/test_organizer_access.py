@@ -308,12 +308,12 @@ class TestOwnerCanAccess:
 
     def test_api_range_list_allows_owner(self, client, organizer_user, ctf_event):
         client.force_login(organizer_user)
-        response = client.get(reverse("ctf:api_range_list", kwargs={"event_id": ctf_event.id}))
+        response = client.get(reverse("v1:ctf:api_range_list", kwargs={"event_id": ctf_event.id}))
         assert response.status_code == 200
 
     def test_api_notification_list_allows_owner(self, client, organizer_user, ctf_event):
         client.force_login(organizer_user)
-        response = client.get(reverse("ctf:api_notification_list", kwargs={"event_id": ctf_event.id}))
+        response = client.get(reverse("v1:ctf:api_notification_list", kwargs={"event_id": ctf_event.id}))
         assert response.status_code == 200
 
 

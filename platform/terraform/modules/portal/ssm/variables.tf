@@ -13,6 +13,15 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "cloud_provider" {
+  # Backend identity published to Parameter Store so the deploy script's
+  # migrate/run containers receive the same CLOUD_PROVIDER the ASG boot path
+  # sets (portal/ec2 user_data). Rendered from shifter.yaml's settings.backend
+  # by shifter-config render-runtime; must not be hardcoded or defaulted here.
+  description = "Backend identity for the portal container's CLOUD_PROVIDER env var"
+  type        = string
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string

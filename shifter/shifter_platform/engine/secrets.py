@@ -152,3 +152,17 @@ def get_rdp_password(secret_ref: str) -> str:
     except CloudSecretsError as e:
         logger.exception("Failed to retrieve RDP password secret")
         raise SecretsError(f"Failed to retrieve RDP password: {e}") from e
+
+
+def get_openvpn_profile_secret(secret_ref: str) -> str:
+    """Resolve one OpenVPN profile without exposing its reference or value."""
+    if not secret_ref:
+        raise SecretsError("Secret reference is required")
+    try:
+        return _get_cached_secret(secret_ref)
+    except CloudSecretsError as exc:
+        # Do not attach the provider exception: provider messages commonly
+        # contain the secret resource name, which is credential metadata for
+        # this flow and must not cross into portal logs.
+        logger.warning("Failed to retrieve OpenVPN profile secret")
+        raise SecretsError("Failed to retrieve OpenVPN profile") from exc

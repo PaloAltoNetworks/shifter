@@ -258,6 +258,18 @@ variable "range_egress_allowed_cidrs" {
   default     = []
 }
 
+variable "aces_package_bucket_name" {
+  description = "Optional GCS bucket holding object-backed ACES package archives (#1567). Grants the portal read-only access; set it (with SHIFTER_ACES_PACKAGE_BUCKET on the app) to enable object-backed ACES packages. Empty disables the binding."
+  type        = string
+  default     = ""
+}
+
+variable "enable_cicd_github_oidc" {
+  description = "Create the GitHub Actions -> GCP Workload Identity federation (pool, provider, packer build SA). Default true. Set false for tenants whose org blocks the GitHub OIDC issuer (constraints on iam.workloadIdentityPoolProviders) or that do not use GitHub Actions CI; the platform itself does not depend on it (#1723)."
+  type        = bool
+  default     = true
+}
+
 variable "github_org" {
   description = "GitHub organization allowed to federate into the packer build service account."
   type        = string
@@ -332,4 +344,23 @@ variable "messaging_notification_channels" {
   description = "Cloud Monitoring notification channel resource IDs for messaging alerts."
   type        = list(string)
   default     = []
+}
+
+# First Identity Platform operator credentials (issue #1570). These are NOT
+# consumed by any Terraform resource -- the operator is created by the bootstrap
+# script (scripts/bootstrap/gcp_control_plane.py), which reads these keys from
+# the gitignored local.auto.tfvars overlay as the authoritative source. They are
+# declared here only so Terraform does not warn about undeclared variables when
+# it auto-loads the overlay. Rendered from GitHub secrets by _gcp-dev.yml.
+variable "gcp_bootstrap_admin_email" {
+  description = "Email of the first Identity Platform operator; consumed by the bootstrap script, not Terraform."
+  type        = string
+  default     = ""
+}
+
+variable "gcp_bootstrap_admin_password" {
+  description = "Password of the first Identity Platform operator; consumed by the bootstrap script, not Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
 }

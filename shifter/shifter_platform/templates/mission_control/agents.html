@@ -233,9 +233,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Create uploader instance
         uploader = new DirectUploader({
-            initiateUrl: '{% url "mission_control:initiate_upload" %}',
-            completeUrl: '{% url "mission_control:complete_upload" %}',
-            cancelUrl: '{% url "mission_control:cancel_upload" %}',
+            initiateUrl: '{% url "v1:mission_control:upload-initiate" %}',
+            completeUrl: '{% url "v1:mission_control:upload-complete" %}',
+            cancelUrl: '{% url "v1:mission_control:upload-cancel" %}',
             csrfToken: csrfToken,
             maxSizeMB: 2048,
 

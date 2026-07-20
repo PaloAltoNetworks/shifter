@@ -170,6 +170,16 @@ class TestGcpKaliSourceImage:
         assert "google-guest-agent" in script
         assert "--force-overwrite" in script
 
+    def test_kali_conversion_script_regenerates_ssh_host_keys(self):
+        script = (PACKER_DIR / "scripts" / "kali" / "gce-debian-to-kali.sh").read_text()
+        # cleanup.sh strips host keys; Kali (unlike Ubuntu) does not regenerate
+        # them on first boot, so sshd never binds :22 and the range provisioner's
+        # SSH-wait times out (#1745). The conversion must install a first-boot
+        # oneshot that runs `ssh-keygen -A` before sshd.
+        assert "regenerate-ssh-host-keys.service" in script
+        assert "ssh-keygen -A" in script
+        assert "systemctl enable regenerate-ssh-host-keys.service" in script
+
 
 class TestGcpPackerValidate:
     """`packer validate` passes against the GCE templates (when packer is present)."""
@@ -194,6 +204,320 @@ class TestGcpPackerValidate:
             cwd=GCP_DIR,
         )
         assert result.returncode == 0, f"Packer validate failed: {result.stderr}"
+
+
+REPO_ROOT = PACKER_DIR.parent.parent
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+
+
+class TestGcpPolarisVerifyStackWiring:
+    """The polaris-vm stack verify is wired into the template + vars (#1343 gap 1)."""
+
+    def test_variables_declare_checksum_and_generation(self):
+        content = (GCP_DIR / "variables.pkr.hcl").read_text()
+        assert 'variable "polaris_stack_sha256"' in content
+        assert 'variable "polaris_stack_generation"' in content
+
+    def test_polaris_vm_template_requires_stack(self):
+        content = (GCP_DIR / "polaris-vm.pkr.hcl").read_text()
+        assert "POLARIS_REQUIRE_STACK=1" in content
+        assert "POLARIS_STACK_SHA256=${var.polaris_stack_sha256}" in content
+        assert "POLARIS_STACK_GENERATION=${var.polaris_stack_generation}" in content
+        # host-setup installs docker/sdk; verify-stack (fail-closed) runs next.
+        assert "scripts/polaris/verify-stack.sh" in content
+        assert content.index("host-setup.sh") < content.index("verify-stack.sh")
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+class TestGcpPolarisVerifyStackBehavior:
+    """verify-stack.sh actually fails the build on each fail-closed condition.
+
+    Executes the script with stubbed gcloud/docker so the fail-closed BRANCHES
+    are exercised (not just asserted present) — #1343 test-quality review.
+    """
+
+    VERIFY_STACK = GCP_SCRIPTS_DIR / "polaris" / "verify-stack.sh"
+
+    def _run(self, tmp_path, env, *, with_stub_bin=True, docker_ok=True, images="img:latest"):
+        import os
+
+        stub = tmp_path / "bin"
+        stub.mkdir(exist_ok=True)
+        if with_stub_bin:
+            # gcloud stub writes deterministic tarball bytes to the cp destination
+            # (last argv). The test sets POLARIS_STACK_SHA256 to that content hash.
+            (stub / "gcloud").write_text('#!/bin/bash\ndest="${@: -1}"\nprintf polaris-stack-bytes > "$dest"\n')
+            docker_rc = "0" if docker_ok else "1"
+            # docker stub: `compose config --images` prints the image list; every
+            # other subcommand (config/build/pull/image inspect) exits docker_rc.
+            (stub / "docker").write_text(
+                "#!/bin/bash\n"
+                'if [ "$1" = "compose" ] && [ "$2" = "config" ] && [ "$3" = "--images" ]; then\n'
+                f'  printf "%s\\n" {images}; exit 0\nfi\n'
+                f"exit {docker_rc}\n"
+            )
+            for f in ("gcloud", "docker"):
+                (stub / f).chmod(0o755)
+        run_env = dict(os.environ)
+        run_env["PATH"] = f"{stub}:{run_env['PATH']}"
+        run_env["POLARIS_ROOT"] = str(tmp_path / "polaris")
+        run_env["COMPOSE_DIR"] = str(tmp_path / "polaris" / "build")
+        run_env.update(env)
+        bash_path = shutil.which("bash")
+        return subprocess.run(  # noqa: S603
+            [bash_path, str(self.VERIFY_STACK)],
+            capture_output=True,
+            text=True,
+            env=run_env,
+        )
+
+    def test_missing_bucket_when_required_fails(self, tmp_path):
+        r = self._run(tmp_path, {"POLARIS_REQUIRE_STACK": "1", "POLARIS_STACK_BUCKET": ""})
+        assert r.returncode != 0, r.stderr
+
+    def test_missing_checksum_when_required_fails(self, tmp_path):
+        r = self._run(tmp_path, {"POLARIS_REQUIRE_STACK": "1", "POLARIS_STACK_BUCKET": "b", "POLARIS_STACK_SHA256": ""})
+        assert r.returncode != 0, r.stderr
+
+    def test_checksum_mismatch_fails(self, tmp_path):
+        r = self._run(
+            tmp_path,
+            {
+                "POLARIS_REQUIRE_STACK": "1",
+                "POLARIS_STACK_BUCKET": "b",
+                "POLARIS_STACK_SHA256": "0" * 64,  # deliberately wrong
+            },
+        )
+        assert r.returncode != 0, r.stderr
+
+    def test_missing_stack_when_not_required_succeeds(self, tmp_path):
+        r = self._run(tmp_path, {"POLARIS_REQUIRE_STACK": "0", "POLARIS_STACK_BUCKET": ""})
+        assert r.returncode == 0, r.stderr
+
+    @staticmethod
+    def _stub_tar(tmp_path):
+        # verify-stack.sh runs `tar xzf <file> -C <dir>`; the gcloud stub writes
+        # raw bytes (not a real tar), so stub tar to drop a compose file in -C.
+        stub = tmp_path / "bin"
+        stub.mkdir(exist_ok=True)
+        (stub / "tar").write_text(
+            "#!/bin/bash\n"
+            'd="";prev="";for a in "$@";do [ "$prev" = "-C" ] && d="$a";prev="$a";done\n'
+            'printf "services: {}\\n" > "$d/docker-compose.yml"\n'
+        )
+        (stub / "tar").chmod(0o755)
+
+    def test_valid_stack_passes(self, tmp_path):
+        import hashlib
+
+        # The gcloud stub writes these exact bytes; declare their real sha256.
+        sha = hashlib.sha256(b"polaris-stack-bytes").hexdigest()
+        self._stub_tar(tmp_path)
+        r = self._run(
+            tmp_path,
+            {"POLARIS_REQUIRE_STACK": "1", "POLARIS_STACK_BUCKET": "b", "POLARIS_STACK_SHA256": sha},
+            docker_ok=True,
+        )
+        assert r.returncode == 0, f"stdout={r.stdout}\nstderr={r.stderr}"
+
+    def test_failed_docker_step_fails(self, tmp_path):
+        import hashlib
+
+        # Even with a valid, checksum-matching stack, a failing docker step
+        # (config/build/pull) must fail the build — no `|| true`.
+        sha = hashlib.sha256(b"polaris-stack-bytes").hexdigest()
+        self._stub_tar(tmp_path)
+        r = self._run(
+            tmp_path,
+            {"POLARIS_REQUIRE_STACK": "1", "POLARIS_STACK_BUCKET": "b", "POLARIS_STACK_SHA256": sha},
+            docker_ok=False,
+        )
+        assert r.returncode != 0, r.stdout
+
+
+class TestGcpValidationWorkflow:
+    """A candidate-boot validation gate exists and boots an isolated VM (#1343 gap 2)."""
+
+    @pytest.fixture
+    def workflow(self):
+        return (WORKFLOWS_DIR / "packer-gcp-validate.yml").read_text()
+
+    def test_validate_workflow_exists(self):
+        assert (WORKFLOWS_DIR / "packer-gcp-validate.yml").exists()
+
+    def test_validation_scripts_exist(self):
+        assert (GCP_SCRIPTS_DIR / "validate" / "linux.sh").exists()
+        assert (GCP_SCRIPTS_DIR / "validate" / "dc-probe.sh").exists()
+        assert (GCP_SCRIPTS_DIR / "validate" / "gather-evidence.sh").exists()
+        # The guest self-report script is removed; evidence is runner-gathered.
+        assert not (GCP_SCRIPTS_DIR / "validate" / "dc.ps1").exists()
+
+    def test_validation_vm_has_no_external_ip(self, workflow):
+        assert "--no-address" in workflow
+
+    def test_validation_vm_is_shielded(self, workflow):
+        assert "--shielded-secure-boot" in workflow
+        assert "--shielded-vtpm" in workflow
+        assert "--shielded-integrity-monitoring" in workflow
+
+    def test_validation_vm_blocks_project_ssh_keys(self, workflow):
+        assert "block-project-ssh-keys=TRUE" in workflow
+
+    def test_validation_reboots_and_rechecks(self, workflow):
+        assert "instances reset" in workflow
+
+    def test_validation_labels_the_candidate(self, workflow):
+        assert "validated=passed" in workflow
+
+    def test_validation_pins_exact_candidate(self, workflow):
+        # The candidate is resolved once and pinned; downstream uses the exact
+        # name, and an explicit source_image input skips family resolution.
+        assert "source_image" in workflow
+
+    def test_binds_candidate_family_to_selected_profile(self, workflow):
+        # The candidate's own family must equal the family for the requested
+        # image_type, so a weak profile cannot validate a sensitive-family image.
+        assert '"${IMG_FAMILY}" != "${FAMILY}"' in workflow
+
+    def test_matrix_excludes_first_boot_dc_and_sysprepped_windows(self, workflow):
+        # Only image types with a matching validator are selectable; the
+        # sysprepped `windows` and first-boot-promotion `dc` images are excluded.
+        assert "\n          - windows\n" not in workflow
+        assert "\n          - dc\n" not in workflow
+        assert "\n          - dc-prebaked\n" in workflow
+        assert "\n          - polaris-vm\n" in workflow
+
+    def test_validation_vm_has_no_guest_service_account(self, workflow):
+        # The VM boots candidate code, so it must have no cloud identity — guest
+        # code cannot read a token and mutate its own image label.
+        assert "--no-service-account --no-scopes" in workflow
+        assert '--service-account="${BUILD_SA}"' not in workflow
+
+    def test_dc_validation_binds_domain_from_checked_in_profile(self, workflow):
+        # The expected forest domain is resolved from the checked-in profile
+        # (the allowlist); an unknown profile / empty domain is rejected, and the
+        # profile is a strict slug (no path traversal).
+        assert "dc-profiles/${DC_PROFILE}.pkrvars.hcl" in workflow
+        assert "dc_domain_name" in workflow
+        assert "^[a-z0-9][a-z0-9-]*$" in workflow
+
+    def test_validation_cleans_up_the_vm(self, workflow):
+        assert "instances delete" in workflow
+        assert "if: always()" in workflow
+
+    def test_evidence_gathered_by_runner_not_guest(self, workflow):
+        # The runner executes the checks over IAP and gates on the result; there
+        # is no guest-emitted serial sentinel trusted as the pass signal.
+        assert "gather-evidence.sh" in workflow
+        assert "SHIFTER_VALIDATION_RESULT" not in workflow
+        assert "get-serial-port-output" not in workflow
+        linux = (GCP_SCRIPTS_DIR / "validate" / "linux.sh").read_text()
+        assert "SHIFTER_VALIDATION_RESULT" not in linux
+
+    def test_gather_evidence_uses_iap_tunnel_and_exit_code(self):
+        g = (GCP_SCRIPTS_DIR / "validate" / "gather-evidence.sh").read_text()
+        assert "start-iap-tunnel" in g
+        # Linux is SSH-exec'd; the DC is probed over LDAP; both gate on exit code.
+        assert "ssh " in g
+        assert "dc-probe.sh" in g
+
+    def test_linux_validation_checks_stack_health_by_exit_code(self):
+        linux = (GCP_SCRIPTS_DIR / "validate" / "linux.sh").read_text()
+        assert "google-guest-agent" in linux
+        assert "docker compose config --images" in linux
+        # Exits non-zero on failure so the runner gates on the exit code.
+        assert "exit 1" in linux and "exit 0" in linux
+
+    def test_dc_probe_reads_ad_without_promoting(self):
+        probe = (GCP_SCRIPTS_DIR / "validate" / "dc-probe.sh").read_text()
+        # Runner-side AD probe: an anonymous rootDSE query proves a serving
+        # forest; it must never promote one, and it must require a specific
+        # expected domain (no unbound "any DC" pass).
+        assert "ldapsearch" in probe
+        assert "defaultNamingContext" in probe
+        assert "Install-ADDSForest" not in probe
+        assert 'EXPECTED_DOMAIN}" ]] || fail' in probe
+
+    def test_dc_evidence_loop_has_no_false_pass(self):
+        # In the DC branch, rc must default non-zero and be set 0 ONLY on a real
+        # probe success — never read $? after the if-compound (bash returns 0 when
+        # no branch runs, which would turn an all-failed loop into a false pass).
+        g = (GCP_SCRIPTS_DIR / "validate" / "gather-evidence.sh").read_text()
+        dc_section = g.split("# Linux: SSH-execute", 1)[0]
+        assert "rc=$?" not in dc_section
+        assert "rc=1" in dc_section
+
+
+class TestGcpPromoteEvidenceDriven:
+    """Promotion copies the exact validated candidate, not newest-in-family (#1343 gaps 3/4)."""
+
+    @pytest.fixture
+    def promote(self):
+        return (WORKFLOWS_DIR / "packer-gcp-promote.yml").read_text()
+
+    def test_requires_exact_source_image_input(self, promote):
+        assert "source_image:" in promote
+        assert "SRC_IMAGE: ${{ inputs.source_image }}" in promote
+
+    def test_verifies_validation_label_before_promotion(self, promote):
+        assert "labels.validated" in promote
+        assert '"${VALIDATED}" != "passed"' in promote
+
+    def test_copies_the_exact_candidate(self, promote):
+        assert '--source-image="${SRC_IMAGE}"' in promote
+
+    def test_does_not_resolve_source_from_family(self, promote):
+        # The dev-side source must be the pinned candidate, never re-resolved to
+        # newest-in-family at promotion time (the TOCTOU gap).
+        assert "SRC_IMAGE=$(gcloud compute images describe-from-family" not in promote
+        assert 'SRC_IMAGE="$(gcloud compute images describe-from-family' not in promote
+        # describe-from-family survives ONLY to read the prod head for deprecation.
+        assert 'PREV_PROD_IMAGE="$(gcloud compute images describe-from-family' in promote
+
+    def test_verifies_new_prod_image_before_deprecating_old_head(self, promote):
+        assert "NEW_STATUS" in promote
+        assert "deprecate" in promote
+
+    def test_derives_family_from_image_for_polaris_and_dc(self, promote):
+        # Family comes from the image's own family attribute, so polaris-vm and
+        # purpose-scoped <purpose>-dc families need no per-name logic.
+        assert "value(family)" in promote
+
+
+class TestGcpDcPrebakedCredentialHygiene:
+    """The pre-promoted DC ships no baked credential/transcript (#1343 gaps 5/6)."""
+
+    def test_promote_bake_has_no_committed_dsrm_default(self):
+        content = (GCP_SCRIPTS_DIR / "dc-prebaked" / "promote-bake.ps1").read_text()
+        assert "DsrmR3store" not in content
+        assert 'DsrmPassword = "' not in content
+        assert "DC_DSRM_PASSWORD" in content
+
+    def test_variables_declare_sensitive_dsrm(self):
+        content = (GCP_DIR / "variables.pkr.hcl").read_text()
+        assert 'variable "dc_dsrm_password"' in content
+        # Must be marked sensitive so packer never prints it.
+        block = content.split('variable "dc_dsrm_password"', 1)[1].split("}", 1)[0]
+        assert "sensitive   = true" in block
+
+    def test_finalize_strips_transcripts_and_seed_in_session(self):
+        # Cleanup runs inside finalize.ps1's still-authenticated session (the
+        # content seed resets the Administrator password, so a later provisioner
+        # could not reconnect). Verify finalize strips the secret-bearing seed +
+        # transcripts, and there is no separate cleanup provisioner to re-auth.
+        content = (GCP_SCRIPTS_DIR / "dc-prebaked" / "finalize.ps1").read_text()
+        assert "dc-prebaked-promote-bake.log" in content
+        assert "dc-prebaked-finalize.log" in content
+        assert 'Remove-Item -Path "C:\\polaris\\a2_setup.ps1"' in content
+        assert not (GCP_SCRIPTS_DIR / "dc-prebaked" / "cleanup.ps1").exists()
+
+    def test_dc_prebaked_finalize_is_last_and_injects_dsrm(self):
+        content = (GCP_DIR / "dc-prebaked.pkr.hcl").read_text()
+        assert "DC_DSRM_PASSWORD=${var.dc_dsrm_password}" in content
+        # finalize (which now also cleans up) is the last provisioner before the
+        # manifest post-processor; no separate cleanup provisioner follows it.
+        assert "scripts/dc-prebaked/cleanup.ps1" not in content
+        assert content.index("finalize.ps1") < content.index("post-processor")
 
 
 class TestAwsTemplatesUnaffected:

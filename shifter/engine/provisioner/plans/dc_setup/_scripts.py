@@ -1,0 +1,497 @@
+"""PowerShell scripts embedded in the DC setup plan.
+
+Extracted from ``dc_setup.py`` (formerly ``plans/dc_setup.py``, now
+``plans/dc_setup/__init__.py``) purely to keep every file in the package
+under the project's 500-line cap. These are the script bodies that
+``DCSetupPlan`` assembles into ``SetupStep`` instances; the plan module
+imports them back, so the package's public surface
+(``plans.dc_setup.DCSetupPlan``) is unchanged.
+"""
+
+# PowerShell script to set Administrator credential
+# Prebaked DC AMI may have unknown credential - reset to configured value
+SET_ADMIN_CREDENTIAL_SCRIPT = """
+$ErrorActionPreference = "Stop"
+
+Write-Host "=========================================="
+Write-Host "=== Setting Administrator Password ==="
+Write-Host "=========================================="
+Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Host "Hostname: $env:COMPUTERNAME"
+
+# Verify this is a Domain Controller. AD DS (NTDS/ADWS) can take a few minutes
+# to finish starting on a freshly cloned prebaked DC, so wait for it with a
+# retry loop rather than failing on the first probe. A single probe made this
+# step flaky: it passed only when AD DS happened to be up within the
+# orchestrator's short retry window, and failed otherwise ("Not a Domain
+# Controller or AD services not running").
+Write-Host ""
+Write-Host "[Step 1] Waiting for AD DS to be ready..."
+$maxAttempts = 15
+$delaySeconds = 20
+$dcInfo = $null
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+        $dcInfo = Get-ADDomainController -ErrorAction Stop
+        Write-Host "  SUCCESS: This is a Domain Controller (attempt $attempt)"
+        Write-Host "  Domain: $($dcInfo.Domain)"
+        Write-Host "  HostName: $($dcInfo.HostName)"
+        Write-Host "  Site: $($dcInfo.Site)"
+        break
+    } catch {
+        Write-Host "  Attempt $($attempt)/$($maxAttempts): AD DS not ready yet: $($_.Exception.Message)"
+        if ($attempt -lt $maxAttempts) {
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+}
+if (-not $dcInfo) {
+    Write-Host "  ERROR: Not a Domain Controller or AD services not running after $maxAttempts attempts"
+    Write-Host "  Cannot set domain Administrator password on non-DC"
+    exit 1
+}
+
+# Check current Administrator account status
+Write-Host ""
+Write-Host "[Step 2] Checking Administrator account status..."
+try {
+    $adminUser = Get-ADUser -Identity Administrator -Properties PasswordLastSet,Enabled,LockedOut -ErrorAction Stop
+    Write-Host "  Account Enabled: $($adminUser.Enabled)"
+    Write-Host "  Account LockedOut: $($adminUser.LockedOut)"
+    Write-Host "  PasswordLastSet: $($adminUser.PasswordLastSet)"
+} catch {
+    Write-Host "  WARNING: Could not query Administrator account: $($_.Exception.Message)"
+}
+
+# Set the password
+Write-Host ""
+Write-Host "[Step 3] Setting Administrator password..."
+$newPassword = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
+
+try {
+    Set-ADAccountPassword -Identity Administrator -Reset -NewPassword $newPassword -ErrorAction Stop
+    Write-Host "  SUCCESS: Administrator password set via Set-ADAccountPassword"
+} catch {
+    Write-Host "  ERROR: Failed to set Administrator password"
+    Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+    Write-Host "  Exception Message: $($_.Exception.Message)"
+    if ($_.Exception.InnerException) {
+        Write-Host "  Inner Exception: $($_.Exception.InnerException.Message)"
+    }
+    exit 1
+}
+
+# Verify RDP access is configured
+Write-Host ""
+Write-Host "[Step 4] Verifying RDP configuration..."
+$rdpService = Get-Service -Name TermService -ErrorAction SilentlyContinue
+Write-Host "  TermService Status: $($rdpService.Status)"
+
+$rdpPort = Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue
+if ($rdpPort) {
+    Write-Host "  RDP Port 3389: LISTENING"
+} else {
+    Write-Host "  WARNING: RDP Port 3389 not listening"
+}
+
+Write-Host ""
+Write-Host "=========================================="
+Write-Host "=== Administrator Password Set ==="
+Write-Host "=========================================="
+"""
+
+# PowerShell script to enable SSH with password auth
+# Required for Guacamole SSH connections (AMI may have key-only auth)
+# Windows OpenSSH has a Match Group administrators block that overrides global settings
+ENABLE_SSH_AUTH_SCRIPT = """
+$ErrorActionPreference = "Stop"
+
+Write-Host "=== Enabling SSH Password Authentication ==="
+
+$sshdConfigPath = "C:\\ProgramData\\ssh\\sshd_config"
+$sshDir = Split-Path -Parent $sshdConfigPath
+
+Write-Host "Ensuring OpenSSH Server is available..."
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+$sshdExeCandidates = @(
+    (Join-Path $env:WINDIR "System32\\OpenSSH\\sshd.exe"),
+    (Join-Path $env:ProgramFiles "OpenSSH\\sshd.exe")
+)
+$sshdExe = $sshdExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $sshdService -and -not $sshdExe) {
+    throw "OpenSSH Server service/binary not found. Rebuild and publish a Polaris DC AMI with OpenSSH preinstalled."
+} else {
+    Write-Host "OpenSSH Server already present"
+}
+
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+$sshdExe = $sshdExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $sshdService -and $sshdExe) {
+    Write-Host "OpenSSH binary found at $sshdExe; creating sshd service"
+    New-Service -Name sshd `
+        -BinaryPathName ('"{0}"' -f $sshdExe) `
+        -DisplayName "OpenSSH SSH Server" `
+        -StartupType Automatic | Out-Null
+    $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+}
+
+if (-not $sshdService) {
+    throw "OpenSSH Server service is unavailable after install/bootstrap"
+}
+
+if (-not (Test-Path $sshDir)) {
+    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+}
+
+Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
+try {
+    Start-Service sshd -ErrorAction Stop
+    Write-Host "sshd service started"
+} catch {
+    Write-Host "WARNING: sshd did not start before config update: $($_.Exception.Message)"
+}
+
+if (-not (Test-Path $sshdConfigPath)) {
+    $defaultConfigPath = Join-Path $env:WINDIR "System32\\OpenSSH\\sshd_config_default"
+    if (Test-Path $defaultConfigPath) {
+        Copy-Item $defaultConfigPath $sshdConfigPath -Force
+        Write-Host "Copied default sshd_config from $defaultConfigPath"
+    } else {
+        @"
+Port 22
+PubkeyAuthentication yes
+PasswordAuthentication yes
+Subsystem sftp sftp-server.exe
+
+Match Group administrators
+       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
+       PasswordAuthentication yes
+"@ | Set-Content -Path $sshdConfigPath -Encoding ascii
+        Write-Host "Created minimal sshd_config at $sshdConfigPath"
+    }
+}
+
+$firewallRule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
+if ($firewallRule) {
+    Enable-NetFirewallRule -Name "OpenSSH-Server-In-TCP" | Out-Null
+    Write-Host "Enabled existing OpenSSH firewall rule"
+} else {
+    New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
+        -DisplayName "OpenSSH Server (sshd)" `
+        -Enabled True `
+        -Direction Inbound `
+        -Protocol TCP `
+        -Action Allow `
+        -LocalPort 22 | Out-Null
+    Write-Host "Created OpenSSH firewall rule"
+}
+
+# Read current config
+$config = Get-Content $sshdConfigPath -Raw
+
+# Enable password authentication at global level
+$config = $config -replace '(?m)^#?PasswordAuthentication\\s+.*$', 'PasswordAuthentication yes'
+
+# Ensure the global setting exists
+if ($config -notmatch 'PasswordAuthentication yes') {
+    $config += "`nPasswordAuthentication yes"
+}
+
+# Windows OpenSSH has Match Group administrators block that overrides global settings
+# Add PasswordAuthentication yes inside that block
+if ($config -match 'Match Group administrators') {
+    Write-Host "Found Match Group administrators block, adding PasswordAuthentication yes"
+    # Insert PasswordAuthentication yes after the Match Group administrators line
+    $config = $config -replace '(Match Group administrators[^\\n]*\\n)', "`$1       PasswordAuthentication yes`n"
+}
+
+# Write updated config
+Set-Content -Path $sshdConfigPath -Value $config -NoNewline
+Write-Host "Updated sshd_config with PasswordAuthentication yes"
+
+# Restart sshd to apply changes
+Write-Host "Restarting sshd service..."
+Restart-Service sshd -Force
+Write-Host "sshd service restarted"
+
+# Verify the change
+$verifyConfig = Get-Content $sshdConfigPath | Select-String "PasswordAuthentication"
+Write-Host "Verification: $verifyConfig"
+
+Write-Host "=== SSH Password Authentication Enabled ==="
+"""
+
+# PowerShell script to promote server to Domain Controller
+PROMOTE_DC_SCRIPT = """
+$ErrorActionPreference = "Stop"
+
+Write-Host "=========================================="
+Write-Host "DC PROMOTION STARTING"
+Write-Host "=========================================="
+Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Host "Hostname: $env:COMPUTERNAME"
+Write-Host "Domain to create: {{ domain_name }}"
+Write-Host "NetBIOS name: {{ netbios_name }}"
+Write-Host ""
+
+try {
+    Write-Host "[Step 0] Detecting existing Domain Controller state..."
+    try {
+        Import-Module ActiveDirectory -ErrorAction Stop
+        $existingDc = Get-ADDomainController -ErrorAction Stop
+        Write-Host "  Domain Controller already configured: $($existingDc.HostName)"
+        Write-Host "  Skipping runtime promotion"
+        exit 0
+    } catch {
+        Write-Host "  No existing Domain Controller detected, continuing with promotion"
+    }
+
+    Write-Host "[Step 1] Converting passwords to SecureString..."
+    $DsrmPassword = ConvertTo-SecureString "{{ dsrm_password }}" -AsPlainText -Force
+    $DomainAdminPassword = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
+    Write-Host "  Passwords converted successfully"
+
+    Write-Host ""
+    Write-Host "[Step 2] Checking AD DS feature is installed..."
+    $addsFeature = Get-WindowsFeature -Name AD-Domain-Services
+    Write-Host "  AD-Domain-Services installed: $($addsFeature.Installed)"
+    Write-Host "  Install state: $($addsFeature.InstallState)"
+
+    if (-not $addsFeature.Installed) {
+        Write-Host "  Installing AD-Domain-Services feature..."
+        Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -ErrorAction Stop | Out-Null
+        Write-Host "  AD-Domain-Services feature installed"
+    }
+
+    Write-Host ""
+    Write-Host "[Step 3] Installing AD DS Forest..."
+    Write-Host "  DomainName: {{ domain_name }}"
+    Write-Host "  DomainNetbiosName: {{ netbios_name }}"
+    Write-Host "  InstallDns: Yes"
+    Write-Host "  NoRebootOnCompletion: Yes"
+    Write-Host ""
+    Write-Host "  Starting Install-ADDSForest (this may take several minutes)..."
+
+    $startTime = Get-Date
+    Install-ADDSForest `
+        -DomainName "{{ domain_name }}" `
+        -DomainNetbiosName "{{ netbios_name }}" `
+        -SafeModeAdministratorPassword $DsrmPassword `
+        -InstallDns `
+        -NoRebootOnCompletion `
+        -Force `
+        -ErrorAction Stop
+    $endTime = Get-Date
+    $duration = $endTime - $startTime
+
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "DC PROMOTION COMPLETED SUCCESSFULLY"
+    Write-Host "=========================================="
+    Write-Host "Duration: $($duration.TotalSeconds) seconds"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "Server will restart to complete domain controller configuration"
+    Write-Host "=========================================="
+
+    exit 0
+} catch {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "DC PROMOTION FAILED"
+    Write-Host "=========================================="
+    Write-Host "Exception Type: $($_.Exception.GetType().FullName)"
+    Write-Host "Exception Message: $($_.Exception.Message)"
+    if ($_.Exception.InnerException) {
+        Write-Host "Inner Exception: $($_.Exception.InnerException.Message)"
+    }
+    Write-Host "Stack Trace:"
+    Write-Host $_.ScriptStackTrace
+    Write-Host ""
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
+    exit 1
+}
+"""
+
+# PowerShell script to verify AD DS is running
+# Includes retry logic - AD services may take time to fully start after reboot
+VERIFY_AD_SCRIPT = """
+$ErrorActionPreference = "Stop"
+
+Write-Host "=========================================="
+Write-Host "DC VERIFICATION STARTING"
+Write-Host "=========================================="
+Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Host "Hostname: $env:COMPUTERNAME"
+
+$maxAttempts = 15
+$retryDelaySeconds = 20
+$attempt = 0
+$verified = $false
+
+Write-Host "Will attempt verification up to $maxAttempts times with ${retryDelaySeconds}s delay between attempts"
+Write-Host ""
+
+while ($attempt -lt $maxAttempts -and -not $verified) {
+    $attempt++
+    Write-Host "=========================================="
+    Write-Host "VERIFICATION ATTEMPT $attempt of $maxAttempts"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
+
+    $stepsPassed = 0
+    $totalSteps = 4
+
+    # Step 1: Check NTDS service
+    Write-Host ""
+    Write-Host "[Step 1/$totalSteps] Checking NTDS service..."
+    try {
+        $addsService = Get-Service -Name "NTDS" -ErrorAction Stop
+        Write-Host "  NTDS service found"
+        Write-Host "  Status: $($addsService.Status)"
+        Write-Host "  StartType: $($addsService.StartType)"
+
+        if ($addsService.Status -ne "Running") {
+            Write-Host "  ERROR: NTDS service is not running (Status=$($addsService.Status))"
+            Write-Host "  Waiting for service to start..."
+        } else {
+            Write-Host "  SUCCESS: NTDS service is running"
+            $stepsPassed++
+        }
+    } catch {
+        Write-Host "  ERROR: Failed to query NTDS service"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
+    }
+
+    # Step 2: Check AD DS module and domain controller
+    Write-Host ""
+    Write-Host "[Step 2/$totalSteps] Querying AD Domain Controller..."
+    try {
+        # First check if AD module is available
+        $adModule = Get-Module -ListAvailable -Name ActiveDirectory
+        if ($adModule) {
+            Write-Host "  ActiveDirectory module version: $($adModule.Version)"
+        } else {
+            Write-Host "  WARNING: ActiveDirectory module not found in available modules"
+        }
+
+        Import-Module ActiveDirectory -ErrorAction Stop
+        Write-Host "  ActiveDirectory module imported"
+
+        $dc = Get-ADDomainController -ErrorAction Stop
+        Write-Host "  SUCCESS: Domain Controller query succeeded"
+        Write-Host "  HostName: $($dc.HostName)"
+        Write-Host "  Domain: $($dc.Domain)"
+        Write-Host "  Forest: $($dc.Forest)"
+        Write-Host "  Site: $($dc.Site)"
+        Write-Host "  IPv4Address: $($dc.IPv4Address)"
+        Write-Host "  OperatingSystem: $($dc.OperatingSystem)"
+        Write-Host "  IsGlobalCatalog: $($dc.IsGlobalCatalog)"
+        Write-Host "  IsReadOnly: $($dc.IsReadOnly)"
+        $stepsPassed++
+    } catch {
+        Write-Host "  ERROR: Failed to query AD Domain Controller"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
+        if ($_.Exception.InnerException) {
+            Write-Host "  Inner Exception: $($_.Exception.InnerException.Message)"
+        }
+    }
+
+    # Step 3: Check AD Domain
+    Write-Host ""
+    Write-Host "[Step 3/$totalSteps] Querying AD Domain..."
+    try {
+        $domain = Get-ADDomain -ErrorAction Stop
+        Write-Host "  SUCCESS: AD Domain query succeeded"
+        Write-Host "  Name: $($domain.Name)"
+        Write-Host "  DNSRoot: $($domain.DNSRoot)"
+        Write-Host "  NetBIOSName: $($domain.NetBIOSName)"
+        Write-Host "  DomainMode: $($domain.DomainMode)"
+        Write-Host "  DistinguishedName: $($domain.DistinguishedName)"
+        Write-Host "  PDCEmulator: $($domain.PDCEmulator)"
+        Write-Host "  InfrastructureMaster: $($domain.InfrastructureMaster)"
+        $stepsPassed++
+    } catch {
+        Write-Host "  ERROR: Failed to query AD Domain"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
+        if ($_.Exception.InnerException) {
+            Write-Host "  Inner Exception: $($_.Exception.InnerException.Message)"
+        }
+    }
+
+    # Step 4: Check DNS service
+    Write-Host ""
+    Write-Host "[Step 4/$totalSteps] Checking DNS service..."
+    try {
+        $dnsService = Get-Service -Name "DNS" -ErrorAction Stop
+        Write-Host "  DNS service found"
+        Write-Host "  Status: $($dnsService.Status)"
+
+        if ($dnsService.Status -eq "Running") {
+            Write-Host "  SUCCESS: DNS service is running"
+            $stepsPassed++
+        } else {
+            Write-Host "  WARNING: DNS service status is $($dnsService.Status)"
+        }
+    } catch {
+        Write-Host "  ERROR: Failed to query DNS service"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
+    }
+
+    # Evaluate overall status
+    Write-Host ""
+    Write-Host "----------------------------------------"
+    Write-Host "Attempt $attempt summary: $stepsPassed/$totalSteps steps passed"
+
+    if ($stepsPassed -eq $totalSteps) {
+        Write-Host "ALL STEPS PASSED - DC verification successful!"
+        $verified = $true
+    } else {
+        Write-Host "INCOMPLETE: $($totalSteps - $stepsPassed) steps failed"
+        if ($attempt -lt $maxAttempts) {
+            Write-Host "Waiting $retryDelaySeconds seconds before retry..."
+            Write-Host "----------------------------------------"
+            Start-Sleep -Seconds $retryDelaySeconds
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "=========================================="
+if ($verified) {
+    Write-Host "DC VERIFICATION COMPLETED SUCCESSFULLY"
+    Write-Host "Total attempts: $attempt"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
+    exit 0
+} else {
+    Write-Host "DC VERIFICATION FAILED"
+    Write-Host "Exhausted all $maxAttempts attempts"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
+
+    # Final diagnostic dump
+    Write-Host ""
+    Write-Host "FINAL DIAGNOSTICS:"
+    Write-Host "----------------------------------------"
+
+    Write-Host "Services status:"
+    Get-Service -Name NTDS,DNS,Netlogon,ADWS -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "  $($_.Name): $($_.Status)"
+    }
+
+    Write-Host ""
+    Write-Host "Event log errors (last 10 from System):"
+    Get-EventLog -LogName System -EntryType Error -Newest 10 -ErrorAction SilentlyContinue | ForEach-Object {
+        $msg = $_.Message.Substring(0, [Math]::Min(200, $_.Message.Length))
+        Write-Host "  [$($_.TimeGenerated)] $($_.Source): $msg..."
+    }
+
+    exit 1
+}
+"""

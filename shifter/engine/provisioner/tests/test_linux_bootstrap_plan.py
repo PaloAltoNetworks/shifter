@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from plans.linux_bootstrap import SET_HOSTNAME_SCRIPT, LinuxBootstrapPlan
+from plans.linux_bootstrap import SET_HOSTNAME_SCRIPT, VERIFY_HOSTNAME_SCRIPT, LinuxBootstrapPlan
 
 
 @dataclass
@@ -92,3 +92,24 @@ class TestSetHostnamePrivilegeEscalation:
         # No bare invocations that would fail as a non-root SSH user.
         assert "\nhostnamectl set-hostname" not in SET_HOSTNAME_SCRIPT
         assert ">> /etc/hosts" not in SET_HOSTNAME_SCRIPT
+
+
+class TestVerifyHostnameCaseInsensitive:
+    """verify_hostname must compare case-insensitively.
+
+    Hostnames are case-insensitive (RFC 4343), and cloud-init on some AMIs
+    re-applies the instance Name tag verbatim (e.g. "Workstation") after
+    set_hostname runs. An exact string compare failed the whole range provision
+    on case alone for any mixed-case victim name (e.g. basic/ad_attack_lab's
+    "Workstation"); regression guard for #1422.
+    """
+
+    def test_verify_lowercases_both_sides(self):
+        # Bash case-insensitive comparison via ${var,,} on both operands.
+        assert '"${current_hostname,,}" = "${expected_hostname,,}"' in VERIFY_HOSTNAME_SCRIPT
+        # The old case-sensitive comparison must be gone.
+        assert '"$current_hostname" = "$expected_hostname"' not in VERIFY_HOSTNAME_SCRIPT
+
+    def test_verify_step_is_the_plan_verification(self):
+        assert LinuxBootstrapPlan.verify_step.name == "verify_hostname"
+        assert LinuxBootstrapPlan.verify_step.is_verification is True

@@ -27,25 +27,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _check_invite_rate_limit(user_id: int, limit: int = 50, window: int = 3600) -> bool:
-    """Return True if within rate limit for magic link generation.
+def _check_credential_delivery_rate_limit(user_id: int, limit: int = 50, window: int = 3600) -> bool:
+    """Return True if credential reset/delivery remains within its budget.
 
     Uses Django's cache with a fixed-window counter. Default: 50 per hour.
     Note: with the default LocMemCache, limits are per-process. For cross-worker
     enforcement, configure a shared CACHES backend (e.g. Redis, Memcached).
     """
-    from django.core.cache import cache
+    from shared.credential_delivery import credential_delivery_allowed
 
-    key = f"invite_ratelimit:{user_id}"
-    # add() only sets if key doesn't exist — preserves the original TTL
-    cache.add(key, 0, timeout=window)
-    try:
-        count = cache.incr(key)
-    except ValueError:
-        # Key expired between add and incr — retry
-        cache.set(key, 1, timeout=window)
-        count = 1
-    return count <= limit
+    return credential_delivery_allowed(user_id, limit=limit, window=window)
 
 
 def _get_user(request: HttpRequest) -> User:

@@ -7,8 +7,9 @@ Range metadata.
 
 The NGFW-specific read/write helpers (``get_user_ngfw_data``,
 ``get_ngfw_data_by_request_id``, and the range-attachment record helpers)
-were split out into ``provisioner_db_ngfw.py`` to keep this module under the
-Sonar S104 line budget.
+were split out into ``provisioner_db_ngfw.py``, and the ACES-native readers
+into ``provisioner_db_aces.py``, to keep this module under the Sonar S104
+line budget.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from typing import Any
 
 import psycopg
 from psycopg import sql
+from shared.remote_access import parse_openvpn_binding
 
 from config import has_ngfw_attachment_state
 from log_redact import safe_log_fingerprint
@@ -190,11 +192,77 @@ def update_range_status(
         conn.commit()
 
 
+def _write_subnet_states(
+    cur: psycopg.Cursor[tuple[object, ...]],
+    range_id: int,
+    subnets: dict[str, dict[str, Any]],
+    provider: str,
+) -> None:
+    """Mark each provisioned subnet ready and persist its provider state."""
+    for subnet_name, subnet_data in subnets.items():
+        subnet_uuid = subnet_data.get("uuid")
+        if not subnet_uuid:
+            logger.warning(
+                "Subnet subnet_fp=%s missing UUID, skipping DB write",
+                safe_log_fingerprint(subnet_name),
+            )
+            continue
+
+        state = _build_subnet_state(subnet_data, provider=provider)
+
+        cur.execute(
+            """
+            UPDATE engine_subnet
+            SET state = %s, status = 'ready'
+            WHERE uuid = %s AND range_id = %s
+            """,
+            (json.dumps(state), subnet_uuid, range_id),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"No engine_subnet record found for uuid={subnet_uuid}, range_id={range_id}")
+        logger.debug("Updated engine_subnet state: subnet_fp=%s", safe_log_fingerprint(subnet_uuid))
+
+
+def _write_instance_states(
+    cur: psycopg.Cursor[tuple[object, ...]],
+    instances: list[dict[str, Any]],
+    provider: str,
+) -> list[dict[str, Any]]:
+    """Mark each provisioned instance ready and return its closed payloads."""
+    provisioned_instances: list[dict[str, Any]] = []
+    for inst in instances:
+        instance_uuid = inst.get("uuid")
+        if not instance_uuid:
+            logger.warning(
+                "Instance (role_fp=%s) missing UUID, skipping DB write",
+                safe_log_fingerprint(inst.get("role", "unknown")),
+            )
+            continue
+
+        instance_state = _build_instance_state(inst, provider=provider)
+
+        cur.execute(
+            """
+            UPDATE engine_instance
+            SET status = 'ready', state = %s
+            WHERE uuid = %s
+            """,
+            (json.dumps(instance_state), instance_uuid),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
+        logger.debug("Updated engine_instance state: instance_fp=%s", safe_log_fingerprint(instance_uuid))
+
+        provisioned_instances.append(_build_provisioned_instance_payload(inst, provider=provider))
+    return provisioned_instances
+
+
 def write_provisioned_state(
     range_id: int,
     subnets: dict[str, dict[str, Any]],
     instances: list[dict[str, Any]],
     ngfw_instance_id: int | None = None,
+    vpn_access_binding: dict[str, object] | None = None,
     outbox_event: dict | None = None,
 ) -> None:
     """Write provisioned infrastructure state directly to database.
@@ -204,68 +272,36 @@ def write_provisioned_state(
         subnets:         Mapping of subnet name → subnet data dict.
         instances:       List of instance data dicts.
         ngfw_instance_id: FK to the NGFW Instance, if any.
+        vpn_access_binding: Closed non-secret OpenVPN result, if supported.
         outbox_event:    Optional event dict to insert into the outbox
                          atomically with the state writes.
     """
+    if vpn_access_binding is not None:
+        # Reject extensions (especially accidental credential/profile fields)
+        # before opening a DB transaction. Only the closed ref-only contract is
+        # eligible for persistence.
+        parse_openvpn_binding(vpn_access_binding)
     provider = _get_cloud_provider()
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            for subnet_name, subnet_data in subnets.items():
-                subnet_uuid = subnet_data.get("uuid")
-                if not subnet_uuid:
-                    logger.warning(
-                        "Subnet subnet_fp=%s missing UUID, skipping DB write",
-                        safe_log_fingerprint(subnet_name),
-                    )
-                    continue
-
-                state = _build_subnet_state(subnet_data, provider=provider)
-
-                cur.execute(
-                    """
-                    UPDATE engine_subnet
-                    SET state = %s, status = 'ready'
-                    WHERE uuid = %s AND range_id = %s
-                    """,
-                    (json.dumps(state), subnet_uuid, range_id),
-                )
-                if cur.rowcount == 0:
-                    raise ValueError(f"No engine_subnet record found for uuid={subnet_uuid}, range_id={range_id}")
-                logger.debug("Updated engine_subnet state: subnet_fp=%s", safe_log_fingerprint(subnet_uuid))
-
-            provisioned_instances = []
-            for inst in instances:
-                instance_uuid = inst.get("uuid")
-                if not instance_uuid:
-                    logger.warning(
-                        "Instance (role_fp=%s) missing UUID, skipping DB write",
-                        safe_log_fingerprint(inst.get("role", "unknown")),
-                    )
-                    continue
-
-                instance_state = _build_instance_state(inst, provider=provider)
-
-                cur.execute(
-                    """
-                    UPDATE engine_instance
-                    SET status = 'ready', state = %s
-                    WHERE uuid = %s
-                    """,
-                    (json.dumps(instance_state), instance_uuid),
-                )
-                if cur.rowcount == 0:
-                    raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
-                logger.debug("Updated engine_instance state: instance_fp=%s", safe_log_fingerprint(instance_uuid))
-
-                provisioned_instances.append(_build_provisioned_instance_payload(inst, provider=provider))
+            _write_subnet_states(cur, range_id, subnets, provider)
+            provisioned_instances = _write_instance_states(cur, instances, provider)
 
             cur.execute(
                 """
                 UPDATE mission_control_range
-                SET provisioned_instances = %s, ngfw_instance_id = %s, updated_at = NOW()
+                SET provisioned_instances = %s,
+                    vpn_access_binding = %s,
+                    ngfw_instance_id = %s,
+                    updated_at = NOW()
                 WHERE id = %s
                 """,
-                (json.dumps(provisioned_instances), ngfw_instance_id, range_id),
+                (
+                    json.dumps(provisioned_instances),
+                    json.dumps(vpn_access_binding) if vpn_access_binding is not None else None,
+                    ngfw_instance_id,
+                    range_id,
+                ),
             )
             if cur.rowcount == 0:
                 raise ValueError(f"No mission_control_range record found for id={range_id}")
@@ -327,6 +363,17 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
                 range_id,
             )
 
+            cur.execute(
+                """
+                UPDATE mission_control_range
+                SET vpn_access_binding = NULL, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (range_id,),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"No mission_control_range record found for id={range_id}")
+
         conn.commit()
     logger.info(
         "Marked engine records as destroyed: range_id=%s instances=%d subnets=%d",
@@ -362,7 +409,10 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
                 rng.user_id,
                 rng.range_config,
                 rng.subnet_index,
-                rng.status
+                rng.status,
+                rng.range_backend,
+                rng.instantiation_purpose,
+                rng.remote_access_capability
             FROM engine_request r
             JOIN mission_control_range rng ON rng.request_id = r.id
             WHERE r.request_id = %s
@@ -403,75 +453,14 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
             "range_id": row[1],
             "user_id": user_id,
             "spec": range_config,
+            "spec_envelope": range_config_raw,
             "subnet_index": row[4],
             "status": row[5],
             "ngfw_instance_id": ngfw_instance_id,
+            # #1666 write-once ownership binding (NULL for legacy/non-GCP rows).
+            # Destroy/reconcile route from these persisted facts, never the
+            # deploy-wide GCP_RANGE_BACKEND selector.
+            "range_backend": row[6],
+            "instantiation_purpose": row[7],
+            "remote_access_capability": row[8],
         }
-
-
-def get_aces_range_data_by_request_id(request_id: str) -> dict[str, Any]:
-    """Read ACES-native range data: the serialized ACES plan + ids (ADR-032).
-
-    Unlike :func:`get_range_data_by_request_id`, this does NOT run the cyberscript
-    persisted-envelope unwrap or the NGFW attachment lookup: for the ACES-native
-    path ``range_config`` is the serialized ACES ProvisioningPlan itself, returned
-    verbatim as ``plan`` for the provisioner ``aces-range`` command to realize.
-    """
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                r.request_id,
-                rng.id AS range_id,
-                rng.user_id,
-                rng.range_config,
-                rng.subnet_index,
-                rng.status
-            FROM engine_request r
-            JOIN mission_control_range rng ON rng.request_id = r.id
-            WHERE r.request_id = %s
-            """,
-            (request_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            raise ValueError(f"Range request not found: {request_id}")
-
-    return {
-        "request_id": str(row[0]),
-        "range_id": row[1],
-        "user_id": row[2],
-        "plan": row[3] if row[3] else {},
-        "subnet_index": row[4],
-        "status": row[5],
-    }
-
-
-def get_aces_image_candidates(provider: str, source_name: str) -> list[dict[str, Any]]:
-    """Return enabled ACES image mappings for (provider, source_name) (ADR-032-R2).
-
-    The tenant-managed image registry the provisioner resolves against at
-    realization. Returns the candidate rows for a source name; the pure resolver
-    (``aces_image_resolver``) applies the exact-version / any-version rules.
-    """
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT source_version, image_ref, machine_type, disk_size_gb, disk_type
-            FROM engine_aces_image_mapping
-            WHERE provider = %s AND source_name = %s AND enabled = TRUE
-            """,
-            (provider, source_name),
-        )
-        rows = cur.fetchall()
-
-    return [
-        {
-            "source_version": row[0],
-            "image_ref": row[1],
-            "machine_type": row[2],
-            "disk_size_gb": row[3],
-            "disk_type": row[4],
-        }
-        for row in rows
-    ]

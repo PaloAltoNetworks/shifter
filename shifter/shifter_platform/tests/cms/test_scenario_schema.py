@@ -216,33 +216,36 @@ class TestScenarioTemplate:
         """ScenarioTemplate requires id field."""
         from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
+        instances = [InstanceConfig(name="Attacker", role="attacker", os_type="kali")]
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 name="Test",
                 description="Test",
-                instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
+                instances=instances,
             )
 
     def test_name_is_required(self):
         """ScenarioTemplate requires name field."""
         from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
+        instances = [InstanceConfig(name="Attacker", role="attacker", os_type="kali")]
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 id="test",
                 description="Test",
-                instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
+                instances=instances,
             )
 
     def test_description_is_required(self):
         """ScenarioTemplate requires description field."""
         from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
+        instances = [InstanceConfig(name="Attacker", role="attacker", os_type="kali")]
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 id="test",
                 name="Test",
-                instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
+                instances=instances,
             )
 
     def test_instances_is_required(self):
@@ -449,3 +452,37 @@ class TestScenarioTemplate:
         assert req["requires_windows"] is True
         assert req["requires_linux"] is True
         assert req["has_from_agent"] is False
+
+
+class TestParticipantAccessConfig:
+    """Tests for explicit scenario participant-access declarations."""
+
+    def test_participant_access_rejects_unknown_instance(self):
+        """Participant access is an explicit closed target/channel allowlist."""
+        from cms.scenarios.schema import InstanceConfig, ParticipantAccessConfig, ScenarioTemplate
+
+        instances = [InstanceConfig(name="Attacker", role="attacker", os_type="kali")]
+        participant_access = [ParticipantAccessConfig(target="Missing", channel="ssh")]
+        with pytest.raises(ValidationError, match="unknown instance"):
+            ScenarioTemplate(
+                id="test",
+                name="Test",
+                description="Test",
+                instances=instances,
+                participant_access=participant_access,
+            )
+
+    def test_participant_access_rejects_duplicate_target_channel(self):
+        """A scenario cannot ambiguously authorize the same channel twice."""
+        from cms.scenarios.schema import InstanceConfig, ParticipantAccessConfig, ScenarioTemplate
+
+        binding = ParticipantAccessConfig(target="Attacker", channel="ssh")
+        instances = [InstanceConfig(name="Attacker", role="attacker", os_type="kali")]
+        with pytest.raises(ValidationError, match="Duplicate participant access"):
+            ScenarioTemplate(
+                id="test",
+                name="Test",
+                description="Test",
+                instances=instances,
+                participant_access=[binding, binding],
+            )

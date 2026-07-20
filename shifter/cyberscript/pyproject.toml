@@ -12,5 +12,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["cyberscript", "cyberscript.channels", "cyberscript.messages", "cyberscript.schemas", "cyberscript.schemas.ctf"]
+packages = ["cyberscript", "cyberscript.channels", "cyberscript.messages", "cyberscript.schemas", "cyberscript.schemas.ctf", "cyberscript.script_context"]
 package-dir = {"cyberscript" = "."}

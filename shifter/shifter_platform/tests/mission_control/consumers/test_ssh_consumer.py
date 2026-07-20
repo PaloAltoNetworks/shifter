@@ -17,6 +17,21 @@ from shared.enums import WebSocketCloseCode
 User = get_user_model()
 
 
+def _create_task_stub(coro, *args, **kwargs):
+    """Stand-in for ``asyncio.create_task`` in connect tests.
+
+    ``SSHConsumer._do_connect`` schedules ``self._read_ssh_output()`` via
+    ``asyncio.create_task``. A test that patches ``create_task`` with a plain
+    mock leaves that coroutine argument created but never scheduled or awaited,
+    which emits ``RuntimeWarning: coroutine '_read_ssh_output' was never
+    awaited`` at garbage-collection time (#1529 / REV1 Q6). Closing the
+    coroutine here consumes it cleanly while still returning a stub task the
+    caller can store on ``consumer._read_task`` and assert against.
+    """
+    coro.close()
+    return MagicMock()
+
+
 @pytest.fixture
 def consumer():
     """Create an SSHConsumer with mocked WebSocket methods."""
@@ -137,7 +152,7 @@ class TestSSHConsumerConnectRealRange:
             patch("boto3.client", return_value=client),
             patch("asyncssh.import_private_key", return_value=MagicMock()),
             patch("asyncssh.connect", new=AsyncMock(return_value=fake_conn)),
-            patch("asyncio.create_task", return_value=MagicMock()),
+            patch("asyncio.create_task", side_effect=_create_task_stub),
         ):
             await consumer.connect()
 
@@ -183,9 +198,8 @@ class TestSSHConsumerConnectRealRange:
             secrets_boundary(),
             patch("asyncssh.import_private_key", return_value=MagicMock()),
             patch("asyncssh.connect", new=AsyncMock(return_value=fake_conn)),
-            patch("asyncio.create_task") as mock_create_task,
+            patch("asyncio.create_task", side_effect=_create_task_stub) as mock_create_task,
         ):
-            mock_create_task.return_value = MagicMock()
             await consumer.connect()
 
         consumer.accept.assert_awaited_once()

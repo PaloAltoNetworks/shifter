@@ -19,7 +19,10 @@ from mission_control.guacamole_bootstrap import (
 )
 from mission_control.models import GuacamoleBootstrapRequest
 
-pytestmark = pytest.mark.django_db
+# transaction=True: the inline Guacamole bootstrap path calls
+# close_old_connections(), which corrupts pytest-django's rolled-back wrapping
+# transaction on PostgreSQL. SQLite tolerated it; a real backend does not (#1524).
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def _make(

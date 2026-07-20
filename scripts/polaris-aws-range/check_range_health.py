@@ -22,10 +22,20 @@ Checks (per range):
 - a5-scada, a9-splice, a0-website containers are running (spot check
   on the flag-bearing services — if any are dead the scenario is
   broken in a way that participants will notice)
+- a14-kali's AWS identity (``sts get-caller-identity``) resolves to
+  THIS range's per-range STS-assumed Bedrock agent role, not the
+  shared host operations role (#1377)
+- the durable DOCKER-USER drop rule for IMDS (169.254.169.254) is
+  present on the host (#1377)
+- IMDS is actually unreachable from inside a14-kali, not merely
+  "the rule exists" (#1377)
+- a14-kali's claude-bedrock.sh does not export a static
+  AWS_ACCESS_KEY_ID (#1377)
 
 The bash hotfix emits a single-line pipe-delimited record per host so
 the Python side just splits & tallies. Never reads or logs secret
-values (keys are boolean-present only).
+values (keys are boolean-present only; the AWS identity ARN captured
+for the STS check contains no credential material).
 
 Targeting: AMI-based discovery against the /shifter/ami/polaris-vm SSM
 parameter. Alternatively pass --instance-ids.

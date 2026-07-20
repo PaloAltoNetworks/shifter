@@ -16,6 +16,7 @@ responsibility across private submodules:
 from __future__ import annotations
 
 from ctf.services.range.batch import provision_event_ranges_throttled
+from ctf.services.range.capacity import build_event_capacity_signal, declare_event_capacity
 from ctf.services.range.lifecycle import (
     cleanup_event_ranges,
     destroy_participant_range,
@@ -35,15 +36,19 @@ from ctf.services.range.spares import (
 )
 from ctf.services.range.status import get_range_status, update_participant_range_status
 from ctf.services.range.tasks import get_provision_progress, request_event_provisioning
+from ctf.services.range.vpn import get_vpn_profile
 
 __all__ = [
+    "build_event_capacity_signal",
     "cleanup_event_ranges",
     "cleanup_event_spares",
+    "declare_event_capacity",
     "destroy_participant_range",
     "get_event_spare_summary",
     "get_provision_progress",
     "get_range_status",
     "get_recovery_status",
+    "get_vpn_profile",
     "provision_event_ranges_throttled",
     "provision_event_spares",
     "provision_participant_range",

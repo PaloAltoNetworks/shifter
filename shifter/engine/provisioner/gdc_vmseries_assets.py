@@ -230,7 +230,7 @@ def _write_bootstrap_iso(
     except ImportError as exc:
         raise RuntimeError(
             "GDC VM-Series bootstrap ISO generation requires pycdlib. "
-            "Install the GCP provisioner extras from requirements-gcp.txt."
+            "Install the GCP provisioner extras from requirements-gcp.lock."
         ) from exc
 
     with tempfile.TemporaryDirectory(prefix="ngfw-bootstrap-") as temp_dir:

@@ -91,6 +91,29 @@ resource "aws_iam_role_policy" "range_instance_bedrock" {
   })
 }
 
+# Allow the shared range-host role to assume ONLY the per-range Polaris
+# Bedrock agent-role namespace (#1377). The assumed role's own trust
+# policy binds each assumption to the exact source EC2 instance ARN (see
+# shifter/engine/provisioner/terraform/modules/range/iam.tf), so this
+# grant alone does not let one range host assume another range's agent
+# role. This does not remove or narrow the SSM/S3/Bedrock permissions
+# above: TechVault's host Claude seat still runs directly on this role.
+resource "aws_iam_role_policy" "range_instance_assume_polaris_agent" {
+  name = "assume-polaris-agent"
+  role = aws_iam_role.range_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-polaris-agent"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "range_instance" {
   name = "${local.iam_name_prefix}-range-instance"
   role = aws_iam_role.range_instance.name

@@ -88,7 +88,20 @@ class TestOidcGroupCapture:
     def test_backend_update_user_syncs_groups(self, django_user_model):
         user = django_user_model.objects.create_user(username="oidc2", email="oidc2@example.com", password="pw")
         backend = ShifterOIDCBackend()
-        backend.update_user(user, {"cognito:groups": ALLOWED_GROUPS})
+        # update_user now binds the verified provider identity before syncing
+        # groups (issue #1521), so stand in for a completed verify_token by
+        # stashing the verified (iss, sub) and passing verified claims -- the
+        # same pattern the OIDC backend tests use to drive the hook directly.
+        backend._verified_issuer = "https://issuer.example.test"
+        backend._verified_subject = "sub-oidc2"
+        claims = {
+            "iss": "https://issuer.example.test",
+            "sub": "sub-oidc2",
+            "email": "oidc2@example.com",
+            "email_verified": True,
+            "cognito:groups": ALLOWED_GROUPS,
+        }
+        backend.update_user(user, claims)
         user.profile.refresh_from_db()
         assert user.profile.cognito_groups == ALLOWED_GROUPS
 

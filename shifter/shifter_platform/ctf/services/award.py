@@ -14,6 +14,7 @@ from django.db.models import QuerySet
 
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
 from ctf.models import CTFAward, CTFEvent, CTFParticipant
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -75,10 +76,10 @@ def grant_award(
     logger.info(
         "Award granted: %+d points to participant %s in event %s by %s — %s",
         points,
-        participant_id,
-        event_id,
-        granted_by,
-        reason,
+        safe_log_value(participant_id),
+        safe_log_value(event_id),
+        safe_log_value(granted_by),
+        safe_log_value(reason),
     )
 
     return award
@@ -109,7 +110,7 @@ def revoke_award(award_id: UUID) -> None:
         recompute_participant_score(participant_id)
         recompute_team_score(team_id)
 
-    logger.info("Award revoked: %s", award_id)
+    logger.info("Award revoked: %s", safe_log_value(award_id))
 
 
 def get_participant_awards(participant_id: UUID) -> QuerySet[CTFAward]:

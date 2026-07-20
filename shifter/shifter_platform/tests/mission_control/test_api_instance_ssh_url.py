@@ -16,9 +16,12 @@ from django.contrib.auth import get_user_model
 from django.test import RequestFactory
 from rest_framework.test import force_authenticate
 
-from mission_control.views import guacamole_bootstrap_status, guacamole_ssh_url
+from mission_control.api.views import guacamole_bootstrap_status, guacamole_ssh_url
 
-pytestmark = pytest.mark.django_db
+# transaction=True: the inline Guacamole bootstrap path calls
+# close_old_connections(), which corrupts pytest-django's rolled-back wrapping
+# transaction on PostgreSQL. SQLite tolerated it; a real backend does not (#1524).
+pytestmark = pytest.mark.django_db(transaction=True)
 
 User = get_user_model()
 
@@ -52,7 +55,7 @@ def guac_configured(settings):
 
 def _post_request(rf, user, payload=None):
     request = rf.post(
-        "/mission-control/api/guacamole/ssh-url/",
+        "/api/v1/mission-control/guacamole/ssh-url/",
         data=json.dumps(payload or {"instance_uuid": INSTANCE_UUID}),
         content_type="application/json",
     )
@@ -68,7 +71,7 @@ def _json(response):
 
 
 def _status_response(rf, user, request_id):
-    request = rf.get(f"/mission-control/api/guacamole/bootstrap/{request_id}/")
+    request = rf.get(f"/api/v1/mission-control/guacamole/bootstrap/{request_id}/")
     request.user = user
     force_authenticate(request, user=user)
     return guacamole_bootstrap_status(request, request_id)
@@ -121,7 +124,7 @@ class TestApiInstanceSSHURL:
 
     def test_returns_400_for_invalid_json(self, rf, user):
         request = rf.post(
-            "/mission-control/api/guacamole/ssh-url/",
+            "/api/v1/mission-control/guacamole/ssh-url/",
             data="{not-json",
             content_type="application/json",
         )
@@ -131,7 +134,7 @@ class TestApiInstanceSSHURL:
         response = guacamole_ssh_url(request)
 
         assert response.status_code == 400
-        assert _json(response)["error"] == "Invalid JSON"
+        assert _json(response)["error"]["code"] == "parse_error"
 
     def test_returns_400_when_instance_not_in_range(self, rf, user, guac_configured, range_ssh_instance):
         # A READY range exists, but the requested instance uuid is not in it.

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import glob
+import ipaddress
 import json
 import os
 import re
@@ -19,9 +21,13 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LAYERS = ("shared", "engine", "cms", "management", "mission_control", "ctf")
+# Every first-party Django app is classified (ADR-001, #1523). Held to
+# set-equality with the canonical classification in layer_imports.yaml by the
+# layer-classification-parity check.
+LAYERS = ("shared", "engine", "cms", "management", "mission_control", "ctf", "config", "risk_register")
 IMPORT_PATTERN = re.compile(
-    r"^\s*(?:from|import)\s+((?:shared|engine|cms|management|mission_control|ctf)(?:\.\w+)*)",
+    r"^\s*(?:from|import)\s+"
+    r"((?:shared|engine|cms|management|mission_control|ctf|config|risk_register)(?:\.\w+)*)",
     re.MULTILINE,
 )
 CYBERSCRIPT_IMPORT_PATTERN = re.compile(
@@ -41,6 +47,12 @@ REQUIRED_ADR_KEYS = {
     "evidence",
 }
 REQUIRED_EXCEPTION_KEYS = {"rule_id", "owner", "reason", "expires_on"}
+REQUIRED_INTERFACE_CONTRACTS = {"ADR-039": "range-substrate/v1"}
+RANGE_SUBSTRATE_OPERATIONS = frozenset({"provision", "destroy", "pause", "resume"})
+RANGE_SUBSTRATE_RESOURCES = frozenset({"network", "instance", "ngfw", "remote-access"})
+RANGE_SUBSTRATE_INITIAL_ADAPTERS = frozenset({"aws-terraform", "gcp-gdc"})
+RANGE_SUBSTRATE_DEFERRED_ADAPTERS = frozenset({"azure"})
+RANGE_SUBSTRATE_ISSUE_REFERENCES = frozenset({"283", "478", "265", "277"})
 GUARDRAIL_PREFIXES = (
     ".github/workflows/",
     ".claude/hooks/",
@@ -70,9 +82,9 @@ GUARDRAIL_FILES = {
 }
 DOC_PATHS = (
     "docs/adr/",
-    "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
-    "shifter/shifter_platform/documentation/docs/technical/dev/index.md",
-    "shifter/shifter_platform/documentation/docs/technical/index.md",
+    "docs/technical/dev/adr-enforcement.md",
+    "docs/technical/dev/index.md",
+    "docs/technical/index.md",
 )
 
 
@@ -197,10 +209,17 @@ def filter_excepted_violations(violations: list[Violation], exceptions: list[dic
     return filtered
 
 
-def load_allowed_imports(config_path: Path) -> dict[str, list[str]]:
-    """Load the simple layer import policy without external YAML dependencies."""
-    allowed: dict[str, list[str]] = {}
-    current_layer: str | None = None
+def _iter_yaml_section(config_path: Path, section: str) -> "list[tuple[str, list[str]]]":
+    """Parse one top-level ``section:`` of the layer-policy YAML.
+
+    Minimal, dependency-free reader for the two-level shape used by
+    layer_imports.yaml (``section:`` -> ``key:`` -> ``- item`` list). Only the
+    requested top-level section is parsed; other sections are ignored, so the
+    ``classification`` and ``allowed`` blocks never bleed into each other.
+    """
+    result: dict[str, list[str]] = {}
+    current_section: str | None = None
+    current_key: str | None = None
 
     for raw_line in config_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].rstrip()
@@ -209,18 +228,71 @@ def load_allowed_imports(config_path: Path) -> dict[str, list[str]]:
         stripped = line.strip()
         indent = len(raw_line) - len(raw_line.lstrip(" "))
 
-        if stripped == "allowed:":
+        if indent == 0 and stripped.endswith(":"):
+            current_section = stripped[:-1]
+            current_key = None
             continue
+        if current_section != section:
+            continue
+        if indent == 2 and stripped.endswith(":"):
+            current_key = stripped[:-1]
+            result[current_key] = []
+            continue
+        if current_key is not None and indent >= 4 and stripped.startswith("- "):
+            result[current_key].append(stripped[2:].strip())
 
+    return list(result.items())
+
+
+def load_allowed_imports(config_path: Path) -> dict[str, list[str]]:
+    """Load the simple layer import policy without external YAML dependencies."""
+    return dict(_iter_yaml_section(config_path, "allowed"))
+
+
+def load_allowed_symbols(config_path: Path) -> dict[str, dict[str, list[str]]]:
+    """Parse the 3-level ``allowed_symbols:`` block (layer -> facade -> [symbols]).
+
+    Dependency-free reader mirroring ``_iter_yaml_section`` one level deeper, for
+    the per-symbol facade allowlists (ADR-001-R4). Only the ``allowed_symbols``
+    top-level section is parsed; other sections are ignored.
+    """
+    result: dict[str, dict[str, list[str]]] = {}
+    in_section = False
+    current_layer: str | None = None
+    current_facade: str | None = None
+
+    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        stripped = line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+
+        if indent == 0 and stripped.endswith(":"):
+            in_section = stripped[:-1] == "allowed_symbols"
+            current_layer = None
+            current_facade = None
+            continue
+        if not in_section:
+            continue
         if indent == 2 and stripped.endswith(":"):
             current_layer = stripped[:-1]
-            allowed[current_layer] = []
+            result[current_layer] = {}
+            current_facade = None
             continue
+        if indent == 4 and stripped.endswith(":") and current_layer is not None:
+            current_facade = stripped[:-1]
+            result[current_layer][current_facade] = []
+            continue
+        if current_layer is not None and current_facade is not None and indent >= 6 and stripped.startswith("- "):
+            result[current_layer][current_facade].append(stripped[2:].strip())
 
-        if current_layer and indent >= 4 and stripped.startswith("- "):
-            allowed[current_layer].append(stripped[2:].strip())
+    return result
 
-    return allowed
+
+def load_classification(config_path: Path) -> dict[str, list[str]]:
+    """Load the canonical package classification without external YAML deps."""
+    return dict(_iter_yaml_section(config_path, "classification"))
 
 
 def is_import_allowed(from_layer: str, module_path: str, allowed: dict[str, list[str]]) -> bool:
@@ -301,6 +373,115 @@ def _registry_violation(path: str, message: str) -> Violation:
     return Violation("adr-registry", "ADR-REGISTRY", path, message)
 
 
+def _validate_exact_string_members(
+    value: object,
+    expected: frozenset[str],
+    field: str,
+) -> list[str]:
+    """Validate one closed interface-contract string collection."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return [f"{field} must be a list of strings"]
+    if len(value) != len(set(value)):
+        return [f"{field} must not contain duplicates"]
+    actual = set(value)
+    if actual != expected:
+        return [
+            f"{field} must contain exactly {sorted(expected)}; got {sorted(actual)}"
+        ]
+    return []
+
+
+def validate_interface_contract(contract: object, adr_id: str) -> list[str]:
+    """Validate executable invariants declared by a typed ADR interface contract."""
+    if not isinstance(contract, dict):
+        return [f"{adr_id} interface_contract must be an object"]
+
+    expected_kind = REQUIRED_INTERFACE_CONTRACTS.get(adr_id)
+    kind = contract.get("kind")
+    if expected_kind is not None and kind != expected_kind:
+        return [f"{adr_id} interface_contract kind must be {expected_kind!r}"]
+    if kind != "range-substrate/v1":
+        return [f"{adr_id} interface_contract has unsupported kind {kind!r}"]
+
+    errors: list[str] = []
+    errors.extend(
+        _validate_exact_string_members(
+            contract.get("operations"),
+            RANGE_SUBSTRATE_OPERATIONS,
+            f"{adr_id} interface_contract.operations",
+        )
+    )
+    errors.extend(
+        _validate_exact_string_members(
+            contract.get("resources"),
+            RANGE_SUBSTRATE_RESOURCES,
+            f"{adr_id} interface_contract.resources",
+        )
+    )
+
+    conformance = contract.get("conformance")
+    if not isinstance(conformance, dict):
+        errors.append(f"{adr_id} interface_contract.conformance must be an object")
+    else:
+        for obligation in ("shared_black_box_suite", "real_provider_promotion_evidence"):
+            if conformance.get(obligation) is not True:
+                errors.append(
+                    f"{adr_id} interface_contract.conformance.{obligation} must be true"
+                )
+
+    adapters = contract.get("adapters")
+    if not isinstance(adapters, dict):
+        errors.append(f"{adr_id} interface_contract.adapters must be an object")
+    else:
+        errors.extend(
+            _validate_exact_string_members(
+                adapters.get("initial"),
+                RANGE_SUBSTRATE_INITIAL_ADAPTERS,
+                f"{adr_id} interface_contract.adapters.initial",
+            )
+        )
+        errors.extend(
+            _validate_exact_string_members(
+                adapters.get("deferred"),
+                RANGE_SUBSTRATE_DEFERRED_ADAPTERS,
+                f"{adr_id} interface_contract.adapters.deferred",
+            )
+        )
+
+    references = contract.get("issue_references")
+    if not isinstance(references, dict):
+        errors.append(f"{adr_id} interface_contract.issue_references must be an object")
+        return errors
+    actual_references = set(references)
+    if actual_references != RANGE_SUBSTRATE_ISSUE_REFERENCES:
+        errors.append(
+            f"{adr_id} interface_contract.issue_references must contain exactly "
+            f"{sorted(RANGE_SUBSTRATE_ISSUE_REFERENCES)}; got {sorted(actual_references)}"
+        )
+    for reference, mapping in references.items():
+        if not isinstance(mapping, dict):
+            errors.append(f"{adr_id} issue reference {reference} mapping must be an object")
+            continue
+        mapping_fields = set(mapping)
+        if mapping_fields == {"disposition"} and mapping["disposition"] == "out-of-scope":
+            continue
+        operations = mapping.get("operations")
+        if (
+            mapping_fields != {"operations"}
+            or not isinstance(operations, list)
+            or not operations
+            or not all(isinstance(operation, str) for operation in operations)
+            or not set(operations).issubset(RANGE_SUBSTRATE_OPERATIONS)
+            or len(operations) != len(set(operations))
+        ):
+            errors.append(
+                f"{adr_id} issue reference {reference} must exclusively map to a "
+                "non-empty, duplicate-free list of declared operations or have only "
+                "disposition 'out-of-scope'"
+            )
+    return errors
+
+
 def _check_adr_entry(
     entry: dict,
     adr_ids: set[str],
@@ -326,6 +507,19 @@ def _check_adr_entry(
     if adr_id in adr_ids:
         violations.append(_registry_violation("docs/adr/index.yaml", f"Duplicate ADR id: {adr_id}"))
     adr_ids.add(adr_id)
+
+    interface_contract = entry.get("interface_contract")
+    if adr_id in REQUIRED_INTERFACE_CONTRACTS and interface_contract is None:
+        violations.append(
+            _registry_violation(
+                "docs/adr/index.yaml",
+                f"{adr_id} must define interface_contract kind "
+                f"{REQUIRED_INTERFACE_CONTRACTS[adr_id]!r}",
+            )
+        )
+    elif interface_contract is not None:
+        for error in validate_interface_contract(interface_contract, adr_id):
+            violations.append(_registry_violation("docs/adr/index.yaml", error))
 
     rules = entry.get("rules", [])
     if not isinstance(rules, list):
@@ -406,11 +600,106 @@ def iter_private_facade_imports(text: str) -> set[str]:
     return targets
 
 
+def _is_public_facade_descendant(module: str, facade: str) -> bool:
+    """True when ``module`` is a PUBLIC descendant module of ``facade``.
+
+    ``engine.services.runtime`` is a descendant of ``engine.services``. A private
+    component anywhere in the remainder (``engine.services._x``) is not, because
+    private split-package modules are already rejected by ADR-001-R1; this keeps
+    the two rules from double-reporting the same import.
+    """
+    if not module.startswith(facade + "."):
+        return False
+    remainder = module[len(facade) + 1 :]
+    return not any(part.startswith("_") for part in remainder.split("."))
+
+
+def iter_facade_symbol_imports(text: str, restricted_facades: set[str]) -> "tuple[dict[str, set[str]], set[str]]":
+    """Return (public symbols imported per restricted facade, non-facade bypasses).
+
+    The only sanctioned shape for a symbol-restricted facade (ADR-001-R4) is an
+    absolute ``from <facade> import <name>``; its public names feed the allowlist
+    check. Every other shape that reaches the facade or one of its public
+    descendants is a bypass: a relative ``from ..<facade> import name``, a
+    descendant ``from <facade>.sub import name``, a bare ``import <facade>``, or
+    ``import <facade>.sub``. Private ``_``-prefixed targets are left to the
+    public-facade rule (ADR-001-R1) so the two rules do not double-report.
+    """
+    from_symbols: dict[str, set[str]] = {}
+    module_bypass: set[str] = set()
+    if not restricted_facades:
+        return from_symbols, module_bypass
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return from_symbols, module_bypass
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module
+            if not module:
+                continue
+            for facade in restricted_facades:
+                if node.level == 0 and module == facade:
+                    for alias in node.names:
+                        if not alias.name.startswith("_"):
+                            from_symbols.setdefault(facade, set()).add(alias.name)
+                elif module == facade or _is_public_facade_descendant(module, facade):
+                    # Relative facade import (level > 0) or a facade descendant.
+                    module_bypass.add(module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                for facade in restricted_facades:
+                    if alias.name == facade or _is_public_facade_descendant(alias.name, facade):
+                        module_bypass.add(alias.name)
+    return from_symbols, module_bypass
+
+
+def _symbol_facade_violations(
+    rel: str,
+    from_layer: str,
+    text: str,
+    allowed_symbols: dict[str, dict[str, list[str]]],
+) -> list[Violation]:
+    """Return ADR-001-R4 per-symbol facade-allowlist violations for one file."""
+    restrictions = allowed_symbols.get(from_layer, {})
+    if not restrictions:
+        return []
+
+    violations: list[Violation] = []
+    from_symbols, module_bypass = iter_facade_symbol_imports(text, set(restrictions))
+    for facade, names in sorted(from_symbols.items()):
+        allowed_names = set(restrictions.get(facade, []))
+        for name in sorted(names):
+            if name not in allowed_names:
+                violations.append(
+                    Violation(
+                        "layer-imports",
+                        "ADR-001-R4",
+                        rel,
+                        f"{from_layer} may import only sanctioned symbols from {facade}; "
+                        f"'{name}' is not allowed (front control-plane operations through cms.services)",
+                    )
+                )
+    for module in sorted(module_bypass):
+        violations.append(
+            Violation(
+                "layer-imports",
+                "ADR-001-R4",
+                rel,
+                f"{from_layer} may not reach {module} except via 'from <facade> import <sanctioned symbol>' "
+                "(no relative, descendant, or bare-module imports of the restricted facade)",
+            )
+        )
+    return violations
+
+
 def check_layer_imports(repo_root: Path, files: list[str] | None) -> list[Violation]:
     """Check the layer import policy against selected files."""
     violations: list[Violation] = []
     config_path = repo_root / "scripts" / "check_layer_imports" / "layer_imports.yaml"
     allowed = load_allowed_imports(config_path)
+    allowed_symbols = load_allowed_symbols(config_path)
 
     for rel, from_layer in iter_layer_files(repo_root, files):
         text = (repo_root / rel).read_text(encoding="utf-8")
@@ -431,6 +720,9 @@ def check_layer_imports(repo_root: Path, files: list[str] | None) -> list[Violat
                         f"{from_layer} may not import {module}",
                     )
                 )
+        # ADR-001-R4: symbol-restricted facade seams (e.g. mission_control ->
+        # engine.services) permit only the enumerated data-plane symbols.
+        violations.extend(_symbol_facade_violations(rel, from_layer, text, allowed_symbols))
         if from_layer != CYBERSCRIPT_ALLOWED_LAYER:
             for module in sorted(set(CYBERSCRIPT_IMPORT_PATTERN.findall(text))):
                 violations.append(
@@ -465,6 +757,147 @@ def check_cross_layer_model_imports(repo_root: Path, files: list[str] | None) ->
                         f"{from_layer} imports {module}; prefer a service seam or shared contract",
                     )
                 )
+
+    return violations
+
+
+_PLATFORM_REL = "shifter/shifter_platform"
+_SETTINGS_REL = "shifter/shifter_platform/config/settings.py"
+_LAYER_POLICY_REL = "scripts/check_layer_imports/layer_imports.yaml"
+
+
+def _classified_packages(repo_root: Path) -> set[str]:
+    """Return the union of every canonically classified first-party package."""
+    classification = load_classification(repo_root / _LAYER_POLICY_REL)
+    return {pkg for packages in classification.values() for pkg in packages}
+
+
+def _local_appconfig_packages(repo_root: Path) -> set[str]:
+    """Return local packages under shifter_platform whose apps.py defines an AppConfig.
+
+    A tracked local Django app is a top-level package with an ``apps.py`` that
+    subclasses ``AppConfig``. Directories without an AppConfig (e.g. the retired
+    ``documentation`` package, ADR-038) are not tracked apps and are excluded.
+    """
+    platform = repo_root / _PLATFORM_REL
+    found: set[str] = set()
+    for apps_py in platform.glob("*/apps.py"):
+        try:
+            text = apps_py.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if re.search(r"class\s+\w+\s*\(\s*[\w.]*AppConfig\b", text):
+            found.add(apps_py.parent.name)
+    return found
+
+
+def _parse_installed_apps(settings_text: str) -> tuple[list[str], list[str]]:
+    """Return (resolved app strings, unresolved dynamic reprs) from INSTALLED_APPS.
+
+    Parses the ``INSTALLED_APPS = [...]`` literal plus ``INSTALLED_APPS.append(...)``
+    calls. Any entry that is not a string constant — a dynamic expression, or an
+    ``extend``/``insert`` mutation — is returned as unresolved so the check fails
+    closed rather than silently skipping it.
+    """
+    resolved: list[str] = []
+    unresolved: list[str] = []
+
+    def _collect_sequence(value: ast.expr, dynamic_detail: str) -> None:
+        """Add string-literal elements of a list/tuple; flag anything else."""
+        if isinstance(value, (ast.List, ast.Tuple)):
+            for elt in value.elts:
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                    resolved.append(elt.value)
+                else:
+                    unresolved.append("non-literal INSTALLED_APPS entry")
+        else:
+            unresolved.append(dynamic_detail)
+
+    tree = ast.parse(settings_text)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "INSTALLED_APPS":
+                    _collect_sequence(node.value, "INSTALLED_APPS not assigned a list/tuple literal")
+        elif isinstance(node, ast.AugAssign):
+            # INSTALLED_APPS += [...] / += SOME_APPS
+            target = node.target
+            if isinstance(target, ast.Name) and target.id == "INSTALLED_APPS" and isinstance(node.op, ast.Add):
+                _collect_sequence(node.value, "unresolvable INSTALLED_APPS += mutation")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            func = node.func
+            if isinstance(func.value, ast.Name) and func.value.id == "INSTALLED_APPS":
+                if func.attr == "append":
+                    arg = node.args[0] if node.args else None
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        resolved.append(arg.value)
+                    else:
+                        unresolved.append("non-literal INSTALLED_APPS.append() argument")
+                elif func.attr in {"extend", "insert", "__iadd__", "__add__"}:
+                    unresolved.append(f"unresolvable INSTALLED_APPS.{func.attr}() mutation")
+    return resolved, unresolved
+
+
+def check_installed_apps_classified(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Fail closed when a first-party INSTALLED_APPS app is unclassified (#1523).
+
+    Enforces set-equality between the canonical classification
+    (layer_imports.yaml), the tracked local AppConfig packages, and the
+    first-party apps actually installed. Adding a local app to INSTALLED_APPS
+    without classifying it, leaving a stale classification entry, or introducing
+    a dynamic INSTALLED_APPS entry the checker cannot resolve, all fail closed.
+    """
+    del files  # whole-tree invariant; not file-scoped
+    settings_path = repo_root / _SETTINGS_REL
+    policy_path = repo_root / _LAYER_POLICY_REL
+    if not settings_path.exists() or not policy_path.exists():
+        return []
+
+    violations: list[Violation] = []
+    classified = _classified_packages(repo_root)
+    local_apps = _local_appconfig_packages(repo_root)
+    installed, unresolved = _parse_installed_apps(settings_path.read_text(encoding="utf-8"))
+
+    for detail in unresolved:
+        violations.append(
+            Violation(
+                "installed-apps-classified",
+                "ADR-001-R3",
+                _SETTINGS_REL,
+                f"INSTALLED_APPS has an entry the classifier cannot resolve ({detail}); "
+                "use a string literal so first-party apps stay classifiable",
+            )
+        )
+
+    installed_first_party = {entry.split(".")[0] for entry in installed} & local_apps
+
+    for pkg in sorted(installed_first_party - classified):
+        violations.append(
+            Violation(
+                "installed-apps-classified",
+                "ADR-001-R3",
+                _SETTINGS_REL,
+                f"first-party app '{pkg}' is in INSTALLED_APPS but not classified in {_LAYER_POLICY_REL}",
+            )
+        )
+    for pkg in sorted(local_apps - classified):
+        violations.append(
+            Violation(
+                "installed-apps-classified",
+                "ADR-001-R3",
+                _LAYER_POLICY_REL,
+                f"local app '{pkg}' has an AppConfig but is not classified in {_LAYER_POLICY_REL}",
+            )
+        )
+    for pkg in sorted(classified - local_apps):
+        violations.append(
+            Violation(
+                "installed-apps-classified",
+                "ADR-001-R3",
+                _LAYER_POLICY_REL,
+                f"classified package '{pkg}' has no local AppConfig under {_PLATFORM_REL} (stale classification)",
+            )
+        )
 
     return violations
 
@@ -2602,13 +3035,12 @@ _QUALITY_NON_DOCS_REQUIRED_GLOBS = (
     "**",
     "!docs/**",
     "!**/*.md",
-    "!shifter/shifter_platform/documentation/**",
 )
 _QUALITY_GUARDRAIL_DOCS_REQUIRED_GLOBS = (
     ".github/pull_request_template.md",
     ".github/copilot-instructions.md",
     "docs/adr/**",
-    "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md",
+    "docs/technical/dev/adr-enforcement.md",
 )
 _PR_GATE_SKIPPED_QUALITY_GUARD = (
     '[ "$quality_result" = "skipped" ] && [ "$quality_relevant" != "false" ]'
@@ -4839,12 +5271,22 @@ def _dw_runs_on(job: dict):
     return job.get("runs-on")
 
 
+# Runner labels the ADR-003-R5 exposure check treats as self-hosted-class. A
+# GCP-native runner (issue #1546) registers with `--no-default-labels` + a custom
+# label, so a job selecting it never carries the literal `self-hosted` label;
+# without this set the exposure check would skip that job and leave a
+# pull_request-reachability blind spot when GCP-dev CI is cut over to its own
+# runner. New self-hosted runner labels (e.g. a future gcp-prod, or a per-account
+# AWS tenant label) MUST be added here so the gate cannot be bypassed.
+_SELF_HOSTED_CLASS_LABELS = frozenset({"self-hosted", "gcp-dev"})
+
+
 def _dw_is_self_hosted(job: dict) -> bool:
     ro = _dw_runs_on(job)
     if isinstance(ro, str):
-        return ro == "self-hosted"
+        return ro in _SELF_HOSTED_CLASS_LABELS
     if isinstance(ro, (list, tuple)):
-        return "self-hosted" in ro
+        return any(label in _SELF_HOSTED_CLASS_LABELS for label in ro)
     return False
 
 
@@ -5241,6 +5683,193 @@ def check_deploy_runner_exposure(repo_root: Path, files: list[str] | None) -> li
     return violations
 
 
+# --- ADR-037-R1 hard check: cloud-credentialed workflows pin action SHAs ----
+# Every non-local `uses:` action in a cloud-credentialed workflow is an
+# executable dependency that runs with cloud credentials; a mutable tag can be
+# moved by a compromised or careless maintainer, so it must resolve to a full
+# 40-hex commit SHA (supply-chain provenance, issue #1519). This mirrors the
+# `_dw_*` workflow-as-data model rather than string-matching workflow text, and
+# fails closed: a workflow that cannot be parsed cannot be classified.
+_ACTION_PIN_CHECK = "workflow-action-sha-pinning"
+_ACTION_PIN_RULE = "ADR-037-R1"
+_ACTION_PIN_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_ACTION_PIN_OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CLOUD_AUTH_ACTIONS = (
+    "aws-actions/configure-aws-credentials",
+    "google-github-actions/auth",
+)
+
+
+def _action_pin_violation(path: str, message: str) -> Violation:
+    return Violation(_ACTION_PIN_CHECK, _ACTION_PIN_RULE, path, message)
+
+
+def _dw_iter_workflow_files(repo_root: Path) -> list[str]:
+    """Repo-relative paths of every GitHub Actions workflow file, sorted."""
+    wf_dir = repo_root / ".github" / "workflows"
+    if not wf_dir.is_dir():
+        return []
+    return sorted(
+        f".github/workflows/{p.name}"
+        for p in wf_dir.iterdir()
+        if p.is_file() and p.suffix in (".yml", ".yaml")
+    )
+
+
+def _dw_permissions_grant_id_token(perms) -> bool:
+    if isinstance(perms, str):
+        return perms.strip().lower() == "write-all"
+    if isinstance(perms, dict):
+        return str(perms.get("id-token", "")).strip().lower() == "write"
+    return False
+
+
+def _dw_job_steps(job: dict) -> list:
+    steps = job.get("steps")
+    return steps if isinstance(steps, list) else []
+
+
+def _dw_step_uses(step) -> str | None:
+    if isinstance(step, dict):
+        uses = step.get("uses")
+        if isinstance(uses, str):
+            return uses.strip()
+    return None
+
+
+def _dw_step_uses_cloud_auth(step) -> bool:
+    uses = _dw_step_uses(step)
+    if uses and any(
+        uses == a or uses.startswith(a + "@") for a in _CLOUD_AUTH_ACTIONS
+    ):
+        return True
+    if isinstance(step, dict):
+        with_block = step.get("with")
+        if isinstance(with_block, dict) and "workload_identity_provider" in with_block:
+            return True
+    return False
+
+
+def _dw_job_is_cloud_credentialed(job: dict) -> bool:
+    if _dw_permissions_grant_id_token(job.get("permissions")):
+        return True
+    if _dw_is_self_hosted(job):
+        return True
+    return any(_dw_step_uses_cloud_auth(step) for step in _dw_job_steps(job))
+
+
+def _dw_workflow_is_cloud_credentialed(wf: dict) -> bool:
+    """True when a workflow requests cloud credentials in any form.
+
+    Markers: top-level or job-level ``id-token: write`` (or ``write-all``), a
+    self-hosted runner, a cloud-auth action, or a ``workload_identity_provider``
+    input. Any one is sufficient; the classifier fails toward "credentialed" so
+    an unpinned action is never silently exempted.
+    """
+    if _dw_permissions_grant_id_token(wf.get("permissions")):
+        return True
+    jobs = wf.get("jobs")
+    if not isinstance(jobs, dict):
+        return False
+    return any(
+        _dw_job_is_cloud_credentialed(job)
+        for job in jobs.values()
+        if isinstance(job, dict)
+    )
+
+
+def _dw_iter_uses_refs(wf: dict):
+    """Yield ``(job_id, uses_ref)`` for every job- and step-level ``uses:``."""
+    jobs = wf.get("jobs")
+    if not isinstance(jobs, dict):
+        return
+    for jid, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        job_uses = job.get("uses")
+        if isinstance(job_uses, str):
+            yield jid, job_uses.strip()
+        for step in _dw_job_steps(job):
+            uses = _dw_step_uses(step)
+            if uses:
+                yield jid, uses
+
+
+def _dw_uses_is_sha_pinned(ref: str) -> bool:
+    parts = ref.rsplit("@", 1)
+    if len(parts) != 2:
+        return False
+    after = parts[1]
+    # Repository actions pin a 40-hex git commit SHA; container (`docker://`)
+    # actions pin an OCI `sha256:<64 hex>` digest. Both are immutable.
+    return bool(_ACTION_PIN_SHA40.match(after) or _ACTION_PIN_OCI_DIGEST.match(after))
+
+
+def _workflow_action_pin_relevant(files: list[str] | None) -> bool:
+    if files is None:
+        return True
+    return any(
+        f.startswith(".github/workflows/") or f == _ADR_GUARD_SCRIPT_PATH
+        for f in files
+    )
+
+
+def check_workflow_action_sha_pinning(
+    repo_root: Path, files: list[str] | None
+) -> list[Violation]:
+    """Cloud-credentialed workflows pin every action to a full SHA (ADR-037-R1).
+
+    Enumerates every ``.github/workflows/*.yml`` as data, classifies each as
+    cloud-credentialed, and requires every non-local ``uses:`` reference in a
+    credentialed workflow to be a full 40-hex commit SHA. Fails closed: a
+    workflow that cannot be parsed cannot be classified, so it is reported.
+    ``actions/*`` is included - GitHub-owned actions are executable dependencies
+    too, as are ``docker://`` container actions, which must pin an OCI
+    ``sha256:<64 hex>`` digest. Only local reusable-workflow refs (``./...``) are
+    exempt.
+    """
+    import yaml  # local import: keeps PyYAML optional for non-workflow checks
+
+    if not _workflow_action_pin_relevant(files):
+        return []
+
+    violations: list[Violation] = []
+    for rel in _dw_iter_workflow_files(repo_root):
+        try:
+            wf = _dw_load_workflow(repo_root, rel)
+        except (_DwShapeError, yaml.YAMLError) as exc:
+            violations.append(
+                _action_pin_violation(
+                    rel,
+                    "workflow could not be parsed for ADR-037-R1, so its "
+                    f"cloud-credential status cannot be verified: {exc}",
+                )
+            )
+            continue
+        if not _dw_workflow_is_cloud_credentialed(wf):
+            continue
+        for jid, ref in _dw_iter_uses_refs(wf):
+            # Local reusable-workflow refs (`./...`) are first-party and exempt.
+            # `docker://` container actions are NOT exempt: they are remote
+            # executable dependencies too, so they must pin an OCI digest.
+            if ref.startswith("./"):
+                continue
+            if not _dw_uses_is_sha_pinned(ref):
+                hint = (
+                    "an OCI 'sha256:<64 hex>' digest"
+                    if ref.startswith("docker://")
+                    else "a full 40-hex commit SHA (keep a '# <version>' comment for Dependabot)"
+                )
+                violations.append(
+                    _action_pin_violation(
+                        rel,
+                        f"job '{jid}' uses '{ref}' with a mutable ref; "
+                        f"ADR-037-R1 requires {hint} in cloud-credentialed workflows",
+                    )
+                )
+    return violations
+
+
 # ---------------------------------------------------------------------------
 # ADR-004-R14: live cloud identifier hygiene.
 #
@@ -5331,6 +5960,52 @@ _UUID_BUCKET_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
 )
 
+# Public IPv4 addresses in IaC (`.tf`/`.tfvars`/`.hcl`) are almost always an
+# operator/participant allow-CIDR - i.e. someone's home/office IP, which is PII
+# in a public repo. Flag any globally-routable IPv4 in IaC. Private (RFC1918),
+# loopback, link-local, CGNAT, and documentation (RFC5737: 192.0.2 / 198.51.100
+# / 203.0.113) ranges are `is_global == False` and are never flagged, so
+# placeholders like `203.0.113.10/32` pass. A small allowlist covers well-known
+# PUBLIC infrastructure constants that legitimately appear in IaC (Google /
+# Cloudflare public DNS; GCP load-balancer health-check, IAP, and googleapis
+# VIP ranges) and are not env-specific or sensitive. A genuinely required
+# public IP is cleared with a scoped docs/adr/exceptions.yaml entry.
+_IAC_IP_SUFFIXES: tuple[str, ...] = (".tf", ".tfvars", ".hcl")
+_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_PUBLIC_IP_ALLOW_NETS: tuple[ipaddress.IPv4Network, ...] = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in (
+        "8.8.8.8/32", "8.8.4.4/32",             # Google Public DNS
+        "1.1.1.1/32", "1.0.0.1/32",             # Cloudflare DNS
+        "130.211.0.0/22", "35.191.0.0/16",      # GCP LB health-check ranges
+        "35.235.240.0/20",                      # GCP Identity-Aware Proxy
+        "199.36.153.4/30", "199.36.153.8/30",   # GCP private/restricted googleapis VIPs
+    )
+)
+
+
+def _is_flaggable_public_ip(token: str) -> bool:
+    """True for a globally-routable IPv4 that is not a well-known public infra
+    constant - i.e. an operator/participant IP that should not be committed."""
+    try:
+        addr = ipaddress.ip_address(token)
+    except ValueError:
+        return False
+    if not isinstance(addr, ipaddress.IPv4Address) or not addr.is_global:
+        return False
+    return not any(addr in net for net in _PUBLIC_IP_ALLOW_NETS)
+
+
+def _scan_iac_public_ips(line: str) -> list[str]:
+    """Return ["public IP address"] once when an IaC line carries a flaggable
+    public IPv4 in its code (not in a `#` / `//` comment, where IPs are prose /
+    policy examples), else []."""
+    code = line.split("#", 1)[0].split("//", 1)[0]
+    for token in _IPV4_RE.findall(code):
+        if _is_flaggable_public_ip(token):
+            return ["public IP address"]
+    return []
+
 
 def _identifier_skip(rel: str) -> bool:
     """True for paths that must not be scanned (binary / generated locks)."""
@@ -5392,10 +6067,14 @@ def _scan_identifier_file(path: Path, rel: str) -> list[Violation]:
     text = _read_text_safe(path)
     if text is None:
         return []
+    is_iac = rel.endswith(_IAC_IP_SUFFIXES)
     violations: list[Violation] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         for kind in _scan_identifier_line(line):
             violations.append(_identifier_violation(rel, lineno, kind))
+        if is_iac:
+            for kind in _scan_iac_public_ips(line):
+                violations.append(_identifier_violation(rel, lineno, kind))
     return violations
 
 
@@ -5654,10 +6333,714 @@ def check_mission_control_no_flag_literals(repo_root: Path, files: list[str] | N
     return violations
 
 
+_PUBLISHED_CONTRACT_DIR = "shifter/installation/published_contract"
+_PUBLISHED_CONTRACT_SNAPSHOT_RE = re.compile(r"^backend-bundle-contract\.v(\d+)\.json$")
+_PUBLISHED_CONTRACT_CHECK = "published-contract-snapshots-immutable"
+_PUBLISHED_CONTRACT_RULE = "ADR-011-R8"
+# CI lanes that fetch base-branch history set this so the check fails CLOSED when it cannot
+# verify immutability. Local/shallow runs (env unset) fail open so dev is not blocked.
+_PUBLISHED_CONTRACT_ENFORCE_ENV = "ADR_GUARD_SNAPSHOT_ENFORCE"
+
+
+def _published_contract_snapshot_names(repo_root: Path, ref: str) -> set[str] | None:
+    """Frozen version-snapshot filenames under the published-contract dir at ``ref``.
+
+    Returns an empty set when the directory does not exist at ``ref`` (a genuine first
+    publication), and ``None`` when the tree could not be read at all (a git read failure) —
+    the two cases are distinct so the caller can fail closed on the unreadable case.
+    """
+    listing = _git_text(repo_root, ["ls-tree", "--name-only", ref, f"{_PUBLISHED_CONTRACT_DIR}/"])
+    if listing is None:
+        return None
+    names = {line.strip().rsplit("/", 1)[-1] for line in listing.splitlines() if line.strip()}
+    return {name for name in names if _PUBLISHED_CONTRACT_SNAPSHOT_RE.match(name)}
+
+
+def _published_contract_enforced() -> bool:
+    return os.environ.get(_PUBLISHED_CONTRACT_ENFORCE_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _published_contract_violation(path: str, message: str) -> Violation:
+    return Violation(_PUBLISHED_CONTRACT_CHECK, _PUBLISHED_CONTRACT_RULE, path, message)
+
+
+def _published_contract_snapshot_diff(repo_root: Path, ref: str, name: str, enforce: bool) -> list[Violation]:
+    rel = f"{_PUBLISHED_CONTRACT_DIR}/{name}"
+    head_path = repo_root / rel
+    if not head_path.exists():
+        return [
+            _published_contract_violation(
+                rel,
+                "published contract version snapshot was deleted; published versions are immutable "
+                "(append-only). Restore it and ship a new version snapshot instead of removing this one.",
+            )
+        ]
+    base_content = _git_text(repo_root, ["show", f"{ref}:{rel}"])
+    if base_content is None:
+        if enforce:
+            return [_published_contract_violation(rel, "cannot read the published snapshot at the base ref to verify immutability")]
+        return []
+    if head_path.read_text(encoding="utf-8") != base_content:
+        return [
+            _published_contract_violation(
+                rel,
+                "published contract version snapshot was modified; published versions are immutable "
+                "(append-only). Bump contract_version and add a new snapshot instead of changing this one.",
+            )
+        ]
+    return []
+
+
+def check_published_contract_snapshots_immutable(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Published backend-bundle contract version snapshots are append-only (ADR-011-R8).
+
+    Each ``backend-bundle-contract.v<N>.json`` records the frozen shape of a published
+    contract version. Once published on the base branch, a snapshot must not be modified or
+    deleted — a contract change ships a *new* version snapshot instead. This is what makes the
+    breaking-change gate's oracle trustworthy, which the working tree alone cannot: the
+    committed snapshot is compared against its content at the base-branch merge base.
+
+    Enforcement is fail-open by default (a shallow clone without base history cannot compare,
+    so local dev is not blocked) and fail-CLOSED when ``ADR_GUARD_SNAPSHOT_ENFORCE`` is set —
+    the CI lane sets it and fetches base history (``fetch-depth: 0``), so an inability to
+    resolve or read the base becomes an enforcement failure rather than a silent pass.
+    """
+    del files  # global repository invariant, not scoped to the changed-file set
+    enforce = _published_contract_enforced()
+    base_refs = _boundary_mock_base_reference_candidates(repo_root)
+    if not base_refs:
+        if enforce:
+            return [
+                _published_contract_violation(
+                    _PUBLISHED_CONTRACT_DIR,
+                    "cannot resolve a base ref to verify published-contract snapshot immutability; "
+                    "the CI lane must fetch base-branch history (fetch-depth: 0)",
+                )
+            ]
+        return []
+    ref = base_refs[0]
+    base_snapshots = _published_contract_snapshot_names(repo_root, ref)
+    if base_snapshots is None:
+        if enforce:
+            return [
+                _published_contract_violation(
+                    _PUBLISHED_CONTRACT_DIR,
+                    "cannot read the published-contract directory at the base ref to verify snapshot immutability",
+                )
+            ]
+        return []
+    if not base_snapshots:
+        return []  # the directory does not exist at the base yet (genuine first publication)
+    violations: list[Violation] = []
+    for name in sorted(base_snapshots):
+        violations.extend(_published_contract_snapshot_diff(repo_root, ref, name, enforce))
+    return violations
+
+
+_PARITY_INVENTORY_PATH = "docs/architecture/aces-migration-parity-inventory.yaml"
+# The only path-bearing fields for this check. Extend this constant (not the
+# traversal or classifier) when a future evidence field must be validated too.
+_PARITY_INSPECTED_FIELDS: tuple[str, ...] = ("legacy_source", "validation_evidence")
+_PARITY_CHECK = "aces-parity-inventory-path-integrity"
+_PARITY_RULE_ID = "ADR-024-R4"
+_PARITY_GLOB_METACHARS = ("*", "?", "[")
+# A whitespace-bearing clause led by one of these tokens (or carrying a shell
+# operator) is a shell command rather than prose. Both kinds are classify-only
+# and never resolved; the distinction is for diagnostics and the four-kind
+# classifier contract, not for gate behaviour.
+_PARITY_COMMAND_TOKENS = frozenset(
+    {
+        "python3", "python", "cd", "aces", "uv", "bash", "sh", "pytest", "npx",
+        "make", "go", "ruff", "mypy", "pre-commit", "git", "kubeconform",
+        "kube-linter", "tflint", "helm", "terraform", "actionlint",
+    }
+)
+# Shell expansion / substitution / brace characters make a path or glob
+# candidate unsafe to resolve at all. Their presence is a fail-closed violation,
+# never a silent skip.
+_PARITY_UNSAFE_CHARS = ("~", "$", "`", "{", "}", "!", "\\")
+
+
+def _parity_violation(message: str) -> Violation:
+    return Violation(_PARITY_CHECK, _PARITY_RULE_ID, _PARITY_INVENTORY_PATH, message)
+
+
+def _parity_clause_violation(row_id: str, field: str, clause: str, reason: str) -> Violation:
+    return _parity_violation(f"row {row_id!r} field {field!r} clause {clause!r} {reason}")
+
+
+def classify_parity_clause(clause: str) -> str:
+    """Classify one trimmed evidence clause: ``path``, ``glob``, ``command``, or ``prose``.
+
+    Syntax-led on purpose: existence is never consulted. A deleted ``foo/bar.py``
+    stays classified ``path`` (and fails) instead of being reclassified as prose
+    and evading the check. Path-looking substrings inside prose are not extracted.
+    """
+    if any(char.isspace() for char in clause):
+        first = clause.split()[0]
+        if (
+            first in _PARITY_COMMAND_TOKENS
+            or " && " in clause
+            or " || " in clause
+            or " | " in clause
+            or " -" in clause
+        ):
+            return "command"
+        return "prose"
+    if any(char in clause for char in _PARITY_GLOB_METACHARS):
+        return "glob"
+    if "/" in clause or clause.startswith("."):
+        return "path"
+    return "prose"
+
+
+def _parity_glob_base(clause: str) -> str:
+    """Return the leading metacharacter-free directory portion of a glob pattern.
+
+    Used to enforce repository containment *before* the pattern is enumerated, so
+    a symlinked base directory that escapes the repository is rejected without
+    following it. Returns ``""`` when the first path component already contains a
+    glob metacharacter (the pattern is anchored at the repository root).
+    """
+    base_parts: list[str] = []
+    for part in clause.split("/")[:-1]:
+        if any(char in part for char in _PARITY_GLOB_METACHARS):
+            break
+        base_parts.append(part)
+    return "/".join(base_parts)
+
+
+def _validate_parity_path(
+    repo_root: Path, row_id: str, field: str, clause: str, *, is_glob: bool
+) -> list[Violation]:
+    """Validate one ``path``/``glob`` clause: syntactic safety, containment, existence."""
+    if clause.startswith("/") or Path(clause).is_absolute():
+        return [_parity_clause_violation(row_id, field, clause, "must be repository-relative, not an absolute path")]
+    if any(char in clause for char in _PARITY_UNSAFE_CHARS):
+        return [_parity_clause_violation(row_id, field, clause, "contains an unsupported shell/expansion character")]
+    if any(segment == ".." for segment in clause.split("/")):
+        return [_parity_clause_violation(row_id, field, clause, "must not use '..' path traversal")]
+
+    root = repo_root.resolve()
+
+    if is_glob:
+        # Enforce containment BEFORE enumeration: reject a glob whose literal base
+        # directory (the leading metacharacter-free portion) resolves outside the
+        # repository, so `linked/*.txt` where `linked` is an escaping symlink is
+        # never followed or enumerated. Every miss - nothing matched, base
+        # escaped, or all matches external - returns one indistinguishable
+        # diagnostic, so the always-run check cannot become a boolean filename
+        # oracle for the host filesystem. Referenced targets are never read.
+        base = _parity_glob_base(clause)
+        if base:
+            try:
+                base_resolved = (repo_root / base).resolve()
+            except (OSError, RuntimeError):
+                return [_parity_clause_violation(row_id, field, clause, "matches no path under the repository root")]
+            if base_resolved != root and root not in base_resolved.parents:
+                return [_parity_clause_violation(row_id, field, clause, "matches no path under the repository root")]
+        try:
+            matches = glob.glob(clause, root_dir=repo_root)
+        except (OSError, ValueError):
+            matches = []
+        for match in matches:
+            try:
+                resolved = (repo_root / match).resolve()
+            except (OSError, RuntimeError):
+                continue
+            if resolved == root or root in resolved.parents:
+                return []  # at least one match resolves within the repository
+        return [_parity_clause_violation(row_id, field, clause, "matches no path under the repository root")]
+
+    candidate = repo_root / clause
+    try:
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError):
+        return [_parity_clause_violation(row_id, field, clause, "could not be resolved within the repository")]
+    if resolved != root and root not in resolved.parents:
+        # Absolute-path and traversal syntax is already rejected above, so this
+        # only fires on a symlinked component escaping the repository. Fail
+        # closed without reading the target.
+        return [_parity_clause_violation(row_id, field, clause, "resolves outside the repository root")]
+    if not candidate.exists():
+        return [_parity_clause_violation(row_id, field, clause, "does not resolve to an existing path")]
+    return []
+
+
+def check_aces_parity_inventory_path_integrity(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Parity-inventory path evidence must resolve (ADR-024-R4).
+
+    Global invariant over ``docs/architecture/aces-migration-parity-inventory.yaml``:
+    every ``legacy_source`` / ``validation_evidence`` clause that is a repository
+    path or glob must resolve to an existing path (glob: at least one match).
+    Shell-command and prose clauses are classified and skipped. Runs regardless of
+    the changed-file set because a referenced file can be moved or deleted without
+    the inventory itself changing. Treats the YAML as untrusted static input: it
+    only inspects path metadata, never reads referenced content, and never lets
+    inventory text reach a shell, subprocess, or command-line argument.
+    """
+    del files  # global repository invariant, not scoped to the changed-file set
+    try:
+        import yaml  # type: ignore[import-not-found]
+    except ImportError:
+        return [
+            _parity_violation(
+                "PyYAML is required to validate the ACES parity inventory; "
+                "install pyyaml in the runtime environment"
+            )
+        ]
+
+    path = repo_root / _PARITY_INVENTORY_PATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return [_parity_violation("parity inventory is missing or unreadable")]
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return [_parity_violation("parity inventory is not valid YAML")]
+
+    if not isinstance(data, dict):
+        return [_parity_violation("parity inventory root must be a mapping")]
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        return [_parity_violation("parity inventory 'rows' must be a list")]
+
+    violations: list[Violation] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            violations.append(_parity_violation(f"row at index {index} must be a mapping"))
+            continue
+        row_id = row.get("id")
+        if not isinstance(row_id, str) or not row_id:
+            violations.append(_parity_violation(f"row at index {index} must have a non-empty string 'id'"))
+            continue
+        for field in _PARITY_INSPECTED_FIELDS:
+            if field not in row:
+                violations.append(_parity_violation(f"row {row_id!r} is missing field {field!r}"))
+                continue
+            value = row[field]
+            if not isinstance(value, str):
+                violations.append(_parity_violation(f"row {row_id!r} field {field!r} must be a string"))
+                continue
+            for raw_clause in value.split(";"):
+                clause = raw_clause.strip()
+                if not clause:
+                    continue
+                kind = classify_parity_clause(clause)
+                if kind == "path":
+                    violations.extend(_validate_parity_path(repo_root, row_id, field, clause, is_glob=False))
+                elif kind == "glob":
+                    violations.extend(_validate_parity_path(repo_root, row_id, field, clause, is_glob=True))
+                # command / prose clauses are classified only, never resolved.
+    return violations
+
+
+# --------------------------------------------------------------------------- #
+# Production-path quality-ownership conformance (#1530, GEN-002, ADR-004-R24)
+#
+# Reconciles .github/quality-path-filters.yaml (the single versioned
+# quality-ownership contract) against the repository. Three invariants:
+#   1. estate completeness  - every tracked path is a production owner or a
+#      typed exclusion (unknown fails closed);
+#   2. ownership completeness - every production PATH is covered, across the
+#      union of its matching units, by a blocking lint AND security AND test
+#      job (advisory / continue-on-error / missing jobs do not count); genuine
+#      gaps are recorded as time-bounded docs/adr/exceptions.yaml entries;
+#   3. routing reachability  - a representative change to each unit makes its
+#      declared jobs (and matrix members) run in the real _quality.yml, while a
+#      docs-only change does not select production jobs.
+# The schema itself is parsed once by scripts/quality_ownership/contract.py -
+# the same module the _quality.yml `paths` job uses - so there is no second
+# implementation of the contract.
+# --------------------------------------------------------------------------- #
+_QUALITY_CONTRACT_REL = ".github/quality-path-filters.yaml"
+_QUALITY_WORKFLOW_REL = ".github/workflows/_quality.yml"
+_QUALITY_RULE = "ADR-004-R24"
+_QUALITY_CHECK = "quality-path-ownership"
+_QUALITY_RESPONSIBILITIES = ("lint", "security", "test")
+# Evidence-only jobs: soft-fail, always-run, or advisory scanners that cannot
+# by themselves own a required responsibility (per the #1530 preflight).
+_QUALITY_ADVISORY_JOBS = frozenset(
+    {
+        "security-trivy-advisory",
+        "security-osv-advisory",
+        "secrets-gitleaks",
+        "sonarcloud",
+        "security-k8s",
+    }
+)
+
+
+def _load_quality_module(repo_root: Path):
+    """Load scripts/quality_ownership/contract.py as a module (the single
+    contract implementation), without mutating sys.path."""
+    import importlib.util
+
+    path = repo_root / "scripts" / "quality_ownership" / "contract.py"
+    spec = importlib.util.spec_from_file_location("_quality_ownership_contract", path)
+    if spec is None or spec.loader is None:
+        raise _DwShapeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    # Register before exec so the module's dataclasses (with `from __future__
+    # import annotations`) can resolve their own namespace during processing.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _quality_probe_path(pattern: str) -> str:
+    if pattern.endswith("/**"):
+        return pattern[:-3].rstrip("/") + "/__probe__"
+    return pattern
+
+
+def _quality_strip_if(if_expr) -> str:
+    expr = _dw_normalize_expr(if_expr)
+    if expr.startswith("${{") and expr.endswith("}}"):
+        expr = expr[3:-2].strip()
+    return expr
+
+
+def _quality_eval_if(if_expr, outputs: dict) -> bool:
+    """Evaluate a job ``if:`` against a controlled paths-output map, so routing
+    is proven semantically (not by substring). ``needs.paths.outputs.<key>``
+    resolves from ``outputs``; other operands are permissive; ``skip_tests`` is
+    false and ``run_stack_smoke`` true so test/smoke jobs are eligible."""
+    expr = _quality_strip_if(if_expr)
+    if not expr:
+        return True
+
+    def resolve(pathstr):
+        parts = pathstr.split(".")
+        if parts[:3] == ["needs", "paths", "outputs"] and len(parts) >= 4:
+            return outputs.get(parts[3], "false")
+        if parts[0] == "needs":
+            if len(parts) >= 3 and parts[2] == "result":
+                return "success"
+            return "true"
+        if parts[0] == "inputs":
+            field = parts[1] if len(parts) > 1 else ""
+            return {
+                "skip_tests": False,
+                "run_full_matrix": False,
+                "run_stack_smoke": True,
+            }.get(field, False)
+        if parts[0] == "github":
+            return ""
+        raise _DwExprError(f"unresolvable operand: {pathstr}")
+
+    return _dw_truthy(_DwParser(_dw_tokenize(expr), resolve).evaluate())
+
+
+def _quality_job_reachable(jobs: dict, job_id: str, outputs: dict, seen=None) -> bool:
+    """A job runs iff its own ``if:`` is true AND every job it ``needs`` runs
+    (transitively) - the real GitHub gating semantics, so a matrix generator or
+    other upstream gate is honoured."""
+    seen = seen or set()
+    job = jobs.get(job_id)
+    if job is None or job_id in seen:
+        return job is not None
+    if not _quality_eval_if(_dw_job_if(job), outputs):
+        return False
+    needs = job.get("needs") or []
+    if isinstance(needs, str):
+        needs = [needs]
+    return all(
+        _quality_job_reachable(jobs, need, outputs, seen | {job_id}) for need in needs
+    )
+
+
+def _quality_ownership_completeness(contract, module, tracked, jobs, viol):
+    violations = []
+
+    def job_blocking(jobref):
+        if jobref.job not in jobs:
+            return (False, "missing")
+        if jobref.job in _QUALITY_ADVISORY_JOBS:
+            return (False, "advisory")
+        if _dw_truthy(jobs[jobref.job].get("continue-on-error")):
+            return (False, "continue-on-error")
+        return (True, "")
+
+    for unit in contract.units:
+        for resp, refs in unit.responsibilities.items():
+            for ref in refs:
+                ok, why = job_blocking(ref)
+                if not ok:
+                    violations.append(
+                        viol(
+                            f"{_QUALITY_CONTRACT_REL}#{unit.id}:{resp}",
+                            f"quality unit {unit.id!r} {resp} references {why} job "
+                            f"{ref.job!r}; an advisory / continue-on-error / missing "
+                            "job cannot own a responsibility",
+                        )
+                    )
+
+    satisfies = {
+        unit.id: {
+            resp
+            for resp, refs in unit.responsibilities.items()
+            if any(job_blocking(ref)[0] for ref in refs)
+        }
+        for unit in contract.units
+    }
+
+    gaps: dict = {}
+    for path in tracked:
+        units_here = module.matching_units(contract, path)
+        if not units_here:
+            continue
+        covered: set = set()
+        for unit_id in units_here:
+            covered |= satisfies.get(unit_id, set())
+        missing = set(_QUALITY_RESPONSIBILITIES) - covered
+        if missing:
+            owner = module.most_specific_unit(contract, path) or units_here[0]
+            for resp in missing:
+                gaps.setdefault((owner, resp), path)
+
+    for (unit_id, resp), path in sorted(gaps.items()):
+        violations.append(
+            viol(
+                f"{_QUALITY_CONTRACT_REL}#{unit_id}:{resp}",
+                f"no blocking {resp} owner for quality unit {unit_id!r} "
+                f"(e.g. {path}); add a blocking {resp} job or record a time-bounded "
+                "docs/adr/exceptions.yaml entry for this gap",
+            )
+        )
+    return violations
+
+
+_QUALITY_MATRIX_OUTPUT = {"mcp-lint": "mcp_lint_packages", "mcp-tests": "mcp_test_packages"}
+
+
+def _quality_matrix_reachable(ref, resp, unit, outputs, jobs, viol):
+    matrix = dict(ref.matrix)
+    package = matrix.get("package")
+    key = _QUALITY_MATRIX_OUTPUT.get(ref.job)
+    if key is None:
+        return []
+    violations = []
+    try:
+        selected = json.loads(outputs.get(key, "[]"))
+    except json.JSONDecodeError:
+        selected = []
+    if package not in selected:
+        violations.append(
+            viol(
+                _QUALITY_WORKFLOW_REL,
+                f"quality unit {unit.id!r} {resp} matrix member package={package!r} "
+                f"is not selected in {key} when {unit.id!r} changes",
+            )
+        )
+    # Verify the real job actually consumes that output as its matrix source, so
+    # a job wired to the wrong JSON output (or a hard-coded matrix) is caught
+    # rather than trusting the classifier value alone.
+    matrix_key = next(iter(matrix), None)
+    job = jobs.get(ref.job) or {}
+    strategy = job.get("strategy") or {}
+    matrix_spec = strategy.get("matrix") or {}
+    matrix_source = str(matrix_spec.get(matrix_key, "")) if matrix_key else ""
+    if "fromjson" not in matrix_source.lower() or f"needs.paths.outputs.{key}" not in matrix_source:
+        violations.append(
+            viol(
+                _QUALITY_WORKFLOW_REL,
+                f"job {ref.job!r} strategy.matrix.{matrix_key} must consume "
+                f"fromJSON(needs.paths.outputs.{key}) (found {matrix_source!r}); "
+                "the matrix must be driven by the declared output, not a fixed list",
+            )
+        )
+    return violations
+
+
+def _quality_output_wiring_violations(contract, module, jobs, viol):
+    """Verify the real paths-job output export edges, not just the classifier's
+    values: every classifier-emitted key is exported as
+    ``steps.detect.outputs.<key>`` (a mis-wired key silently breaks routing),
+    and no classifier-sourced output exists that the contract does not emit."""
+    violations = []
+    paths_job = jobs.get("paths")
+    if not isinstance(paths_job, dict):
+        return [viol(_QUALITY_WORKFLOW_REL, "paths job is missing from the workflow")]
+    declared = paths_job.get("outputs") or {}
+    emitted = set(module.compute_outputs(contract, None, run_full_matrix=True).keys())
+    for key in sorted(emitted):
+        if key not in declared:
+            violations.append(
+                viol(
+                    _QUALITY_WORKFLOW_REL,
+                    f"paths job does not export classifier output {key!r}",
+                )
+            )
+        elif f"steps.detect.outputs.{key}" not in str(declared[key]):
+            violations.append(
+                viol(
+                    _QUALITY_WORKFLOW_REL,
+                    f"paths output {key!r} is not wired to steps.detect.outputs.{key} "
+                    f"(found {declared[key]!r}); a mis-wired output silently breaks routing",
+                )
+            )
+    for key, value in declared.items():
+        if "steps.detect.outputs." in str(value) and key not in emitted:
+            violations.append(
+                viol(
+                    _QUALITY_WORKFLOW_REL,
+                    f"paths output {key!r} is sourced from the classifier but is not an "
+                    "emitted contract output",
+                )
+            )
+    return violations
+
+
+def _quality_routing_reachability(contract, module, jobs, viol):
+    violations = []
+    for unit in contract.units:
+        probe = _quality_probe_path(unit.paths[0])
+        try:
+            outputs = module.compute_outputs(contract, [probe])
+        except Exception as exc:  # UnknownPathError / ContractError
+            violations.append(
+                viol(
+                    _QUALITY_CONTRACT_REL,
+                    f"cannot classify probe {probe!r} for unit {unit.id!r}: {exc}",
+                )
+            )
+            continue
+        for resp, refs in unit.responsibilities.items():
+            for ref in refs:
+                if ref.job not in jobs:
+                    continue  # missing-job already reported by completeness
+                try:
+                    reachable = _quality_job_reachable(jobs, ref.job, outputs)
+                except _DwShapeError as exc:
+                    violations.append(
+                        viol(
+                            _QUALITY_WORKFLOW_REL,
+                            f"quality unit {unit.id!r} {resp} job {ref.job!r} has an "
+                            f"if-expression the routing model cannot evaluate: {exc}",
+                        )
+                    )
+                    continue
+                if not reachable:
+                    violations.append(
+                        viol(
+                            _QUALITY_WORKFLOW_REL,
+                            f"quality unit {unit.id!r} {resp} job {ref.job!r} does not "
+                            f"run when {probe!r} changes (routing unreachable)",
+                        )
+                    )
+                    continue
+                if ref.matrix:
+                    violations += _quality_matrix_reachable(
+                        ref, resp, unit, outputs, jobs, viol
+                    )
+
+    docs_probe = "docs/__probe__.md"
+    try:
+        neg = module.compute_outputs(contract, [docs_probe])
+    except Exception:
+        neg = None
+    if neg is not None:
+        # A docs-only change must not select any declared production job.
+        declared_jobs = {
+            ref.job
+            for unit in contract.units
+            for refs in unit.responsibilities.values()
+            for ref in refs
+            if ref.job in jobs
+        }
+        for job_id in sorted(declared_jobs):
+            try:
+                if _quality_job_reachable(jobs, job_id, neg):
+                    violations.append(
+                        viol(
+                            _QUALITY_WORKFLOW_REL,
+                            f"production job {job_id!r} is selected by a docs-only "
+                            f"change ({docs_probe!r}); an exclusion must not route "
+                            "production jobs",
+                        )
+                    )
+            except _DwShapeError:
+                continue  # unevaluatable if already reported above
+    return violations
+
+
+def _quality_package_reconciliation(contract, repo_root, viol):
+    try:
+        classified = _classified_packages(repo_root)
+    except Exception as exc:
+        return [
+            viol(
+                _QUALITY_CONTRACT_REL,
+                f"cannot load the #1523 package classification: {exc}",
+            )
+        ]
+    declared: set = set()
+    for unit in contract.units:
+        declared |= set(unit.packages)
+    violations = []
+    for pkg in sorted(declared - classified):
+        violations.append(
+            viol(
+                _QUALITY_CONTRACT_REL,
+                f"quality unit references package {pkg!r} that is not in the #1523 "
+                "classification (scripts/check_layer_imports/layer_imports.yaml)",
+            )
+        )
+    for pkg in sorted(classified - declared):
+        violations.append(
+            viol(
+                _QUALITY_CONTRACT_REL,
+                f"#1523 first-party package {pkg!r} has no quality-ownership unit",
+            )
+        )
+    return violations
+
+
+def check_quality_path_ownership(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Reconcile the quality-ownership contract (whole-tree invariant)."""
+    del files  # whole-tree invariant
+
+    def viol(path: str, message: str) -> Violation:
+        return Violation(_QUALITY_CHECK, _QUALITY_RULE, path, message)
+
+    try:
+        module = _load_quality_module(repo_root)
+    except Exception as exc:
+        return [viol(_QUALITY_CONTRACT_REL, f"cannot load quality-ownership module: {exc}")]
+    try:
+        contract = module.load_contract(repo_root / _QUALITY_CONTRACT_REL)
+    except Exception as exc:  # ContractError / OSError
+        return [viol(_QUALITY_CONTRACT_REL, f"contract invalid: {exc}")]
+
+    tracked = _git_tracked_all(repo_root)
+    if tracked is None:
+        tracked = _walk_all_files(repo_root)
+
+    violations: list[Violation] = [
+        viol(_QUALITY_CONTRACT_REL, err)
+        for err in module.estate_violations(contract, tracked)
+    ]
+
+    try:
+        workflow = _dw_load_workflow(repo_root, _QUALITY_WORKFLOW_REL)
+        jobs = _dw_jobs(workflow, _QUALITY_WORKFLOW_REL)
+    except _DwShapeError as exc:
+        return violations + [viol(_QUALITY_WORKFLOW_REL, str(exc))]
+
+    violations += _quality_ownership_completeness(contract, module, tracked, jobs, viol)
+    violations += _quality_output_wiring_violations(contract, module, jobs, viol)
+    violations += _quality_routing_reachability(contract, module, jobs, viol)
+    violations += _quality_package_reconciliation(contract, repo_root, viol)
+    return violations
+
+
 CHECKS = {
     "adr-registry": check_adr_registry,
     "layer-imports": check_layer_imports,
     "cross-layer-model-imports": check_cross_layer_model_imports,
+    "installed-apps-classified": check_installed_apps_classified,
     "guardrail-docs": check_guardrail_docs,
     "cloud-factory-seam": check_cloud_factory_seam,
     "mcp-no-shell-exec": check_mcp_no_shell_exec,
@@ -5674,18 +7057,23 @@ CHECKS = {
     "aws-platform-renders-deploy-tfvars": check_platform_renders_deploy_tfvars,
     "deploy-verification-fail-loud": check_deploy_verification_fail_loud,
     "deploy-workflow-runner-exposure": check_deploy_runner_exposure,
+    "workflow-action-sha-pinning": check_workflow_action_sha_pinning,
     "no-live-cloud-identifiers": check_no_live_cloud_identifiers,
     "no-mission-control-flag-literals": check_mission_control_no_flag_literals,
     "no-terraform-operational-placeholders": check_no_terraform_operational_placeholders,
     "github-oidc-no-admin-access": check_github_oidc_no_admin_access,
     "documentation-coverage": check_documentation_coverage,
+    "published-contract-snapshots-immutable": check_published_contract_snapshots_immutable,
     "no-agent-attribution": check_no_agent_attribution,
+    "aces-parity-inventory-path-integrity": check_aces_parity_inventory_path_integrity,
+    "quality-path-ownership": check_quality_path_ownership,
 }
 CHECK_LEVELS = {
     "fast": [
         "adr-registry",
         "layer-imports",
         "cross-layer-model-imports",
+        "installed-apps-classified",
         "guardrail-docs",
         "cloud-factory-seam",
         "mcp-no-shell-exec",
@@ -5700,17 +7088,21 @@ CHECK_LEVELS = {
         "aws-platform-renders-deploy-tfvars",
         "deploy-verification-fail-loud",
         "deploy-workflow-runner-exposure",
+        "workflow-action-sha-pinning",
         "no-live-cloud-identifiers",
         "no-mission-control-flag-literals",
         "no-terraform-operational-placeholders",
         "github-oidc-no-admin-access",
         "documentation-coverage",
+        "published-contract-snapshots-immutable",
         "no-agent-attribution",
+        "quality-path-ownership",
     ],
     "ci": [
         "adr-registry",
         "layer-imports",
         "cross-layer-model-imports",
+        "installed-apps-classified",
         "cloud-factory-seam",
         "mcp-no-shell-exec",
         "k8s-deployment-security-context",
@@ -5726,12 +7118,16 @@ CHECK_LEVELS = {
         "aws-platform-renders-deploy-tfvars",
         "deploy-verification-fail-loud",
         "deploy-workflow-runner-exposure",
+        "workflow-action-sha-pinning",
         "no-live-cloud-identifiers",
         "no-mission-control-flag-literals",
         "no-terraform-operational-placeholders",
         "github-oidc-no-admin-access",
         "documentation-coverage",
+        "published-contract-snapshots-immutable",
         "no-agent-attribution",
+        "aces-parity-inventory-path-integrity",
+        "quality-path-ownership",
     ],
     "all": list(CHECKS),
 }

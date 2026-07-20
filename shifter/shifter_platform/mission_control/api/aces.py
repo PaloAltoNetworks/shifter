@@ -20,12 +20,17 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from cms.services import get_range_by_request_id
 from mission_control.api._base import MissionControlReadAPIView, _validated
-from mission_control.api.serializers import AcesOperationRecordSerializer, AcesRecordQuerySerializer
+from mission_control.api.serializers import (
+    AcesOperationRecordListResponseSerializer,
+    AcesOperationRecordSerializer,
+    AcesRecordQuerySerializer,
+)
 from shared.aces.projections import (
     RECORD_KIND_OPERATION_RECEIPT,
     RECORD_KIND_OPERATION_STATUS,
@@ -66,18 +71,36 @@ class _AcesRecordListView(MissionControlReadAPIView):
         )
 
 
+@extend_schema_view(
+    get=extend_schema(
+        responses=AcesOperationRecordListResponseSerializer,
+        operation_id="api_v1_mission_control_aces_operation_status_list",
+    )
+)
 class AcesOperationStatusListView(_AcesRecordListView):
     """``GET`` ACES operation-status observations for a range."""
 
     record_kind = RECORD_KIND_OPERATION_STATUS
 
 
+@extend_schema_view(
+    get=extend_schema(
+        responses=AcesOperationRecordListResponseSerializer,
+        operation_id="api_v1_mission_control_aces_operation_receipts_list",
+    )
+)
 class AcesOperationReceiptListView(_AcesRecordListView):
     """``GET`` ACES operation receipts for a range."""
 
     record_kind = RECORD_KIND_OPERATION_RECEIPT
 
 
+@extend_schema_view(
+    get=extend_schema(
+        responses=AcesOperationRecordListResponseSerializer,
+        operation_id="api_v1_mission_control_aces_runtime_snapshots_list",
+    )
+)
 class AcesRuntimeSnapshotListView(_AcesRecordListView):
     """``GET`` ACES runtime snapshots for a range."""
 

@@ -87,13 +87,12 @@ class TestTokenWriteAccess:
 
     def test_write_token_create_is_audited_with_token_actor(self, client, staff):
         from risk_register.models import AuditLog
+        from shared.audit import AuditAction, AuditActorType, AuditEntityType
 
         token, raw = ApiToken.create_token(name="w", created_by=staff, scopes=[scopes.RISK_WRITE])
         _bearer(client, raw).post(RISKS_URL, {"title": "T", "description": "D"}, format="json")
-        row = AuditLog.objects.filter(entity_type=AuditLog.EntityType.RISK, action=AuditLog.Action.CREATE).latest(
-            "timestamp"
-        )
-        assert row.actor_type == AuditLog.ActorType.APIKEY
+        row = AuditLog.objects.filter(entity_type=AuditEntityType.RISK, action=AuditAction.CREATE).latest("timestamp")
+        assert row.actor_type == AuditActorType.APIKEY
         assert row.actor_id == token.id
 
 

@@ -28,7 +28,7 @@ locals {
     "ecr.api",
     "ecr.dkr",
     "ecs",
-    # SES API (django_ses). The portal sends CTF magic-link invites and alarm
+    # SES API (django_ses). The portal sends CTF credential messages and alarm
     # notifications through SES; there is no NAT/internet egress from the private
     # tier for the public SES API endpoint, so without this VPC endpoint the SES
     # SendRawEmail call blackholes and every outbound email hangs (issue #1460).

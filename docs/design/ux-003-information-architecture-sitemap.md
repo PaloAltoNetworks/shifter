@@ -108,7 +108,7 @@ sidebar, while organizer pages use the shared icon sidebar.
 | Current page | Route | Primary user | Primary purpose |
 | --- | --- | --- | --- |
 | Participant dashboard | `/ctf/` | Participant | Event entry point with current participant state. |
-| Registration | `/ctf/register/` | Participant | Join or register for the active event. |
+| Participant login | `/ctf/login/` | Participant | Sign in with an isolated temporary CTF account. |
 | Event overview | `/ctf/event/` | Participant | Read event rules, timing, and contextual details. |
 | Challenge list | `/ctf/challenges/` | Participant | Browse available challenges and progression. |
 | Challenge detail | `/ctf/challenges/<challenge_id>/` | Participant | Read challenge instructions, hints, files, and submit flags. |

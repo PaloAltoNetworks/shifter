@@ -31,6 +31,7 @@ class AWSTaskRunner:
         container_name: str,
         env_overrides: dict[str, str] | None = None,
         network_config: dict[str, Any] | None = None,
+        task_identity: str | None = None,
     ) -> str | None:
         logger.debug(
             "run_task: task_definition=%s cluster=%s command=%s container=%s",
@@ -60,6 +61,8 @@ class AWSTaskRunner:
             }
             if network_config:
                 kwargs["networkConfiguration"] = network_config
+            if task_identity:
+                kwargs["clientToken"] = task_identity
 
             response: dict[str, Any] = client.run_task(**kwargs)
         except (ClientError, BotoCoreError) as e:

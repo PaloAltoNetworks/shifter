@@ -125,6 +125,11 @@ variable "agent_s3_bucket" {
   type        = string
 }
 
+variable "environment" {
+  description = "Environment name (dev, prod, proof). Scopes the range-instance role's sts:AssumeRole grant to this environment's Polaris agent-role namespace (shifter-$${environment}-*-polaris-agent); see docs/architecture/polaris-aws-agent-credentials-preflight-1377.md."
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # VM-Series NGFW Configuration
 # ------------------------------------------------------------------------------

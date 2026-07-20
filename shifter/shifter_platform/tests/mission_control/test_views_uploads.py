@@ -24,9 +24,9 @@ from mission_control.upload_session import set_upload_in_progress
 
 pytestmark = pytest.mark.django_db
 
-INITIATE = reverse("mission_control:initiate_upload")
-COMPLETE = reverse("mission_control:complete_upload")
-CANCEL = reverse("mission_control:cancel_upload")
+INITIATE = reverse("v1:mission_control:upload-initiate")
+COMPLETE = reverse("v1:mission_control:upload-complete")
+CANCEL = reverse("v1:mission_control:upload-cancel")
 
 
 def _post(client, url, payload):
@@ -89,7 +89,7 @@ class TestInitiateUpload:
         client, _ = authenticated_client(email="up-json@example.com")
         resp = _post(client, INITIATE, "not json")
         assert resp.status_code == 400
-        assert "Invalid JSON" in _body(resp)["error"]
+        assert _body(resp)["error"]["code"] == "parse_error"
 
     @pytest.mark.parametrize(
         "payload,err_substr",
@@ -106,7 +106,7 @@ class TestInitiateUpload:
         client, _ = authenticated_client(email="up-val@example.com")
         resp = _post(client, INITIATE, payload)
         assert resp.status_code == 400
-        assert err_substr in _body(resp)["error"]
+        assert err_substr in json.dumps(_body(resp)["error"]["details"])
 
     def test_returns_409_when_upload_already_in_progress(self, authenticated_client):
         client, _ = authenticated_client(email="up-lock@example.com")
@@ -126,8 +126,8 @@ class TestInitiateUpload:
         resp = _post(client, INITIATE, {"name": "n", "filename": "agent.msi", "file_size": 10})
         assert resp.status_code == 400
         body = _body(resp)
-        assert body["error"] == "Upload could not be initiated"
-        assert "\n" not in body["error"] and "\r" not in body["error"]
+        assert body["error"]["message"] == "Upload could not be initiated"
+        assert "\n" not in body["error"]["message"] and "\r" not in body["error"]["message"]
 
     @override_settings(AWS_S3_BUCKET_NAME="test-bucket")
     def test_success_returns_presigned_url_and_sets_lock(self, authenticated_client):

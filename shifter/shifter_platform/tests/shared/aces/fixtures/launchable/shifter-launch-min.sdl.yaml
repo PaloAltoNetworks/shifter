@@ -1,0 +1,26 @@
+name: shifter-launch-min
+description: >
+  Minimal provisioning-only ACES scenario used to exercise the Shifter native
+  launch path (one VM node on one network). Authored against aces-sdl 0.20.0.
+
+nodes:
+  lan:
+    type: Switch
+  web:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: {name: "alpine", version: "3.19"}
+    resources: {ram: 512 mib, cpu: 1}
+    services:
+      - {port: 80, name: http}
+
+infrastructure:
+  lan:
+    count: 1
+    properties: {cidr: 10.50.0.0/24, gateway: 10.50.0.1}
+  web:
+    count: 1
+    links: [lan]
+    properties:
+      - lan: 10.50.0.10

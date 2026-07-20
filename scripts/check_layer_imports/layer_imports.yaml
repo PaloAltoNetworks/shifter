@@ -1,6 +1,6 @@
 # Allowed cross-layer imports between service layers
 #
-# Rule: Layers may ONLY import another layer's services.py.
+# Rule: Layers may ONLY import another layer's services.py (public facade).
 # shared is freely importable by all layers (contracts layer).
 # No model imports, no internal submodule imports, no __init__.py shortcuts.
 #
@@ -10,6 +10,37 @@
 # contracts belong in shared natively; cyberscript is for scenario DSL only.
 #
 # Any import not matching this config is a violation.
+
+# Canonical package classification (ADR-001, #1523). Every first-party Django
+# app is classified into exactly one class. This is the single source of truth;
+# the hard-coded package lists in check_layer_imports.py, adr_guard.py, and
+# check_model_fks.py are held to set-equality with it by tests, and the
+# installed-apps-classified adr_guard check fails closed when an unclassified
+# first-party app is added to INSTALLED_APPS. Do NOT classify the retired
+# `documentation` package (ADR-038 removed it).
+classification:
+  # Own business state and behavior. May use `shared` and only explicitly
+  # allowed public service facades of another domain.
+  domain:
+    - engine
+    - cms
+    - management
+    - ctf
+    - risk_register
+  # Owns HTTP/WebSocket presentation orchestration. May use `shared` and
+  # explicitly allowed public domain service facades; never domain models.
+  presentation:
+    - mission_control
+  # Owns neutral contracts and cross-cutting platform primitives. Must not
+  # import domain, presentation, or composition packages.
+  support_contracts:
+    - shared
+  # Owns settings, startup binding, root URL/ASGI wiring, identity-provider
+  # adapters, and cross-domain read composition. May wire explicitly named
+  # public services, URL/routing surfaces, and adapter factories; must not
+  # import domain models or private implementation modules.
+  support_composition:
+    - config
 
 allowed:
   engine:
@@ -24,6 +55,15 @@ allowed:
   management:
     - shared
 
+  # ADR-001-R4: presentation calls the owning domain facade. CMS owns catalog,
+  # desired-state lifecycle, and control-plane orchestration; Engine owns
+  # realized runtime/data-plane access (terminal, SSH/RDP connection resolution,
+  # and NGFW terminal access). The two explicit service seams are intentional;
+  # do not add CMS pass-throughs solely to hide the Engine dependency. The
+  # mission_control -> engine.services seam is narrowed to a per-symbol allowlist
+  # (see `allowed_symbols` below): only the sanctioned data-plane symbols may be
+  # imported directly, so control-plane engine operations still front through
+  # cms.services.
   mission_control:
     - shared
     - management.services
@@ -34,3 +74,44 @@ allowed:
     - shared
     - cms.services
     - management.services
+
+  # Domain: owns the AuditLog store and risk CRUD. Its access policy reads a
+  # user profile through the management public facade.
+  risk_register:
+    - shared
+    - management.services
+
+  # Composition root: wires public domain service facades and the ASGI/routing
+  # + operational-metrics surfaces. Enumerated narrowly — it must not import
+  # domain models or private modules.
+  config:
+    - shared
+    - cms.services
+    - ctf.services
+    - management.services
+    - risk_register.services
+    - mission_control.routing
+    - mission_control.terminal_sessions
+
+# Per-symbol facade allowlists (ADR-001-R4). When a (layer -> facade) pair is
+# listed here, that layer may import from the facade ONLY the enumerated public
+# symbols. Importing any other public symbol of that facade — or a bare
+# `import <facade>` / `import <facade>.sub` module import that hides which symbol
+# is used — is a violation. This narrows an otherwise facade-wide allowance (the
+# facade must still appear under `allowed` above for the module path itself to be
+# permitted) down to a specific, drift-proof seam. Private (`_`-prefixed) names
+# are already rejected by the public-facade rule (ADR-001-R1) and are not listed.
+allowed_symbols:
+  # mission_control (presentation) reaches engine.services directly only for
+  # realized runtime/data-plane operations (issue #994): live terminal creation,
+  # SSH/RDP connection resolution, NGFW terminal access, and the NGFW range read.
+  # Control-plane engine operations (range create/destroy/pause/resume/reassign,
+  # VPN, NGFW CRUD) are consumed through cms.services, never imported here.
+  mission_control:
+    engine.services:
+      - SSHConnection
+      - connect_ngfw_terminal
+      - connect_terminal
+      - get_ranges_for_ngfw
+      - get_rdp_connection_info
+      - get_ssh_connection_info

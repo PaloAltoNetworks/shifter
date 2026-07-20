@@ -237,3 +237,43 @@ class TestGetAllScenarios:
             assert isinstance(scenario.enabled, bool)
             assert isinstance(scenario.ngfw, bool)
             assert len(scenario.instances) > 0
+
+
+class TestSmokeScenarios:
+    """The post-deploy smoke scenarios must stay agent-independent (#1422)."""
+
+    @pytest.mark.parametrize("scenario_id", ["smoke_linux", "smoke_windows"])
+    def test_smoke_scenario_requires_no_agent(self, scenario_id):
+        """Smoke ranges are built from base AMIs — no XDR agent required."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario(scenario_id)
+        # Hidden from the user catalog, but still launchable (YAML defaults).
+        assert scenario.enabled is False
+        # No `from_agent` instances and no `xdr_agent`, so create_range needs
+        # no agents_by_os entries.
+        for inst in scenario.instances:
+            assert inst.os_type != "from_agent"
+            assert inst.xdr_agent is False
+        assert scenario.get_agent_requirements() == {
+            "requires_windows": False,
+            "requires_linux": False,
+            "has_from_agent": False,
+        }
+
+    def test_smoke_linux_shape(self):
+        """smoke_linux is a Kali attacker + Ubuntu victim on one subnet."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario("smoke_linux")
+        by_role = {i.role: i.os_type for i in scenario.instances}
+        assert by_role == {"attacker": "kali", "victim": "ubuntu"}
+
+    def test_smoke_windows_shape(self):
+        """smoke_windows is a Kali attacker + plain Windows victim (no dc)."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario("smoke_windows")
+        by_role = {i.role: i.os_type for i in scenario.instances}
+        assert by_role == {"attacker": "kali", "victim": "windows"}
+        assert all(not i.domain_controller for i in scenario.instances)

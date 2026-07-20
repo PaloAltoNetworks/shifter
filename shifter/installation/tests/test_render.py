@@ -25,20 +25,27 @@ import sys
 import pytest
 
 from installation.loader import load_root_config
-from installation.render import render_tfvars
+from installation.render import render_cloud_provider_tfvars, render_tfvars
 
 
 def _aws(settings: dict | None, aws_config: dict) -> dict:
     cfg = dict(aws_config)
     if settings is not None:
-        cfg["settings"] = settings
+        # Merge onto the fixture's settings so the required ``region`` (#728) is preserved
+        # while the test supplies its own ``range_egress`` policy.
+        cfg["settings"] = {**aws_config.get("settings", {}), **settings}
     return cfg
 
 
 def _gcp(settings: dict | None, gcp_config: dict) -> dict:
     cfg = dict(gcp_config)
+    # The GCP backend now has a closed settings model (#729) that requires project_id and
+    # region; merge them in so these range-egress-focused render cases load cleanly while
+    # still controlling the range_egress block under test.
+    merged = {"project_id": "acme-shifter", "region": "us-central1", **gcp_config.get("settings", {})}
     if settings is not None:
-        cfg["settings"] = settings
+        merged.update(settings)
+    cfg["settings"] = merged
     return cfg
 
 
@@ -126,8 +133,9 @@ class TestRenderGcp:
         from installation.errors import InstallationConfigError
 
         path = write_config(_gcp({"range_egress": {"mode": "none"}}, gcp_config))
+        config = load_root_config(path)
         with pytest.raises(InstallationConfigError, match="AWS only"):
-            render_tfvars(load_root_config(path))
+            render_tfvars(config)
 
 
 class TestRenderShape:
@@ -136,7 +144,9 @@ class TestRenderShape:
             _aws({"range_egress": {"mode": "allowlist", "allowed_cidrs": ["203.0.113.0/24"]}}, aws_config)
         )
         config = load_root_config(path)
-        assert render_tfvars(config) == render_tfvars(config)
+        first = render_tfvars(config)
+        second = render_tfvars(config)
+        assert first == second
 
     def test_output_carries_generated_header(self, write_config, aws_config):
         path = write_config(_aws({"range_egress": {"mode": "status-quo"}}, aws_config))
@@ -240,3 +250,87 @@ class TestModuleEntrypoint:
         )
         assert result.returncode == 1
         assert "nope.yaml" in result.stderr
+
+
+class TestRenderCloudProviderTfvars:
+    """``render_cloud_provider_tfvars`` is the renderer-owned source of the runtime
+
+    ``cloud_provider`` identity (PLAT-2005): the selected backend, not a hardcoded
+    literal or a branch name. It is intentionally separate from ``render_tfvars``
+    (the range-egress bridge) — a different tfvar, a different consumer.
+    """
+
+    def test_aws_example_renders_aws(self, examples_dir):
+        config = load_root_config(examples_dir / "aws.yaml")
+        out = render_cloud_provider_tfvars(config)
+        assert 'cloud_provider = "aws"' in out
+
+    def test_gcp_example_renders_gcp(self, examples_dir):
+        config = load_root_config(examples_dir / "gcp.yaml")
+        out = render_cloud_provider_tfvars(config)
+        assert 'cloud_provider = "gcp"' in out
+
+    def test_output_carries_generated_header(self, examples_dir):
+        config = load_root_config(examples_dir / "aws.yaml")
+        out = render_cloud_provider_tfvars(config)
+        assert out.lstrip().startswith("#")
+        assert "shifter-config render-runtime" in out
+
+    def test_output_ends_with_newline(self, examples_dir):
+        config = load_root_config(examples_dir / "gcp.yaml")
+        assert render_cloud_provider_tfvars(config).endswith("\n")
+
+    def test_output_is_deterministic(self, examples_dir):
+        config = load_root_config(examples_dir / "aws.yaml")
+        first = render_cloud_provider_tfvars(config)
+        second = render_cloud_provider_tfvars(config)
+        assert first == second
+
+
+class TestRenderRuntimeCli:
+    def test_render_runtime_to_stdout_aws(self, examples_dir, capsys):
+        from installation.cli import main
+
+        rc = main(["render-runtime", str(examples_dir / "aws.yaml")])
+        assert rc == 0
+        assert 'cloud_provider = "aws"' in capsys.readouterr().out
+
+    def test_render_runtime_to_stdout_gcp(self, examples_dir, capsys):
+        from installation.cli import main
+
+        rc = main(["render-runtime", str(examples_dir / "gcp.yaml")])
+        assert rc == 0
+        assert 'cloud_provider = "gcp"' in capsys.readouterr().out
+
+    def test_render_runtime_to_output_file(self, examples_dir, tmp_path, capsys):
+        from installation.cli import main
+
+        out_file = tmp_path / "cloud_provider.auto.tfvars"
+        rc = main(["render-runtime", str(examples_dir / "gcp.yaml"), "--output", str(out_file)])
+        assert rc == 0
+        assert out_file.read_text(encoding="utf-8").count('cloud_provider = "gcp"') == 1
+        # With --output, stdout stays clean so the file is the only product.
+        assert capsys.readouterr().out == ""
+
+    def test_render_runtime_invalid_config_exits_nonzero(self, write_config, capsys):
+        from installation.cli import main
+
+        path = write_config({"backend": "azure", "deployment": {"name": "Bad Name", "domain": "localhost"}})
+        rc = main(["render-runtime", str(path)])
+        assert rc == 1
+        assert "backend" in capsys.readouterr().err
+
+    def test_render_runtime_missing_file_exits_nonzero(self, tmp_path, capsys):
+        from installation.cli import main
+
+        rc = main(["render-runtime", str(tmp_path / "does-not-exist.yaml")])
+        assert rc == 1
+        assert "does-not-exist.yaml" in capsys.readouterr().err
+
+    def test_render_runtime_default_path_is_shifter_yaml_in_cwd(self, write_config, aws_config, monkeypatch, capsys):
+        from installation.cli import main
+
+        monkeypatch.chdir(write_config(_aws(None, aws_config)).parent)
+        rc = main(["render-runtime"])
+        assert rc == 0
+        assert 'cloud_provider = "aws"' in capsys.readouterr().out

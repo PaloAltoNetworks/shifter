@@ -19,7 +19,7 @@ from django.utils import timezone
 from cms.handlers import parse_sns_message, process_event, process_range_event
 from cms.models import App, AppType, Instance, InstanceType, RangeInstance, Request
 from cms.signals import range_status_changed
-from shared.enums import RequestType, ResourceStatus
+from shared.enums import RangeSource, RequestType, ResourceStatus
 
 pytestmark = pytest.mark.django_db
 
@@ -45,10 +45,19 @@ def _range_event(*, new_status, user_id, range_id=None, request_id=None, **extra
     return _sns(payload)
 
 
-def _range_instance(user, *, range_id=None, request=None, status=ResourceStatus.PENDING.value, scenario_id="basic"):
-    return RangeInstance.objects.create(
-        user_id=user.id, range_id=range_id, request=request, status=status, scenario_id=scenario_id
-    )
+def _range_instance(
+    user, *, range_id=None, request=None, status=ResourceStatus.PENDING.value, scenario_id="basic", range_source=None
+):
+    kwargs = {
+        "user_id": user.id,
+        "range_id": range_id,
+        "request": request,
+        "status": status,
+        "scenario_id": scenario_id,
+    }
+    if range_source is not None:
+        kwargs["range_source"] = range_source
+    return RangeInstance.objects.create(**kwargs)
 
 
 def _request(user) -> Request:
@@ -243,7 +252,12 @@ class TestProcessRangeEventRequestLookup:
         """
         req = _request(user)
         target = _range_instance(user, request=req, range_id=77, status=ResourceStatus.PENDING.value)
-        decoy = _range_instance(user, range_id=55, status=ResourceStatus.PENDING.value)
+        # Decoy is a different source so it coexists with the target under the
+        # one-active-range-per-source constraint (#307); range_id is globally
+        # unique, so it is still the range_id=55 match the lookup must not prefer.
+        decoy = _range_instance(
+            user, range_id=55, status=ResourceStatus.PENDING.value, range_source=RangeSource.CTF.value
+        )
         process_range_event(
             _range_event(request_id=req.request_id, range_id=55, new_status=ResourceStatus.READY.value, user_id=user.id)
         )

@@ -29,6 +29,10 @@ BASIC_DEF = {
         {"name": "Victim", "role": "victim", "os_type": "from_agent", "xdr_agent": True},
     ],
     "subnets": [{"name": "core", "instances": ["Attacker", "Victim"]}],
+    "participant_access": [
+        {"target": "Attacker", "channel": "ssh"},
+        {"target": "Attacker", "channel": "rdp"},
+    ],
     "ngfw": False,
 }
 
@@ -146,6 +150,15 @@ class TestHydrateScenarioStructure:
         result = hydrate_scenario(basic_scenario.scenario_id, user.id, windows_agent)
         for instance in result.all_instances:
             assert uuid.UUID(instance.uuid).version == 4
+
+    def test_maps_named_participant_access_to_authored_member_refs(self, user, basic_scenario, windows_agent):
+        result = hydrate_scenario(basic_scenario.scenario_id, user.id, windows_agent)
+        attacker = next(instance for instance in result.all_instances if instance.role == "attacker")
+
+        assert {(binding.target_ref, binding.channel) for binding in result.participant_access} == {
+            (attacker.uuid, "ssh"),
+            (attacker.uuid, "rdp"),
+        }
 
 
 class TestHydrateScenarioOsResolution:

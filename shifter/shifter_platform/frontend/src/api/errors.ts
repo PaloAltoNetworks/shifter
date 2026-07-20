@@ -45,3 +45,16 @@ export class ApiError extends Error {
 export function isApiError(value: unknown): value is ApiError {
   return value instanceof ApiError;
 }
+
+/**
+ * Render a mutation's `error` into user-facing copy: the server-provided
+ * message for a typed `ApiError`, `fallbackMessage` for any other error, or
+ * `null` when there is no error. Shared by the mission-control forms that
+ * surface a single top-of-form server error (ADR-029: no auto-retry, so this
+ * is recomputed on every render from the mutation's current error state).
+ */
+export function describeMutationError(error: unknown, fallbackMessage: string): string | null {
+  if (error instanceof ApiError) return error.message;
+  if (error) return fallbackMessage;
+  return null;
+}

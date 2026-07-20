@@ -468,35 +468,37 @@ class TestIsScoreboardFrozen:
 
 
 class TestScoreboardVisibility:
-    """Tests for CTFEvent.scoreboard_visible field behaviour."""
+    """Tests for the CTF-404 three-mode scoreboard visibility field."""
 
-    def _make_event(self, scoreboard_visible=True):
-        """Create a mock event with visibility configuration."""
+    def test_scoreboard_public_by_default(self):
+        """scoreboard_visibility defaults to public (pre-CTF-404 behavior)."""
         from ctf.models import CTFEvent
 
-        event = MagicMock(spec=CTFEvent)
-        event.scoreboard_visible = scoreboard_visible
-        return event
+        field = CTFEvent._meta.get_field("scoreboard_visibility")
+        assert field.default == "public"
 
-    def test_scoreboard_visible_by_default(self):
-        """scoreboard_visible defaults to True."""
+    @pytest.mark.django_db
+    def test_compat_property_tracks_mode(self, organizer_user):
+        """The scoreboard_visible compatibility bit is False only when hidden."""
+        from django.utils import timezone as dj_timezone
+
         from ctf.models import CTFEvent
 
-        field = CTFEvent._meta.get_field("scoreboard_visible")
-        assert field.default is True
-
-    def test_scoreboard_hidden_when_not_visible(self):
-        """Event with scoreboard_visible=False reports hidden."""
-        event = self._make_event(scoreboard_visible=False)
+        event = CTFEvent.objects.create(
+            name="Visibility Event",
+            created_by=organizer_user,
+            event_start=dj_timezone.now() + timedelta(days=1),
+            event_end=dj_timezone.now() + timedelta(days=1, hours=8),
+            scenario_id="basic",
+        )
+        assert event.scoreboard_visible is True
+        event.scoreboard_visibility = "participants"
+        assert event.scoreboard_visible is True
+        event.scoreboard_visibility = "hidden"
         assert event.scoreboard_visible is False
 
-    def test_scoreboard_shown_when_visible(self):
-        """Event with scoreboard_visible=True reports visible."""
-        event = self._make_event(scoreboard_visible=True)
-        assert event.scoreboard_visible is True
-
-    def test_scoreboard_visible_in_mutable_fields(self):
-        """scoreboard_visible is in the event mutable fields whitelist."""
+    def test_scoreboard_visibility_in_mutable_fields(self):
+        """scoreboard_visibility is in the event mutable fields whitelist."""
         from ctf.services.event import _EVENT_MUTABLE_FIELDS
 
-        assert "scoreboard_visible" in _EVENT_MUTABLE_FIELDS
+        assert "scoreboard_visibility" in _EVENT_MUTABLE_FIELDS

@@ -1,7 +1,10 @@
 # GCP GCE range-cell deploy runbook
 
-The GCP range backend defaults to the GCE range-cell path. This runbook covers
-enabling it in a real environment, mapping images, and rolling back to GDC.
+Part of the Shifter deploy and operations docs; start at the [documentation home](../index.md).
+
+The GCP range backend defaults to the GCE range-cell path, the approved GCP
+live-fire backend (ADR-030). This runbook covers enabling it in a real
+environment and mapping images.
 
 For the backend design see
 `docs/architecture/gcp-range-cell-backend-preflight-1341.md`; for the Polaris
@@ -12,14 +15,76 @@ port see `docs/dev/polaris-gcp-range-cell.md`. For the image build see
 
 `GCP_RANGE_BACKEND` selects the GCP range backend:
 
-- `gce` (default): provision each range as an isolated GCE range cell.
-- `gdc`: the retained GDC VM Runtime path.
+- `gce` (default): provision each range as an isolated GCE range cell. This is
+  the only approved GCP **live-fire** backend (ADR-030).
+- `gdc`: the retained GDC VM Runtime path (**development/validation only**). It is
+  **not** a live-fire rollback: normal Mission Control and CTF range provisioning
+  fails closed on `gdc` (the CMS service gate rejects the launch and the
+  provisioner independently denies a live-fire GDC apply; issue #1348). Do not set
+  `GCP_RANGE_BACKEND=gdc` to "roll back" a live-fire environment when GCE is
+  unhealthy. A GCE availability problem must be fixed on the GCE path, never by
+  downgrading containment.
 
 The default lives in `config.py` (`get_gcp_range_backend`) and the generated
-runtime config (`scripts/gcp/render_runtime_env.py`). To roll back an
-environment, set the `GCP_RANGE_BACKEND=gdc` repository/environment variable and
-redeploy. The GDC configuration block is retained in the rendered contract and
-is inert while the backend is `gce`.
+runtime config (`scripts/gcp/render_runtime_env.py`). The GDC configuration block
+is retained in the rendered contract and is inert while the backend is `gce`.
+
+### Switching the selector on an environment with existing GDC ranges
+
+Range destroy currently routes from the deploy-wide `GCP_RANGE_BACKEND` selector,
+so **tear down any existing GDC ranges before flipping `GCP_RANGE_BACKEND` from
+`gdc` to `gce`**. Flipping while GDC ranges are still live would route their
+teardown down the GCE path and strand the GDC namespaces, VMs, disks, secrets,
+L2 Networks, and subnet allocations (recover those with the manual GDC cleanup
+runbook). Binding the backend to per-range state so this ordering is no longer
+required is tracked by #1666.
+
+The environment setting is an operator/backend-policy input, not scenario
+metadata. Issue #1354 owns the policy that decides which requests may use each
+backend. Once a request has been admitted to the GCP VM range-cell contract, the
+provisioner refuses to route it to GDC, GKE, or the legacy Terraform path; an
+operator must not treat `gdc` as a per-request fallback for a contract-tagged
+live-fire user range.
+
+## Scenario-to-cell contract
+
+The boundary is the closed, versioned `shifter.gcp-vm-range-cell` contract in
+`shifter/shifter_platform/shared/range_cells.py`. Its responsibilities are:
+
+- The scenario producer owns VM count and roles, containers or nested
+  Kubernetes, topology and connectivity, ports and DNS, fixed addresses,
+  images, startup/bootstrap behavior, services, and validation. The existing
+  wrapped `RangeSpec` is validated by its canonical Pydantic contract before the
+  Engine persists it as an immutable SHA-256-bound artifact. The standalone
+  provisioner verifies that producer-minted digest without loading the scenario
+  schema graph; the platform does not copy scenario fields into a universal
+  placement model.
+- The platform owns admission to the approved GCP/GCE live-fire capability,
+  operation and cell identity, allocated network bindings, isolation, resource
+  membership and ownership, lifecycle/recovery state, logical access, and
+  cleanup. Allocated CIDRs are bindings and are not written back into the
+  scenario artifact. A later destroy rehydrates those bindings from the
+  platform allocation table when available and otherwise uses the validated
+  authored membership and deterministic resource identity; it never requires a
+  blank CIDR to pass request validation.
+- The outer request and result reject unknown fields and versions. A digest or
+  backend mismatch, malformed/duplicate membership, or missing/foreign network
+  binding fails before any Compute Engine or Secret Manager mutation. Results
+  reject dangling access targets and inline credentials, trigger cell cleanup
+  if output validation fails, and expose credential references rather than
+  credential values. Participant access is a closed scenario declaration keyed
+  by authored member plus `ssh` or `rdp` channel. The result must match that
+  declaration exactly. Participant SSH keys are distinct from host-management
+  setup keys, and host/bootstrap credential references never enter the closed
+  access result.
+
+`gcp_range_cell_scenario.py` is the compatibility adapter for the current
+legacy `RangeSpec`; it owns role/image/host-access interpretation. Polaris is
+one composition supported by that adapter, not a platform range class. A future
+scenario artifact can use a new discriminator/version adapter while retaining
+the same cell lifecycle contract. See
+`docs/architecture/scenario-gcp-range-cell-contract-preflight-1344.md` for the
+full boundary analysis.
 
 ## Required configuration
 
@@ -50,10 +115,10 @@ control-plane `GCP_PROJECT_ID` is a deploy-overlay placeholder.
   retained as a selectable mode for a future peering/IAP implementation; do not
   use it for live deployments yet.
 
-## Image mapping
+## Legacy RangeSpec image mapping
 
-A range instance resolves to one of four image profiles by role and OS
-(`GCERangeCellConfig.get_profile`):
+The scenario-owned legacy `RangeSpec` adapter resolves current instances to one
+of four approved image profiles by role and OS (`GCERangeCellConfig.get_profile`):
 
 | Instance | Profile | Variable |
 |---|---|---|
@@ -62,12 +127,29 @@ A range instance resolves to one of four image profiles by role and OS
 | Windows guest | windows | `GCP_RANGE_WINDOWS_IMAGE` |
 | Everything else (Linux host) | linux | `GCP_RANGE_LINUX_IMAGE` |
 
-For a Polaris deployment the Docker host maps to the linux profile and the
-`BOREAS.LOCAL` DC to the dc profile, so set `GCP_RANGE_LINUX_IMAGE` to the
-`shifter-polaris-vm` family and `GCP_RANGE_DC_IMAGE` to `shifter-polaris-dc`.
-Because there is one image per profile per deployment, a single environment
-serves either Polaris hosts or generic Linux guests, not both; run generic
-scenarios in a separate deployment or environment.
+The Polaris Docker host is provisioned as the attacker (`os_type=kali` /
+`role=attacker`), so it resolves to the **kali** profile, falling back to the
+linux profile only when `GCP_RANGE_KALI_IMAGE` is unset. Set
+`GCP_RANGE_KALI_IMAGE` to the `shifter-polaris-vm` family and
+`GCP_RANGE_DC_IMAGE` to `shifter-polaris-dc`. Do **not** leave
+`GCP_RANGE_KALI_IMAGE` pointing at a plain Kali desktop image in a Polaris
+deployment: it wins over the linux fallback and the Polaris host will boot the
+wrong image (host sshd never appears on the `2222` management port and setup
+times out). Because there is one image per profile per deployment, a single
+environment serves either Polaris hosts or generic Kali attackers, not both;
+run generic scenarios in a separate deployment or environment.
+
+The `shifter-polaris-vm` image is a 200 GB disk, and a boot disk cannot be
+smaller than its source image, so set `GCP_RANGE_KALI_DISK_SIZE_GB` to at least
+the image size (the kali-profile default is 80 GB); otherwise instance creation
+fails with `disk size cannot be smaller than the image size`.
+
+The Polaris host's `polaris_range_bootstrap` step fetches a smoketests tarball
+from `gs://$POLARIS_TESTS_BUCKET/$POLARIS_TESTS_KEY` (default
+`polaris/tests/polaris-tests.tar.gz`). Build it from the in-repo tests tree and
+upload it before launching a range:
+`tar czf polaris-tests.tar.gz -C scenario-dev/polaris tests` then
+`gcloud storage cp polaris-tests.tar.gz gs://<assets-bucket>/polaris/tests/polaris-tests.tar.gz`.
 
 Images are native GCE images referenced by family:
 `projects/<project>/global/images/family/shifter-<type>`. Unlike the GDC path
@@ -75,7 +157,20 @@ there is no qcow2 export or CDI import.
 
 ## Service accounts
 
-The GCE range-cell backend uses two service accounts:
+For the default same-project range cell, Terraform (`modules/portal/iam`)
+creates both range service accounts, grants their roles, and grants the
+provisioner workload SA the access it needs to drive them: `roles/compute.admin`
+on the range-cell project (create the range VPC, subnets, firewall, Cloud NAT,
+and instances), `roles/iam.serviceAccountUser` on the host SA (attach it to
+guests) and the Vertex SA, and `roles/iam.serviceAccountKeyAdmin` on the Vertex
+SA (mint per-range keys). The two emails are exposed as the
+`range_host_service_account_email` / `range_vertex_service_account_email`
+Terraform outputs; set `GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL` /
+`GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL` to those values (a cross-project range
+cell, `GCP_RANGE_CELL_PROJECT_ID`, provisions its own SAs in that project and
+grants the provisioner the equivalent roles there; follow-up tracked in #1509).
+
+The two service accounts:
 
 - **Host SA** (`GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL`): attached to every range
   guest. Grant logging write and monitoring write, plus (for Polaris)
@@ -177,12 +272,16 @@ the same external stack), so the GCE bake fetches it from GCS:
    `PKR_VAR_polaris_stack_bucket`; empty leaves the host range-ready without the
    stack baked.
 5. **Run the Packer GCE Image Build** workflow with `image_type=polaris-vm`. It
-   publishes image family `shifter-polaris-vm`, which `GCP_RANGE_LINUX_IMAGE`
-   points at.
+   publishes image family `shifter-polaris-vm`, which `GCP_RANGE_KALI_IMAGE`
+   points at (the Polaris host uses the kali/attacker profile).
 
-The DC's Administrator password baked by `a2_setup.ps1` must match
-`DC_DOMAIN_PASSWORD` in the deploy config (see `docs/dev/deploy-secrets.md`), so
-the provisioner's `set_admin_password` step succeeds against the prebaked DC.
+`DC_DOMAIN_PASSWORD` is provisioned automatically: Terraform seeds a
+`dc-domain-password` Secret Manager secret and `render_runtime_env` emits
+`DC_DOMAIN_PASSWORD_SECRET_ID`, which the entrypoint resolves and `ecs.py`
+passes into the provisioner Job. The provisioner authenticates to the prebaked
+DC over SSH (injected key, not a password) and its `set_admin_password` step
+resets the domain Administrator password to `DC_DOMAIN_PASSWORD` per range, so
+the value baked by `a2_setup.ps1` does not need to match.
 
 ## NGFW
 

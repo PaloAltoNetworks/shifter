@@ -127,6 +127,7 @@ def _provision_one_spare(event: CTFEvent) -> CTFSpareRange:
             scenario=event.scenario_id,
             agents_by_os=agents_by_os,
             ngfw_enabled=ngfw_enabled,
+            remote_access_teardown_at=event.get_cleanup_time(),
         )
     except Exception:
         logger.exception(
@@ -170,6 +171,9 @@ def provision_event_spares(event_id: UUID, target_count: int, *, operator: User 
     Raises:
         CTFNotFoundError: If the event does not exist.
     """
+    from ctf.services.range.capacity import declare_event_capacity
+
+    declare_event_capacity(event_id, source="spare_pool")
     event = _get_event(event_id)
     event.spare_range_count = target_count
     event.save(update_fields=["spare_range_count", "updated_at"])

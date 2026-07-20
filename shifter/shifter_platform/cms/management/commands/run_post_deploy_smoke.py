@@ -15,10 +15,10 @@ from django.utils.crypto import get_random_string
 
 from cms import services as cms_services
 from cms.post_deploy_smoke.probe import probe_rdp_endpoint, probe_ssh_endpoint
-from cms.post_deploy_smoke.smoke_runner import build_agents_by_os, select_probe_target
+from cms.post_deploy_smoke.smoke_runner import select_probe_target
 from cms.post_deploy_smoke.variants import SmokeVariant, parse_variant
 from engine.services import get_rdp_connection_info, get_ssh_connection_info
-from shared.enums import ResourceStatus
+from shared.enums import TERMINAL_STATUSES, ResourceStatus
 from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--variant",
             default="linux",
-            help="Smoke variant: linux (basic) or windows (ad_attack_lab)",
+            help="Smoke variant: linux (smoke_linux) or windows (smoke_windows)",
         )
         parser.add_argument(
             "--poll-interval",
@@ -91,11 +91,14 @@ class Command(BaseCommand):
         return user
 
     def _provision_range(self, user: User, variant: SmokeVariant) -> UUID:
-        agents_by_os = build_agents_by_os(variant)
+        # The smoke scenarios are built from base range AMIs (no `from_agent`
+        # instances, no `xdr_agent`), so no user-provided agent is required and
+        # `agents_by_os` is empty. XDR/agent install is scenario content and is
+        # not exercised by the post-deploy smoke.
         context = cms_services.create_range(
             user,
             variant.scenario_id,
-            agents_by_os,
+            {},
             ngfw_enabled=False,
         )
         if context.request_id is None:
@@ -113,6 +116,8 @@ class Command(BaseCommand):
                 if status == ResourceStatus.READY.value:
                     self.stdout.write(f"range READY request_id={request_id}")
                     return
+                if any(status == terminal.value for terminal in TERMINAL_STATUSES):
+                    raise CommandError(f"range reached terminal status {status} (request_id={request_id})")
             time.sleep(poll_interval)
         raise CommandError(
             f"timed out after {variant.provision_timeout_seconds}s waiting for READY (request_id={request_id})"
@@ -128,19 +133,8 @@ class Command(BaseCommand):
         if range_context.status != ResourceStatus.READY:
             raise CommandError(f"range not READY for connectivity probe (status={range_context.status})")
 
-        attacker_uuid = ""
-        windows_uuid = None
-        for inst in range_context.instances:
-            if inst.role == "attacker" and inst.uuid:
-                attacker_uuid = inst.uuid
-            elif inst.role == "dc" and inst.uuid:
-                windows_uuid = inst.uuid
-
-        protocol, target_uuid = select_probe_target(
-            variant,
-            attacker_uuid=attacker_uuid,
-            windows_uuid=windows_uuid,
-        )
+        instances_by_role: dict[str, str] = {inst.role: inst.uuid for inst in range_context.instances if inst.uuid}
+        protocol, target_uuid = select_probe_target(variant, instances_by_role)
         deadline = time.monotonic() + variant.connectivity_timeout_seconds
         last_error: Exception | None = None
         while time.monotonic() < deadline:

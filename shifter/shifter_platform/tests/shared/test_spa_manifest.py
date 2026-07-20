@@ -56,3 +56,24 @@ def test_missing_manifest_returns_empty(static_root):
     result = spa.vite_asset_urls()
     assert result["js"] is None
     assert result["css"] == []
+
+
+def _write_mermaid_manifest(root, payload):
+    manifest_dir = root / "spa" / "mermaid" / ".vite"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_mermaid_bundle_url_resolves_from_its_own_manifest(static_root):
+    _write_mermaid_manifest(
+        static_root,
+        {"src/mermaid-entry.ts": {"file": "assets/mermaid-entry-abc.js", "isEntry": True}},
+    )
+    url = spa.mermaid_bundle_url()
+    assert url is not None
+    assert url.endswith("spa/mermaid/assets/mermaid-entry-abc.js")
+
+
+def test_mermaid_bundle_url_missing_returns_none(static_root):
+    # No mermaid manifest written: the docs template omits the script tag.
+    assert spa.mermaid_bundle_url() is None

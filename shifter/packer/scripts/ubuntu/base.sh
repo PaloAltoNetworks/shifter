@@ -35,6 +35,12 @@ echo "=== Updating snapd to patch CVE-2024-24790 ==="
 apt-get install -y --only-upgrade snapd
 snap refresh
 
+echo "=== Installing request-owned VPN gateway runtime ==="
+# The standard Ubuntu image also backs the isolated per-range gateway. Keeping
+# the packages in the image lets that gateway bootstrap without general internet
+# egress; normal victim instances do not enable the OpenVPN service.
+apt-get install -y openvpn python3-boto3
+
 echo "=== Installing SSM Agent ==="
 # SSM agent for AWS Systems Manager
 snap install amazon-ssm-agent --classic

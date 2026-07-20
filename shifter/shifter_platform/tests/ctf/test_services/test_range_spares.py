@@ -38,6 +38,7 @@ from ctf.services.range.spares import (
     provision_event_spares,
 )
 from risk_register.models import AuditLog
+from shared.audit import AuditAction
 
 _NO_AGENT_SCENARIO_DEFINITION = {
     "instances": [
@@ -128,7 +129,7 @@ class TestProvisionEventSpares:
             instance = RangeInstance.objects.get(pk=spare.range_instance_id)
             assert instance.user_id == spare.owner_user_id
 
-        audit = AuditLog.objects.get(action=AuditLog.Action.SPARE_PROVISION)
+        audit = AuditLog.objects.get(action=AuditAction.SPARE_PROVISION)
         assert audit.actor_id == organizer_user.id
         assert audit.new_state["event_id"] == str(event_with_scenario.pk)
         assert audit.new_state["created"] == 2
@@ -186,8 +187,9 @@ class TestProvisionEventSpares:
     def test_event_not_found_raises(self):
         import uuid
 
+        uuid4 = uuid.uuid4()
         with pytest.raises(CTFNotFoundError):
-            provision_event_spares(uuid.uuid4(), 1)
+            provision_event_spares(uuid4, 1)
 
     @pytest.mark.django_db
     def test_a_spares_provisioning_failure_is_recorded_failed_and_topup_continues(self, ctf_event, organizer_user):
@@ -243,8 +245,9 @@ class TestGetEventSpareSummary:
     def test_event_not_found_raises(self):
         import uuid
 
+        uuid4 = uuid.uuid4()
         with pytest.raises(CTFNotFoundError):
-            get_event_spare_summary(uuid.uuid4())
+            get_event_spare_summary(uuid4)
 
 
 class TestSpareStatusSignalSync:
@@ -325,6 +328,27 @@ class TestSpareStatusSignalSync:
 
         spare.refresh_from_db()
         assert spare.status == SpareRangeStatus.CONSUMED.value
+
+    @pytest.mark.django_db
+    def test_destroyed_status_finalizes_unconsumed_spare(self, event_with_scenario, organizer_user):
+        from cms.signals import range_status_changed
+        from shared.enums import ResourceStatus
+
+        provision_event_spares(event_with_scenario.pk, 1, operator=organizer_user)
+        spare = CTFSpareRange.objects.get(event=event_with_scenario)
+        owner_id = spare.owner_user_id
+
+        range_status_changed.send(
+            sender=None,
+            range_instance_id=spare.range_instance_id,
+            new_status=ResourceStatus.DESTROYED.value,
+            previous_status=ResourceStatus.DESTROYING.value,
+        )
+
+        spare.refresh_from_db()
+        assert spare.status == SpareRangeStatus.FAILED.value
+        assert spare.owner_user_id is None
+        assert not User.objects.filter(pk=owner_id).exists()
 
 
 class TestCleanupEventSpares:
@@ -412,8 +436,9 @@ class TestCleanupEventSpares:
     def test_event_not_found_raises(self):
         import uuid
 
+        uuid4 = uuid.uuid4()
         with pytest.raises(CTFNotFoundError):
-            cleanup_event_spares(uuid.uuid4())
+            cleanup_event_spares(uuid4)
 
 
 class TestCleanupEventRangesWiresSpares:
@@ -450,12 +475,29 @@ class TestCleanupEventSparesBestEffort:
     """
 
     @pytest.mark.django_db
-    def test_swallows_a_real_cleanup_failure_without_raising(self):
+    def test_swallows_a_real_cleanup_failure_without_raising(self, monkeypatch):
         import uuid
 
-        from ctf.services.range.lifecycle import _cleanup_event_spares_best_effort
+        from ctf.services.range import lifecycle
+
+        # Spy on the module logger (app loggers set propagate=False, so caplog's
+        # root handler would miss the record). This asserts the swallow path is
+        # the one exercised — the failure is logged for on-call visibility with
+        # the event id and the exception traceback, not silently discarded.
+        calls: list[tuple] = []
+        monkeypatch.setattr(
+            lifecycle.logger,
+            "exception",
+            lambda msg, *args, **kwargs: calls.append((msg, args)),
+        )
 
         # No event exists for this id, so the real `cleanup_event_spares` call
         # inside genuinely raises `CTFNotFoundError`; the wrapper must swallow it
         # rather than let it propagate.
-        _cleanup_event_spares_best_effort(uuid.uuid4())
+        event_id = uuid.uuid4()
+        lifecycle._cleanup_event_spares_best_effort(event_id)
+
+        assert calls, "expected the swallowed spare-cleanup failure to be logged"
+        msg, args = calls[0]
+        assert "spare-pool cleanup failed" in msg
+        assert any(str(event_id) == str(arg) for arg in args)

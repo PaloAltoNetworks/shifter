@@ -11,10 +11,10 @@ backend — has no real row-level locking, so it cannot prove the lock
 actually *serializes concurrent* requests.
 
 This module races real threads, each with its own DB connection, against a
-real PostgreSQL instance (via `tests/ctf/test_services/conftest.py`'s
-`TEST_DB_BACKEND=postgres` override) to prove the submission-control
-guarantees hold under genuine concurrency for all three paths: duplicate-solve,
-attempt-limit lockout, and submission cooldown.
+real PostgreSQL instance (selected by the settings-owned `TEST_DB_BACKEND=postgres`
+selector plus pytest-django's native test-database lifecycle) to prove the
+submission-control guarantees hold under genuine concurrency for all three
+paths: duplicate-solve, attempt-limit lockout, and submission cooldown.
 
 What each class actually proves differs by path, because only one path has a
 DB backstop:
@@ -33,14 +33,13 @@ DB backstop:
   isolation. (The lock is a single call guarding all three paths, so a
   regression that drops it is still caught by the two classes above.)
 
-Marked `postgres` so the default SQLite suite skips it, and
-`django_db(transaction=True)` so writes are real commits visible across
+Marked `postgres` so the default SQLite suite excludes it (`-m "not postgres"`),
+and `django_db(transaction=True)` so writes are real commits visible across
 threads/connections (not rolled back inside a shared wrapping transaction).
 """
 
 from __future__ import annotations
 
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -60,21 +59,17 @@ from ctf.services.submission import submit_flag
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-# Skip unless a real PostgreSQL backend is requested. SQLite (the default test
-# backend, and what the full-suite pre-commit hook / main CI run use) has no
-# real row-level locking, so `select_for_update()` is a no-op there and these
-# races would assert against meaningless behavior. Mirroring the redis
-# integration tests (which `pytest.skip()` when Redis is unreachable), this
-# module skips itself outside the dedicated `TEST_DB_BACKEND=postgres` step
-# rather than failing when collected under SQLite. `tests/ctf/test_services/
-# conftest.py` performs the matching ORM redirect when the flag is set.
+# `postgres`-marked so the SQLite lane excludes it by marker (`-m "not
+# postgres"`), not a per-test skip: SQLite has no real row-level locking, so
+# `select_for_update()` is a no-op there and these races would assert against
+# meaningless behavior. In the PostgreSQL lane the settings-owned
+# `TEST_DB_BACKEND=postgres` selector points the ORM at a real PostgreSQL
+# backend and pytest-django creates/migrates the per-worker test database.
+# Selecting a `postgres`-marked test under the wrong backend is a configuration
+# error (the root-conftest guard fails closed), not a silent skip.
 pytestmark = [
     pytest.mark.postgres,
     pytest.mark.django_db(transaction=True),
-    pytest.mark.skipif(
-        os.environ.get("TEST_DB_BACKEND", "").strip().lower() != "postgres",
-        reason="requires a real PostgreSQL backend (set TEST_DB_BACKEND=postgres)",
-    ),
 ]
 
 # Correctness is decided by the real production verification path

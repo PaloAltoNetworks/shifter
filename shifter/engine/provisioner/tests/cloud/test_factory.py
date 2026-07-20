@@ -1,10 +1,14 @@
 """Tests for provisioner cloud abstraction factory functions."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from installation.contract import BackendCapability
 
+import cloud
 from cloud import (
+    _require_capability,
     get_config_store,
     get_db_auth,
     get_event_bus,
@@ -104,3 +108,43 @@ class TestFactoryDefaultProvider:
         os.environ.pop("CLOUD_PROVIDER", None)
         bus = get_event_bus()
         assert isinstance(bus, EventBus)
+
+
+class TestRequireCapability:
+    """``_require_capability`` is defense-in-depth alongside resolve_cloud_provider's
+    identity check: a *registered* backend that has not claimed a capability, or
+    whose bundle cannot be found at all, must still fail closed rather than let a
+    factory fall through to another provider's adapter."""
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"})
+    def test_missing_bundle_for_a_known_identity_raises(self, monkeypatch):
+        """Registry drift (bundle missing despite a resolvable identity) fails closed."""
+        monkeypatch.setattr(cloud, "get_backend_bundle", lambda name: None)
+
+        with pytest.raises(CloudProviderNotImplementedError, match="aws") as excinfo:
+            _require_capability(BackendCapability.EVENT_BUS)
+        assert excinfo.value.capability is BackendCapability.EVENT_BUS
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"})
+    def test_registered_backend_missing_capability_raises(self, monkeypatch):
+        fake_bundle = SimpleNamespace(capabilities=frozenset({BackendCapability.STORAGE}))
+        monkeypatch.setattr(cloud, "get_backend_bundle", lambda name: fake_bundle)
+
+        with pytest.raises(CloudProviderNotImplementedError, match="EVENT_BUS"):
+            _require_capability(BackendCapability.EVENT_BUS)
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"})
+    def test_registered_backend_with_capability_returns_provider(self, monkeypatch):
+        fake_bundle = SimpleNamespace(capabilities=frozenset({BackendCapability.EVENT_BUS}))
+        monkeypatch.setattr(cloud, "get_backend_bundle", lambda name: fake_bundle)
+
+        assert _require_capability(BackendCapability.EVENT_BUS) == "aws"
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "azure"})
+    def test_unresolvable_identity_raises_before_capability_check(self):
+        """An identity resolve_cloud_provider already rejects fails closed at the
+        identity check -- observably, the error carries no capability (the capability
+        lookup is never reached)."""
+        with pytest.raises(CloudProviderNotImplementedError, match="azure") as excinfo:
+            _require_capability(BackendCapability.EVENT_BUS)
+        assert excinfo.value.capability is None

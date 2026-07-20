@@ -15,12 +15,23 @@ from risk_register.api.serializers import (
     RiskSerializer,
     RiskUpdateSerializer,
 )
-from risk_register.models import AuditLog, Comment, Risk
+from risk_register.models import (
+    AuditLog,
+    Comment,
+    Risk,
+)
 from shared.api.errors import api_error_response
 from shared.api_tokens import scopes
 from shared.api_tokens.authentication import ApiTokenAuthentication
 from shared.api_tokens.models import ApiToken
 from shared.api_tokens.permissions import require_scope
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+    AuditEvent,
+    audit_log,
+)
 
 
 def get_actor_info(request):
@@ -28,9 +39,9 @@ def get_actor_info(request):
     # A platform ApiToken authenticates without a Django user; attribute the
     # audit row to the token.
     if isinstance(request.auth, ApiToken):
-        return AuditLog.ActorType.APIKEY, request.auth.id
+        return AuditActorType.APIKEY, request.auth.id
     elif request.user and request.user.is_authenticated:
-        return AuditLog.ActorType.USER, request.user.id
+        return AuditActorType.USER, request.user.id
     return None, None
 
 
@@ -106,13 +117,15 @@ class RiskViewSet(viewsets.ModelViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=risk.id,
-                action=AuditLog.Action.CREATE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                new_state=risk_to_dict(risk),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=risk.id,
+                    action=AuditAction.CREATE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    new_state=risk_to_dict(risk),
+                )
             )
 
         output_serializer = RiskSerializer(risk)
@@ -135,23 +148,25 @@ class RiskViewSet(viewsets.ModelViewSet):
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
             # Determine action type
-            action_type = AuditLog.Action.UPDATE
+            action_type = AuditAction.UPDATE
             old_status = previous_state.get("status")
             new_status = instance.status
 
             if old_status != "closed" and new_status == "closed":
-                action_type = AuditLog.Action.CLOSE
+                action_type = AuditAction.CLOSE
             elif old_status == "closed" and new_status != "closed":
-                action_type = AuditLog.Action.REOPEN
+                action_type = AuditAction.REOPEN
 
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=instance.id,
-                action=action_type,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                previous_state=previous_state,
-                new_state=risk_to_dict(instance),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=instance.id,
+                    action=action_type,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    previous_state=previous_state,
+                    new_state=risk_to_dict(instance),
+                )
             )
 
         output_serializer = RiskSerializer(instance)
@@ -167,14 +182,16 @@ class RiskViewSet(viewsets.ModelViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=instance.id,
-                action=AuditLog.Action.DELETE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                previous_state=previous_state,
-                new_state=risk_to_dict(instance),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=instance.id,
+                    action=AuditAction.DELETE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    previous_state=previous_state,
+                    new_state=risk_to_dict(instance),
+                )
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -207,14 +224,16 @@ class RiskViewSet(viewsets.ModelViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=instance.id,
-                action=AuditLog.Action.RESTORE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                previous_state=previous_state,
-                new_state=risk_to_dict(instance),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=instance.id,
+                    action=AuditAction.RESTORE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    previous_state=previous_state,
+                    new_state=risk_to_dict(instance),
+                )
             )
 
         serializer = RiskSerializer(instance)
@@ -277,16 +296,18 @@ class CommentViewSet(viewsets.ViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.COMMENT,
-                entity_id=comment.id,
-                action=AuditLog.Action.CREATE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                new_state={
-                    "risk_id": risk.id,
-                    "content": comment.content,
-                },
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.COMMENT,
+                    entity_id=comment.id,
+                    action=AuditAction.CREATE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    new_state={
+                        "risk_id": risk.id,
+                        "content": comment.content,
+                    },
+                )
             )
 
         output_serializer = CommentSerializer(comment)
@@ -301,12 +322,14 @@ class CommentViewSet(viewsets.ViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.COMMENT,
-                entity_id=comment.id,
-                action=AuditLog.Action.DELETE,
-                actor_type=actor_type,
-                actor_id=actor_id,
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.COMMENT,
+                    entity_id=comment.id,
+                    action=AuditAction.DELETE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)

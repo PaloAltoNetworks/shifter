@@ -13,9 +13,18 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from engine.models import AcesImageMapping
 
-__all__ = ["AcesImageMappingError", "AcesImageMappingOptions", "upsert_aces_image_mapping"]
+__all__ = [
+    "AcesImageMappingError",
+    "AcesImageMappingOptions",
+    "AcesImageMappingView",
+    "disable_aces_image_mapping",
+    "list_aces_image_mappings",
+    "upsert_aces_image_mapping",
+]
 
 
 class AcesImageMappingError(ValueError):
@@ -32,6 +41,30 @@ class AcesImageMappingOptions:
     disk_type: str = ""
     enabled: bool = True
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class AcesImageMappingView:
+    """Allowlisted read projection of an :class:`engine.models.AcesImageMapping` row.
+
+    The list seam shared by the tenant management surfaces (management command +
+    CMS API). Keeping the projection here -- beside the write path -- means the
+    command and the API render one field allowlist and neither reaches into the
+    model directly.
+    """
+
+    id: int
+    provider: str
+    source_name: str
+    source_version: str
+    image_ref: str
+    machine_type: str
+    disk_size_gb: int | None
+    disk_type: str
+    enabled: bool
+    notes: str
+    created_at: datetime
+    updated_at: datetime
 
 
 def upsert_aces_image_mapping(
@@ -71,6 +104,79 @@ def upsert_aces_image_mapping(
         },
     )
     return mapping
+
+
+def list_aces_image_mappings(
+    *,
+    provider: str | None = None,
+    include_disabled: bool = True,
+) -> list[AcesImageMappingView]:
+    """Return registry rows as allowlisted DTOs in stable natural-key order.
+
+    Optional ``provider`` filters to one provider (normalized/validated exactly
+    like the write path, so an unknown provider raises rather than silently
+    returning nothing). ``include_disabled=False`` hides soft-disabled rows the
+    way the provisioner resolver ignores them; the default shows them so an
+    operator can audit and re-enable.
+    """
+    from engine.models import AcesImageMapping
+
+    queryset = AcesImageMapping.objects.all().order_by("provider", "source_name", "source_version")
+    if provider is not None:
+        queryset = queryset.filter(provider=_normalize_provider(provider))
+    if not include_disabled:
+        queryset = queryset.filter(enabled=True)
+    return [_to_view(row) for row in queryset]
+
+
+def disable_aces_image_mapping(
+    *,
+    provider: str,
+    source_name: str,
+    source_version: str = "",
+) -> AcesImageMappingView:
+    """Soft-disable an existing mapping (``enabled=False``) by natural key.
+
+    Preserves the row and its ``image_ref`` for audit; realization then fails
+    loud. Raises :class:`AcesImageMappingError` when no such mapping exists --
+    the surface disables what is registered rather than creating a disabled
+    placeholder (disable is not delete, and not upsert).
+    """
+    from engine.models import AcesImageMapping
+
+    normalized_provider = _normalize_provider(provider)
+    name = _require(source_name, field="source_name")
+    version = (source_version or "").strip()
+    try:
+        mapping = AcesImageMapping.objects.get(
+            provider=normalized_provider,
+            source_name=name,
+            source_version=version,
+        )
+    except AcesImageMapping.DoesNotExist as exc:
+        raise AcesImageMappingError(f"no mapping for {normalized_provider}:{name}@{version or '*'}") from exc
+    if mapping.enabled:
+        mapping.enabled = False
+        mapping.save(update_fields=["enabled", "updated_at"])
+    return _to_view(mapping)
+
+
+def _to_view(mapping: AcesImageMapping) -> AcesImageMappingView:
+    """Project a model row onto the allowlisted read DTO."""
+    return AcesImageMappingView(
+        id=mapping.pk,
+        provider=mapping.provider,
+        source_name=mapping.source_name,
+        source_version=mapping.source_version,
+        image_ref=mapping.image_ref,
+        machine_type=mapping.machine_type,
+        disk_size_gb=mapping.disk_size_gb,
+        disk_type=mapping.disk_type,
+        enabled=mapping.enabled,
+        notes=mapping.notes,
+        created_at=mapping.created_at,
+        updated_at=mapping.updated_at,
+    )
 
 
 def _normalize_provider(provider: str) -> str:

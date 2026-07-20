@@ -14,10 +14,9 @@ import uuid as uuid_module
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from ..enums import ResourceStatus
-
 from .base import SpecBase
 
 if TYPE_CHECKING:
@@ -243,6 +242,24 @@ class RangeSpecBase(SpecBase):
         return [inst for subnet in self.subnets for inst in subnet.instances]
 
 
+class RangeAccessBinding(BaseModel):
+    """Scenario authorization for one participant-facing member channel."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target_ref: str
+    channel: Literal["ssh", "rdp"]
+
+    @field_validator("target_ref")
+    @classmethod
+    def target_ref_not_empty(cls, value: str) -> str:
+        """Require a stable authored member reference."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("target_ref cannot be empty or whitespace")
+        return normalized
+
+
 class RangeSpec(RangeSpecBase):
     """Demo range specification.
 
@@ -256,6 +273,23 @@ class RangeSpec(RangeSpecBase):
 
     range_type: Literal["demo"] = "demo"
     ngfw: bool = False
+    participant_access: list[RangeAccessBinding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def participant_access_targets_exist(self) -> RangeSpec:
+        """Reject duplicate or foreign participant access declarations."""
+        member_refs = {str(instance.uuid) for instance in self.all_instances if instance.uuid}
+        seen: set[tuple[str, str]] = set()
+        for binding in self.participant_access:
+            key = (binding.target_ref, binding.channel)
+            if binding.target_ref not in member_refs:
+                raise ValueError(f"participant_access references unknown member {binding.target_ref!r}")
+            if key in seen:
+                raise ValueError(
+                    f"participant_access contains duplicate target/channel {binding.target_ref!r}/{binding.channel}"
+                )
+            seen.add(key)
+        return self
 
 
 # =============================================================================

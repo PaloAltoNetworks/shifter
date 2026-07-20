@@ -50,8 +50,13 @@ output "internet_gateway_id" {
 }
 
 output "nat_gateway_id" {
-  description = "ID of the NAT gateway (if enabled)"
+  description = "ID of the first NAT gateway (if enabled). Prefer nat_gateway_ids for the per-AZ set."
   value       = var.enable_nat_gateway ? aws_nat_gateway.this[0].id : null
+}
+
+output "nat_gateway_ids" {
+  description = "NAT gateway IDs ordered by AZ index (index i serves availability_zones[i]). One per AZ when portal inspection is enabled, else a single-element list. Empty when NAT is disabled."
+  value       = aws_nat_gateway.this[*].id
 }
 
 output "availability_zones" {

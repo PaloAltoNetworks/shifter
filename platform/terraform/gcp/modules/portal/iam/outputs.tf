@@ -10,3 +10,13 @@ output "workload_service_accounts" {
     name => account.email
   }
 }
+
+output "range_host_service_account_email" {
+  description = "Email of the GCE range host service account, attached only to hosts that need cloud APIs."
+  value       = google_service_account.range_host.email
+}
+
+output "range_vertex_service_account_email" {
+  description = "Email of the GCE range Vertex service account (per-range key minting)."
+  value       = google_service_account.range_vertex.email
+}

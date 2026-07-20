@@ -174,6 +174,7 @@ class TestSSHConsumerCapacity:
 
         from mission_control import consumers as consumers_mod
         from risk_register.models import AuditLog
+        from shared.audit import AuditEntityType
 
         consumer._user_id = 1
         consumer._session_acquired = True
@@ -185,7 +186,7 @@ class TestSSHConsumerCapacity:
         # Slot released, and the real session audit row was written.
         assert consumers_mod._session_registry.snapshot()["active_sessions"] == 0
         session_audit_written = await sync_to_async(
-            AuditLog.objects.filter(entity_type=AuditLog.EntityType.SESSION, actor_id=1).exists
+            AuditLog.objects.filter(entity_type=AuditEntityType.SESSION, actor_id=1).exists
         )()
         assert session_audit_written
 

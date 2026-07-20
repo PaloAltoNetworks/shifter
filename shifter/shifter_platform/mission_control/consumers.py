@@ -23,7 +23,11 @@ from mission_control.terminal_executor import (
     run_terminal_sync,
 )
 from mission_control.terminal_sessions import session_registry as _session_registry
-from risk_register.services import SessionInfo, audit_session_event, select_trusted_client_ip
+from shared.audit import (
+    SessionInfo,
+    audit_session_event,
+    select_trusted_client_ip,
+)
 from shared.enums import WebSocketCloseCode
 
 if TYPE_CHECKING:
@@ -70,7 +74,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
     def _client_ip(self) -> str | None:
         """Best-effort client IP for audit, using the shared trusted-hop policy.
 
-        Mirrors :func:`risk_register.services.get_client_ip` on the ASGI scope so
+        Mirrors :func:`shared.audit.get_client_ip` on the ASGI scope so
         terminal-session audit rows do not drift from HTTP audit rows: the
         rightmost (proxy-appended) X-Forwarded-For hop is trusted, with the
         direct peer from ``scope["client"]`` as the fallback (SEC-4, issue #937).

@@ -70,7 +70,7 @@ class AuditLogDegradedHealthCheck(HealthCheckPluginBase):
     """Report whether this worker has observed an audit write failure."""
 
     def check_status(self) -> None:
-        from risk_register.audit_health import get_audit_health_snapshot
+        from shared.audit import get_audit_health_snapshot
 
         snapshot = get_audit_health_snapshot()
         if snapshot.degraded:

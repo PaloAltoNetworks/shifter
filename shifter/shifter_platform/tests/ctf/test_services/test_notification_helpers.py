@@ -50,7 +50,6 @@ def ctf_participant():
     p.pk = uuid4()
     p.email = "participant@test.com"
     p.name = "Test Participant"
-    p.invite_token = "test-invite-token"
     p.invited_at = None
     p.range_status = "pending"
     p.registered_at = "2025-01-01T00:00:00Z"
@@ -127,7 +126,7 @@ class TestRenderEmail:
     @patch("django.template.loader.render_to_string")
     def test_renders_templates(self, mock_render, ctf_event, ctf_participant):
         """Renders both HTML and text templates."""
-        registration_url = "https://example.com/ctf/register/#token=test-token"
+        registration_url = "https://example.com/ctf/login/"
 
         mock_render.side_effect = [
             f"<html>{ctf_event.name} {registration_url}</html>",
@@ -151,19 +150,18 @@ class TestRenderEmail:
         assert mock_render.call_count == 2
 
 
-class TestBuildRegistrationUrl:
-    """The invite token must ride in the URL fragment, never the query string."""
+class TestBuildCtfLoginUrl:
+    """Credential delivery uses a tokenless login URL."""
 
-    def test_token_in_fragment_not_query_string(self):
-        """_build_registration_url emits #token=, never ?token= (SonarCloud S8435)."""
+    def test_login_url_has_no_credential(self):
         from django.test import override_settings
 
         with override_settings(SITE_URL="https://example.com"):
-            url = notification._build_registration_url("abc123")
+            url = notification._build_ctf_login_url()
 
-        assert url == "https://example.com/ctf/register/#token=abc123"
-        assert "?token=" not in url
-        assert "#token=abc123" in url
+        assert url == "https://example.com/ctf/login/"
+        assert "?" not in url
+        assert "#" not in url
 
 
 @pytest.mark.django_db
@@ -223,8 +221,8 @@ class TestInvitedAtNotSetAtCreation:
         from ctf.services import participant as participant_service
 
         csv_content = "Alice,alice@test.com\nBob,bob@test.com"
-        created = participant_service.bulk_import_participants(importable_event.pk, csv_content)
+        result = participant_service.bulk_import_participants(importable_event.pk, csv_content)
 
-        assert len(created) == 2
-        for participant in created:
+        assert len(result["created"]) == 2
+        for participant in result["created"]:
             assert participant.invited_at is None

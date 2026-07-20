@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
-from risk_register.services import get_client_ip
+from shared.audit import get_client_ip
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:

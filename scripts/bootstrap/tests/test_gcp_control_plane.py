@@ -23,6 +23,7 @@ from unittest.mock import patch
 import pytest
 
 import deploy
+import gcp_control_plane
 
 PINNED_IMAGE_TAG = "abc1234"
 
@@ -109,6 +110,9 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 "portal": f"shiftergcpdev-portal@{project_id}.iam.gserviceaccount.com",
                 "workers": f"shiftergcpdev-workers@{project_id}.iam.gserviceaccount.com",
                 "ctf-scheduler": f"shiftergcpdev-ctf-scheduler@{project_id}.iam.gserviceaccount.com",
+                # account_id is bounded to <=30 chars, so provisioner-launcher's SA
+                # localpart is shortened to prov-launcher (#1719).
+                "provisioner-launcher": (f"shiftergcpdev-prov-launcher@{project_id}.iam.gserviceaccount.com"),
                 "provisioner": f"shiftergcpdev-provisioner@{project_id}.iam.gserviceaccount.com",
             }
         },
@@ -251,7 +255,11 @@ class TestGdcControlPlaneTerraform:
 
     def test_uses_requested_project_for_backend_and_apply(self, mock_repo_root):
         """Terraform bootstrap must target the live project instead of the committed gcp-dev placeholder."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        # Pin the bootstrap-sa path explicitly: the default is now operator-adc (#1738),
+        # but this test exercises the tf-bootstrap-SA credential + access-wait flow.
+        config = deploy.GDCBootstrapConfig(
+            project_id="prod-rwctxzl6shxk", cluster_id="cluster1", terraform_identity="bootstrap-sa"
+        )
         tf_dir = mock_repo_root / "platform" / "terraform" / "gcp" / "environments" / "gcp-dev"
         tf_dir.mkdir(parents=True)
         (tf_dir / "terraform.tfvars").write_text(
@@ -307,6 +315,64 @@ gke_master_authorized_cidrs = ["198.51.100.10/32"]
         assert mock_init.call_args.args[0] is config
         mock_apply.assert_called_once_with(config)
         assert mock_apply.call_args.args[0] is config
+        assert outputs["gke_cluster_name"]["value"] == "shifter-gcp-dev-platform"
+
+    def test_operator_adc_identity_skips_tf_bootstrap_service_account(self, mock_repo_root):
+        """operator-adc runs terraform under ADC and never provisions the privileged tf-bootstrap SA (#1718)."""
+        config = deploy.GDCBootstrapConfig(
+            project_id="prod-rwctxzl6shxk", cluster_id="cluster1", terraform_identity="operator-adc"
+        )
+        tf_dir = mock_repo_root / "platform" / "terraform" / "gcp" / "environments" / "gcp-dev"
+        tf_dir.mkdir(parents=True)
+        (tf_dir / "terraform.tfvars").write_text(
+            'project_id = "shifter-gcp-dev"\n'
+            'region = "us-central1"\n'
+            'public_hostname = "portal.example.test"\n'
+            "enable_managed_tls = true\n"
+            'gke_master_authorized_cidrs = ["198.51.100.10/32"]\n'
+        )
+        (mock_repo_root / "shifter.yaml").write_text("version: 1\nbackend: gcp\n")
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"name":"operations/artifactregistry-service-identity"}'
+
+        terraform_output = json.dumps(_sample_gcp_control_plane_outputs(config.project_id))
+
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("deploy.gcloud_resource_exists", return_value=False),
+            patch("deploy.gcp_terraform_bootstrap_credentials") as mock_creds,
+            patch("deploy.run_gcp_terraform_init_with_retry") as mock_init,
+            patch("deploy.wait_for_gcp_terraform_bootstrap_access") as mock_wait,
+            patch("deploy.run_gcp_terraform_apply_with_retry") as mock_apply,
+            patch("deploy.run_cmd"),
+            patch("deploy._gcp_identity_access_token", return_value="test-access-token"),
+            patch("deploy.urllib_request.urlopen", return_value=_FakeResponse()),
+            patch("os.chdir"),
+            patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess(["terraform"], 0, stdout=terraform_output),
+            ),
+        ):
+            outputs = deploy.apply_gcp_control_plane_terraform(config)
+
+            # Under the caller's user ADC, identitytoolkit / Identity Platform need
+            # a quota project or they 403; the operator-adc path sets it (#1738).
+            assert os.environ["USER_PROJECT_OVERRIDE"] == "true"
+            assert os.environ["GOOGLE_BILLING_PROJECT"] == config.project_id
+
+        mock_creds.assert_not_called()
+        mock_wait.assert_not_called()
+        mock_init.assert_called_once_with(config, config.terraform_state_bucket_name, None)
+        mock_apply.assert_called_once_with(config)
         assert outputs["gke_cluster_name"]["value"] == "shifter-gcp-dev-platform"
 
 
@@ -721,6 +787,7 @@ class TestGdcTerraformInitRetries:
             stderr="Error: unsupported backend configuration",
         )
 
+        bootstrap_path = Path("bootstrap.json")
         with (
             patch("subprocess.run", return_value=invalid_backend) as mock_subprocess,
             patch("deploy.time.sleep") as mock_sleep,
@@ -729,7 +796,7 @@ class TestGdcTerraformInitRetries:
             deploy.run_gcp_terraform_init_with_retry(
                 config,
                 config.terraform_state_bucket_name,
-                Path("bootstrap.json"),
+                bootstrap_path,
                 max_attempts=3,
                 sleep_seconds=0,
             )
@@ -851,6 +918,7 @@ class TestGdcTerraformBootstrapAccess:
             stderr="ERROR: (gcloud.artifacts.repositories.list) INVALID_ARGUMENT: bad request",
         )
 
+        bootstrap_path = Path("bootstrap.json")
         with (
             patch("deploy._run_gcp_bootstrap_probe", return_value=invalid) as mock_probe,
             patch("deploy.time.sleep") as mock_sleep,
@@ -858,7 +926,7 @@ class TestGdcTerraformBootstrapAccess:
         ):
             deploy.wait_for_gcp_terraform_bootstrap_access(
                 config,
-                Path("bootstrap.json"),
+                bootstrap_path,
                 max_attempts=2,
                 sleep_seconds=0,
             )
@@ -881,6 +949,9 @@ class TestGdcControlPlaneHelmValues:
         )
 
         assert values["releaseNamespace"] == "shifter-system"
+        # CLOUD_PROVIDER reaches the merged runtime env solely via the GCP backend
+        # runtime-env renderer (scripts/gcp/render_runtime_env.py); PLAT-2005.
+        assert values["runtimeEnv"]["CLOUD_PROVIDER"] == "gcp"
         assert values["runtimeEnv"]["GCP_PROJECT_ID"] == "prod-rwctxzl6shxk"
         assert values["runtimeEnv"]["GOOGLE_CLOUD_PROJECT"] == "prod-rwctxzl6shxk"
         assert values["runtimeEnv"]["DJANGO_DEBUG"] == "false"
@@ -937,9 +1008,11 @@ class TestGdcControlPlaneHelmValues:
                 "199.36.153.4/30",  # NOSONAR - restricted.googleapis.com VIP.
                 "199.36.153.8/30",  # NOSONAR - private.googleapis.com VIP.
             ],
-            "privateServiceCidrs": ["10.40.0.10/32", "10.40.0.20/32", "10.48.0.0/20"],
+            "privateServiceCidrs": ["10.40.0.10/32", "10.40.0.20/32"],
+            "kubernetesApiCidrs": ["10.48.0.0/20"],
             "rangeClusterApiCidrs": [],
             "rangeClusterApiPort": 6444,
+            "rangeAccessCidrs": ["10.50.0.0/16"],
         }
 
     def test_range_cluster_api_cidrs_from_control_plane_endpoint(self):
@@ -958,6 +1031,24 @@ class TestGdcControlPlaneHelmValues:
 
         assert values["networkPolicy"]["rangeClusterApiCidrs"] == ["10.240.0.5/32"]
         assert values["networkPolicy"]["rangeClusterApiPort"] == 6444
+
+    def test_range_access_cidrs_from_range_network_cidr(self):
+        """Participant range access (issue #1349): the portal/guacd egress allowlist
+        is the range network CIDR so those workloads can dial range guests."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        values = deploy.render_gcp_helm_values(config, outputs, image_tag=PINNED_IMAGE_TAG)
+
+        assert values["networkPolicy"]["rangeAccessCidrs"] == ["10.50.0.0/16"]
+
+    def test_range_access_cidrs_empty_when_range_network_cidr_absent(self):
+        """No range network CIDR -> empty allowlist so the egress policy stays unrendered."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        outputs["range_network_cidr"] = {"value": ""}
+        values = deploy.render_gcp_helm_values(config, outputs, image_tag=PINNED_IMAGE_TAG)
+
+        assert values["networkPolicy"]["rangeAccessCidrs"] == []
 
     def test_rejects_insecure_public_bootstrap_values(self):
         """The Helm values renderer must refuse public bare-IP debug deployments on GCP."""
@@ -1111,6 +1202,15 @@ class TestGdcControlPlaneHelmChart:
         assert "name: default-deny-jobs" in output
         assert "199.36.153.4/30" in output
         assert "10.40.0.10/32" in output
+        # Participant/operator range access egress (issue #1349): the Helm path
+        # must render the policy from networkPolicy.rangeAccessCidrs (fed by the
+        # range_network_cidr Terraform output), scoped to the participant channel
+        # ports -- asserted at the rendered-manifest level so values->template
+        # wiring drift is caught, mirroring the Kustomize renderer's own test.
+        assert "name: allow-platform-range-access-egress" in output
+        assert "10.50.0.0/16" in output  # range_network_cidr from the sample outputs
+        assert "port: 22" in output
+        assert "port: 3389" in output
         assert 'requestPath: "/health/"' in output
         assert "securityPolicy:" in output
         assert "name: shifter-gcp-dev-edge" in output
@@ -1759,6 +1859,47 @@ class TestGcpBootstrapIdentityPlatform:
             "OIDC_AUTH_DOMAIN": "https://auth.example.test",
         }
 
+    def _write_gcp_dev_overlay(self, repo_root: Path, body: str) -> Path:
+        overlay = repo_root / gcp_control_plane._GCP_DEV_TFVARS_OVERLAY
+        overlay.parent.mkdir(parents=True, exist_ok=True)
+        overlay.write_text(body)
+        return overlay
+
+    def test_gcp_bootstrap_creds_from_tfvars_maps_overlay_keys(self, tmp_path):
+        """The gcp-dev overlay's HCL creds map to the GCP_BOOTSTRAP_ADMIN_* env keys."""
+        self._write_gcp_dev_overlay(
+            tmp_path,
+            "\n".join(
+                [
+                    'project_id                   = "prod-ksqdkj"',
+                    'gcp_bootstrap_admin_email    = "operator@paloaltonetworks.com"',
+                    'gcp_bootstrap_admin_password = "Galvatron7!!!"',
+                    "",
+                ]
+            ),
+        )
+
+        assert gcp_control_plane._gcp_bootstrap_creds_from_tfvars(tmp_path) == {
+            "GCP_BOOTSTRAP_ADMIN_EMAIL": "operator@paloaltonetworks.com",
+            "GCP_BOOTSTRAP_ADMIN_PASSWORD": "Galvatron7!!!",
+        }
+
+    def test_gcp_bootstrap_creds_from_tfvars_absent_overlay_returns_empty(self, tmp_path):
+        """A missing (gitignored) overlay yields no creds so the bootstrap falls back."""
+        assert gcp_control_plane._gcp_bootstrap_creds_from_tfvars(tmp_path) == {}
+
+    def test_load_bootstrap_env_values_overlay_overrides_process_env(self, tmp_path, monkeypatch):
+        """The tfvars overlay is authoritative: it overrides a stale process-env password."""
+        self._write_gcp_dev_overlay(
+            tmp_path,
+            'gcp_bootstrap_admin_password = "from-overlay"\n',
+        )
+        monkeypatch.setenv("GCP_BOOTSTRAP_ADMIN_PASSWORD", "from-process-env")
+
+        values = gcp_control_plane.load_bootstrap_env_values(repo_root=tmp_path)
+
+        assert values["GCP_BOOTSTRAP_ADMIN_PASSWORD"] == "from-overlay"
+
     def test_resolve_gcp_bootstrap_operator_credentials_returns_none_when_missing(self):
         """Bootstrap should report no operator credentials when the env files do not provide them."""
         assert deploy.resolve_gcp_bootstrap_operator_credentials(env_values={}) is None
@@ -1917,25 +2058,32 @@ class TestGcpBootstrapIdentityPlatform:
         """The generated runtime env should elevate the first operator without hardcoding an email in the repo."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
 
-        with patch("deploy.load_bootstrap_env_values", return_value={}):
-            rendered = deploy.render_gcp_platform_runtime_env(
-                config,
-                bootstrap_operator_email="admin@example.com",
-            )
+        rendered = deploy.render_gcp_platform_runtime_env(
+            config,
+            bootstrap_operator_email="admin@example.com",
+            bootstrap_env_values={},
+        )
 
         assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=admin@example.com\n" in rendered
         assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=admin@example.com\n" in rendered
         assert "GCP_RANGE_BACKEND=gce\n" in rendered
+        assert "ENGINE_TASK_SERVICE_ACCOUNT_NAME=provisioner\n" in rendered
+        # CLOUD_PROVIDER must come from the GCP backend runtime-env renderer only
+        # (PLAT-2005): _render_gcp_runtime_env merges this bootstrap-owned contract
+        # with scripts/gcp/render_runtime_env.py's output, which is the
+        # renderer-owned source of the backend identity. A second hardcoded literal
+        # here would be redundant and could silently drift from that value.
+        assert "CLOUD_PROVIDER" not in deploy.parse_env_contract(rendered)
 
     def test_render_gcp_platform_runtime_env_uses_blank_guest_password_samples(self):
         """The generated env contract must not embed sample guest passwords in source-controlled output."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
 
-        with patch("deploy.load_bootstrap_env_values", return_value={}):
-            rendered = deploy.render_gcp_platform_runtime_env(
-                config,
-                bootstrap_operator_email="admin@example.com",
-            )
+        rendered = deploy.render_gcp_platform_runtime_env(
+            config,
+            bootstrap_operator_email="admin@example.com",
+            bootstrap_env_values={},
+        )
 
         # Issue #762: per-instance guest passwords replace shared env
         # entries. The bootstrap-rendered platform-runtime env file must
@@ -1951,8 +2099,7 @@ class TestGcpBootstrapIdentityPlatform:
         """Guest boot images resolve to the packer-gcp export bucket per environment."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1", environment="gcp-dev")
 
-        with patch("deploy.load_bootstrap_env_values", return_value={}):
-            rendered = deploy.render_gcp_platform_runtime_env(config)
+        rendered = deploy.render_gcp_platform_runtime_env(config, bootstrap_env_values={})
 
         bucket = "shifter-gcp-dev-gdc-vm-images"
         assert f"GDC_UBUNTU_IMAGE_URL=gs://{bucket}/ubuntu.qcow2\n" in rendered
@@ -1961,6 +2108,22 @@ class TestGcpBootstrapIdentityPlatform:
         assert f"GDC_DC_IMAGE_URL=gs://{bucket}/dc.qcow2\n" in rendered
         assert "GDC_KALI_DISK_SIZE_GIB=40\n" in rendered
         assert "GDC_UBUNTU_IMAGE_URL=\n" not in rendered
+
+    def test_render_gcp_platform_runtime_env_emits_aws_region_for_provisioner_policy(self):
+        """AWS_REGION rides the ConfigMap so the range-Job admission policy passes (#1742).
+
+        Django settings alias AWS_REGION to CLOUD_REGION, so the provisioner-launcher
+        always emits a non-empty AWS_REGION even on GCP; restrict-provisioner-jobs then
+        requires it to exist in platform-runtime with a matching value.
+        """
+        config = deploy.GDCBootstrapConfig(
+            project_id="prod-rwctxzl6shxk", cluster_id="cluster1", environment="gcp-dev", region="us-central1"
+        )
+
+        rendered = deploy.render_gcp_platform_runtime_env(config, bootstrap_env_values={})
+
+        assert "AWS_REGION=us-central1\n" in rendered
+        assert "CLOUD_REGION=us-central1\n" in rendered
 
 
 class TestArtifactRegistryServiceIdentity:
@@ -1974,6 +2137,43 @@ class TestArtifactRegistryServiceIdentity:
 
         mock_run.assert_not_called()
         mock_urlopen.assert_not_called()
+
+
+class TestProvisionerLauncherDeploymentParity:
+    """Launcher identity must stay consistent across Terraform, bootstrap, Helm, and runtime config."""
+
+    def test_bootstrap_renders_dedicated_launcher_without_provisioner_cloud_identity(self):
+        service_accounts = _sample_gcp_control_plane_outputs()["workload_service_accounts"]["value"]
+
+        values = gcp_control_plane._helm_service_account_values(service_accounts)
+
+        assert values["provisionerLauncher"] == {
+            "name": "provisioner-launcher",
+            "annotations": {
+                "iam.gke.io/gcp-service-account": service_accounts["provisioner-launcher"],
+            },
+        }
+        assert values["provisioner"]["annotations"]["iam.gke.io/gcp-service-account"] == service_accounts["provisioner"]
+        assert service_accounts["provisioner-launcher"] != service_accounts["provisioner"]
+
+    def test_runtime_and_terraform_keep_launcher_and_privileged_runtime_distinct(self):
+        terraform_iam = (
+            gcp_control_plane.get_repo_root()
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "portal"
+            / "iam"
+            / "main.tf"
+        ).read_text(encoding="utf-8")
+        assert '"provisioner-launcher"' in terraform_iam
+        assert "shifter-platform/provisioner-launcher" in terraform_iam
+        assert "provisioner-launcher = toset([])" in terraform_iam
+        assert (
+            'secret_reader_workloads    = toset(["portal", "workers", "ctf-scheduler", "provisioner-launcher"])'
+            in terraform_iam
+        )
 
 
 class TestGcpIdentityAdminApi:
@@ -2073,3 +2273,61 @@ class TestGcpBootstrapDnsTlsFlow:
         mock_wait_for_user.assert_called_once()
         mock_wait_for_tls.assert_called_once_with()
         mock_verify_portal.assert_called_once_with("portal.example.test")
+
+
+class TestGdcBootstrapRangeBackend:
+    """gdc_bootstrap_cluster gates the ABM/GDC substrate on the range backend (#1716)."""
+
+    def test_gce_backend_skips_substrate_and_deploys_control_plane(self):
+        """The gce backend never touches the substrate (no SA-key creation) and deploys the control plane."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1", range_backend="gce")
+        with (
+            patch("gcp_control_plane.confirm", return_value=True),
+            patch("gcp_control_plane.ensure_gdc_apis") as mock_apis,
+            patch("gcp_control_plane.ensure_gdc_service_account") as mock_sa,
+            patch("gcp_control_plane.stage_gdc_bootstrap_assets") as mock_stage,
+            patch("gcp_control_plane.sync_gdc_vm_image_secret") as mock_vm_image,
+            patch(
+                "gcp_control_plane.bootstrap_gcp_control_plane",
+                return_value={"gke_cluster_name": {"value": "shifter-gcp-dev-platform"}},
+            ) as mock_platform,
+        ):
+            result = gcp_control_plane.gdc_bootstrap_cluster(config, dry_run=False)
+
+        mock_apis.assert_not_called()
+        mock_sa.assert_not_called()
+        mock_stage.assert_not_called()
+        mock_vm_image.assert_not_called()
+        mock_platform.assert_called_once_with(config, dry_run=False)
+        assert result["gke_cluster_name"] == "shifter-gcp-dev-platform"
+        assert result["workstation"] == ""
+        assert result["gdc_vm_image_gcs_secret_id"] == ""
+
+    def test_gdc_backend_builds_substrate_before_control_plane(self, tmp_path):
+        """The gdc backend still builds the substrate (including the vm-image secret) before the control plane."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1", range_backend="gdc")
+        staged = {
+            "ssh_metadata": tmp_path / "ssh-metadata",
+            "assets_dir": tmp_path / "assets",
+            "service_account_key": tmp_path / "bm-gcr.json",
+        }
+        with (
+            patch("gcp_control_plane.confirm", return_value=True),
+            patch("gcp_control_plane.ensure_gdc_apis") as mock_apis,
+            patch("gcp_control_plane.ensure_gdc_service_account"),
+            patch("gcp_control_plane.stage_gdc_bootstrap_assets", return_value=staged),
+            patch("gcp_control_plane.ensure_gdc_network"),
+            patch("gcp_control_plane.ensure_gdc_instances"),
+            patch("gcp_control_plane.sync_gdc_instance_ssh_metadata"),
+            patch("gcp_control_plane.wait_for_gdc_ssh"),
+            patch("gcp_control_plane.upload_gdc_assets"),
+            patch("gcp_control_plane.run_gdc_workstation_script"),
+            patch("gcp_control_plane.sync_gdc_access_secret"),
+            patch("gcp_control_plane.sync_gdc_vm_image_secret") as mock_vm_image,
+            patch("gcp_control_plane.bootstrap_gcp_control_plane", return_value={}),
+        ):
+            result = gcp_control_plane.gdc_bootstrap_cluster(config, dry_run=False)
+
+        mock_apis.assert_called_once()
+        mock_vm_image.assert_called_once()
+        assert result["workstation"] == config.workstation.name

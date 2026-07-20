@@ -452,7 +452,7 @@ def test_provisioner_db_ngfw_reads_user_and_request_data(monkeypatch: pytest.Mon
 
 
 def test_range_ngfw_helpers_use_direct_runtime_and_db_modules(monkeypatch: pytest.MonkeyPatch) -> None:
-    from terraform_ops import (
+    from terraform_ngfw_range import (
         _configure_ngfw_for_range,
         _maybe_pause_user_ngfw,
         _recover_aws_ngfw_stuck_resuming,
@@ -462,9 +462,9 @@ def test_range_ngfw_helpers_use_direct_runtime_and_db_modules(monkeypatch: pytes
     )
 
     run_ngfw_operation = MagicMock()
-    monkeypatch.setattr("terraform_ops.run_ngfw_operation", run_ngfw_operation)
-    monkeypatch.setattr("terraform_ops.AWSExecutor", MagicMock())
-    monkeypatch.setattr("terraform_ops._describe_ec2_state", MagicMock(return_value="stopped"))
+    monkeypatch.setattr("terraform_ngfw_range.run_ngfw_operation", run_ngfw_operation)
+    monkeypatch.setattr("terraform_ngfw_range.AWSExecutor", MagicMock())
+    monkeypatch.setattr("terraform_ngfw_range._describe_ec2_state", MagicMock(return_value="stopped"))
 
     _recover_aws_ngfw_stuck_resuming("i-ngfw", "ngfw-req")
     _resume_aws_ngfw_for_provisioning({"status": "paused", "ngfw_request_id": "ngfw-req"})
@@ -484,15 +484,15 @@ def test_range_ngfw_helpers_use_direct_runtime_and_db_modules(monkeypatch: pytes
         "attachment_mode": "aws-data-eni",
         "status": "ready",
     }
-    monkeypatch.setattr("terraform_ops.get_user_ngfw_data", MagicMock(return_value=ngfw_data))
+    monkeypatch.setattr("terraform_ngfw_range.get_user_ngfw_data", MagicMock(return_value=ngfw_data))
     configure_subnets = MagicMock()
     record_attachment = MagicMock()
     remove_subnets = MagicMock()
     remove_attachment = MagicMock()
-    monkeypatch.setattr("terraform_ops.configure_ngfw_subnets", configure_subnets)
-    monkeypatch.setattr("terraform_ops._record_ngfw_range_attachment", record_attachment)
-    monkeypatch.setattr("terraform_ops.remove_ngfw_subnets", remove_subnets)
-    monkeypatch.setattr("terraform_ops._remove_ngfw_range_attachment", remove_attachment)
+    monkeypatch.setattr("terraform_ngfw_range.configure_ngfw_subnets", configure_subnets)
+    monkeypatch.setattr("terraform_ngfw_range._record_ngfw_range_attachment", record_attachment)
+    monkeypatch.setattr("terraform_ngfw_range.remove_ngfw_subnets", remove_subnets)
+    monkeypatch.setattr("terraform_ngfw_range._remove_ngfw_range_attachment", remove_attachment)
 
     _validate_ngfw_range_attachment({"ngfw": True}, user_id=7)
     _configure_ngfw_for_range(
@@ -510,7 +510,7 @@ def test_range_ngfw_helpers_use_direct_runtime_and_db_modules(monkeypatch: pytes
     remove_subnets.assert_called_once_with(7, [{"name": "attack"}], 42)
     remove_attachment.assert_called_once_with(ngfw_request_id="ngfw-req", ngfw_status="ready", range_id=42)
 
-    monkeypatch.setattr("terraform_ops.user_has_active_ranges", MagicMock(return_value=False))
+    monkeypatch.setattr("terraform_ngfw_range.user_has_active_ranges", MagicMock(return_value=False))
     _maybe_pause_user_ngfw(7, 42)
 
     assert run_ngfw_operation.call_args_list[-1] == call("stop", "ngfw-req")

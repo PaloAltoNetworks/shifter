@@ -9,17 +9,22 @@ from uuid import UUID
 
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from mission_control.api._base import (
     MissionControlReadAPIView,
-    _guacamole_bootstrap_url_names,
     _guacamole_read_permission,
     _validated,
 )
 from mission_control.api.permissions import HasMissionControlActor
-from mission_control.api.serializers import GuacamoleInstanceSerializer
+from mission_control.api.serializers import (
+    GuacamoleBootstrapQueuedSerializer,
+    GuacamoleBootstrapStatusSerializer,
+    GuacamoleInstanceSerializer,
+)
 from mission_control.guacamole_bootstrap import consume_ready_url
 from mission_control.models import GuacamoleBootstrapRequest
 from mission_control.views._guacamole import (
@@ -31,6 +36,7 @@ from mission_control.views._guacamole import (
 from mission_control.views._guacamole_bootstrap import _authenticated_user_id, _BootstrapViewError, _mark_expired
 from mission_control.views._guacamole_bootstrap import guacamole_bootstrap_response as _guacamole_bootstrap_response
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
+from shared.api.schema import ApiErrorSerializer, LegacyErrorSerializer
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
@@ -51,6 +57,15 @@ class GuacamoleRDPURLView(MissionControlReadAPIView):
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _guacamole_read_permission()]
 
+    @extend_schema(
+        request=GuacamoleInstanceSerializer,
+        responses={
+            202: GuacamoleBootstrapQueuedSerializer,
+            400: ApiErrorSerializer,
+            503: LegacyErrorSerializer,
+        },
+        operation_id="api_v1_mission_control_guacamole_rdp_url",
+    )
     def post(self, request: Request) -> JsonResponse | Response:
         """Queue an RDP bootstrap request for a range instance."""
         data, error = _validated(self, GuacamoleInstanceSerializer, request.data)
@@ -65,7 +80,6 @@ class GuacamoleRDPURLView(MissionControlReadAPIView):
                 return exc.response
             raise
         return _range_bootstrap_response(
-            request=request,
             user=user,
             protocol=GuacamoleBootstrapRequest.Protocol.RDP,
             target_id=data["instance_uuid"],
@@ -85,6 +99,15 @@ class GuacamoleRangeSSHURLView(MissionControlReadAPIView):
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _guacamole_read_permission()]
 
+    @extend_schema(
+        request=GuacamoleInstanceSerializer,
+        responses={
+            202: GuacamoleBootstrapQueuedSerializer,
+            400: ApiErrorSerializer,
+            503: LegacyErrorSerializer,
+        },
+        operation_id="api_v1_mission_control_guacamole_ssh_url",
+    )
     def post(self, request: Request) -> JsonResponse | Response:
         """Queue an SSH bootstrap request for a range instance."""
         data, error = _validated(self, GuacamoleInstanceSerializer, request.data)
@@ -99,7 +122,6 @@ class GuacamoleRangeSSHURLView(MissionControlReadAPIView):
                 return exc.response
             raise
         return _range_bootstrap_response(
-            request=request,
             user=user,
             protocol=GuacamoleBootstrapRequest.Protocol.RANGE_SSH,
             target_id=data["instance_uuid"],
@@ -119,6 +141,11 @@ class GuacamoleNGFWSSHURLView(MissionControlReadAPIView):
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _guacamole_read_permission()]
 
+    @extend_schema(
+        request=None,
+        responses={202: GuacamoleBootstrapQueuedSerializer, 503: LegacyErrorSerializer},
+        operation_id="api_v1_mission_control_ngfw_ssh_url",
+    )
     def post(self, request: Request, app_id: str) -> JsonResponse | Response:
         """Queue an SSH bootstrap request for an NGFW instance."""
         user = self.actor_user()
@@ -134,7 +161,6 @@ class GuacamoleNGFWSSHURLView(MissionControlReadAPIView):
             safe_log_value(app_id),
         )
         return _range_bootstrap_response(
-            request=request,
             user=user,
             protocol=GuacamoleBootstrapRequest.Protocol.NGFW_SSH,
             target_id=str(app_id),
@@ -150,6 +176,20 @@ class GuacamoleBootstrapStatusView(MissionControlReadAPIView):
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _guacamole_read_permission()]
 
+    @extend_schema(
+        responses={
+            200: GuacamoleBootstrapStatusSerializer,
+            # A failed bootstrap surfaces the persisted error_status_code (400/500/503)
+            # while an expired/gone request returns 410 — all carry the status payload.
+            400: GuacamoleBootstrapStatusSerializer,
+            410: GuacamoleBootstrapStatusSerializer,
+            500: GuacamoleBootstrapStatusSerializer,
+            503: GuacamoleBootstrapStatusSerializer,
+            # An unknown request id returns the flat legacy error body.
+            404: LegacyErrorSerializer,
+        },
+        operation_id="api_v1_mission_control_guacamole_bootstrap_status_retrieve",
+    )
     def get(self, request: Request, request_id: UUID) -> JsonResponse:
         """Return current status for a queued Guacamole bootstrap request."""
         user = self.actor_user()
@@ -167,6 +207,16 @@ class GuacamoleBootstrapOpenView(MissionControlReadAPIView):
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _guacamole_read_permission()]
 
+    @extend_schema(
+        # Deliberate non-JSON route: returns an HTML opener page that polls the
+        # status endpoint and redirects when the session URL is ready. Declared
+        # with its real media types rather than pretending to return JSON.
+        responses={
+            (200, "text/html"): OpenApiTypes.STR,
+            (404, "text/plain"): OpenApiTypes.STR,
+        },
+        operation_id="api_v1_mission_control_guacamole_bootstrap_open_retrieve",
+    )
     def get(self, request: Request, request_id: UUID) -> HttpResponse:
         """Render an opener page that polls until the bootstrap URL is ready."""
         user = self.actor_user()
@@ -177,11 +227,10 @@ class GuacamoleBootstrapOpenView(MissionControlReadAPIView):
         except _BootstrapViewError as err:
             return err.response
 
-        status_url_name = _guacamole_bootstrap_url_names(request).get(
-            "status_url_name",
-            "mission_control:guacamole_bootstrap_status",
+        status_url = reverse(
+            "v1:mission_control:guacamole-bootstrap-status",
+            kwargs={"request_id": request_id},
         )
-        status_url = reverse(status_url_name, kwargs={"request_id": request_id})
         html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -223,18 +272,16 @@ class GuacamoleBootstrapOpenView(MissionControlReadAPIView):
 
 def _range_bootstrap_response(
     *,
-    request: Request,
     user: User,
     protocol: str,
     target_id: str,
     build_url: Callable[[], str],
 ) -> JsonResponse:
-    """Create a bootstrap response with canonical route names when applicable."""
+    """Create a bootstrap response with the canonical /api/v1 route names."""
     return _guacamole_bootstrap_response(
         user=user,
         protocol=protocol,
         target_id=target_id,
-        **_guacamole_bootstrap_url_names(request),
         build_url=build_url,
     )
 

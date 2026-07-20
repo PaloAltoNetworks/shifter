@@ -6,6 +6,13 @@ Status: pre-implementation architecture guidance. This note does not implement
 the ACES path, add schemas, add tests, launch ranges, or cut over runtime
 behavior.
 
+Issue #1293 was re-scoped on 2026-07-15. Per-scenario verification adapters and
+answer-key material are now out-of-tree installed plugins; Shifter core owns
+only the provider/pack-neutral discovery, runner, prerequisite, result, and
+redaction framework. The issue-specific seam guidance in
+`aces-polaris-scenario-smoketest-coverage-preflight-1293.md` supersedes this
+note's original in-core adapter-expansion wording.
+
 ## Boundary
 
 ADR-024 remains the controlling decision:
@@ -73,8 +80,8 @@ Required evidence artifacts for the later implementation:
 | Backend launch | `cms.services.create_range`, `engine.services.create_range`, `engine.ecs`, provisioner `main.py range provision --request-id` | Launch receipt with request id, range id after projection, task id fingerprint, profile id, and final Shifter status. |
 | Status projection | `RangeEventOutbox`, `cms.handlers.range_events.apply_range_status`, `reconcile_range_events`, Mission Control status consumers | Status readback showing READY/FAILED/DESTROYED semantics recover through outbox/reconciler paths, not websocket-only fanout. |
 | Polaris infrastructure smoke | `scenario-dev/polaris/tests/run-all-smoketests.sh` and `isolation-smoketest.sh` | Redacted transcript or JSON summary with every asset sweep and isolation check passing. |
-| Polaris scenario-content smoke | `scenario-dev/polaris/tests/scenario_smoketest` | Redacted `--json-report` output. A cutover-grade run must have zero failed, errored, or uncovered challenges for the declared acceptance universe. If full-board coverage is not available, the missing adapters are a test-gap blocker, not a silent skip. |
-| CTFd board parity | `scripts/ctfd-workshop/common.py`, `sync_polaris_ctfd.py`, `sync_polaris_ctfd_onboarding.py`, scenario-smoketest CTFd readback | Read-only CTFd flag-row/challenge readback with token-safe diagnostics. It may report drift but must not mutate CTFd as part of acceptance. |
+| Polaris scenario-content smoke | Core scenario-verification framework plus an explicitly installed out-of-tree adapter plugin | Versioned, redacted report output. A cutover-grade run must have zero failed, blocked, errored, or missing checks for the declared acceptance universe. Core CI proves only the framework contract; adapter coverage evidence comes from the installed plugin and must not be copied back into core. |
+| CTFd board parity | `scripts/ctfd-workshop/common.py`, `sync_polaris_ctfd.py`, `sync_polaris_ctfd_onboarding.py`, and explicit read-only operator tooling | Read-only CTFd flag-row/challenge readback with token-safe diagnostics. It stays outside the plugin ABI, may report drift, and must not mutate CTFd as part of acceptance. |
 | Mission Control/CTF access projection | `mission_control.api`, `mission_control.views`, `ctf.services.range`, `ctf.bridges` | API/view tests or live readback showing owner-scoped range status and access projections still use existing auth, serializers, and error envelopes. |
 | Rollback | Catalog/profile selector, `ScenarioMetadata`, legacy `polaris` template, range destroy lifecycle | Evidence that disabling the ACES entry or selector leaves the legacy Polaris path available, and that failed ACES validation tears down through existing range lifecycle controls. |
 
@@ -100,7 +107,7 @@ Guacamole/terminal access URLs.
 | CTF integration | `ctf.bridges`, `ctf.services.range`, CTFd sync/readback scripts | Shifter owns CTF event/range/status/scoring behavior unless ACES later publishes matching contracts. |
 | Experiment execution | `cms.experiments.orchestrator.execution_plan`, `shared.script_context.ScriptExecutionContext` | Commands, prompts, S3 keys, instance ids, and artifacts stay behind current execution and redaction gates. |
 | Mission Control | `mission_control.api`, `mission_control.views`, terminal and Guacamole services | ACES-backed fields are read-only projections through existing auth, serializers, token lifecycle, and capacity controls. |
-| Polaris smoke | `scenario-dev/polaris/tests/run-all-smoketests.sh`, `scenario_smoketest`, walkthroughs, CTFd JSON | Use existing topology-aware smoke harnesses and redacted reporting; do not add a second challenge schema. |
+| Polaris smoke | `scenario-dev/polaris/tests/run-all-smoketests.sh`, `shared.scenario_verification`, an explicitly selected installed adapter plugin, walkthroughs, and CTFd JSON | Keep topology-aware execution and redacted reporting. Core ships no scenario adapters or answer-key schema; the plugin owns the realization-specific glue and must not become a second challenge schema. |
 | Logging/audit | `shared.log_sanitize`, provisioner `log_redact`, `risk_register.services.audit_log` | Logs and audit carry sanitized ids/status/classes, not package bodies, secrets, flags, commands, or provider dumps. |
 | Errors/API | `shared.api.errors`, `shared.errors`, `cms.exceptions.CMSError`, CTF/experiment exceptions | Translate at domain boundaries; do not add an ACES-only API envelope or exception hierarchy. |
 | Import enforcement | `.importlinter`, `scripts/check_layer_imports/layer_imports.yaml`, `scripts/adr_guard/adr_guard.py` | ACES imports stay behind `shared` and service seams unless a later ADR changes the rule. |
@@ -169,6 +176,10 @@ first acceptance target is the Shifter ACES Polaris profile over the
 `provisioning-only` backend claim. Later profiles may add orchestration,
 evaluation, participant runtime, or provider variants only behind that seam.
 
+The scenario-verification plugin seam is orthogonal to this ACES selection
+seam. It produces redacted evidence about a realized run; it neither selects a
+backend nor changes manifest, admission, hydration, or launchability decisions.
+
 Acceptance tooling should also keep selection parameters explicit:
 scenario id/profile, package ref/digest, backend manifest ref, provider,
 environment, evidence output path, CTFd base URL, smoke challenge universe, and
@@ -184,8 +195,9 @@ Concrete follow-up work identified by this gate is tracked as:
   catalog entries, including a distinct Polaris ACES selector.
 - #1261, #1262, #1263, and #1264: backend manifest, RuntimeTarget adapter,
   conformance gate, and live Shifter backend validation.
-- #1293: expand Polaris `scenario_smoketest` coverage until the declared
-  cutover challenge universe has zero uncovered entries.
+- #1293: define the provider-agnostic scenario-verification plugin seam, keep
+  the framework in core with zero adapters, and move cutover-universe coverage
+  to a separately installed plugin.
 - #1294: generate the redacted Polaris parity evidence bundle that collects
   conformance, launch, status, smoke, CTFd readback, and rollback artifacts.
 - #1238: define the cutover/archive/rollback plan before the live `polaris`

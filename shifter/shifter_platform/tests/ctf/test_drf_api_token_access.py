@@ -124,13 +124,47 @@ class TestCTFPlayTokenAccess:
 
 class TestCTFPublicScoreboard:
     def test_public_scoreboard_allows_anonymous_read(self, api_client: APIClient, ctf_event):
-        ctf_event.scoreboard_visible = True
-        ctf_event.save(update_fields=["scoreboard_visible"])
+        ctf_event.scoreboard_visibility = "public"
+        ctf_event.save(update_fields=["scoreboard_visibility"])
 
         response = api_client.get(f"/api/v1/ctf/events/{ctf_event.id}/scoreboard/")
 
         assert response.status_code == 200
         assert response.json()["event_id"] == str(ctf_event.id)
+
+    def test_participants_mode_blocks_anonymous(self, api_client: APIClient, ctf_event):
+        """CTF-404: participants-only boards are hidden from unauthenticated viewers."""
+        ctf_event.scoreboard_visibility = "participants"
+        ctf_event.save(update_fields=["scoreboard_visibility"])
+
+        response = api_client.get(f"/api/v1/ctf/events/{ctf_event.id}/scoreboard/")
+
+        assert response.status_code == 200
+        assert response.json() == {"scoreboard_hidden": True}
+
+    def test_participants_mode_serves_registered_participant(
+        self, api_client: APIClient, ctf_event, ctf_participant, participant_user
+    ):
+        ctf_event.scoreboard_visibility = "participants"
+        ctf_event.save(update_fields=["scoreboard_visibility"])
+        api_client.force_authenticate(user=participant_user)
+
+        response = api_client.get(f"/api/v1/ctf/events/{ctf_event.id}/scoreboard/")
+
+        assert response.status_code == 200
+        assert response.json()["event_id"] == str(ctf_event.id)
+
+    def test_hidden_mode_blocks_even_participants(
+        self, api_client: APIClient, ctf_event, ctf_participant, participant_user
+    ):
+        ctf_event.scoreboard_visibility = "hidden"
+        ctf_event.save(update_fields=["scoreboard_visibility"])
+        api_client.force_authenticate(user=participant_user)
+
+        response = api_client.get(f"/api/v1/ctf/events/{ctf_event.id}/scoreboard/")
+
+        assert response.status_code == 200
+        assert response.json() == {"scoreboard_hidden": True}
 
     def test_public_exception_does_not_apply_to_score_timeline(self, api_client: APIClient, ctf_participant):
         response = api_client.get(f"/api/v1/ctf/participants/{ctf_participant.id}/score-timeline/")

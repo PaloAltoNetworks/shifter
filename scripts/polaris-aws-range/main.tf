@@ -27,13 +27,16 @@
 locals {
   name_prefix = var.name_prefix
 
-  target_vpc_id        = trimspace(var.range_vpc_id) != "" ? var.range_vpc_id : data.aws_vpc.default.id
-  target_vpc_cidr      = data.aws_vpc.target.cidr_block
-  polaris_cidr_block   = trimspace(var.polaris_cidr_block) != "" ? var.polaris_cidr_block : cidrsubnet(local.target_vpc_cidr, 8, 240)
-  ubuntu_ami_id        = trimspace(var.ubuntu_ami_id) != "" ? var.ubuntu_ami_id : data.aws_ami.ubuntu_noble.id
-  a2_dc_ami_id         = trimspace(var.a2_dc_ami_id) != "" ? var.a2_dc_ami_id : data.aws_ami.windows_2022.id
-  internet_gateway_id  = trimspace(var.internet_gateway_id) != "" ? var.internet_gateway_id : one(data.aws_internet_gateway.target[*].id)
-  aws_cli_profile_args = trimspace(coalesce(var.aws_profile, "")) == "" ? "" : "--profile ${var.aws_profile} "
+  target_vpc_id       = trimspace(var.range_vpc_id) != "" ? var.range_vpc_id : data.aws_vpc.default.id
+  target_vpc_cidr     = data.aws_vpc.target.cidr_block
+  polaris_cidr_block  = trimspace(var.polaris_cidr_block) != "" ? var.polaris_cidr_block : cidrsubnet(local.target_vpc_cidr, 8, 240)
+  ubuntu_ami_id       = trimspace(var.ubuntu_ami_id) != "" ? var.ubuntu_ami_id : data.aws_ami.ubuntu_noble.id
+  a2_dc_ami_id        = trimspace(var.a2_dc_ami_id) != "" ? var.a2_dc_ami_id : data.aws_ami.windows_2022.id
+  internet_gateway_id = trimspace(var.internet_gateway_id) != "" ? var.internet_gateway_id : one(data.aws_internet_gateway.target[*].id)
+  # var.aws_profile defaults to null (CI uses the ambient OIDC credential chain,
+  # no profile). coalesce() errors when every argument is null/empty, so guard
+  # the null explicitly rather than coalesce(var.aws_profile, "").
+  aws_cli_profile_args = var.aws_profile == null || trimspace(var.aws_profile) == "" ? "" : "--profile ${var.aws_profile} "
 
   # Per-range subnet + IP plan. For each range index, carve a /28 out of
   # var.polaris_cidr_block and pin polaris .10 / a2 .11 inside it.

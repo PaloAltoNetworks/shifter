@@ -1,5 +1,7 @@
 # Service Discovery ForceNew: Operational Rule
 
+Part of the Shifter deploy and operations docs; start at the [documentation home](../index.md).
+
 ## Observed ForceNew Attribute
 
 The Terraform AWS provider marks `health_check_custom_config.failure_threshold`

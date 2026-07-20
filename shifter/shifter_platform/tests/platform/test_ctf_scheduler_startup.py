@@ -146,7 +146,7 @@ def test_aws_runtime_containers_skip_boot_migrations(path: Path, expected_runtim
         ("helm", _load_helm_documents),
     ],
 )
-def test_gcp_scheduler_deployment_runs_and_can_launch_jobs(source_name: str, loader: Any) -> None:
+def test_gcp_scheduler_deployment_runs_without_kubernetes_credentials(source_name: str, loader: Any) -> None:
     deployment = _deployment(loader(), SCHEDULER_NAME)
     pod_spec = deployment["spec"]["template"]["spec"]
     container = _scheduler_container(deployment)
@@ -155,6 +155,6 @@ def test_gcp_scheduler_deployment_runs_and_can_launch_jobs(source_name: str, loa
     assert container["args"] == SCHEDULER_COMMAND
     assert "ctf-scheduler-heartbeat" in " ".join(container["livenessProbe"]["exec"]["command"])
     assert pod_spec["serviceAccountName"] == SCHEDULER_NAME
-    assert pod_spec["automountServiceAccountToken"] is True, (
-        f"{source_name} scheduler must mount its dedicated token so due CTF spin-up tasks can submit GCP Jobs"
+    assert pod_spec["automountServiceAccountToken"] is False, (
+        f"{source_name} scheduler must stay tokenless because provisioner-launcher submits GCP Jobs"
     )

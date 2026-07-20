@@ -83,6 +83,50 @@ def list_ranges(user: User) -> list[RangeInstance]:
         raise
 
 
+def list_mission_control_range_history(user: User) -> list[RangeInstance]:
+    """Return the user's Mission Control range history, newest first (#1370).
+
+    Unlike :func:`list_ranges` (the generic, source-agnostic query through the
+    soft-delete ``objects`` manager), this backs the Mission Control
+    range-history surface, so it:
+
+    - reads through ``all_objects`` to INCLUDE soft-deleted rows. Terminal
+      ranges (DESTROYED/FAILED) set ``deleted_at`` on save, and those are
+      exactly the historical rows a history view exists to list; the default
+      manager would hide them and leave history near-empty.
+    - scopes to ``range_source == MISSION_CONTROL`` so CTF-sourced ranges for
+      the same user never leak into the Mission Control product surface
+      (provenance is server-derived, never user-supplied).
+
+    ``request`` is eager-loaded because the caller projects the durable
+    ``request.request_id`` correlation key for every row.
+
+    Args:
+        user: User whose Mission Control range history to retrieve.
+
+    Returns:
+        List of ``RangeInstance`` rows (active and soft-deleted), newest first.
+
+    Raises:
+        TypeError: If user is None or an invalid type.
+        ValueError: If user is unsaved (id is None).
+    """
+    from shared.enums import RangeSource
+
+    _validate_caller_user(user, "list_mission_control_range_history")
+
+    logger.debug("list_mission_control_range_history called for user_id=%s", user.id)
+
+    return list(
+        RangeInstance.all_objects.filter(
+            user_id=user.id,
+            range_source=RangeSource.MISSION_CONTROL.value,
+        )
+        .select_related("request")
+        .order_by("-created_at")
+    )
+
+
 def get_range(user: User, range_id: int) -> RangeInstance:
     """Get single range instance by range ID.
 

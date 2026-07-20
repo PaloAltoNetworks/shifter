@@ -1,0 +1,11 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{{ event.name }}: a problem with your range
+
+Hi {{ participant.name }},
+
+We hit a problem while provisioning your range for {{ event.name }}. The
+organizers have been notified and are working on it; you do not need to do
+anything. You will receive another email when your range is ready.
+
+-- {{ event.name }} Organizers

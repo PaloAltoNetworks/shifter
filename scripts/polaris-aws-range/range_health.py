@@ -4,6 +4,13 @@ Extracted from ``check_range_health.py`` so the script becomes a thin CLI
 over (a) ``common.SsmExecutor`` for the SSM fan-out and (b) this module
 for target discovery, the per-host pipe-delimited record parser, the
 issue-detection model, and the markdown report writer.
+
+#1377 adds the AWS credential-boundary evidence the preflight calls out as
+missing: a static-key-absence check alone does not prove the target security
+posture, so the probe now also confirms a14-kali's AWS identity is the
+per-range STS-assumed Bedrock agent role (not the shared host operations
+role), that the durable DOCKER-USER drop rule for IMDS is present on the
+host, and that IMDS is actually unreachable from inside a14-kali.
 """
 
 from __future__ import annotations
@@ -23,6 +30,12 @@ KALI_ENV_KEYS = (
     "ANTHROPIC_MODEL",
     "ANTHROPIC_SMALL_FAST_MODEL",
 )
+
+# Per-range Bedrock agent role names always end in this literal suffix (see
+# shifter/engine/provisioner/terraform/modules/range/iam.tf), even when the
+# environment/range-id portion is truncated+hashed for the 64-char IAM name
+# limit. Checking for the suffix is therefore truncation-proof.
+AGENT_ROLE_NAME_SUFFIX = "-polaris-agent"
 
 POLARIS_AMI_SSM_PARAM = "/shifter/ami/polaris-vm"
 
@@ -74,7 +87,11 @@ if [[ "$profile_ok" == "1" ]]; then
     present=$(sudo docker exec a14-kali grep -q "^export ${key}=" /etc/profile.d/claude-bedrock.sh && echo 1 || echo 0)
     add "env_${key}" "$present"
   done
-  # static keys are only set for Account B shards — don't require them
+  # #1377: post-fix, no shard should ever export a static key -- the a14
+  # entrypoint is STS-only (KALI_BEDROCK_SHARD_SCRIPT). Captured as a
+  # boolean-present flag only (never the value) and flagged as an issue by
+  # RangeReport if set, alongside (not instead of) the agent-role identity
+  # check below.
   has_ak=$(sudo docker exec a14-kali grep -q '^export AWS_ACCESS_KEY_ID=' /etc/profile.d/claude-bedrock.sh && echo 1 || echo 0)
   add env_AWS_ACCESS_KEY_ID "$has_ak"
 else
@@ -91,6 +108,35 @@ else
 fi
 add hosts_override "$hosts_ok"
 
+# #1377: prove the participant identity is the per-range STS-assumed agent
+# role (not the shared host operations role), and that IMDS is denied from
+# inside a14-kali. Both are skipped (safe-default values) when a14-kali
+# isn't running -- a14_state already flags that separately above.
+# The firewall DROPs packets to 169.254.169.254, so a blocked container sees a
+# connection timeout and curl reports "000". IMDSv2 answers a tokenless GET
+# with 401 even when fully reachable, so probing the token PUT endpoint (the
+# way a participant would) and reporting the raw HTTP status lets the reporter
+# treat ANY non-"000" response as reachability rather than only 2xx.
+if [[ "$kali_state" == "running" ]]; then
+  caller_arn=$(sudo docker exec a14-kali aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "")
+  imds_status=$(sudo docker exec a14-kali curl -s -m 2 -o /dev/null -w '%{http_code}' -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token 2>/dev/null || true)
+  imds_status="${imds_status:-000}"
+else
+  caller_arn=""
+  imds_status="000"
+fi
+add caller_identity_arn "${caller_arn:-none}"
+add imds_status "$imds_status"
+
+# #1377: durable DOCKER-USER drop rule for the IMDS address. Host-level and
+# independent of a14-kali's runtime state -- the restore unit installs it at
+# boot, before a14-kali ever starts.
+if sudo iptables -C DOCKER-USER -d 169.254.169.254/32 -j DROP 2>/dev/null; then
+  add docker_user_imds_rule 1
+else
+  add docker_user_imds_rule 0
+fi
+
 # splice watcher systemd
 sv_state=$(systemctl is-active polaris-splice-watcher.service 2>/dev/null || echo missing)
 add splice_watcher "$sv_state"
@@ -103,6 +149,35 @@ done
 
 echo "__RECORD__${out}__END__"
 """
+
+
+def parse_assumed_role_name(arn: str) -> str | None:
+    """Extract the role name from an STS assumed-role ARN.
+
+    Returns ``None`` when ``arn`` is empty, the ``"none"`` sentinel used for
+    a failed/skipped ``sts get-caller-identity`` call, or any ARN that is not
+    an assumed-role identity (e.g. an IAM user or the raw role ARN itself) --
+    a static credential or a failed STS call must not be mistaken for the
+    per-range agent identity.
+    """
+    marker = ":assumed-role/"
+    idx = arn.find(marker)
+    if idx == -1:
+        return None
+    rest = arn[idx + len(marker) :]
+    name, _, _session = rest.partition("/")
+    return name or None
+
+
+def is_polaris_agent_role(role_name: str | None) -> bool:
+    """True when ``role_name`` is a per-range Polaris Bedrock agent role.
+
+    Terraform (``iam.tf``) always terminates the role name with the literal
+    ``-polaris-agent`` suffix, even when the environment/range-id portion is
+    truncated and hash-suffixed for the 64-character IAM name limit, so this
+    check is stable regardless of range id length.
+    """
+    return bool(role_name) and role_name.endswith(AGENT_ROLE_NAME_SUFFIX)
 
 
 @dataclass(frozen=True)
@@ -137,6 +212,10 @@ class RangeReport:
         probs.extend(self._bedrock_env_issues())
         probs.extend(self._splice_watcher_issue())
         probs.extend(self._other_container_state_issues())
+        probs.extend(self._agent_identity_issues())
+        probs.extend(self._docker_user_imds_rule_issue())
+        probs.extend(self._imds_reachability_issue())
+        probs.extend(self._static_access_key_issue())
         return probs
 
     def _container_count_issue(self) -> list[str]:
@@ -169,6 +248,59 @@ class RangeReport:
         if self.fields.get("hosts_override") != "1":
             probs.append("missing /etc/hosts bedrock-runtime entry")
         return probs
+
+    def _agent_identity_issues(self) -> list[str]:
+        """#1377: prove a14-kali's AWS identity is THIS range's per-range STS
+        agent role, not the shared host operations role. Skipped when
+        a14-kali isn't running -- ``_a14_kali_issues`` already reports that,
+        and a state where the container is down produces no meaningful
+        caller identity to evaluate.
+        """
+        if self.fields.get("a14_state") != "running":
+            return []
+        arn = self.fields.get("caller_identity_arn", "none")
+        if not arn or arn == "none":
+            return ["a14-kali sts get-caller-identity failed: no assumed-role identity resolved"]
+        role_name = parse_assumed_role_name(arn)
+        if role_name is None:
+            return [f"a14-kali caller identity is not an assumed role: {arn}"]
+        if not is_polaris_agent_role(role_name):
+            return [f"a14-kali caller identity is not the per-range agent role: {role_name}"]
+        return []
+
+    def _docker_user_imds_rule_issue(self) -> list[str]:
+        """#1377: the durable DOCKER-USER drop rule for 169.254.169.254 must
+        be present on the host regardless of a14-kali's runtime state."""
+        if self.fields.get("docker_user_imds_rule") != "1":
+            return ["DOCKER-USER IMDS drop rule for 169.254.169.254 is missing"]
+        return []
+
+    def _imds_reachability_issue(self) -> list[str]:
+        """#1377: IMDS must actually be unreachable from a14-kali, not merely
+        have the rule present in the abstract (``_docker_user_imds_rule_issue``
+        checks that separately). Skipped when a14-kali isn't running."""
+        if self.fields.get("a14_state") != "running":
+            return []
+        status = self.fields.get("imds_status", "000")
+        # The firewall DROPs packets to 169.254.169.254, so a blocked container
+        # sees a connection timeout and the probe records "000". A reachable
+        # IMDSv2 endpoint answers the token PUT with 200 (or 401/403 in unusual
+        # configs), so ANY non-"000" HTTP status means the metadata service is
+        # reachable and the firewall failed. Treating only 2xx as reachable is a
+        # false negative: IMDSv2 rejects a tokenless request with 401 while still
+        # letting a participant PUT for a token and read credentials.
+        if status != "000":
+            return [f"IMDS reachable from a14-kali (token endpoint status={status}); metadata firewall is not blocking it"]
+        return []
+
+    def _static_access_key_issue(self) -> list[str]:
+        """#1377: a14-kali must rely solely on the per-range STS
+        credential_process. A static AWS_ACCESS_KEY_ID export is a standing
+        credential that doesn't expire or revoke with the range, so it adds
+        risk even alongside a healthy agent-role identity."""
+        if self.fields.get("env_AWS_ACCESS_KEY_ID") == "1":
+            return ["a14-kali claude-bedrock.sh exports a static AWS_ACCESS_KEY_ID (should be STS-only)"]
+        return []
 
     def _splice_watcher_issue(self) -> list[str]:
         sw = self.fields.get("splice_watcher")
@@ -302,6 +434,7 @@ def write_report(
 
 
 __all__ = [
+    "AGENT_ROLE_NAME_SUFFIX",
     "EXPECTED_CONTAINER_COUNT",
     "FLAG_CRITICAL_CONTAINERS",
     "HEALTH_PROBE_SCRIPT",
@@ -311,6 +444,8 @@ __all__ = [
     "Target",
     "batched",
     "discover_targets",
+    "is_polaris_agent_role",
+    "parse_assumed_role_name",
     "parse_record",
     "resolve_polaris_ami_id",
     "write_report",

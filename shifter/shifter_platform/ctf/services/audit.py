@@ -5,8 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from risk_register.models import AuditLog
-from risk_register.services import AuditEvent, audit_log
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+    AuditEvent,
+    audit_log,
+)
 
 if TYPE_CHECKING:
     from ctf.models import CTFParticipant, CTFRangeRecovery
@@ -28,10 +33,10 @@ def audit_live_flag_repair(
     """Record a live flag repair without storing flag plaintext or hashes."""
     audit_log(
         AuditEvent(
-            entity_type=AuditLog.EntityType.CONFIG,
+            entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(challenge_id),
-            action=AuditLog.Action.UPDATE,
-            actor_type=AuditLog.ActorType.USER,
+            action=AuditAction.UPDATE,
+            actor_type=AuditActorType.USER,
             actor_id=actor_id,
             new_state={
                 "ctf_live_flag_repair": action,
@@ -76,10 +81,10 @@ def audit_range_recovery(
     }
     audit_log(
         AuditEvent(
-            entity_type=AuditLog.EntityType.RANGE,
+            entity_type=AuditEntityType.RANGE,
             entity_id=old_range_instance_id,
-            action=AuditLog.Action.RECOVER,
-            actor_type=AuditLog.ActorType.USER if actor_id else AuditLog.ActorType.SYSTEM,
+            action=AuditAction.RECOVER,
+            actor_type=AuditActorType.USER if actor_id else AuditActorType.SYSTEM,
             actor_id=actor_id,
             previous_state={"status": previous_status, "range_instance_id": old_range_instance_id},
             new_state=new_state,
@@ -100,14 +105,14 @@ def audit_spare_provisioning(
 
     One row per ``provision_event_spares`` call, not one per range -- each
     individual CMS range creation is already audited by
-    ``cms.services.create_range`` (``AuditLog.Action.PROVISION``).
+    ``cms.services.create_range`` (``AuditAction.PROVISION``).
     """
     audit_log(
         AuditEvent(
-            entity_type=AuditLog.EntityType.RANGE,
+            entity_type=AuditEntityType.RANGE,
             entity_id=_entity_id_from_uuid(event_id),
-            action=AuditLog.Action.SPARE_PROVISION,
-            actor_type=AuditLog.ActorType.USER if actor_id else AuditLog.ActorType.SYSTEM,
+            action=AuditAction.SPARE_PROVISION,
+            actor_type=AuditActorType.USER if actor_id else AuditActorType.SYSTEM,
             actor_id=actor_id,
             new_state={
                 "event_id": str(event_id),
@@ -117,4 +122,25 @@ def audit_spare_provisioning(
             },
             context="ctf_spare_provisioning",
         )
+    )
+
+
+def audit_vpn_profile_download(
+    *,
+    actor_id: int,
+    participant_id: UUID,
+    range_instance_id: int,
+    generation: UUID,
+    profile_version: str,
+) -> None:
+    """Record profile delivery without credential, topology, or provider data."""
+    from shared.credential_delivery import audit_openvpn_profile_download
+
+    audit_openvpn_profile_download(
+        actor_id=actor_id,
+        participant_id=participant_id,
+        range_instance_id=range_instance_id,
+        generation=generation,
+        profile_version=profile_version,
+        product="ctf",
     )

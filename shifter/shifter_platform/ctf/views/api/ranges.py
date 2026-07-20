@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 from ctf.views import _access
 from ctf.views._access import (
-    _check_invite_rate_limit,
+    _check_credential_delivery_rate_limit,
     _get_user,
     _json_error,
     _resolve_owned_participant,
@@ -59,26 +59,6 @@ def api_range_status(request: HttpRequest) -> JsonResponse:
         return JsonResponse(status)
     except CTFNotFoundError:
         return JsonResponse({"error": _PARTICIPANT_NOT_FOUND_MSG}, status=404)
-
-
-@login_required
-@ctf_participant_required
-@require_POST
-def api_range_access(request: HttpRequest) -> JsonResponse:
-    """API: Get range access URL.
-
-    Delegates to mission_control's Guacamole RDP endpoint.
-    CTF participants are standard users with ranges — the platform's
-    existing RDP access flow works for them directly.
-    """
-    from django.urls import reverse
-
-    return JsonResponse(
-        {
-            "redirect": reverse("mission_control:guacamole_rdp_url"),
-            "message": "Use the mission_control RDP endpoint directly.",
-        }
-    )
 
 
 @login_required
@@ -386,7 +366,7 @@ def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """
     from ctf.services.notification import send_invitations
 
-    if not _check_invite_rate_limit(_get_user(request).pk):
+    if not _check_credential_delivery_rate_limit(_get_user(request).pk):
         return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
 
     _event, error = _resolve_owned_event_json(request, event_id)

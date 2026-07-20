@@ -27,6 +27,13 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
 
     environment = [
       { name = "ENVIRONMENT", value = var.environment },
+      # Explicit backend selection for the provisioner (PLAT-2005). The AWS
+      # provisioner previously relied on the runtime's implicit "aws" default;
+      # runtime now fails closed on a missing/unsupported backend, so every
+      # deployed role must receive the value explicitly. Renderer-owned: the
+      # value comes from var.cloud_provider (rendered from shifter.yaml at
+      # deploy time), not a hardcoded literal.
+      { name = "CLOUD_PROVIDER", value = var.cloud_provider },
       { name = "SECRETS_KMS_KEY_ARN", value = var.secrets_manager_kms_key_arn },
       { name = "AWS_REGION", value = local.region },
       { name = "DB_HOST", value = var.db_host },
@@ -38,6 +45,9 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "RANGE_VPC_CIDR", value = var.range_vpc_cidr },
       { name = "RANGE_ROUTE_TABLE_ID", value = var.range_route_table_id },
       { name = "RANGE_AVAILABILITY_ZONE", value = var.range_availability_zone },
+      { name = "RANGE_VPN_EDGE_SUBNET_ID", value = var.range_vpn_edge_subnet_id },
+      { name = "RANGE_VPN_GATEWAY_PERMISSIONS_BOUNDARY_ARN", value = var.permissions_boundary_arn },
+      { name = "RANGE_VPN_PROVIDER_ENDPOINT_SECURITY_GROUP_ID", value = var.range_vpn_provider_endpoint_security_group_id },
       { name = "RANGE_INSTANCE_PROFILE_NAME", value = var.range_instance_profile_name },
       { name = "KALI_AMI_ID", value = var.kali_ami_id },
       { name = "VICTIM_AMI_ID", value = var.victim_ami_id },
@@ -65,6 +75,22 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "NGFW_INSTANCE_PROFILE_NAME", value = var.ngfw_instance_profile_name },
       # Messaging (SNS for range events)
       { name = "SNS_RANGE_EVENTS_ARN", value = var.sns_topic_arn },
+      # Polaris Bedrock agent config (#1377). See
+      # shifter/engine/provisioner/config.py load_aws_polaris_agent_config().
+      # RANGE_INSTANCE_ROLE_ARN reuses the existing shared range-host role
+      # ARN (already granted iam:PassRole above) as the per-range Polaris
+      # agent role's trust principal.
+      { name = "AWS_POLARIS_AGENT_REGION", value = var.aws_polaris_agent_region },
+      { name = "AWS_POLARIS_AGENT_MAIN_MODEL_ID", value = var.aws_polaris_agent_main_model_id },
+      { name = "AWS_POLARIS_AGENT_SMALL_MODEL_ID", value = var.aws_polaris_agent_small_model_id },
+      { name = "AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN", value = var.aws_polaris_agent_main_inference_profile_arn },
+      { name = "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN", value = var.aws_polaris_agent_small_inference_profile_arn },
+      { name = "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS", value = join(",", var.aws_polaris_agent_main_backing_model_arns) },
+      { name = "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS", value = join(",", var.aws_polaris_agent_small_backing_model_arns) },
+      { name = "AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS", value = tostring(var.aws_polaris_agent_sts_session_duration_seconds) },
+      { name = "AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS", value = tostring(var.aws_polaris_agent_refresh_window_seconds) },
+      { name = "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN", value = var.permissions_boundary_arn },
+      { name = "RANGE_INSTANCE_ROLE_ARN", value = var.range_instance_role_arn },
     ]
 
     secrets = [

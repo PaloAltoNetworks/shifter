@@ -15,21 +15,26 @@ from gcp_range_cell_resources import (
     firewall_resource,
     instance_resource,
     network_resource,
+    openvpn_gateway_address_resource,
+    openvpn_gateway_instance_resource,
     subnetwork_resource,
 )
 
 
 def _plan() -> dict:
     return {
+        "project_id": "test-project",
         "region": "us-central1",
         "zone": "us-central1-b",
+        "range_id": 42,
+        "request_uuid": "87a99f87-5af2-46e6-a459-0e5eb1ab1bf2",
         "private_google_access": True,
         "labels": {"range": "shifter-range-42", "managed-by": "shifter"},
         "network": {"name": "shifter-range-42", "self_link": "projects/p/global/networks/shifter-range-42"},
     }
 
 
-def _instance(*, os_type: str = "kali") -> dict:
+def _instance(*, os_type: str = "kali", attach_service_account: bool = True) -> dict:
     return {
         "resource_name": "shifter-r-42-kali",
         "address_name": "shifter-r-42-kali-ip",
@@ -46,6 +51,7 @@ def _instance(*, os_type: str = "kali") -> dict:
             disk_size_gb=80,
             disk_type="pd-ssd",
         ),
+        "attach_service_account": attach_service_account,
     }
 
 
@@ -128,6 +134,40 @@ class TestAddressResource:
         }
 
 
+class TestOpenVpnGatewayResource:
+    def test_gateway_has_public_udp_edge_and_target_only_forwarding_bootstrap(self):
+        gateway = {
+            "resource_name": "shifter-r-42-vpn-gateway",
+            "address_name": "shifter-r-42-vpn-gateway-ip",
+            "private_ip": "10.50.2.5",
+            "subnetwork_link": "projects/p/regions/us-central1/subnetworks/sn",
+            "target_ip": "10.50.2.4",
+            "tag": "shifter-r-42-vpn-gateway",
+            "service_account_email": "sh-vpn-generation@test-project.iam.gserviceaccount.com",
+            "profile": GCERangeImageProfile(
+                source_image="projects/debian-cloud/global/images/family/debian-12",
+                machine_type="e2-standard-2",
+                disk_size_gb=50,
+            ),
+        }
+        config = _config(service_account_email="range-host@test-project.iam.gserviceaccount.com")
+
+        address = openvpn_gateway_address_resource(gateway)
+        body = openvpn_gateway_instance_resource(_plan(), gateway, config)
+
+        assert address["address"] == "10.50.2.5"
+        assert body["can_ip_forward"] is True
+        assert body["network_interfaces"][0]["access_configs"] == [{"name": "External NAT", "type_": "ONE_TO_ONE_NAT"}]
+        assert body["service_accounts"][0]["email"] == "sh-vpn-generation@test-project.iam.gserviceaccount.com"
+        startup = body["metadata"]["items"][0]["value"]
+        assert "shifter-range-42-vpn-87a99f875af246e6a4590e5eb1ab1bf2-server" in startup
+        assert '"10.50.2.4/32"' in startup
+        assert "shifter-openvpn-health.service" in startup
+        assert '("0.0.0.0", 1195)' in startup
+        assert 'b"ready\\n"' in startup
+        assert "ca_private_key" not in startup
+
+
 def _metadata_map(body: dict) -> dict[str, str]:
     return {item["key"]: item["value"] for item in body["metadata"]["items"]}
 
@@ -148,6 +188,7 @@ class TestInstanceResource:
         assert body["labels"]["range"] == "shifter-range-42"
         assert body["tags"] == {"items": ["shifter-range-42", "shifter-range-42-polaris"]}
         assert body["network_interfaces"][0]["network_i_p"] == "10.50.2.4"
+        assert "access_configs" not in body["network_interfaces"][0]
         disk = body["disks"][0]["initialize_params"]
         assert disk["source_image"] == "projects/kali/global/images/kali"
         assert disk["disk_size_gb"] == 80
@@ -198,3 +239,13 @@ class TestInstanceResource:
         assert HOST_PUBLIC_KEY_METADATA_KEY not in meta
         assert "startup-script" not in meta
         assert meta["ssh-keys"] == "ubuntu:ssh-ed25519 AAAAkey"
+
+    def test_configured_service_account_is_omitted_when_guest_does_not_need_cloud_apis(self):
+        body = instance_resource(
+            _plan(),
+            _instance(attach_service_account=False),
+            _config(service_account_email="range-host@test-project.iam.gserviceaccount.com"),
+            ssh_public_key="ssh-ed25519 AAAAkey",
+        )
+
+        assert "service_accounts" not in body

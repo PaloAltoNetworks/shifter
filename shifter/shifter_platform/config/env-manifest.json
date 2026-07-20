@@ -18,6 +18,11 @@
       "source_file": "config/_aces_settings.py"
     },
     {
+      "default": "False",
+      "name": "ADMINISTER_SPA_ENABLED",
+      "source_file": "config/settings.py"
+    },
+    {
       "default": "300",
       "name": "API_TOKEN_LAST_USED_COALESCE_SECONDS",
       "source_file": "config/_api_token_settings.py"
@@ -26,6 +31,11 @@
       "default": "365",
       "name": "API_TOKEN_MAX_TTL_DAYS",
       "source_file": "config/_api_token_settings.py"
+    },
+    {
+      "default": "1",
+      "name": "AUDIT_TRUSTED_PROXY_HOPS",
+      "source_file": "config/settings.py"
     },
     {
       "default": "'oidc'",
@@ -63,6 +73,11 @@
       "source_file": "config/_email.py"
     },
     {
+      "default": "'report-only'",
+      "name": "BROWSER_CSP_MODE",
+      "source_file": "config/_browser_security.py"
+    },
+    {
       "default": "'aws'",
       "name": "CLOUD_PROVIDER",
       "source_file": "config/_cloud.py"
@@ -83,6 +98,11 @@
       "source_file": "config/settings.py"
     },
     {
+      "default": "''",
+      "name": "CTF_DEFAULT_PARTICIPANT_PASSWORD",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
       "default": "'30'",
       "name": "CTF_DEFAULT_RANGE_SPINUP_MINUTES",
       "source_file": "config/settings.py"
@@ -91,6 +111,21 @@
       "default": "'ctf@example.com'",
       "name": "CTF_FROM_EMAIL",
       "source_file": "config/settings.py"
+    },
+    {
+      "default": "'5'",
+      "name": "CTF_LOGIN_RATE_LIMIT_MAX",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'300'",
+      "name": "CTF_LOGIN_RATE_LIMIT_WINDOW_SECONDS",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'24'",
+      "name": "CTF_PARTICIPANT_ACCOUNT_RETENTION_HOURS",
+      "source_file": "config/_oidc_settings.py"
     },
     {
       "default": "'0.1'",
@@ -106,6 +141,11 @@
       "default": "'500'",
       "name": "CTF_REGEX_FLAG_MAX_SUBMISSION_LENGTH",
       "source_file": "config/_ctf_regex_settings.py"
+    },
+    {
+      "default": "False",
+      "name": "CTF_WORKSPACE_SPA_ENABLED",
+      "source_file": "config/settings.py"
     },
     {
       "default": null,
@@ -176,6 +216,11 @@
       "default": "''",
       "name": "DJANGO_SECRET_KEY_FALLBACKS",
       "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": "'https://brad-edwards.github.io/shifter/'",
+      "name": "DOCS_SITE_URL",
+      "source_file": "config/settings.py"
     },
     {
       "default": "''",
@@ -378,21 +423,6 @@
       "source_file": "config/_logging_config.py"
     },
     {
-      "default": null,
-      "name": "MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS",
-      "source_file": "config/_oidc_settings.py"
-    },
-    {
-      "default": "'24'",
-      "name": "MAGIC_LINK_EXPIRY_HOURS",
-      "source_file": "config/_oidc_settings.py"
-    },
-    {
-      "default": "'False'",
-      "name": "MAGIC_LINK_SINGLE_USE",
-      "source_file": "config/_oidc_settings.py"
-    },
-    {
       "default": "''",
       "name": "MAILGUN_SENDER_DOMAIN",
       "source_file": "config/_email.py"
@@ -478,13 +508,58 @@
       "source_file": "config/settings.py"
     },
     {
+      "default": "False",
+      "name": "SCENARIO_EDITOR_SPA_ENABLED",
+      "source_file": "config/settings.py"
+    },
+    {
       "default": "'31536000'",
       "name": "SECURE_HSTS_SECONDS",
       "source_file": "config/settings.py"
     },
     {
+      "default": "'268435456'",
+      "name": "SHIFTER_ACES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'aces/content-delivery'",
+      "name": "SHIFTER_ACES_CONTENT_DELIVERY_PREFIX",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
       "default": "'False'",
       "name": "SHIFTER_ACES_NATIVE_PROVISIONING",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "SHIFTER_ACES_PACKAGE_BUCKET",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'268435456'",
+      "name": "SHIFTER_ACES_PACKAGE_MAX_ARCHIVE_BYTES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'20000'",
+      "name": "SHIFTER_ACES_PACKAGE_MAX_ENTRIES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'1073741824'",
+      "name": "SHIFTER_ACES_PACKAGE_MAX_UNCOMPRESSED_BYTES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "SHIFTER_ACES_PACKAGE_PREFIX",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "str(_aces_default_package_root)",
+      "name": "SHIFTER_ACES_PACKAGE_ROOT",
       "source_file": "config/_aces_settings.py"
     },
     {
@@ -511,6 +586,11 @@
       "default": null,
       "name": "TESTING",
       "source_file": "config/settings.py"
+    },
+    {
+      "default": "sqlite",
+      "name": "TEST_DB_BACKEND",
+      "source_file": "config/_database_settings.py"
     },
     {
       "default": "str(_UPLOAD_INSPECTION_FLOOR)",

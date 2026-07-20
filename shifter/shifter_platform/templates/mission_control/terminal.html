@@ -260,22 +260,20 @@
 {% endblock %}
 {% block extra_js %}
     {% if has_active_range %}
-        <!-- xterm.js from CDN with SRI. URLs centralised in TERMINAL_CDN_ASSETS (see settings.py). -->
+        <!-- xterm.js vendored + served same-origin with SRI (ADR-036). Paths
+             centralised in TERMINAL_CDN_ASSETS (see config/_terminal_assets.py). -->
         <link rel="stylesheet"
-              href="{{ terminal_cdn_assets.xterm_css.url }}"
-              integrity="{{ terminal_cdn_assets.xterm_css.integrity }}"
-              crossorigin="anonymous">
-        <script src="{{ terminal_cdn_assets.xterm_js.url }}"
-                integrity="{{ terminal_cdn_assets.xterm_js.integrity }}"
-                crossorigin="anonymous"></script>
-        <script src="{{ terminal_cdn_assets.xterm_addon_fit.url }}"
-                integrity="{{ terminal_cdn_assets.xterm_addon_fit.integrity }}"
-                crossorigin="anonymous"></script>
-        <script src="{{ terminal_cdn_assets.xterm_addon_web_links.url }}"
-                integrity="{{ terminal_cdn_assets.xterm_addon_web_links.integrity }}"
-                crossorigin="anonymous"></script>
-        <!-- Split.js for resizable split panes -->
-        <script src="{{ terminal_cdn_assets.split_js.url }}"></script>
+              href="{% static terminal_cdn_assets.xterm_css.url %}"
+              integrity="{{ terminal_cdn_assets.xterm_css.integrity }}">
+        <script src="{% static terminal_cdn_assets.xterm_js.url %}"
+                integrity="{{ terminal_cdn_assets.xterm_js.integrity }}"></script>
+        <script src="{% static terminal_cdn_assets.xterm_addon_fit.url %}"
+                integrity="{{ terminal_cdn_assets.xterm_addon_fit.integrity }}"></script>
+        <script src="{% static terminal_cdn_assets.xterm_addon_web_links.url %}"
+                integrity="{{ terminal_cdn_assets.xterm_addon_web_links.integrity }}"></script>
+        <!-- Split.js for resizable split panes (vendored, same-origin) -->
+        <script src="{% static terminal_cdn_assets.split_js.url %}"
+                integrity="{{ terminal_cdn_assets.split_js.integrity }}"></script>
         {{ terminal_instances|json_script:"terminal-instances-data" }}
         {{ connection_urls|json_script:"terminal-connection-urls-data" }}
         {{ terminal_guacamole_config|json_script:"terminal-guacamole-config" }}

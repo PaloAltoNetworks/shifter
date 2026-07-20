@@ -1,6 +1,0 @@
-# Usage: terraform init -backend-config=backend-teamN.hcl
-# Create one per team: backend-team2.hcl, backend-team3.hcl, etc.
-bucket         = "REPLACE_AT_BOOTSTRAP"
-key            = "global/tssummit-ranges/team2/terraform.tfstate"
-region         = "us-east-2"
-dynamodb_table = "REPLACE_AT_BOOTSTRAP"

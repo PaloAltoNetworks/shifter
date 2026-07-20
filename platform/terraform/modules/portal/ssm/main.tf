@@ -41,6 +41,15 @@ resource "aws_ssm_parameter" "environment" {
   tags = local.common_tags
 }
 
+resource "aws_ssm_parameter" "cloud_provider" {
+  name        = "${local.ps_prefix}/cloud-provider"
+  description = "Backend identity for the portal container's CLOUD_PROVIDER env var (config._cloud.resolve_cloud_provider)"
+  type        = "String"
+  value       = var.cloud_provider
+
+  tags = local.common_tags
+}
+
 resource "aws_ssm_parameter" "image_tag" {
   name        = "${local.ps_prefix}/image-tag"
   description = "Current Docker image tag for portal deployment"

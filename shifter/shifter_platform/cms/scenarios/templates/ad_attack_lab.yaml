@@ -28,6 +28,12 @@ instances:
     ai_agent: true
     join_domain: true
 
+participant_access:
+  - target: Attacker
+    channel: ssh
+  - target: Attacker
+    channel: rdp
+
 subnets:
   - name: core
     instances: [Attacker, Domain Controller, Workstation]

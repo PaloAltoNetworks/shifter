@@ -1,0 +1,24 @@
+# In-box scenario-pack manifest (#1578, ADR-034).
+#
+# Declares the scenario packs Shifter ships by default. The bootstrap
+# (`cms.scenarios.inbox.register_inbox_packs`, invoked by the
+# `bootstrap_inbox_catalog` management command) registers each entry through the
+# SAME `cms.services.register_pack` service an operator uses. The in-box catalog
+# therefore has NO privileged load path — it is dogfooded through the uniform
+# ingestion boundary (ADR-033/ADR-034).
+#
+# There are no conformant default scenario packs yet (they are authored under
+# program #1584), so `packs` is an empty list. Add an entry per shipped pack as
+# they land. Each entry is the same source-agnostic, entitlement-blind shape the
+# operator API/CLI accept. Example:
+#
+# packs:
+#   - scenario_id: example-inbox
+#     source_kind: repo            # repo | object (object is not launchable until #1567)
+#     contract_kind: aces
+#     contract_profile: shifter
+#     package_ref: scenario-dev/example-inbox   # pack root, resolved under ACES_PACKAGE_ROOT
+#     package_version: "0.1.0"
+#     package_digest: "sha256:<64 lowercase hex>"  # canonical associated-artifact set digest
+#     provenance: {repo: Brad-Edwards/shifter}
+packs: []

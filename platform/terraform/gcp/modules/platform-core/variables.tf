@@ -51,27 +51,28 @@ variable "gke_master_ipv4_cidr" {
 }
 
 variable "gke_master_authorized_cidrs" {
-  description = "CIDR blocks allowed to reach the public GKE control-plane endpoint. Required: the cluster runs with enable_private_endpoint = false, so master_authorized_networks_config is the only network-level restriction on the public Kubernetes API server (ADR-008; docs/architecture/gke-control-plane-access-preflight.md). The environment root must supply at least one CIDR."
+  description = "Optional RFC1918 CIDR blocks allowed to reach the private GKE control-plane endpoint from within the VPC / peered networks. The cluster runs with enable_private_endpoint = true and no public control-plane endpoint (ADR-008; docs/architecture/gke-control-plane-access-preflight.md); operator and CI reach the control plane over the IAM-authenticated DNS endpoint, so this list is optional and defaults to empty. Any entries must be RFC1918 (a private endpoint rejects public CIDRs)."
   type        = list(string)
+  default     = []
 
-  # Fail closed: an empty, malformed, or world-open (/0) allowlist would expose
-  # the public API server to the entire internet. This is the Terraform-layer
-  # backstop for the bootstrap preflight
-  # (scripts/bootstrap/deploy.py::validate_gcp_control_plane_security_inputs);
-  # both gates express the same contract from the parsed prefix:
+  # The control-plane endpoint is private (no public API server), so an empty
+  # allowlist is the secure default — remote access is IAM-gated via the DNS
+  # endpoint, not a network allowlist (#1723). This validation no longer requires
+  # a non-empty list; it only rejects malformed or world-open (/0) entries when
+  # entries are supplied. Contract from the parsed prefix:
   #   1. cidrhost(cidr, 0) — entry parses as a CIDR (rejects bare IPs, garbage,
   #      bad octets, bad prefixes).
   #   2. an explicit /N suffix is present.
   #   3. the parsed prefix length is > 0 (so /0 is rejected from the prefix
   #      number, not by string-suffix matching against one spelling).
   validation {
-    condition = length(var.gke_master_authorized_cidrs) > 0 && alltrue([
+    condition = alltrue([
       for cidr in var.gke_master_authorized_cidrs :
       can(cidrhost(cidr, 0))
       && can(regex("/[0-9]+$", cidr))
       && tonumber(regex("/([0-9]+)$", cidr)[0]) > 0
     ])
-    error_message = "gke_master_authorized_cidrs must contain at least one CIDR; every entry must be a valid CIDR with an explicit /N suffix (e.g. 203.0.113.10/32), and no entry may be a /0 (world-open) range. The GKE control-plane endpoint is public (enable_private_endpoint = false), so an empty or world-open allowlist would expose the Kubernetes API server to the entire internet. Set it from the environment root (see ADR-008 and docs/architecture/gke-control-plane-access-preflight.md); if a private endpoint is intended, change enable_private_endpoint and relax this rule together."
+    error_message = "Every gke_master_authorized_cidrs entry must be a valid CIDR with an explicit /N suffix (e.g. 10.0.0.0/24) and may not be a /0 (world-open) range. The control-plane endpoint is private (enable_private_endpoint = true) and reached over the IAM-authenticated DNS endpoint, so the list is optional and defaults to empty (see ADR-008 and docs/architecture/gke-control-plane-access-preflight.md)."
   }
 }
 
@@ -299,6 +300,18 @@ variable "email_from_address" {
 
 variable "email_sender_domain" {
   description = "Mailgun sender domain (MAILGUN_SENDER_DOMAIN); ignored for SendGrid."
+  type        = string
+  default     = ""
+}
+
+variable "vmseries_bootstrap_bucket_name" {
+  description = "Optional GCS bucket the provisioner writes VM-Series bootstrap ISOs to (GDC VM-Series path only). Empty grants the provisioner no binding on it (ADR-008-R7); set it when a GDC VM-Series deployment configures GDC_VMSERIES_BOOTSTRAP_BUCKET."
+  type        = string
+  default     = ""
+}
+
+variable "aces_package_bucket_name" {
+  description = "Optional GCS bucket holding object-backed ACES package archives (#1567). Empty grants the portal no binding on it (ADR-008-R7); set it (with SHIFTER_ACES_PACKAGE_BUCKET on the app) when a deployment enables object-backed ACES packages."
   type        = string
   default     = ""
 }

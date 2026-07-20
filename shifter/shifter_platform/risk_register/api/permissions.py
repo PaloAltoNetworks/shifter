@@ -9,9 +9,12 @@ from rest_framework import permissions
 from rest_framework.request import Request
 
 from risk_register.access import principal_has_risk_register_access
-from risk_register.models import AuditLog
-from risk_register.services import audit_log_from_request
 from shared.api_tokens.models import ApiToken
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+    audit_log_from_request,
+)
 
 if TYPE_CHECKING:
     from rest_framework.request import Request
@@ -27,7 +30,7 @@ class AuditedPermissionMixin:
         """Log access denied event to audit log."""
         try:
             # Determine entity type from view
-            entity_type = AuditLog.EntityType.CONFIG  # Default
+            entity_type = AuditEntityType.CONFIG  # Default
             entity_id = 0
 
             # Try to get entity info from view
@@ -35,9 +38,9 @@ class AuditedPermissionMixin:
             if hasattr(view, "basename"):
                 basename = view.basename
                 if basename == "risk":
-                    entity_type = AuditLog.EntityType.RISK
+                    entity_type = AuditEntityType.RISK
                 elif basename == "auditlog":
-                    entity_type = AuditLog.EntityType.CONFIG
+                    entity_type = AuditEntityType.CONFIG
 
             # Get entity_id from URL kwargs if available
             if hasattr(view, "kwargs") and view.kwargs:
@@ -51,7 +54,7 @@ class AuditedPermissionMixin:
                 request,
                 entity_type=entity_type,
                 entity_id=entity_id,
-                action=AuditLog.Action.ACCESS_DENIED,
+                action=AuditAction.ACCESS_DENIED,
                 context=context,
             )
         except Exception:

@@ -137,7 +137,7 @@ function openRdpSession(button, instanceUuid) {
     var originalText = button.textContent;
     button.textContent = 'Opening...';
 
-    fetch('{% url "mission_control:guacamole_rdp_url" %}', {
+    fetch('{% url "v1:mission_control:guacamole-rdp-url" %}', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

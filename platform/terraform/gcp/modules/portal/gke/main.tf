@@ -21,23 +21,29 @@ resource "google_container_cluster" "platform" {
     }
   }
 
+  # Private control plane, secure by default (#1723): no public IP endpoint on the
+  # control plane (satisfies org policies such as custom.disableGkePublicControlPlane
+  # and is universally the hardened posture). Operator and CI reach the control
+  # plane through Connect Gateway via the fleet membership below (IAM-authenticated,
+  # no public IP, no DNS endpoint, no bastion), so private-by-default does not cost
+  # remote access.
   private_cluster_config {
     enable_private_nodes    = true
-    enable_private_endpoint = false
+    enable_private_endpoint = true
     master_ipv4_cidr_block  = var.gke_master_ipv4_cidr
   }
 
-  dynamic "master_authorized_networks_config" {
-    for_each = length(var.gke_master_authorized_cidrs) == 0 ? [] : [1]
+  # Always present (enabled): a private control plane requires
+  # master_authorized_networks_config to be enabled. cidr_blocks may be empty —
+  # remote access is via the IAM-authenticated DNS endpoint, not a network
+  # allowlist (#1723). gcp_public_cidrs_access_enabled defaults false.
+  master_authorized_networks_config {
+    dynamic "cidr_blocks" {
+      for_each = var.gke_master_authorized_cidrs
 
-    content {
-      dynamic "cidr_blocks" {
-        for_each = var.gke_master_authorized_cidrs
-
-        content {
-          cidr_block   = cidr_blocks.value
-          display_name = "admin-${replace(replace(cidr_blocks.value, "/", "-"), ".", "-")}"
-        }
+      content {
+        cidr_block   = cidr_blocks.value
+        display_name = "admin-${replace(replace(cidr_blocks.value, "/", "-"), ".", "-")}"
       }
     }
   }
@@ -48,6 +54,15 @@ resource "google_container_cluster" "platform" {
 
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  # Register the cluster to the project fleet so operator/CI reach the private
+  # control plane through Connect Gateway (IAM-authenticated, no public endpoint,
+  # no DNS endpoint, no bastion) — the access path for a private control plane
+  # when both the public endpoint and the Google DNS endpoint are disallowed
+  # (#1723). Credentials: `gcloud container fleet memberships get-credentials`.
+  fleet {
+    project = var.project_id
   }
 
   binary_authorization {
@@ -146,8 +161,14 @@ resource "google_container_node_pool" "provisioner" {
   }
 
   network_config {
-    create_pod_range = false
-    pod_range        = var.gke_provisioner_pods_secondary_range_name
+    # Private nodes (no external IP): egress is via Cloud NAT, matching the web/
+    # workers pools and the cluster default. Specifying network_config without
+    # enable_private_nodes otherwise defaults it to false (public/external IP),
+    # which is both a needless exposure and a violation of the
+    # constraints/compute.vmExternalIpAccess org policy (#1723).
+    enable_private_nodes = true
+    create_pod_range     = false
+    pod_range            = var.gke_provisioner_pods_secondary_range_name
   }
 
   node_config {

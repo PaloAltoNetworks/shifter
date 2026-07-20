@@ -59,18 +59,56 @@ __all__ = [
     "render_shifter_backend_manifest_payload",
 ]
 
-#: Shifter's honest provisioning capability envelope. Shifter provisions virtual
-#: machine instances (EC2 / GDC) running Linux and Windows guests. Account,
-#: ACL, and content-placement realization are not exposed as authored ACES
-#: scenario semantics in this slice, so they stay off -- every declared term is
-#: backed by real capability, so the manifest cannot over-claim.
+#: Shifter's honest provisioning capability envelope (issue #1563: a realizability
+#: ledger, not an aspiration). Shifter provisions virtual machine instances
+#: (EC2 / GDC / GCE) running Linux and Windows guests, realizes authored networks
+#: (``switch`` nodes) as backend networks/subnets, realizes authored node ACLs as
+#: backend firewall rules, and realizes authored composition as guest effect:
+#: ``file`` and ``directory`` content placements, feature bindings, and account
+#: placements (groups/shell/home/disabled/auth_method) plus range-local Active
+#: Directory accounts and SPNs. Every declared term must be backed by a real
+#: guest effect (ADR-031 / ADR-032); a term realized only structurally or as a
+#: marker file is dropped until its sibling issue lands genuine realization plus
+#: cross-boundary evidence. ``file`` and ``directory`` are re-declared by #1564:
+#: every admitted shape now has a genuine guest effect -- an inline ``text`` file
+#: is written by the guest bootstrap, an empty ``directory`` is created, and a
+#: source-backed ``file`` / ``directory`` is genuinely delivered into the guest
+#: (materialized from the digest-verified pack, promoted content-addressed to
+#: object storage, transferred over the authenticated guest channel, and confirmed
+#: by an in-guest digest readback that fails the range apply on mismatch,
+#: ADR-032-R3 / ADR-034-R6). ``mail`` (no common provider) and ``dataset`` (its
+#: item-only and generator-format shapes have no deterministic materializer +
+#: readback yet) stay out entirely rather than admit an unrealized shape. ``switch``
+#: is required for any networked scenario: the aces-sdl planner rejects every
+#: network resource unless the backend declares switch support (matches the
+#: libvirt/reference backends).
+#: The apply-time account-feature realization gate (``shared.aces.realization_ledger``
+#: consumed by ``shared.aces.composition_envelope``) is an INDEPENDENT evidence
+#: envelope: re-declaring a term here does not by itself make a plan admissible.
+#:
+#: The ``constraints`` map qualifies ``switch``: Shifter's range-cell substrate is
+#: IPv4-only across planning, addressing, firewall posture, and outputs, so the
+#: backend realizes IPv4 networks only. ACES SDL accepts IPv6/dual-stack, so this
+#: narrower support is published as ``network-address-family = ipv4-only`` (issue
+#: #1568). IPv6-only and mixed IPv4/IPv6 topologies are unsupported and rejected at
+#: admission (``shared.aces.runtime_target``); the provisioner ``_usable_host_ips``
+#: check is the separate backstop for persisted/replayed plans. The key is
+#: provider-neutral by design -- the publication guard forbids provider/subnet/CIDR
+#: detail in the manifest.
 SHIFTER_PROVISIONER_CAPABILITIES = ProvisionerCapabilities(
     name="shifter-provisioner",
-    supported_node_types=frozenset({"vm"}),
+    supported_node_types=frozenset({"vm", "switch"}),
     supported_os_families=frozenset({"linux", "windows"}),
+    supported_content_types=frozenset({"file", "directory"}),
+    supported_account_features=frozenset({"groups", "shell", "home", "disabled", "auth_method", "spn"}),
+    # #1561 realizes the bounded first ACES identity-domain profile: one
+    # range-local Windows AD controller, Windows member joins, domain accounts,
+    # uniqueness-preserving SPN registration, and directory readback.
+    supported_domain_profiles=frozenset({"active_directory"}),
     max_total_nodes=None,
-    supports_acls=False,
-    supports_accounts=False,
+    supports_acls=True,
+    supports_accounts=True,
+    constraints={"network-address-family": "ipv4-only"},
 )
 
 

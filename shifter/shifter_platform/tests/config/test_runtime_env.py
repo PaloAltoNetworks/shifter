@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
-from config._runtime_env import AUTH_PROVIDER, require_environment
+from config._runtime_env import AUTH_PROVIDER, require_environment, resolve_cloud_provider
 
 PLATFORM_DIR = Path(__file__).resolve().parents[2]
 SHIFTER_DIR = PLATFORM_DIR.parent
@@ -54,3 +54,30 @@ def test_settings_import_fails_without_environment():
 
 def test_auth_provider_default_is_oidc():
     assert AUTH_PROVIDER == "oidc"
+
+
+def test_resolve_cloud_provider_returns_known_backend():
+    """A registered backend is accepted and returned normalized (PLAT-2005)."""
+    assert resolve_cloud_provider({"CLOUD_PROVIDER": "gcp"}) == "gcp"
+
+
+def test_resolve_cloud_provider_normalizes_case_and_whitespace():
+    assert resolve_cloud_provider({"CLOUD_PROVIDER": "  AWS  "}) == "aws"
+
+
+def test_resolve_cloud_provider_rejects_unknown_backend():
+    """An unrecognized backend fails closed rather than defaulting to AWS (PLAT-2005)."""
+    with pytest.raises(ImproperlyConfigured, match="not a supported backend"):
+        resolve_cloud_provider({"CLOUD_PROVIDER": "azure"})
+
+
+def test_resolve_cloud_provider_allows_aws_dev_default_under_test():
+    """Missing selection resolves to the aws dev default only when dev defaults are allowed."""
+    assert resolve_cloud_provider({"TESTING": "1"}) == "aws"
+
+
+def test_resolve_cloud_provider_fails_closed_when_missing_in_prod(monkeypatch):
+    """A deployed process with no CLOUD_PROVIDER must not silently default to AWS (PLAT-2005)."""
+    monkeypatch.setattr(sys, "argv", ["gunicorn"])
+    with pytest.raises(ImproperlyConfigured, match="CLOUD_PROVIDER"):
+        resolve_cloud_provider({"ENVIRONMENT": "production"})

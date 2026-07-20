@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 from cms.exceptions import CMSError
-from risk_register.models import AuditLog
+from shared.audit import AuditAction, AuditActorType, AuditEntityType
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
 from shared.log_sanitize import safe_log_value
@@ -307,10 +307,10 @@ def _hydrate_and_dispatch_ngfw(
     engine_create_ngfw(request_spec)
 
     _audit_log_call(
-        entity_type=AuditLog.EntityType.NGFW,
+        entity_type=AuditEntityType.NGFW,
         entity_id=0,
-        action=AuditLog.Action.PROVISION,
-        actor_type=AuditLog.ActorType.USER,
+        action=AuditAction.PROVISION,
+        actor_type=AuditActorType.USER,
         actor_id=user.id,
         new_state={
             "app_uuid": str(app.id),
@@ -473,10 +473,10 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
     instance.save(update_fields=["status", "deleted_at"])
 
     _audit_log_call(
-        entity_type=AuditLog.EntityType.NGFW,
+        entity_type=AuditEntityType.NGFW,
         entity_id=0,
-        action=AuditLog.Action.DEPROVISION,
-        actor_type=AuditLog.ActorType.USER,
+        action=AuditAction.DEPROVISION,
+        actor_type=AuditActorType.USER,
         actor_id=user.id,
         previous_state={
             "app_uuid": str(app.id),

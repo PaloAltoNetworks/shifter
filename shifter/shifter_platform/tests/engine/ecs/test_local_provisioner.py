@@ -7,6 +7,7 @@ first-party ``_run_local_provisioner`` helper.
 """
 
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import UUID
 
@@ -105,6 +106,33 @@ class TestRunLocalProvisioner:
         assert captured_env.get("DB_PORT") == "5433"
         assert captured_env.get("DB_USER") == "testuser"
         assert captured_env.get("DB_NAME") == "testdb"
+
+    def test_default_path_resolves_to_repo_provisioner_dir_when_unset(self, settings):
+        """Regression test for #685: the ``engine/ecs.py`` -> ``engine/ecs/``
+        package move must not shift the unset-``PROVISIONER_PATH`` default off
+        the real ``shifter/engine/provisioner`` directory.
+        """
+        from engine.ecs import _run_local_provisioner
+
+        settings.PROVISIONER_PATH = None
+        settings.ENVIRONMENT = "dev"
+        settings.AWS_REGION = "us-east-2"
+
+        # Independently derive the expected default from this test file's own
+        # location (repo layout invariant), rather than re-deriving it from
+        # the code under test.
+        shifter_dir = Path(__file__).resolve().parents[4]
+        expected_main_py = shifter_dir / "engine" / "provisioner" / "main.py"
+        assert expected_main_py.is_file(), "test assumption: real provisioner main.py must exist"
+
+        proc = MagicMock()
+        proc.pid = 54321
+        with patch("subprocess.Popen", return_value=proc) as popen:
+            result = _run_local_provisioner(["range", "provision"])
+
+        assert result == "local-54321"
+        full_command = popen.call_args[0][0]
+        assert full_command[1] == str(expected_main_py)
 
     def test_returns_local_pid_on_success(self, settings, tmp_path):
         from engine.ecs import _run_local_provisioner

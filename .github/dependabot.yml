@@ -235,11 +235,20 @@ updates:
           - "minor"
           - "patch"
 
-  # Auto-bump the digest-pinned base images in the portal Dockerfile so the
-  # pins stay current with upstream security rebuilds (the FROM lines are
-  # pinned by @sha256 for reproducible, integrity-checked builds).
+  # Track the digest-pinned base images across every first-party and scenario
+  # Dockerfile (ADR-037-R2). The FROM lines are pinned by @sha256 for
+  # reproducible, integrity-checked builds; Dependabot surfaces base-image
+  # updates on the weekly reviewed-PR cadence. Note: Dependabot's digest-only
+  # refresh is best-effort (it opens an initial PR but does not always
+  # supersede); the authoritative refresh procedure is documented in
+  # docs/architecture/rev1-build-deployment-provenance.md.
   - package-ecosystem: "docker"
-    directory: "/shifter/shifter_platform"
+    directories:
+      - "/shifter/shifter_platform"
+      - "/shifter/engine/provisioner"
+      - "/shifter/engine/guacd"
+      - "/shifter/engine/guacamole"
+      - "/scenario-dev/polaris/containers/*"
     target-branch: "dev"
     schedule:
       interval: "weekly"

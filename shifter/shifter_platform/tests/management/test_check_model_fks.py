@@ -168,3 +168,17 @@ class TestCheckModelFksCommand:
         stats = Command().compute_stats(_RESULTS_WITH_VIOLATION)
         assert stats["violations"] == 1
         assert "engine" in stats["layers_with_violations"]
+
+
+class TestLayerClassificationParity:
+    """ALL_LAYERS must mirror the canonical classification (ADR-001, #1523)."""
+
+    def test_all_layers_set_equality_with_classification(self):
+        from pathlib import Path
+
+        import yaml
+
+        policy = Path(__file__).resolve().parents[4] / "scripts" / "check_layer_imports" / "layer_imports.yaml"
+        classification = yaml.safe_load(policy.read_text(encoding="utf-8"))["classification"]
+        classified = {pkg for packages in classification.values() for pkg in packages}
+        assert set(ALL_LAYERS) == classified

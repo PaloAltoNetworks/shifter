@@ -1,13 +1,17 @@
 """URL routing for the Risk Register UI.
 
-Rollout-flag aware (issue #1302, ADR-029). When ``RISK_REGISTER_SPA_ENABLED``
-is on, the GET page paths are served by the React SPA host view; when off (the
-default), the classic Django template views handle them. The decision is made
-**per request** (not at import) so the flag can be flipped without a restart and
-so tests can toggle it with ``override_settings``. The legacy POST action URLs
-are always Django-handled — the SPA uses /api/v1/ exclusively, but old tabs,
-bookmarks, and rollback rely on them. Route *names* are identical in both modes
-so ``reverse("risk_register:...")`` callers keep working across the cutover.
+Rollout-flag aware (issues #1302 / #1369, ADR-013 / ADR-029). When the SPA
+shell is enabled, the GET page paths are served by the platform SPA host view
+(the Risk Register routes are rehomed under the unified client router in
+#1369); when off (the default), the classic Django template views handle them.
+The decision is made **per request** (not at import) so the flag can be flipped
+without a restart and so tests can toggle it with ``override_settings``. The
+enable check honours both ``PLATFORM_SPA_ENABLED`` (the platform-wide control)
+and the legacy ``RISK_REGISTER_SPA_ENABLED`` so an in-flight deploy toggled on
+the older flag keeps working. The legacy POST action URLs are always
+Django-handled — the SPA uses /api/v1/ exclusively, but old tabs, bookmarks,
+and rollback rely on them. Route *names* are identical in both modes so
+``reverse("risk_register:...")`` callers keep working across the cutover.
 """
 
 from __future__ import annotations
@@ -19,12 +23,14 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.urls import path, re_path
 
 from risk_register import views
-from risk_register.spa_views import risk_register_spa_host
+from shared.spa_host import platform_spa_host
 
 
 def _spa_enabled() -> bool:
-    """Return whether the Risk Register SPA rollout flag is enabled."""
-    return bool(getattr(settings, "RISK_REGISTER_SPA_ENABLED", False))
+    """Return whether the SPA shell should serve the Risk Register pages."""
+    return bool(
+        getattr(settings, "PLATFORM_SPA_ENABLED", False) or getattr(settings, "RISK_REGISTER_SPA_ENABLED", False)
+    )
 
 
 def _page(django_view: Callable[..., HttpResponse] | None) -> Callable[..., HttpResponse]:
@@ -38,7 +44,7 @@ def _page(django_view: Callable[..., HttpResponse] | None) -> Callable[..., Http
     def _dispatch(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         """Serve the SPA shell when enabled, else the Django page (or 404)."""
         if _spa_enabled():
-            return risk_register_spa_host(request, *args, **kwargs)
+            return platform_spa_host(request, *args, **kwargs)
         if django_view is None:
             raise Http404
         return django_view(request, *args, **kwargs)

@@ -31,7 +31,12 @@ REQUIRED_TAG_KEYS: tuple[str, ...] = (
     "ec2:ResourceTag/ManagedBy",
 )
 
-_RESOURCE_RE = re.compile(r'^\s*resource\s+"aws_iam_role_policy"\s+"([^"]+)"\s*\{')
+# Match both the inline (aws_iam_role_policy) and customer-managed (aws_iam_policy)
+# forms: the ec2_provisioning policy was moved to a managed policy to keep the
+# task role under AWS's inline-policy-size limit (issue #1749), and the same EC2
+# scoping rules must apply regardless of the container. The check keys on the
+# resource name.
+_RESOURCE_RE = re.compile(r'^\s*resource\s+"aws_iam_(?:role_)?policy"\s+"([^"]+)"\s*\{')
 _ACTION_RE = re.compile(r'"(ec2:[^"]+)"')
 
 

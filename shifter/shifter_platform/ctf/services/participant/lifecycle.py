@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import logging
-import secrets
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import transaction
-from django.utils import timezone
 
 from ctf.enums import ParticipantStatus
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
@@ -42,7 +40,7 @@ def invite_participant(
         CTFNotFoundError: If event or team doesn't exist.
         CTFValidationError: If participant already exists or data is invalid.
     """
-    logger.info("Inviting participant %s to event %s", safe_log_value(email), safe_log_value(event_id))
+    logger.info("Creating participant account for event %s", safe_log_value(event_id))
 
     try:
         event = CTFEvent.objects.get(pk=event_id)
@@ -52,27 +50,12 @@ def invite_participant(
             details={"event_id": str(event_id)},
         ) from None
 
-    # Check registration deadline
-    if event.registration_deadline and timezone.now() > event.registration_deadline:
-        raise CTFValidationError(
-            "Registration deadline has passed",
-            code="CTF_REGISTRATION_DEADLINE_PASSED",
-            details={
-                "event_id": str(event_id),
-                "deadline": event.registration_deadline.isoformat(),
-            },
-        )
+    # CTF-705: the registration deadline closes SELF-registration; organizer
+    # manual additions (this path and bulk import) intentionally bypass it so
+    # stragglers can be added to a live event. Capacity still applies below.
 
     # Capacity is enforced under the event row lock inside the transaction
     # below (#1145), so concurrent invites cannot race past max_participants.
-
-    # Check for existing participant
-    if CTFParticipant.objects.filter(event=event, email__iexact=email).exists():
-        raise CTFValidationError(
-            f"Participant with email {email} already exists in this event",
-            code="CTF_DUPLICATE_PARTICIPANT",
-            details={"email": email, "event_id": str(event_id)},
-        )
 
     team = None
     if team_id:
@@ -95,6 +78,29 @@ def invite_participant(
                 details={"event_id": str(event_id), "max": event.max_participants},
             )
 
+        # CTF-601: a delivery email may appear at most once per event; check
+        # under the event lock so concurrent invites cannot double-insert
+        # (the partial unique constraint backstops any other write path).
+        normalized_email = email.lower().strip()
+        if normalized_email and event.participants.filter(email=normalized_email).exists():
+            raise CTFValidationError(
+                "A participant with this email already exists for this event",
+                code="CTF_DUPLICATE_EMAIL",
+                details={"event_id": str(event_id), "email": normalized_email},
+            )
+
+        if team is not None:
+            # CTF-505 (#648): organizer team assignment honors the same
+            # capacity cap as participant joins; lock the team row so
+            # concurrent assignments cannot race past the limit.
+            locked_team = CTFTeam.objects.select_for_update().get(pk=team.pk)
+            if locked_team.is_full:
+                raise CTFValidationError(
+                    "Team is at its size limit",
+                    code="CTF_TEAM_FULL",
+                    details={"team_id": str(locked_team.pk)},
+                )
+
         participant = CTFParticipant.objects.create(
             event=event,
             email=email.lower().strip(),
@@ -107,58 +113,18 @@ def invite_participant(
         _auto_register_participant(participant)
 
         logger.info(
-            "Invited participant %s to event %s (id: %s)",
-            safe_log_value(email),
+            "Created participant account for event %s (id: %s)",
             safe_log_value(event_id),
             participant.id,
         )
 
-    return participant
+    # CTF-1203: new-registration webhook, post-commit and best-effort.
+    from ctf.services.webhook import emit_webhook
 
-
-def disqualify_participant(participant_id: UUID, reason: str | None = None) -> CTFParticipant:
-    """Disqualify a participant from the event.
-
-    Args:
-        participant_id: UUID of the participant.
-        reason: Optional reason for disqualification.
-
-    Returns:
-        The updated CTFParticipant instance.
-
-    Raises:
-        CTFNotFoundError: If participant doesn't exist.
-    """
-    logger.info("Disqualifying participant %s", participant_id)
-
-    try:
-        participant = CTFParticipant.objects.get(pk=participant_id)
-    except CTFParticipant.DoesNotExist:
-        raise CTFNotFoundError(
-            f"Participant {participant_id} not found",
-            details={"participant_id": str(participant_id)},
-        ) from None
-
-    participant.status = ParticipantStatus.DISQUALIFIED.value
-    participant.save(update_fields=["status", "updated_at"])
-
-    # Maintain the materialized leaderboard (issue #850): a disqualified
-    # participant drops off the individual board via the eligibility filter at
-    # read time, but their team's materialized score must shed their
-    # contribution now.
-    if participant.team_id is not None:
-        from ctf.services.scoring import recompute_team_score
-
-        recompute_team_score(participant.team_id)
-
-    # Clear CTF participant profile if user was linked
-    if participant.user is not None:
-        _clear_ctf_participant_profile(participant.user, participant.event)
-
-    logger.info(
-        "Disqualified participant %s: %s",
-        participant_id,
-        reason or "No reason provided",
+    emit_webhook(
+        event,
+        "participant_registered",
+        {"participant_id": str(participant.pk), "name": participant.name},
     )
 
     return participant
@@ -188,7 +154,9 @@ def delete_participant(participant_id: UUID) -> bool:
 
     # Clear CTF participant profile if user was linked
     if participant.user is not None:
-        _clear_ctf_participant_profile(participant.user, participant.event)
+        from ctf.services.participant.accounts import anonymize_participant_account
+
+        anonymize_participant_account(participant.pk)
 
     participant.delete(soft=True)
     logger.info("Deleted participant %s", safe_log_value(participant_id))
@@ -197,98 +165,18 @@ def delete_participant(participant_id: UUID) -> bool:
 
 
 def resend_invite(participant_id: UUID) -> CTFParticipant:
-    """Resend magic link email to a participant and refresh the token.
+    """Compatibility facade for the reset-and-send credential operation."""
+    from ctf.services.participant.accounts import reset_participant_credentials
 
-    Works for any participant regardless of registration status.
-
-    Args:
-        participant_id: UUID of the participant.
-
-    Returns:
-        The updated CTFParticipant instance.
-
-    Raises:
-        CTFNotFoundError: If participant doesn't exist.
-    """
-    logger.info("Resending invite for participant %s", safe_log_value(participant_id))
-
-    try:
-        participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
-    except CTFParticipant.DoesNotExist:
-        raise CTFNotFoundError(
-            f"Participant {participant_id} not found",
-            details={"participant_id": str(participant_id)},
-        ) from None
-
-    now = timezone.now()
-
-    participant.invite_token = secrets.token_urlsafe(32)
-    participant.invite_token_expires = CTFParticipant.default_invite_token_expiry(participant.event, now=now)
-    participant.invited_at = now
-    participant.save(update_fields=["invite_token", "invite_token_expires", "invited_at", "updated_at"])
-
-    from ctf.services.notification import _build_registration_url, _render_email, _send_email
-
-    registration_url = _build_registration_url(participant.invite_token)
-    html_content, text_content, custom_subject = _render_email(
-        "invitation",
-        {
-            "event": participant.event,
-            "participant": participant,
-            # Expose only the registration URL, not the raw token, so
-            # organizer-authored templates cannot reintroduce the token into a
-            # query string or other leak surface (#1088).
-            "registration_url": registration_url,
-        },
-        event=participant.event,
-    )
-    # _send_email dispatches asynchronously (PLAT-103 clause 3) and returns
-    # immediately with no synchronous delivery-success signal; delivery
-    # failures are logged inside the background worker, not here.
-    _send_email(
-        recipient=participant.email,
-        subject=custom_subject or f"You're invited to {participant.event.name}",
-        html_content=html_content,
-        text_content=text_content,
-    )
-
-    logger.info("Resent invite for participant %s", safe_log_value(participant_id))
-
-    return participant
+    return reset_participant_credentials(participant_id)
 
 
 def _auto_register_participant(participant: CTFParticipant) -> None:
-    """Create a Django user and register the participant.
+    """Attach a fresh isolated account; retained as the bulk-import seam."""
+    from ctf.services.participant.accounts import attach_isolated_account
 
-    Find-or-creates a Django user from the participant's email (with an
-    unusable password), then links them and sets status to registered.
-    This eliminates the separate "registration" step — participants are
-    ready to access the platform as soon as they're added.
-    """
-    from django.contrib.auth.models import User
-
-    user = User.objects.filter(email__iexact=participant.email).first()
-    if user is None:
-        user = User.objects.create_user(
-            username=participant.email,
-            email=participant.email,
-            first_name=participant.name.split()[0] if participant.name else "",
-            last_name=" ".join(participant.name.split()[1:]) if participant.name else "",
-        )
-        user.set_unusable_password()
-        user.save()
-
-    participant.user = user
-    participant.status = ParticipantStatus.REGISTERED.value
-    participant.registered_at = timezone.now()
-    participant.save(update_fields=["user", "status", "registered_at", "updated_at"])
-    _set_ctf_participant_profile(user, participant.event)
-
-    logger.info(
-        "Auto-registered participant %s (user %s)",
-        participant.pk,
-        user.email,
-    )
+    attach_isolated_account(participant)
+    logger.info("Created isolated account for participant %s", participant.pk)
 
 
 def _set_ctf_participant_profile(user: User, event: CTFEvent) -> None:

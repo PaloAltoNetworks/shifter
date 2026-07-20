@@ -20,9 +20,9 @@ It mirrors the ``aces_backend_libvirt`` / APTL reference backend pattern:
   ``ApplyResult`` with non-empty ``changed_addresses`` and a PROVISIONING
   ``RuntimeSnapshot`` reflecting the accepted realization.
 
-This module and :mod:`shared.aces.manifest` are the only modules allowed to
-import the ``aces-sdl`` tooling (ADR-031-R1 / ADR-024); the realization side
-consumes the serialized plan as plain data via the injected dispatch port.
+Only modules under :mod:`shared.aces` may import the ``aces-sdl`` tooling
+(ADR-031-R1 / ADR-024); the realization side consumes the serialized plan as
+plain data via the injected dispatch port.
 """
 
 from __future__ import annotations
@@ -36,11 +36,22 @@ from aces_backend_protocols.capabilities import BackendManifest, ProvisionerCapa
 from aces_contracts.diagnostics import Diagnostic, Severity
 from aces_contracts.planning import PlannedResource, ProvisioningPlan, RuntimeDomain
 from aces_contracts.runtime_state import ApplyResult, RuntimeSnapshot, SnapshotEntry
+from aces_processor.semantics.realization import CONCERN_PAYLOAD_PATH
 from aces_runtime.registry import BackendRegistry, RuntimeTarget, RuntimeTargetComponents
 
-from shared.aces.contracts import SHIFTER_BACKEND_NAME
+from shared.aces.composition_envelope import (
+    COMPOSITION_RESOURCE_TYPES,
+    account_operation_diagnostics,
+    composition_diagnostics,
+)
+from shared.aces.contracts import ACES_PROVISIONING_PLAN_CONTRACT_VERSION, SHIFTER_BACKEND_NAME
 from shared.aces.dispatch_port import ShifterDispatchResult, ShifterProvisioningDispatchPort
+from shared.aces.domain_topology import (
+    backend_effect_domain_topology_diagnostics,
+    sanitized_domain_topology_diagnostics,
+)
 from shared.aces.manifest import SHIFTER_PROVISIONER_CAPABILITIES, create_shifter_backend_manifest
+from shared.aces.network_family import network_address_family_diagnostics
 from shared.log_sanitize import safe_log_value
 
 __all__ = [
@@ -59,7 +70,10 @@ __all__ = [
 _DOMAIN = "provisioning"
 NODE_RESOURCE_TYPE = "node"
 NETWORK_RESOURCE_TYPE = "network"
-SUPPORTED_RESOURCE_TYPES: frozenset[str] = frozenset({NODE_RESOURCE_TYPE, NETWORK_RESOURCE_TYPE})
+#: Node/network plus the composition placement types (content/features/accounts).
+SUPPORTED_RESOURCE_TYPES: frozenset[str] = (
+    frozenset({NODE_RESOURCE_TYPE, NETWORK_RESOURCE_TYPE}) | COMPOSITION_RESOURCE_TYPES
+)
 
 #: Discriminator for the serialized plan persisted in ``range_config`` so the
 #: provisioner ``aces-range`` path can tell it apart from a cyberscript envelope.
@@ -203,6 +217,7 @@ def _capability_envelope_diagnostics(
 ) -> list[Diagnostic]:
     """Return fail-closed diagnostics for every out-of-envelope term in the plan."""
     diagnostics: list[Diagnostic] = []
+    node_addresses = {r.address for r in resources if r.resource_type == NODE_RESOURCE_TYPE}
     total_nodes = 0
     for resource in resources:
         payload = resource.payload
@@ -222,11 +237,13 @@ def _capability_envelope_diagnostics(
                     f"(supported: {sorted(SUPPORTED_RESOURCE_TYPES)})",
                 )
             )
-            continue
-        if resource.resource_type == NETWORK_RESOURCE_TYPE:
-            continue
-        total_nodes += _node_count(payload)
-        diagnostics.extend(_node_envelope_diagnostics(resource, payload, capabilities))
+        elif resource.resource_type == NODE_RESOURCE_TYPE:
+            total_nodes += _node_count(payload)
+            diagnostics.extend(_node_envelope_diagnostics(resource, payload, capabilities))
+        elif resource.resource_type == NETWORK_RESOURCE_TYPE:
+            diagnostics.extend(network_address_family_diagnostics(resource, payload, capabilities, _diagnostic))
+        elif resource.resource_type in COMPOSITION_RESOURCE_TYPES:
+            diagnostics.extend(composition_diagnostics(resource, payload, capabilities, node_addresses))
     if capabilities.max_total_nodes is not None and total_nodes > capabilities.max_total_nodes:
         diagnostics.append(
             _diagnostic(
@@ -256,8 +273,10 @@ def serialize_provisioning_plan(plan: ProvisioningPlan) -> dict[str, Any]:
     The payloads are the ACES plan's own payloads, verbatim -- this is
     serialization for the cross-process boundary, not a re-modeled schema
     (ADR-032-R3). A ``kind`` discriminator lets the provisioner distinguish the
-    serialized plan from a cyberscript envelope in ``range_config``, and the
-    ``aces_sdl_version`` records the contract the plan was compiled against.
+    serialized plan from a cyberscript envelope in ``range_config``; the
+    ``contract_version`` declares the transport envelope shape the consumer must
+    support (ADR-032-R7); and the ``aces_sdl_version`` records the producer
+    (aces-sdl) version the plan was compiled against.
     """
     resources: dict[str, Any] = {}
     for address, resource in plan.resources.items():
@@ -273,6 +292,7 @@ def serialize_provisioning_plan(plan: ProvisioningPlan) -> dict[str, Any]:
         }
     envelope = {
         "kind": ACES_PROVISIONING_PLAN_KIND,
+        "contract_version": ACES_PROVISIONING_PLAN_CONTRACT_VERSION,
         "aces_sdl_version": _aces_sdl_version(),
         "resources": resources,
     }
@@ -306,6 +326,7 @@ def interpret_provisioning_plan(
     plan: ProvisioningPlan,
     *,
     capabilities: ProvisionerCapabilities | None = None,
+    snapshot: RuntimeSnapshot | None = None,
 ) -> tuple[dict[str, Any] | None, list[Diagnostic]]:
     """Validate a compiled ACES provisioning plan and return its serialized form.
 
@@ -322,6 +343,9 @@ def interpret_provisioning_plan(
     ]
     diagnostics = _capability_envelope_diagnostics(provisioning, capabilities)
 
+    diagnostics.extend(sanitized_domain_topology_diagnostics(plan, capabilities, snapshot))
+    diagnostics.extend(backend_effect_domain_topology_diagnostics(plan, snapshot))
+
     network_resources = [
         (r, r.payload)
         for r in provisioning
@@ -332,16 +356,31 @@ def interpret_provisioning_plan(
     ]
     diagnostics.extend(_unknown_network_diagnostics(node_resources, _network_lookup(network_resources)))
 
+    # Gate account features carried by materializing (CREATE/UPDATE) operations too, so an
+    # operation-only or resource-divergent account payload cannot bypass the realization
+    # ledger before dispatch (#1563 codex review). Deduplicate against the resource pass:
+    # a resource and its own CREATE operation produce an identical diagnostic.
+    seen = {(diagnostic.code, diagnostic.address, diagnostic.message) for diagnostic in diagnostics}
+    for diagnostic in account_operation_diagnostics(plan.operations, capabilities):
+        key = (diagnostic.code, diagnostic.address, diagnostic.message)
+        if key not in seen:
+            seen.add(key)
+            diagnostics.append(diagnostic)
+
     if any(diagnostic.is_error for diagnostic in diagnostics):
         return None, diagnostics
     return serialize_provisioning_plan(plan), diagnostics
 
 
-def _serialized_for_apply(plan: ProvisioningPlan) -> tuple[dict[str, Any] | None, list[Diagnostic]]:
+def _serialized_for_apply(
+    plan: ProvisioningPlan,
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+) -> tuple[dict[str, Any] | None, list[Diagnostic]]:
     """Validate + serialize ``plan`` for validate/apply; (None, diagnostics) if unusable."""
     if not isinstance(plan, ProvisioningPlan):
         return None, [_diagnostic("shifter-provisioner.invalid-plan", "plan", "expected an ACES ProvisioningPlan")]
-    return interpret_provisioning_plan(plan)
+    return interpret_provisioning_plan(plan, snapshot=snapshot)
 
 
 class ShifterProvisioner:
@@ -358,7 +397,7 @@ class ShifterProvisioner:
 
     def apply(self, plan: ProvisioningPlan, snapshot: RuntimeSnapshot) -> ApplyResult:
         """Validate + dispatch the serialized ``plan``; never dispatch on error."""
-        serialized, diagnostics = _serialized_for_apply(plan)
+        serialized, diagnostics = _serialized_for_apply(plan, snapshot=snapshot)
         if serialized is None:
             return ApplyResult(success=False, snapshot=snapshot, diagnostics=diagnostics)
 
@@ -376,7 +415,7 @@ class ShifterProvisioner:
         for resource in sorted(plan.resources.values(), key=lambda item: item.address):
             if resource.domain != RuntimeDomain.PROVISIONING or resource.resource_type not in SUPPORTED_RESOURCE_TYPES:
                 continue
-            entries[resource.address] = _snapshot_entry(resource.address, resource.resource_type, result)
+            entries[resource.address] = _snapshot_entry(resource, result)
             changed_addresses.append(resource.address)
 
         return ApplyResult(
@@ -387,15 +426,47 @@ class ShifterProvisioner:
         )
 
 
-def _snapshot_entry(address: str, resource_type: str, result: ShifterDispatchResult) -> SnapshotEntry:
-    """Build a provisional PROVISIONING snapshot entry from the dispatch result."""
+def _echo_concern_values(source: Mapping[str, object], payload: dict[str, Any]) -> None:
+    """Echo authored realization-concern values into the snapshot entry payload.
+
+    The aces-sdl runtime non-approximation gate (SEM-218) compares each exact
+    authored requirement (``os_family``, ``node_type``, content ``spec.type``)
+    against the value the backend recorded at ``CONCERN_PAYLOAD_PATH`` in its
+    returned snapshot; an omitted value is a forbidden silent approximation.
+    Shifter dispatches asynchronously, so its provisional entry echoes the exact
+    values it commits to realize, and the gate sees realized == authored.
+    """
+    for path in CONCERN_PAYLOAD_PATH.values():
+        value: object = source
+        for key in path:
+            if isinstance(value, Mapping) and key in value:
+                value = value[key]
+            else:
+                value = None
+                break
+        if value is None:
+            continue
+        target = payload
+        for key in path[:-1]:
+            target = target.setdefault(key, {})
+        target[path[-1]] = value
+
+
+def _snapshot_entry(resource: PlannedResource, result: ShifterDispatchResult) -> SnapshotEntry:
+    """Build a provisional PROVISIONING snapshot entry from the dispatch result.
+
+    Echoes the authored realization-concern values (see ``_echo_concern_values``)
+    so the runtime non-approximation gate confirms Shifter committed to realize
+    exactly what the author declared.
+    """
     payload: dict[str, Any] = {"request_id": result.request_id, "status": result.status}
     if result.range_id:
         payload["range_id"] = result.range_id
+    _echo_concern_values(resource.payload, payload)
     return SnapshotEntry(
-        address=address,
+        address=resource.address,
         domain=RuntimeDomain.PROVISIONING,
-        resource_type=resource_type,
+        resource_type=resource.resource_type,
         payload=payload,
         status=result.status,
     )

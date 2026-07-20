@@ -20,6 +20,16 @@ output "internet_gateway_id" {
   value       = module.vpc.internet_gateway_id
 }
 
+output "vpn_edge_subnet_id" {
+  description = "Public placement subnet for request-owned OpenVPN NLBs"
+  value       = module.vpc.vpn_edge_subnet_id
+}
+
+output "provider_api_endpoint_security_group_id" {
+  description = "Destination security group for private provider API endpoints"
+  value       = module.vpc.provider_api_endpoint_security_group_id
+}
+
 output "private_route_table_id" {
   description = "ID of the private route table (for user subnet associations)"
   value       = module.vpc.private_route_table_id

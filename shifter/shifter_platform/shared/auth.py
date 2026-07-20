@@ -81,6 +81,10 @@ def is_ctf_participant_only(user) -> bool:
     - Are NOT staff or superuser
     - Are NOT in Threat Research group
     """
+    # The immutable account-origin marker is deny-authoritative: privilege
+    # drift must never make a temporary account appear to be a platform user.
+    if getattr(getattr(user, "profile", None), "is_ctf_account", False) is True:
+        return True
     if not user.is_active:
         return False
     if user.is_staff or user.is_superuser:

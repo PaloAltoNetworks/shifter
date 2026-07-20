@@ -10,11 +10,43 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
+
+# Re-exported (see ``__all__``): historical import path for callers and tests
+# that reference the realized-instance projection helpers at
+# ``engine.services._common`` (#685). The implementation lives in the
+# dependency-neutral ``engine._range_state`` so the model compatibility
+# wrappers on ``engine.models.Range`` can consume the same pure functions
+# without importing a private ``engine.services`` submodule (that would make
+# the model depend upward on the service layer, which already depends on the
+# model).
+from engine._range_state import (
+    attacker_instance,
+    attacker_private_ip,
+    find_instance_by_role,
+    find_instance_by_uuid,
+    first_victim_private_ip,
+    victim_instances,
+)
 from engine.secrets import SecretsError
 
+if TYPE_CHECKING:
+    from engine.models import Range
+
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "EngineError",
+    "SecretsError",
+    "attacker_instance",
+    "attacker_private_ip",
+    "find_instance_by_role",
+    "find_instance_by_uuid",
+    "first_victim_private_ip",
+    "victim_instances",
+]
 
 
 def _get_rdp_password(secret_ref: str) -> str:
@@ -179,8 +211,11 @@ def _resolve_dc_password(instance: dict[str, Any]) -> str | None:
     is intentional only for the DC host itself; non-DC guests use
     per-instance secret references.
     """
+    # The portal's own backend is the validated composition-root selection
+    # (PLAT-2005), not an ad-hoc env read; the persisted instance value keeps its
+    # historical "aws" compatibility default.
     instance_provider = _first_connection_value(instance.get("cloud_provider")).lower() or "aws"
-    portal_provider = os.environ.get("CLOUD_PROVIDER", "aws").lower()
+    portal_provider = settings.CLOUD_PROVIDER
     if instance_provider != portal_provider:
         return None
     return os.environ.get("DC_DOMAIN_PASSWORD")
@@ -287,3 +322,20 @@ def _resolve_ngfw_ssh_key_secret_ref(state: dict[str, Any]) -> str:
         provider_metadata.get("ssh_secret_ref"),
         provider_metadata.get("ssh_secret_id"),
     )
+
+
+_TASK_ARN_FIELDS = {
+    "provision": "provisioning_task_arn",
+    "destroy": "teardown_task_arn",
+}
+
+
+def _persist_task_arn(range_obj: Range, operation: str, task_arn: str | None) -> None:
+    """Store an ECS task identifier on the operation-specific Range field."""
+    if not task_arn:
+        return
+    field_name = _TASK_ARN_FIELDS.get(operation)
+    if field_name is None:
+        raise ValueError(f"Unknown range task operation: {operation}")
+    setattr(range_obj, field_name, task_arn)
+    range_obj.save(update_fields=[field_name])

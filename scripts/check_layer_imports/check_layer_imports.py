@@ -26,12 +26,31 @@ from pathlib import Path
 
 import yaml
 
-ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control", "ctf"]
+from _symbol_facade import (
+    analyze_symbol_facade_imports,
+    apply_symbol_facade_violations,
+    load_allowed_symbols,
+)
+
+# Every first-party Django app is classified (ADR-001, #1523). Held to
+# set-equality with the canonical classification in layer_imports.yaml by
+# tests/test_check_layer_imports.py.
+ALL_LAYERS = [
+    "shared",
+    "engine",
+    "cms",
+    "management",
+    "mission_control",
+    "ctf",
+    "config",
+    "risk_register",
+]
 
 # Regex to match imports from our layers (including indented imports in functions)
 # Captures the full module path (e.g., "shared.exceptions" from "from shared.exceptions import X")
 IMPORT_PATTERN = re.compile(
-    r"^\s*(?:from|import)\s+((?:shared|engine|cms|management|mission_control|ctf)(?:\.\w+)*)",
+    r"^\s*(?:from|import)\s+"
+    r"((?:shared|engine|cms|management|mission_control|ctf|config|risk_register)(?:\.\w+)*)",
     re.MULTILINE,
 )
 
@@ -55,6 +74,23 @@ def load_allowed_imports(config_path: Path) -> dict[str, list[str]]:
     with open(Path(config_path).resolve()) as f:
         config = yaml.safe_load(f)
     return config.get("allowed", {})
+
+
+def load_classification(config_path: Path) -> dict[str, list[str]]:
+    """Load the canonical package classification map from the YAML config.
+
+    Returns dict mapping classification name (domain / presentation /
+    support_contracts / support_composition) -> list of package names.
+    """
+    with open(Path(config_path).resolve()) as f:
+        config = yaml.safe_load(f)
+    return config.get("classification", {})
+
+
+def classified_packages(config_path: Path) -> set[str]:
+    """Return the set of every classified first-party package (canonical)."""
+    classification = load_classification(config_path)
+    return {pkg for packages in classification.values() for pkg in packages}
 
 
 def is_import_allowed(from_layer: str, module_path: str, allowed: dict[str, list[str]]) -> bool:
@@ -287,11 +323,27 @@ def _apply_private_facade_violations(stats: dict[str, object], private_facade: d
         )
 
 
+def _apply_extra_violations(
+    stats: dict[str, object],
+    cyberscript: dict[str, list[str]] | None,
+    private_facade: dict[str, list[str]] | None,
+    symbol_facade: dict[str, list[str]] | None,
+) -> None:
+    """Roll the boundary-specific violation categories into summary stats."""
+    if cyberscript:
+        _apply_cyberscript_violations(stats, cyberscript)
+    if private_facade:
+        _apply_private_facade_violations(stats, private_facade)
+    if symbol_facade:
+        apply_symbol_facade_violations(stats, symbol_facade)
+
+
 def compute_stats(
     imports: dict[str, dict[str, list[str]]],
     allowed: dict[str, list[str]],
     cyberscript: dict[str, list[str]] | None = None,
     private_facade: dict[str, list[str]] | None = None,
+    symbol_facade: dict[str, list[str]] | None = None,
 ) -> dict[str, object]:
     """Compute summary statistics from import analysis."""
     stats = {
@@ -324,11 +376,7 @@ def compute_stats(
         if layer_has_violation:
             stats["layers_with_violations"].append(from_layer)
 
-    if cyberscript:
-        _apply_cyberscript_violations(stats, cyberscript)
-
-    if private_facade:
-        _apply_private_facade_violations(stats, private_facade)
+    _apply_extra_violations(stats, cyberscript, private_facade, symbol_facade)
 
     # Determine clean layers (no violations)
     for layer in ALL_LAYERS:
@@ -376,6 +424,7 @@ def main():
 
     # Load allowed imports from config
     allowed = load_allowed_imports(config_path)
+    allowed_symbols = load_allowed_symbols(config_path)
 
     # Go up two levels: check_layer_imports -> scripts -> repo root
     base_path = script_dir.parent.parent / "shifter" / "shifter_platform"
@@ -388,13 +437,15 @@ def main():
     imports = analyze_imports(base_path)
     cyberscript = analyze_cyberscript_imports(base_path)
     private_facade = analyze_private_facade_imports(base_path, allowed)
-    stats = compute_stats(imports, allowed, cyberscript, private_facade)
+    symbol_facade = analyze_symbol_facade_imports(base_path, allowed_symbols, ALL_LAYERS)
+    stats = compute_stats(imports, allowed, cyberscript, private_facade, symbol_facade)
 
     # Build output
     output = {
         "imports": imports,
         "cyberscript_imports": cyberscript,
         "private_facade_imports": private_facade,
+        "symbol_facade_imports": symbol_facade,
         "stats": stats,
     }
 

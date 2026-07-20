@@ -26,7 +26,9 @@ def _make_mock_cursor(range_row, ngfw_row=None):
     return mock_conn, mock_cursor
 
 
-# Range query columns: request_id, range_id, user_id, range_config, subnet_index, status
+# Range query columns: request_id, range_id, user_id, range_config, subnet_index,
+# status, range_backend, instantiation_purpose (#1666 ownership binding),
+# remote_access_capability (#1695 trusted OpenVPN activation contract).
 _RANGE_ROW_WITH_NGFW = (
     "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",  # request_id
     201,  # range_id
@@ -34,6 +36,9 @@ _RANGE_ROW_WITH_NGFW = (
     {"ngfw": True, "subnets": []},  # range_config
     5,  # subnet_index
     "provisioning",  # status
+    None,  # range_backend (legacy/non-GCP)
+    None,  # instantiation_purpose
+    None,  # remote_access_capability
 )
 
 _RANGE_ROW_NO_NGFW = (
@@ -43,6 +48,9 @@ _RANGE_ROW_NO_NGFW = (
     {"subnets": []},  # ngfw not set
     5,
     "provisioning",
+    None,  # range_backend
+    None,  # instantiation_purpose
+    None,  # remote_access_capability
 )
 
 
@@ -176,3 +184,43 @@ class TestGetRangeDataNGFWLookup:
         result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         assert result["ngfw_instance_id"] is None
+
+    def test_preserves_wrapped_scenario_envelope_for_range_cell_validation(self, monkeypatch):
+        """The provisioner keeps the producer envelope as well as its payload view."""
+        from shared.range_cells import build_scenario_artifact
+
+        from provisioner_db import get_range_data_by_request_id
+
+        envelope = build_scenario_artifact(
+            {
+                "spec_schema": "range_spec",
+                "spec_version": "1",
+                "payload": {"scenario_id": "scenario-a", "user_id": 7, "subnets": []},
+            }
+        )
+        row = (*_RANGE_ROW_NO_NGFW[:3], envelope, *_RANGE_ROW_NO_NGFW[4:])
+        mock_conn, _mock_cursor = _make_mock_cursor(row)
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+        assert result["spec"] == envelope["payload"]
+        assert result["spec_envelope"] == envelope
+
+    def test_preserves_remote_access_capability(self, monkeypatch):
+        """The provisioner receives the server-owned OpenVPN capability unchanged."""
+        from provisioner_db import get_range_data_by_request_id
+
+        capability = {
+            "version": "openvpn-capability-v1",
+            "channel": "openvpn",
+            "target_ref": "11111111-2222-3333-4444-555555555555",
+            "teardown_at": "2026-07-20T12:00:00Z",
+        }
+        row = (*_RANGE_ROW_NO_NGFW[:-1], capability)
+        mock_conn, _mock_cursor = _make_mock_cursor(row)
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+
+        result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+        assert result["remote_access_capability"] == capability

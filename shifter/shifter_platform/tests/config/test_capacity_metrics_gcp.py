@@ -10,6 +10,8 @@ fail-soft write path with a fake monitoring client; no google libs or network.
 
 from __future__ import annotations
 
+import pytest
+
 from config import capacity_metrics
 from config.capacity_metrics_gcp import GCPMonitoringClient, build_time_series
 
@@ -159,6 +161,19 @@ def test_resolve_default_client_factory_selects_by_provider(monkeypatch):
     gcp_factory = capacity_metrics._resolve_default_client_factory()
     assert gcp_factory is not capacity_metrics._default_client_factory
     assert callable(gcp_factory)
+
+
+def test_resolve_default_client_factory_raises_for_unsupported_provider(monkeypatch):
+    """A future third backend must fail closed rather than silently keeping the
+    AWS/CloudWatch client (the previous ``gcp ? gcp_factory : _default_client_factory``
+    ternary routed any non-gcp value to CloudWatch)."""
+    from django.conf import settings as django_settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    monkeypatch.setattr(django_settings, "CLOUD_PROVIDER", "azure")
+
+    with pytest.raises(ImproperlyConfigured, match="azure"):
+        capacity_metrics._resolve_default_client_factory()
 
 
 def test_build_emitter_with_no_factory_routes_through_provider_resolution(monkeypatch):

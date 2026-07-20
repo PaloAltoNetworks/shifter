@@ -81,8 +81,9 @@ class TestListAgents:
     def test_raises_on_invalid_user(self):
         with pytest.raises((TypeError, ValueError)):
             services.list_agents(None)
+        user_2 = User(username="unsaved")
         with pytest.raises((TypeError, ValueError)):
-            services.list_agents(User(username="unsaved"))
+            services.list_agents(user_2)
 
 
 class TestGetAgent:
@@ -111,8 +112,9 @@ class TestGetAgent:
     def test_validates_user(self):
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(None, 42)
+        user_2 = User(username="unsaved")
         with pytest.raises((TypeError, ValueError)):
-            services.get_agent(User(username="unsaved"), 42)
+            services.get_agent(user_2, 42)
 
     @pytest.mark.parametrize("agent_id", [None, "not-an-id", -1])
     def test_validates_agent_id(self, user, agent_id):
@@ -139,6 +141,7 @@ class TestCreateAgent:
 
     def test_passes_upload_method_through(self, user, windows_os):
         from risk_register.models import AuditLog
+        from shared.audit import AuditAction, AuditEntityType
 
         agent = services.create_agent(
             user,
@@ -150,9 +153,7 @@ class TestCreateAgent:
             sha256="abc123",
             upload_method="presigned",
         )
-        row = AuditLog.objects.get(
-            entity_type=AuditLog.EntityType.AGENT, entity_id=agent.id, action=AuditLog.Action.CREATE
-        )
+        row = AuditLog.objects.get(entity_type=AuditEntityType.AGENT, entity_id=agent.id, action=AuditAction.CREATE)
         assert row.new_state["upload_method"] == "presigned"
 
     def test_propagates_asset_error_on_invalid_os(self, user):
@@ -178,8 +179,9 @@ class TestCreateAgent:
         }
         with pytest.raises((TypeError, ValueError)):
             services.create_agent(None, **kwargs)
+        user_2 = User(username="unsaved")
         with pytest.raises((TypeError, ValueError)):
-            services.create_agent(User(username="unsaved"), **kwargs)
+            services.create_agent(user_2, **kwargs)
 
 
 class TestDeleteAgent:
@@ -211,8 +213,9 @@ class TestDeleteAgent:
     def test_validates_user(self):
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(None, 42)
+        user_2 = User(username="unsaved")
         with pytest.raises((TypeError, ValueError)):
-            services.delete_agent(User(username="unsaved"), 42)
+            services.delete_agent(user_2, 42)
 
     @pytest.mark.parametrize("agent_id", [None, "not-an-id", -1])
     def test_validates_agent_id(self, user, agent_id):

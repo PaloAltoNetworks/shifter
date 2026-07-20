@@ -12,9 +12,13 @@ variable "aws_region" {
 }
 
 variable "name_prefix" {
-  description = "Prefix for Terraform-created Polaris AWS resources."
+  # Must fall within the CI role's iam:PassRole scope (shifter-* / <env>-*) so
+  # the bake workflow can launch the golden-range host with the instance-role
+  # this module creates. A bare "polaris" prefix is outside that scope and the
+  # RunInstances PassRole is denied.
+  description = "Prefix for Terraform-created Polaris AWS resources. Must be within the CI PassRole scope (shifter-*)."
   type        = string
-  default     = "polaris"
+  default     = "shifter-polaris"
 }
 
 variable "deployment_purpose" {

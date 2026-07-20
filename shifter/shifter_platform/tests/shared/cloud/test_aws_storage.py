@@ -177,3 +177,70 @@ class TestHeadObjectIdentity:
             identity = storage.head_object("b", "k")
 
         assert identity == {"content_length": 42, "etag": "deadbeef"}
+
+
+class TestDownloadObject:
+    def test_streams_full_object_to_dest_and_returns_identity(self, tmp_path):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.get_object.return_value = {"Body": BytesIO(b"packbytes"), "ETag": '"abc123"'}
+        dest = tmp_path / "pkg.tar"
+
+        with patch("boto3.client", return_value=fake_client):
+            identity = storage.download_object(
+                "my-bucket", "my-key", str(dest), max_bytes=1024, expected_identity={"etag": "abc123"}
+            )
+
+        assert dest.read_bytes() == b"packbytes"
+        assert identity == {"content_length": len(b"packbytes"), "etag": "abc123"}
+        kwargs = fake_client.get_object.call_args.kwargs
+        assert kwargs["Bucket"] == "my-bucket"
+        assert kwargs["Key"] == "my-key"
+        # Bind the download to the validated object version (TOCTOU: an overwrite
+        # after validation makes IfMatch fail).
+        assert kwargs["IfMatch"] == "abc123"
+
+    def test_no_expected_identity_omits_if_match(self, tmp_path):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.get_object.return_value = {"Body": BytesIO(b"data"), "ETag": '"e"'}
+        dest = tmp_path / "pkg.tar"
+
+        with patch("boto3.client", return_value=fake_client):
+            storage.download_object("b", "k", str(dest), max_bytes=1024)
+
+        assert "IfMatch" not in fake_client.get_object.call_args.kwargs
+
+    def test_aborts_when_object_exceeds_max_bytes(self, tmp_path):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.get_object.return_value = {"Body": BytesIO(b"x" * 5000), "ETag": '"e"'}
+        dest = str(tmp_path / "big.tar")
+
+        with patch("boto3.client", return_value=fake_client), pytest.raises(CloudStorageError):
+            storage.download_object("b", "k", dest, max_bytes=1024)
+
+    def test_precondition_failure_maps_to_object_precondition_error(self, tmp_path):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.get_object.side_effect = _precondition_error("GetObject")
+        dest = str(tmp_path / "x.tar")
+
+        with patch("boto3.client", return_value=fake_client), pytest.raises(ObjectPreconditionError):
+            storage.download_object("b", "k", dest, max_bytes=1024, expected_identity={"etag": "abc123"})
+
+    def test_other_client_error_maps_to_cloud_storage_error(self, tmp_path):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.get_object.side_effect = _make_client_error("AccessDenied")
+        dest = str(tmp_path / "x.tar")
+
+        with patch("boto3.client", return_value=fake_client), pytest.raises(CloudStorageError) as exc:
+            storage.download_object("b", "k", dest, max_bytes=1024)
+        assert not isinstance(exc.value, ObjectPreconditionError)
+
+    def test_rejects_non_positive_max_bytes(self, tmp_path):
+        storage = AWSObjectStorage()
+        dest = str(tmp_path / "x")
+        with pytest.raises(ValueError):
+            storage.download_object("b", "k", dest, max_bytes=0)

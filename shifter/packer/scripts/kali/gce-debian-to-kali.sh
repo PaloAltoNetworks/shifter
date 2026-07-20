@@ -102,6 +102,30 @@ systemctl mask networking.service || true
 systemctl enable systemd-networkd.service || true
 systemctl enable ssh.service || true
 
+echo "=== Ensuring SSH host keys are regenerated on first boot ==="
+# common/cleanup.sh strips /etc/ssh/ssh_host_* so images never ship shared host
+# keys. The Ubuntu image regenerates them on first boot; Kali does not, so
+# ssh.service cannot start (no host keys) and never binds :22 — the range guest
+# looks unreachable and the provisioner's SSH-wait times out (#1745). Install a
+# oneshot that runs `ssh-keygen -A` before sshd on any boot missing host keys,
+# so a freshly provisioned Kali guest generates per-instance keys and sshd comes
+# up on :22.
+cat > /etc/systemd/system/regenerate-ssh-host-keys.service <<'UNIT'
+[Unit]
+Description=Regenerate missing SSH host keys before sshd starts
+Before=ssh.service ssh.socket
+ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/ssh-keygen -A
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl enable regenerate-ssh-host-keys.service || true
+
 echo "=== Creating the kali user (Kali scripts and xrdp expect it) ==="
 if ! id kali >/dev/null 2>&1; then
   useradd -m -s /bin/bash kali

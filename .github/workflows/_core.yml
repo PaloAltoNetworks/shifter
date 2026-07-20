@@ -52,7 +52,25 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - name: Preflight - validate deploy prerequisites
+        # Shared fail-safe gate (scripts/bootstrap/preflight.py): reports every
+        # missing prerequisite up front before any Terraform apply, so a missing
+        # secret fails here in seconds rather than mid-run. See docs/dev/deploy-secrets.md.
+        working-directory: scripts/bootstrap
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_VARS_DEV_CORE: ${{ secrets.TF_VARS_DEV_CORE }}
+          TF_VARS_PROOF_CORE: ${{ secrets.TF_VARS_PROOF_CORE }}
+          TF_VARS_PROD_CORE: ${{ secrets.TF_VARS_PROD_CORE }}
+        run: uv run python -m preflight --cloud aws --env "$ENVIRONMENT" --component core --headless
       - name: Resolve AWS deploy role
         id: aws-role
         env:
@@ -84,11 +102,11 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
       - run: terraform fmt -check -recursive
@@ -166,7 +184,7 @@ jobs:
       - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const fs = require('fs');
@@ -199,7 +217,7 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Resolve AWS deploy role
         id: aws-role
         env:
@@ -231,11 +249,11 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
       - name: Render local.auto.tfvars from deployment secret

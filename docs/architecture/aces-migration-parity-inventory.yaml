@@ -109,9 +109,28 @@ rows:
     candidate_issue_title: Map CyberScript schema shims to ACES contract/profile coverage
     notes: The map must distinguish ACES-owned semantics from Shifter-only compatibility wrappers.
 
+  - id: cyberscript.domain-topology
+    surface: CyberScript
+    legacy_source: shifter/cyberscript/schemas/range.py; shifter/cyberscript/schemas/ctf/asset.py; shifter/cyberscript/schemas/ctf/forest.py
+    legacy_field: DCConfig, InstanceSpec role/join_domain, DCConfigExt, AssetSpec.join_domain, DomainSpec, and ForestSpec
+    category: ACES schema/profile gap
+    aces_target: aces-sdl 0.23 public domain identity, DC binding, domain-join relation, account-domain anchor, semantic validation, supported_domain_profiles capability, and domain_topology_plan_diagnostics gate
+    shifter_owner: upstream ACES contract; shared.aces admission and separate provisioner backstop
+    validation_evidence: docs/architecture/aces-domain-topology-preflight-1606.md; shifter/shifter_platform/tests/shared/aces/test_domain_topology_admission.py; shifter/engine/provisioner/tests/test_aces_plan.py
+    next_issue_kind: none
+    candidate_issue_title: "#1606: Consume released ACES domain topology without a Shifter dialect"
+    notes: >-
+      Domain topology is authored scenario meaning, not backend configuration.
+      Shifter must not copy the legacy schemas, infer topology from names/OS/images,
+      create a private extension, or reinterpret observed runtime identity inventory.
+      Shifter consumes the released 0.23 public topology diagnostics while declaring
+      no supported domain profiles; the existing serialized ProvisioningPlan remains
+      the transport. Authority credentials and genuine DC/join/SPN realization remain
+      backend-owned work for #1561.
+
   - id: cyberscript.script-context
     surface: CyberScript
-    legacy_source: shifter/cyberscript/script_context.py
+    legacy_source: shifter/cyberscript/script_context/
     legacy_field: ScriptExecutionContext
     category: Shifter backend responsibility
     aces_target: ACES participant/runtime contracts only after equal prompt and artifact boundaries exist
@@ -164,10 +183,10 @@ rows:
     category: ACES SDL
     aces_target: ACES content declarations plus provenance references
     shifter_owner: scenario-dev/polaris/content-packages
-    validation_evidence: scenario-dev/polaris/tests/scenario_smoketest/README.md
+    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh
     next_issue_kind: design-only
     candidate_issue_title: Classify Polaris content packages against ACES content/provenance contracts
-    notes: Package manifests carry scenario meaning, while generated runtime material stays out of the inventory.
+    notes: Package manifests carry scenario meaning, while generated runtime material stays out of the inventory. The surviving range sweep is in-repository evidence; scenario-specific participant-path verification is owned by a separately installed plugin and is not represented by an external checkout path here.
 
   - id: polaris.portal-template
     surface: Polaris
@@ -184,14 +203,14 @@ rows:
   - id: polaris.smoketests
     surface: Polaris
     legacy_source: scenario-dev/polaris/tests/
-    legacy_field: run-all-smoketests, scenario_smoketest, asset smoketests
+    legacy_field: run-all-smoketests, isolation checks, and asset smoketests
     category: validation gate
     aces_target: ACES/Shifter parity validation evidence
     shifter_owner: scenario-dev/polaris/tests
-    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh
+    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh; shifter/shifter_platform/tests/shared/scenario_verification
     next_issue_kind: implementation-candidate
     candidate_issue_title: Promote Polaris ACES parity smoke checks into the cutover gate
-    notes: Existing smoke tests are required evidence for any ACES cutover claim.
+    notes: The in-repository range smoke remains required infrastructure evidence, and the shared synthetic suite proves the neutral verification framework. Scenario-specific adapters and answer material are owned out of tree; their versioned redacted operator report is cutover evidence but no external checkout is part of this inventory.
 
   - id: ctf.event-lifecycle
     surface: CTF
@@ -243,7 +262,7 @@ rows:
 
   - id: experiment.lifecycle
     surface: experiment
-    legacy_source: removed legacy cms.experiments schemas (ADR-027 / issue #1195)
+    legacy_source: "removed legacy cms.experiments schemas (ADR-027 / issue #1195)"
     legacy_field: ExperimentStatus, RunStatus, transitions
     category: archive/delete
     aces_target: ACES experiment-core and runtime status contracts
@@ -255,7 +274,7 @@ rows:
 
   - id: experiment.execution-plan
     surface: experiment
-    legacy_source: removed legacy cms.experiments execution planner (ADR-027 / issue #1195)
+    legacy_source: "removed legacy cms.experiments execution planner (ADR-027 / issue #1195)"
     legacy_field: build_execution_plan, ScriptCommand, RunExecutionPlan
     category: archive/delete
     aces_target: ACES participant runtime adapter after profile support exists
@@ -267,7 +286,7 @@ rows:
 
   - id: aces.execution-plan-references
     surface: experiment
-    legacy_source: removed legacy cms.experiments execution planner (ADR-027 / issue #1195)
+    legacy_source: "removed legacy cms.experiments execution planner (ADR-027 / issue #1195)"
     legacy_field: RunExecutionPlan and ScriptCommand references
     category: ACES schema/profile gap
     aces_target: ACES execution-plan reference records after a matching operation profile exists
@@ -279,7 +298,7 @@ rows:
 
   - id: experiment.artifacts
     surface: artifact
-    legacy_source: removed legacy cms.experiments models (ADR-027 / issue #1195)
+    legacy_source: "removed legacy cms.experiments models (ADR-027 / issue #1195)"
     legacy_field: experiment run artifacts and Claude transcript artifacts
     category: archive/delete
     aces_target: ACES evidence/provenance and experiment-run artifact contracts
@@ -291,7 +310,7 @@ rows:
 
   - id: aces.participant-runtime-sidecars
     surface: participant-runtime
-    legacy_source: removed legacy cms.experiments models; shifter/shifter_platform/engine/models.py; shifter/shifter_platform/ctf/models/
+    legacy_source: removed legacy cms.experiments models; shifter/shifter_platform/engine/models/; shifter/shifter_platform/ctf/models/
     legacy_field: removed ExperimentRun, Range, CTFParticipant, and runtime participant/access correlation fields
     category: ACES schema/profile gap
     aces_target: ACES participant implementation and participant runtime records with profile/version discriminators
@@ -303,12 +322,12 @@ rows:
 
   - id: aces.participant-history-evidence
     surface: artifact
-    legacy_source: removed legacy cms.experiments execution/model code; shifter/cyberscript/script_context.py
+    legacy_source: removed legacy cms.experiments execution/model code; shifter/cyberscript/script_context/
     legacy_field: ScriptExecutionContext, ScriptCommand, RunArtifact, ExperimentArtifact, Claude transcript artifacts, and behavior-history evidence references
     category: ACES schema/profile gap
     aces_target: ACES behavior-history and evidence records carrying artifact refs, digests, provenance, capture profile, retention class, and redaction status
     shifter_owner: future ACES-backed experiment design, shared.script_context, shared.uploads, shared.cloud, risk_register.services.audit_log
-    validation_evidence: docs/architecture/aces-participant-runtime-history-evidence-preflight-1289.md plus future #1289 implementation tests and ADR-027 removal evidence
+    validation_evidence: "docs/architecture/aces-participant-runtime-history-evidence-preflight-1289.md plus future #1289 implementation tests and ADR-027 removal evidence"
     next_issue_kind: implementation-candidate
     candidate_issue_title: "#1289: Capture participant runtime history and evidence"
     notes: Evidence records are reference-oriented. Rendered commands, prompt bodies, script bodies, transcript bodies, terminal streams, token URLs, SSH keys, RDP passwords, CTF flags, provider payloads, and presigned URLs stay out of ACES records.
@@ -356,7 +375,7 @@ rows:
     category: Shifter backend responsibility
     aces_target: read-only ACES participant/runtime/access-channel projection fields after participant-runtime sidecars exist
     shifter_owner: mission_control.api, mission_control.views, engine.services, shared.api.errors, shared.api_tokens.scopes
-    validation_evidence: future #1290 UI/API tests plus existing mission_control terminal, Guacamole, and range API tests
+    validation_evidence: "future #1290 UI/API tests plus existing mission_control terminal, Guacamole, and range API tests"
     next_issue_kind: implementation-candidate
     candidate_issue_title: "#1290: Project participant runtime access in Mission Control"
     notes: Terminal, SSH, RDP/Guacamole, NGFW SSH, and backend command dispatch are Shifter access-channel projections. They may expose ACES-backed read-only fields, but they do not become authorization, lifecycle truth, evidence redaction, or authored scenario semantics.
@@ -399,7 +418,7 @@ rows:
 
   - id: aces.operation-sidecar-persistence
     surface: provisioner
-    legacy_source: shifter/shifter_platform/engine/models.py
+    legacy_source: shifter/shifter_platform/engine/models/
     legacy_field: Request, Range, range_config, provisioned_instances, and lifecycle timestamps
     category: Shifter backend responsibility
     aces_target: operation-receipt-v1, operation-status-v1, runtime-snapshot-v1, and execution-plan reference sidecar records
@@ -452,14 +471,14 @@ rows:
     category: ACES SDL
     aces_target: ACES content/provenance declarations
     shifter_owner: scenario-dev/polaris/content-packages
-    validation_evidence: scenario-dev/polaris/tests/scenario_smoketest/README.md
+    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh
     next_issue_kind: design-only
     candidate_issue_title: Bind Polaris content packages to ACES provenance terms
-    notes: Content inputs are scenario meaning; generated outputs remain runtime evidence.
+    notes: Content inputs are scenario meaning; generated outputs remain runtime evidence. The surviving range sweep is the checked in-repository path, while scenario-specific verification adapters and answer material are owned by a separately installed plugin.
 
   - id: status.engine-range
     surface: status
-    legacy_source: shifter/shifter_platform/engine/models.py
+    legacy_source: shifter/shifter_platform/engine/models/
     legacy_field: Range.Status and Instantiation.status
     category: Shifter backend responsibility
     aces_target: ACES operation-status-v1 adapter view
@@ -525,7 +544,7 @@ rows:
 
   - id: validation.aces-manifest-conformance
     surface: validation
-    legacy_source: aces-sdl/contracts/profiles/backend/
+    legacy_source: aces-sdl backend profile and conformance contract corpus (upstream PyPI package aces-sdl, not a repository path)
     legacy_field: backend profile and conformance contract corpus
     category: validation gate
     aces_target: ACES backend manifest and conformance CLI
@@ -554,20 +573,23 @@ rows:
     legacy_field: Shifter portal/CMS/engine/task-runner/provisioner launch path and ACES operation receipt/status/snapshot evidence
     category: validation gate
     aces_target: live or controlled Shifter ACES provisioning-only backend validation through the normal backend path
-    shifter_owner: cms.scenarios.registry, cms.services.create_range, engine.services.create_range, engine.ecs, shifter/engine/provisioner, shared.aces.operations, shared.aces.projections, mission_control.api.aces
-    validation_evidence: "future #1264 implementation evidence: launch receipt, operation-status projection, runtime-snapshot projection, cleanup result, and sanitized diagnostics captured through existing Shifter services and ACES sidecar read seams"
-    next_issue_kind: implementation-candidate
+    shifter_owner: cms.scenarios.registry, cms.services.create_range_dispatch, cms.services.create_aces_native_range, shared.aces.package_loader, engine.services.create_aces_range, engine.ecs, shifter/engine/provisioner, shared.aces.operations, shared.aces.projections, cms.aces.validation, cms.management.commands.run_aces_backend_validation, mission_control.api.aces
+    validation_evidence: "shipped #1264: cms/management/commands/run_aces_backend_validation.py launches a registered ACES package through create_range_dispatch, polls to READY, reads redacted receipt/status/runtime-snapshot evidence via cms.aces.validation.collect_evidence + shared.aces.projections, asserts non-vacuous realization, tears down by request_id, and sanitizes failures; docs/architecture/aces-cutover-evidence-1264.md; tests/cms/aces/test_validation.py + tests/cms/test_run_aces_backend_validation.py"
+    next_issue_kind: none
     candidate_issue_title: "#1264: Add live validation for Shifter ACES backend path"
     notes: >-
       #1264 is the cutover evidence gate that proves the provisioning-only
       RuntimeTarget path is not just a manifest/conformance claim: a launchable
-      ACES entry must enter through the normal registry, CMS range service,
-      engine interpreter/service, task-runner, and provisioner CLI request-id
-      path, then produce non-secret operation receipt/status/runtime-snapshot
-      evidence through the validated sidecar and redacted read projections.
-      Direct Terraform/cloud/provisioner calls, demo-only launchers, seeded
-      sidecar rows, raw logs, provider dumps, and ACES-authored backend
-      realization details do not satisfy this gate.
+      ACES entry enters through the normal registry, CMS range dispatch
+      (create_range_dispatch -> create_aces_native_range), package loader,
+      engine ACES range service, task-runner, and provisioner request-id path,
+      then produces non-secret operation receipt/status/runtime-snapshot
+      evidence through the validated sidecar and redacted read projections. The
+      run_aces_backend_validation command is the evidence path (run in a
+      deployed environment with SHIFTER_ACES_NATIVE_PROVISIONING=true against a
+      registered ACES package). Direct Terraform/cloud/provisioner calls,
+      demo-only launchers, seeded sidecar rows, raw logs, provider dumps, and
+      ACES-authored backend realization details do not satisfy this gate.
 
   - id: validation.participant-runtime-conformance
     surface: validation

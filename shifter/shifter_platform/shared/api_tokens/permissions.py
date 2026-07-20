@@ -34,6 +34,12 @@ def require_scope(read_scope: str, write_scope: str | None = None) -> type[permi
 
         message = "API token is missing the required scope."
 
+        # Machine-readable scope requirement, consumed by the OpenAPI schema
+        # generator (shared.api.schema.PlatformAutoSchema) to publish exact
+        # per-operation ``x-required-scopes`` without inferring them from paths.
+        required_read_scope: str = read_scope
+        required_write_scope: str = required_write
+
         def has_permission(self, request: Request, view: APIView) -> bool:
             auth = getattr(request, "auth", None)
             if not isinstance(auth, ApiToken):

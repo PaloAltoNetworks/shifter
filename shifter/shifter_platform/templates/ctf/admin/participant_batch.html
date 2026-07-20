@@ -1,0 +1,12 @@
+{% extends "mission_control/base.html" %}
+{% load i18n %}
+{% block title %}{% trans "Generate participant accounts" %}{% endblock %}
+{% block content %}
+  <h1>{% trans "Generate participant accounts" %}</h1>
+  <p>{% trans "Creates temporary username/password accounts. Email is optional and can be attached later." %}</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="btn btn-primary" type="submit">{% trans "Generate accounts" %}</button>
+  </form>
+{% endblock %}

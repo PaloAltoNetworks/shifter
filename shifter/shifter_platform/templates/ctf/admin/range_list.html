@@ -216,9 +216,9 @@
 document.addEventListener('DOMContentLoaded', function() {
     var manager = new CTFRangeManager({
         csrfToken: '{{ csrf_token }}',
-        provisionAllUrl: '{% url "ctf:api_provision_ranges" event_id=event.pk %}',
-        rangeListUrl: '{% url "ctf:api_range_list" event_id=event.pk %}',
-        spareProvisionUrl: '{% url "ctf:api_provision_event_spares" event_id=event.pk %}',
+        provisionAllUrl: '{% url "v1:ctf:api_provision_ranges" event_id=event.pk %}',
+        rangeListUrl: '{% url "v1:ctf:api_range_list" event_id=event.pk %}',
+        spareProvisionUrl: '{% url "v1:ctf:api_provision_event_spares" event_id=event.pk %}',
     });
     manager.init();
     {% if active_provisioning %}

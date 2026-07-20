@@ -28,15 +28,31 @@ class ResolvedImage:
     disk_type: str | None = None
 
 
+#: Authored version sentinels meaning "unpinned / any" (aces-sdl defaults an
+#: omitted ``source.version`` to ``"*"``; a bare-string source yields no version).
+_UNPINNED_VERSIONS = frozenset({"", "*"})
+
+
 def resolve_from_candidates(candidates: Sequence[dict[str, Any]], *, version: str | None) -> ResolvedImage | None:
     """Resolve a registry match from candidate rows for one (provider, source_name).
 
-    Prefers an exact ``source_version`` match, then the any-version fallback (a
-    row whose ``source_version`` is blank). Returns ``None`` when neither exists,
-    leaving passthrough / fail-loud to the caller.
+    Version handling honors authored specificity, matching aces-sdl (``version`` is
+    an opaque pin with no substitution semantics) and the reference backend (which
+    never substitutes an unavailable image):
+
+    - **Unpinned** (author omitted the version, i.e. ``*``/blank): use the
+      any-version default mapping (a row whose ``source_version`` is blank).
+    - **Pinned** (author gave an exact version): match that ``source_version``
+      exactly and **never** fall back to the any-version row -- an any-version
+      catch-all cannot be proven to be the pinned artifact, so substituting it
+      would silently violate authored intent.
+
+    Returns ``None`` when nothing matches, leaving passthrough / fail-loud to the
+    caller.
     """
     wanted = (version or "").strip()
-    chosen = _first_match(candidates, wanted) or _first_match(candidates, "")
+    # Unpinned -> the any-version default row; pinned -> that exact version only.
+    chosen = _first_match(candidates, "") if wanted in _UNPINNED_VERSIONS else _first_match(candidates, wanted)
     return _to_resolved(chosen) if chosen is not None else None
 
 

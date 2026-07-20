@@ -61,6 +61,42 @@
                     <span class="detail-label">{% trans "Email" %}</span>
                     <span class="detail-value">{{ participant.email }}</span>
                 </div>
+                <form method="post" action="{% url 'ctf:admin_participant_email' participant_id=participant.pk %}">
+                    {% csrf_token %}
+                    <label for="participant-email">{% trans "Credential delivery email (optional)" %}</label>
+                    <input id="participant-email" name="email" type="email" value="{{ participant.email }}">
+                    <button type="submit" class="btn btn-secondary">{% trans "Update email" %}</button>
+                </form>
+                {% if participant.user %}
+                    <div class="detail-row">
+                        <span class="detail-label">{% trans "Username" %}</span>
+                        <span class="detail-value">{{ participant.user.username }}</span>
+                    </div>
+                    {% if bootstrap_password %}
+                        <details>
+                            <summary>{% trans "Reveal current event bootstrap password" %}</summary>
+                            <code>{{ bootstrap_password }}</code>
+                        </details>
+                    {% else %}
+                        <p class="detail-value">
+                            {% blocktrans trimmed %}
+                                No secure bootstrap password is configured for this event.
+                                Set a participant password override on the event, or configure
+                                CTF_DEFAULT_PARTICIPANT_PASSWORD, before provisioning accounts.
+                            {% endblocktrans %}
+                        </p>
+                    {% endif %}
+                    <form method="post" action="{% url 'ctf:admin_participant_rename' participant_id=participant.pk %}">
+                        {% csrf_token %}
+                        <label for="participant-username">{% trans "Rename username" %}</label>
+                        <input id="participant-username"
+                               name="username"
+                               value="{{ participant.user.username }}"
+                               maxlength="49"
+                               required>
+                        <button type="submit" class="btn btn-secondary">{% trans "Rename" %}</button>
+                    </form>
+                {% endif %}
                 <div class="detail-row">
                     <span class="detail-label">{% trans "Status" %}</span>
                     <span class="detail-value">

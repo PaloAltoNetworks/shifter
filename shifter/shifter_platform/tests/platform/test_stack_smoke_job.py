@@ -35,6 +35,9 @@ DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 SMOKE_DIR = REPO_ROOT / "scripts" / "stack-smoke"
 SMOKE_SCRIPT = SMOKE_DIR / "stack_smoke.sh"
 WS_HELPER = SMOKE_DIR / "ws_handshake.py"
+PAGE_HELPER = SMOKE_DIR / "page_smoke.py"
+STUB_IDP = SMOKE_DIR / "stub_idp.py"
+LOGIN_PROBE = SMOKE_DIR / "oidc_login.py"
 ELASTICMQ_CONF = SMOKE_DIR / "elasticmq.conf"
 
 
@@ -98,6 +101,9 @@ def test_deploy_reruns_smoke_when_its_own_implementation_changes(deploy_yml: str
 def test_harness_files_exist() -> None:
     assert SMOKE_SCRIPT.is_file()
     assert WS_HELPER.is_file()
+    assert PAGE_HELPER.is_file()
+    assert STUB_IDP.is_file()
+    assert LOGIN_PROBE.is_file()
     assert ELASTICMQ_CONF.is_file()
 
 
@@ -160,7 +166,9 @@ def test_harness_asserts_authenticated_page_renders(smoke_script: str) -> None:
     # assets resolve, catching the missing-terminal-sourcemaps / static class.
     assert "page_smoke.py" in smoke_script
     assert "/mission-control/terminal/" in smoke_script
-    assert "$session_key" in smoke_script  # reuses the authenticated WS session
+    # Reuses the callback-established session via a mode-0600 file handoff (#988),
+    # not a second directly minted session.
+    assert "--session-file" in smoke_script
 
 
 def test_page_smoke_helper_checks_static_and_sourcemaps() -> None:
@@ -196,3 +204,96 @@ def test_ws_helper_targets_authenticated_notifications_route() -> None:
     # Real routed consumer through AllowedHostsOriginValidator + AuthMiddlewareStack.
     assert "sessionid" in helper
     assert "Origin" in helper
+
+
+# ---------------------------------------------------------------------------
+# Real OIDC login contract (issue #988)
+# ---------------------------------------------------------------------------
+
+
+def test_harness_drives_real_oidc_login(smoke_script: str) -> None:
+    # The session must be obtained through the real authorization-code flow
+    # against the local provider double, not minted directly (#988).
+    assert "oidc_login.py" in smoke_script
+    assert "stub_idp.py" in smoke_script
+    assert "OIDC_AUTH_DOMAIN" in smoke_script
+    assert "OIDC_ISSUER_URL" in smoke_script
+
+
+def test_harness_has_no_direct_session_shortcut(smoke_script: str) -> None:
+    # Acceptance criterion (#988): the #922 direct-session shortcut must not
+    # return - no SessionStore mint, no force_login, no /dev-login bypass.
+    assert "SessionStore" not in smoke_script
+    assert "_auth_user_id" not in smoke_script
+    assert "force_login" not in smoke_script
+    assert "/dev-login" not in smoke_script
+    # The session value is handed off by file path, never on argv.
+    assert "--session-file" in smoke_script
+    assert "--session " not in smoke_script
+
+
+def test_harness_proves_first_login_provisioning(smoke_script: str) -> None:
+    # Acceptance criterion (#988): prove the account is absent before the flow,
+    # then created + identity-bound by the callback (not a directly written row).
+    # Match the definition AND the enforcing call (count >= 2): a bare-name check
+    # stays green if the invocation is deleted while the function body remains
+    # (the #922 "defined but never called" lesson; cf. assert_home_writable).
+    assert smoke_script.count("assert_oidc_user_absent") >= 2
+    assert smoke_script.count("assert_oidc_user_provisioned") >= 2
+    assert "UserProfile" in smoke_script
+    assert "cognito_sub" in smoke_script
+    assert "issuer" in smoke_script
+
+
+def test_harness_redacts_secrets_in_failure_logs(smoke_script: str) -> None:
+    # gunicorn / IdP request lines can carry the auth code, state, nonce, tokens,
+    # and session key; the bounded failure log tail must redact them (#988).
+    # Assert the redaction expression covers each secret-bearing field by name,
+    # not merely that the word REDACTED appears somewhere (a narrowed field list
+    # would keep this green while leaking a real session key / client secret).
+    redaction = "\n".join(ln for ln in smoke_script.splitlines() if "REDACTED" in ln)
+    assert redaction, "no redaction expression found in the failure-log tail"
+    for field in ("code", "state", "nonce", "access_token", "id_token", "sessionid", "client_secret"):
+        assert field in redaction, f"redaction expression does not cover {field}"
+
+
+def test_stub_idp_is_cognito_shaped_and_fail_closed() -> None:
+    stub = STUB_IDP.read_text(encoding="utf-8")
+    # Exact Cognito endpoint shapes config._oidc_settings derives - not a generic
+    # mock's paths (which would force weakening production endpoint construction).
+    assert "/oauth2/authorize" in stub
+    assert "/oauth2/token" in stub
+    assert "/oauth2/userInfo" in stub
+    assert "/.well-known/jwks.json" in stub
+    # RS256 signing with a published JWKS; the signing call must never use a
+    # symmetric HS* or "none" algorithm (docstring prose may still mention them).
+    assert 'algorithm="RS256"' in stub
+    assert 'algorithm="HS256"' not in stub
+    assert 'algorithm="none"' not in stub
+    # Literal-boolean email_verified true (a truthy string must not pass).
+    assert '"email_verified": True' in stub
+    # Fail-closed: rejects wrong client, reused/invalid grant, and bad tokens.
+    assert "invalid_client" in stub
+    assert "invalid_grant" in stub
+    assert "invalid_token" in stub
+
+
+def test_login_probe_runs_real_flow_and_is_redaction_safe() -> None:
+    probe = LOGIN_PROBE.read_text(encoding="utf-8")
+    # Starts at the public /login router and traverses the real callback.
+    assert "/login" in probe
+    assert "callback" in probe
+    # Preserves the logical-HTTPS production posture across portal hops.
+    assert "X-Forwarded-Proto" in probe
+    # Never logs secret-bearing full URLs / query strings. Match the definition
+    # AND at least one call (count >= 2), so removing the redaction call fails.
+    assert probe.count("_redact") >= 2
+
+
+def test_probes_read_session_from_file_not_argv() -> None:
+    # The session value must never appear on a probe's argv (#988): its path,
+    # not its value, is the argument.
+    for helper in (WS_HELPER, PAGE_HELPER):
+        text = helper.read_text(encoding="utf-8")
+        assert "--session-file" in text
+        assert '"--session"' not in text

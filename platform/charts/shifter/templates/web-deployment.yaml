@@ -22,7 +22,7 @@ spec:
     spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
       serviceAccountName: {{ .Values.serviceAccounts.portal.name }} # NOSONAR - bound by rbac-job-launcher.yaml.
-      automountServiceAccountToken: true
+      automountServiceAccountToken: false
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

@@ -397,6 +397,42 @@ def _delete_bootstrap_role(config: BootstrapConfig, *, profile: str, dry_run: bo
     success("Bootstrap role deleted - using Terraform-managed role going forward")
 
 
+def _ensure_ebs_encryption_by_default(config: BootstrapConfig, profile: str, dry_run: bool) -> None:
+    """Enable account-level EBS encryption-by-default in the deploy region.
+
+    The range provisioner's RunInstances grant requires encrypted root volumes
+    (``ec2:Encrypted=true``). Without account-default encryption, range launches
+    from the unencrypted base and scenario AMIs are denied and no range can
+    provision. Idempotent: only enables when currently disabled.
+    """
+    if dry_run:
+        info(f"[DRY-RUN] Would ensure EBS encryption-by-default in {config.region}")
+        return
+    check = [
+        "aws",
+        "--profile",
+        profile,
+        "--region",
+        config.region,
+        "ec2",
+        "get-ebs-encryption-by-default",
+        "--query",
+        "EbsEncryptionByDefault",
+        "--output",
+        "text",
+    ]
+    _validate_argv(check)
+    result = subprocess.run(check, capture_output=True, text=True)  # nosec B603 B607
+    if result.returncode == 0 and result.stdout.strip() == "True":
+        info("EBS encryption-by-default already enabled")
+        return
+    run_cmd(
+        ["aws", "--profile", profile, "--region", config.region, "ec2", "enable-ebs-encryption-by-default"],
+        dry_run=dry_run,
+    )
+    success("EBS encryption-by-default enabled")
+
+
 def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = False) -> dict[str, object]:
     """Bootstrap AWS account with state backend and IAM role."""
     header(f"Bootstrapping {config.env.upper()} AWS Account")
@@ -417,6 +453,11 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     header("Step 1/3: Creating S3 Bucket")
     _ensure_state_bucket(bucket_name, config, profile, dry_run)
     success("S3 bucket ready")
+
+    # Account hardening: EBS encryption-by-default. Range provisioning fails
+    # closed without it (the provisioner's RunInstances grant requires
+    # ec2:Encrypted=true on range root volumes).
+    _ensure_ebs_encryption_by_default(config, profile, dry_run)
 
     # Step 2: Bootstrap IAM Role (temporary - will be replaced by Terraform)
     header("Step 2/3: Creating Bootstrap IAM Role")

@@ -40,6 +40,7 @@ def _settings_import_env(**updates: str | None) -> dict[str, str]:
             "DJANGO_SECRET_KEY": "settings-import-secret",
             "ENVIRONMENT": "production",
             "DJANGO_DEBUG": "false",
+            "CLOUD_PROVIDER": "aws",
             "DJANGO_ALLOWED_HOSTS": "portal.example.test,localhost,127.0.0.1",
             "FIELD_ENCRYPTION_KEY": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
             "DB_NAME": "shifter",
@@ -97,6 +98,22 @@ def test_production_settings_require_effective_allowed_hosts() -> None:
 
     assert result.returncode != 0
     assert "DJANGO_ALLOWED_HOSTS" in result.stderr + result.stdout
+
+
+def test_production_settings_require_cloud_provider() -> None:
+    """A deployed portal must fail closed when CLOUD_PROVIDER is absent (PLAT-2005)."""
+    result = _run_settings_import(_settings_import_env(CLOUD_PROVIDER=None))
+
+    assert result.returncode != 0
+    assert "CLOUD_PROVIDER" in result.stderr + result.stdout
+
+
+def test_production_settings_reject_unsupported_cloud_provider() -> None:
+    """An unsupported backend fails closed instead of behaving as AWS (PLAT-2005)."""
+    result = _run_settings_import(_settings_import_env(CLOUD_PROVIDER="azure"))
+
+    assert result.returncode != 0
+    assert "CLOUD_PROVIDER" in result.stderr + result.stdout
 
 
 def test_field_encryption_key_has_single_settings_initializer() -> None:
@@ -180,7 +197,9 @@ def test_platform_drf_convention_defaults(monkeypatch) -> None:
         "rest_framework.authentication.SessionAuthentication",
     ]
     assert settings_module.REST_FRAMEWORK["EXCEPTION_HANDLER"] == "shared.api.errors.api_exception_handler"
-    assert settings_module.REST_FRAMEWORK["DEFAULT_SCHEMA_CLASS"] == "drf_spectacular.openapi.AutoSchema"
+    # Custom AutoSchema publishes per-operation token scopes and the shared error
+    # envelope into the contract (#1329).
+    assert settings_module.REST_FRAMEWORK["DEFAULT_SCHEMA_CLASS"] == "shared.api.schema.PlatformAutoSchema"
     assert settings_module.REST_FRAMEWORK["DEFAULT_VERSIONING_CLASS"] == "rest_framework.versioning.NamespaceVersioning"
     assert settings_module.REST_FRAMEWORK["ALLOWED_VERSIONS"] == ["v1"]
     assert settings_module.REST_FRAMEWORK["DEFAULT_VERSION"] == "v1"
@@ -198,6 +217,9 @@ def test_platform_drf_convention_defaults(monkeypatch) -> None:
     assert spectacular["SWAGGER_UI_DIST"] == "SIDECAR"
     assert spectacular["SWAGGER_UI_FAVICON_HREF"] == "SIDECAR"
     assert spectacular["REDOC_DIST"] == "SIDECAR"
+    # Contract scoped to the SPA-facing surface: unpublished apps are dropped
+    # from schema generation (#1329).
+    assert spectacular["PREPROCESSING_HOOKS"] == ["shared.api.schema.exclude_unpublished_endpoints"]
 
 
 def test_api_token_policy_read_from_env(monkeypatch) -> None:

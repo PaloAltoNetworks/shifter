@@ -16,6 +16,10 @@ from django.contrib.auth.models import Group
 from config.user_type_sync import USER_TYPE_TO_GROUP, sync_user_type
 from management.services import get_user_profile
 from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+)
 from shared.auth import (
     CTF_ORGANIZER_GROUP,
     CTF_PARTICIPANT_GROUP,
@@ -37,9 +41,9 @@ def _group_names(user) -> set[str]:
 
 def _role_sync_rows(user):
     return AuditLog.objects.filter(
-        entity_type=AuditLog.EntityType.USER,
+        entity_type=AuditEntityType.USER,
         entity_id=user.id,
-        action=AuditLog.Action.ROLE_SYNC,
+        action=AuditAction.ROLE_SYNC,
     )
 
 
@@ -55,9 +59,13 @@ class TestSyncUserType:
         assert row.new_state["user_type"] == "ctf_participant"
         assert row.new_state["groups"] == [CTF_PARTICIPANT_GROUP]
 
-    def test_organizer_claim_grants_organizer_group(self, user):
+    def test_organizer_claim_does_not_grant_organizer_group(self, user):
+        # #1516: CTF Organizer authority must never come from the self-mutable
+        # user_type claim. An organizer claim is inert on this path — no group is
+        # added and no audit row is written.
         sync_user_type(user, "ctf_organizer", source="oidc")
-        assert _group_names(user) == {CTF_ORGANIZER_GROUP}
+        assert _group_names(user) == set()
+        assert _role_sync_rows(user).count() == 0
 
     def test_standard_claim_removes_ctf_groups(self, user):
         user.groups.add(Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)[0])
@@ -65,19 +73,22 @@ class TestSyncUserType:
         assert _group_names(user) == set()
         assert _role_sync_rows(user).count() == 1
 
-    def test_role_claim_preserves_existing_sibling_ctf_group(self, user):
-        # Dual CTF roles are legitimate (e.g. an organizer who also self-registers
-        # as a participant); a later claim adds its group without clobbering the
-        # sibling. Only a ``standard`` claim clears CTF membership.
-        sync_user_type(user, "ctf_organizer", source="oidc")
+    def test_participant_sync_preserves_admin_granted_organizer_group(self, user):
+        # #1516: organizer is admin-controlled. A dual-role user (admin-granted
+        # organizer who also self-registers as a participant) keeps organizer; the
+        # self-service participant sync adds its own group without touching it.
+        user.groups.add(Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)[0])
         sync_user_type(user, "ctf_participant", source="oidc")
         assert _group_names(user) == {CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP}
 
-    def test_standard_claim_clears_both_ctf_groups(self, user):
-        sync_user_type(user, "ctf_organizer", source="oidc")
+    def test_standard_claim_clears_participant_but_not_admin_organizer(self, user):
+        # #1516: ``standard`` drops the self-service participant group but must
+        # never remove an admin-granted organizer group — self-service identity
+        # data cannot alter organizer authority in either direction.
+        user.groups.add(Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)[0])
         sync_user_type(user, "ctf_participant", source="oidc")
         sync_user_type(user, "standard", source="oidc")
-        assert _group_names(user) == set()
+        assert _group_names(user) == {CTF_ORGANIZER_GROUP}
 
     def test_no_op_when_already_in_target_state_writes_no_audit_row(self, user):
         sync_user_type(user, "ctf_participant", source="oidc")
@@ -105,8 +116,8 @@ class TestSyncUserType:
     def test_writes_one_audit_row_per_change(self, user):
         """The audit trail records each transition, the SEC-5 reviewability control."""
         sync_user_type(user, "ctf_participant", source="oidc")
-        sync_user_type(user, "ctf_organizer", source="dev_login")
-        sync_user_type(user, "standard", source="identity_platform")
+        sync_user_type(user, "standard", source="dev_login")
+        sync_user_type(user, "ctf_participant", source="identity_platform")
         # Order by insertion id, not timestamp: three rows can share a millisecond.
         sources = list(_role_sync_rows(user).order_by("id").values_list("context", flat=True))
         assert sources == [
@@ -127,12 +138,17 @@ class TestClaimDerivedGroupInvariant:
     ``apply_bootstrap_admin_flags``; this is a structural regression guard.
     """
 
-    def test_mapping_reaches_only_ctf_groups(self):
+    def test_mapping_reaches_only_participant_group(self):
+        # #1516: self-service user_type may reach the CTF Participant group only.
+        # Organizer is no longer derivable from self-service identity data; it is
+        # granted from admin-controlled provider evidence or local assignment.
         reachable = {group for group in USER_TYPE_TO_GROUP.values() if group is not None}
-        assert reachable == {CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP}
+        assert reachable == {CTF_PARTICIPANT_GROUP}
 
-    def test_mapping_never_reaches_platform_groups(self):
-        assert THREAT_RESEARCH_GROUP not in set(USER_TYPE_TO_GROUP.values())
+    def test_mapping_never_reaches_platform_or_organizer_groups(self):
+        values = set(USER_TYPE_TO_GROUP.values())
+        assert THREAT_RESEARCH_GROUP not in values
+        assert CTF_ORGANIZER_GROUP not in values
 
     @pytest.mark.parametrize("claim", ["ctf_organizer", "ctf_participant"])
     def test_claim_derived_role_grants_no_cms_authoring(self, user, claim):
@@ -143,3 +159,29 @@ class TestClaimDerivedGroupInvariant:
         assert THREAT_RESEARCH_GROUP not in set(user.groups.values_list("name", flat=True))
         assert user.is_staff is False
         assert user.is_superuser is False
+
+
+@pytest.mark.django_db
+class TestSelfServiceCannotAcquireOrganizer:
+    """#1516: participant-controlled identity changes cannot acquire organizer,
+    staff, superuser, or provisioning authority through the self-service sync,
+    from any provider source. Re-verifies the #937 privilege-separation invariant
+    against the narrowed mapping.
+    """
+
+    @pytest.mark.parametrize("source", ["oidc", "identity_platform", "dev_login"])
+    def test_self_service_organizer_claim_grants_no_privilege(self, user, source):
+        sync_user_type(user, "ctf_organizer", source=source)
+        user.refresh_from_db()
+        groups = _group_names(user)
+        assert CTF_ORGANIZER_GROUP not in groups
+        assert THREAT_RESEARCH_GROUP not in groups
+        assert user.is_staff is False
+        assert user.is_superuser is False
+
+    def test_toggling_user_type_never_reaches_organizer(self, user):
+        # Any sequence of self-asserted user_type values a participant can drive
+        # never lands them in the organizer group.
+        for claim in ["ctf_participant", "ctf_organizer", "standard", "ctf_organizer"]:
+            sync_user_type(user, claim, source="oidc")
+        assert CTF_ORGANIZER_GROUP not in _group_names(user)

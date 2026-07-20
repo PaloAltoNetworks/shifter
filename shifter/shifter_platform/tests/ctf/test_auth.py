@@ -4,7 +4,7 @@ Tests cover:
 - OIDC backend extension for CTF user types
 - Dashboard routing by user type
 - Access control decorators
-- CTF magic link authentication
+- Dedicated temporary-account authentication boundaries
 - CTF context processor
 - Dev auth CTF user type support
 
@@ -192,9 +192,11 @@ class TestOIDCBackendCTFUserType:
 
         return get_user_model().objects.create_user(username="newctf@test.com", email="newctf@test.com")
 
-    def test_organizer_claim_adds_organizer_group(self, real_user):
+    def test_organizer_claim_does_not_add_organizer_group(self, real_user):
+        # #1516: a self-service custom:user_type claim can never grant the CTF
+        # Organizer group. Organizer authority is administrator-controlled only.
         self._make_backend()._update_user_type(real_user, {"custom:user_type": "ctf_organizer"})
-        assert real_user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
+        assert not real_user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
 
     def test_participant_claim_adds_participant_group(self, real_user):
         self._make_backend()._update_user_type(real_user, {"custom:user_type": "ctf_participant"})

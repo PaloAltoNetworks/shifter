@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiFetch } from "./client";
+import { apiDownload, apiFetch } from "./client";
 import { ApiError } from "./errors";
 
 function mockFetch(status: number, body?: unknown) {
@@ -92,5 +92,113 @@ describe("apiFetch", () => {
     expect(url).toContain("severity=high");
     expect(url).toContain("page=2");
     expect(url).not.toContain("include_deleted");
+  });
+});
+
+describe("apiDownload", () => {
+  it("preserves unsafe-request protections and returns only a bounded OpenVPN blob", async () => {
+    const profile = new TextEncoder().encode("client\nremote vpn.example.test 1194 udp\n");
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      headers: new Headers({ "Content-Type": "application/x-openvpn-profile" }),
+      arrayBuffer: async () => profile.buffer,
+      text: async () => "",
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const blob = await apiDownload("/ctf/range/vpn-profile/", {
+      method: "POST",
+      expectedMediaType: "application/x-openvpn-profile",
+      maxBytes: 64 * 1024,
+    });
+
+    expect(blob.type).toBe("application/x-openvpn-profile");
+    expect(blob.size).toBe(profile.byteLength);
+    const init = lastInit(fetchMock);
+    expect(init.headers["X-CSRFToken"]).toBe("tok123");
+    expect(init.credentials).toBe("same-origin");
+    expect(init.headers["X-Request-ID"]).toBeTruthy();
+  });
+
+  it("parses JSON error envelopes instead of treating them as profile bytes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 409,
+      ok: false,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      text: async () => JSON.stringify({ error: { code: "vpn_not_ready", message: "VPN profile is not ready." } }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await apiDownload("/ctf/range/vpn-profile/", {
+      method: "POST",
+      expectedMediaType: "application/x-openvpn-profile",
+      maxBytes: 64 * 1024,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("vpn_not_ready");
+  });
+
+  it("rejects unexpected media types before exposing response bytes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      headers: new Headers({ "Content-Type": "text/html" }),
+      arrayBuffer: async () => new TextEncoder().encode("not a profile").buffer,
+      text: async () => "",
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      apiDownload("/ctf/range/vpn-profile/", {
+        method: "POST",
+        expectedMediaType: "application/x-openvpn-profile",
+        maxBytes: 64 * 1024,
+      }),
+    ).rejects.toMatchObject({ code: "unexpected_response" });
+  });
+
+  it("rejects an oversized declared content length before reading bytes", async () => {
+    const arrayBuffer = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      headers: new Headers({
+        "Content-Type": "application/x-openvpn-profile",
+        "Content-Length": "5",
+      }),
+      arrayBuffer,
+      text: async () => "",
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      apiDownload("/ctf/range/vpn-profile/", {
+        method: "POST",
+        expectedMediaType: "application/x-openvpn-profile",
+        maxBytes: 4,
+      }),
+    ).rejects.toMatchObject({ code: "unexpected_response", message: "The download exceeded the allowed size." });
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized response bytes when content length is absent", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      headers: new Headers({ "Content-Type": "application/x-openvpn-profile" }),
+      arrayBuffer: async () => new Uint8Array(5).buffer,
+      text: async () => "",
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      apiDownload("/ctf/range/vpn-profile/", {
+        method: "POST",
+        expectedMediaType: "application/x-openvpn-profile",
+        maxBytes: 4,
+      }),
+    ).rejects.toMatchObject({ code: "unexpected_response", message: "The download exceeded the allowed size." });
   });
 });

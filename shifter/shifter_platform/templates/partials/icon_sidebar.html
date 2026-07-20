@@ -325,7 +325,7 @@
                             {% if active_nav == 'docs' %}
                                 active-top-item
                             {% endif %}">
-                    <a href="{% url 'documentation:index' %}"
+                    <a href="{{ DOCS_SITE_URL }}" target="_blank" rel="noopener"
                        class="nav-menu-item nav-menu-item-level-0
                               {% if active_nav == 'docs' %}
                                   active-link
@@ -399,7 +399,7 @@
                 </div>
                 {# Help #}
                 <div>
-                    <a href="{% url 'documentation:index' %}" class="nav-menu-item nav-menu-item-level-0">
+                    <a href="{% url 'mission_control:help' %}" class="nav-menu-item nav-menu-item-level-0">
                         <span class="nav-icon">
                             <svg width="24"
                                  height="24"

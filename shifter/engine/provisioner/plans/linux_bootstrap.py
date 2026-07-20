@@ -87,7 +87,14 @@ echo "SSH configuration complete"
 exit 0
 """
 
-# Bash script to verify hostname is set correctly
+# Bash script to verify hostname is set correctly.
+#
+# The comparison is case-insensitive: hostnames are case-insensitive (RFC 4343),
+# and cloud-init on some AMIs re-applies the instance Name tag verbatim (e.g.
+# "Workstation") after `set_hostname` runs, so the live hostname can differ only
+# in case from the value we set. Failing verification on case alone would break
+# every scenario whose instance name is not already lowercase (e.g. the
+# "Workstation" victim in basic/ad_attack_lab), so match case-insensitively.
 VERIFY_HOSTNAME_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
@@ -97,7 +104,7 @@ echo "Verifying hostname configuration..."
 
 current_hostname=$(hostname)
 
-if [ "$current_hostname" = "$expected_hostname" ]; then
+if [ "${current_hostname,,}" = "${expected_hostname,,}" ]; then
     echo "Hostname verified: $current_hostname"
     exit 0
 else

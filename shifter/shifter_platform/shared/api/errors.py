@@ -72,7 +72,14 @@ def _error_message(exc: Exception, response: Response) -> str:
     """Return the safe user-facing message for an exception response."""
     if isinstance(exc, ValidationError):
         return _STATUS_MESSAGES[status.HTTP_400_BAD_REQUEST]
-    if response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+    # 429 has a known safe status message; do not route DRF's throttle detail
+    # ("...Expected available in N seconds") through keyword classification,
+    # whose "expected" validation token would mislabel it as "Invalid request".
+    if response.status_code in (
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_429_TOO_MANY_REQUESTS,
+    ):
         return _STATUS_MESSAGES[response.status_code]
 
     default = _STATUS_MESSAGES.get(response.status_code, "Request could not be processed")

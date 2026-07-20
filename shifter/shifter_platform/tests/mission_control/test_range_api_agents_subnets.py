@@ -24,14 +24,14 @@ def _json(response):
 
 class TestListAgents:
     def test_requires_login(self):
-        response = Client().get(reverse("mission_control:list_agents"))
+        response = Client().get(reverse("v1:mission_control:agents-list"))
         assert response.status_code == 401
 
     def test_returns_user_agents(self, authenticated_client, make_agent):
         client, user = authenticated_client(email="agents@example.com")
         make_agent(user, name="Test XDR Agent")
 
-        response = client.get(reverse("mission_control:list_agents"))
+        response = client.get(reverse("v1:mission_control:agents-list"))
         assert response.status_code == 200
         agents = _json(response)["agents"]
         assert len(agents) == 1
@@ -41,7 +41,7 @@ class TestListAgents:
         client, user = authenticated_client(email="osslug@example.com")
         make_agent(user, os=windows_os)
 
-        response = client.get(reverse("mission_control:list_agents"))
+        response = client.get(reverse("v1:mission_control:agents-list"))
         assert response.status_code == 200
         agent = _json(response)["agents"][0]
         assert agent["os_slug"] == "windows"
@@ -52,7 +52,7 @@ class TestListAgents:
         _other_client, other = authenticated_client(email="other-a@example.com")
         make_agent(other, name="Someone Else")
 
-        response = owner_client.get(reverse("mission_control:list_agents"))
+        response = owner_client.get(reverse("v1:mission_control:agents-list"))
         names = [a["name"] for a in _json(response)["agents"]]
         assert names == ["Owned"]
 

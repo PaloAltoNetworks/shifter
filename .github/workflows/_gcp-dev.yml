@@ -64,6 +64,8 @@ jobs:
       KUBECONFORM_VERSION: v0.7.0
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_version: "1.7.1"
@@ -72,9 +74,15 @@ jobs:
           version: v1.34.1
       - name: Install kubeconform
         run: |
-          curl -fsSL -o /tmp/kubeconform.tar.gz \
+          # ADR-037-R3: verify the download against the release CHECKSUMS
+          # manifest before extraction. The archive is saved under the exact name
+          # the manifest references so `sha256sum -c` matches.
+          curl -fsSL -o /tmp/kubeconform-linux-amd64.tar.gz \
             "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
-          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          curl -fsSL -o /tmp/kubeconform.CHECKSUMS \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/CHECKSUMS"
+          (cd /tmp && grep "kubeconform-linux-amd64.tar.gz" kubeconform.CHECKSUMS | sha256sum -c -)
+          tar -xzf /tmp/kubeconform-linux-amd64.tar.gz -C /tmp kubeconform
       - run: terraform fmt -check -recursive
         working-directory: platform/terraform/gcp
       - run: terraform init -backend=false
@@ -90,14 +98,19 @@ jobs:
       - run: /tmp/kubeconform -strict -summary /tmp/gcp-platform.yaml
 
   deploy:
+    # Runs on the GCP tenant's own runner (label gcp-dev), provisioned by
+    # `deploy.py runners --cloud gcp` (issue #1546), so a GCP dev tenant deploys
+    # without borrowing the AWS self-hosted fleet. gcp-dev is self-hosted-class
+    # to the ADR-003-R5 exposure checker, so the PR gate below still applies.
     name: Deploy (${{ inputs.environment }})
-    runs-on: self-hosted
+    runs-on: gcp-dev
     environment: ${{ inputs.github_environment }}
     needs: validate
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     permissions:
       contents: read
       id-token: write
+      attestations: write
     env:
       GCP_ENVIRONMENT: ${{ inputs.environment }}
       USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
@@ -111,8 +124,15 @@ jobs:
       GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      # Explicit, audited opt-out for the first Identity Platform operator bootstrap.
+      # Set the repo variable to "true" to deliberately skip operator creation; the
+      # preflight downgrades the missing-credential failure to a logged warning and
+      # the seed step below is skipped. Unset/false keeps operator creds required.
+      SHIFTER_SKIP_OPERATOR_BOOTSTRAP: ${{ vars.SHIFTER_SKIP_OPERATOR_BOOTSTRAP }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
       - name: Ensure GCP deploy auth is configured
         run: |
           if [ -z "${GCP_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
@@ -136,13 +156,27 @@ jobs:
         with:
           terraform_version: "1.7.1"
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - name: Preflight - validate deploy prerequisites
+        # Shared fail-safe gate (scripts/bootstrap/preflight.py): reports every
+        # missing prerequisite up front before Terraform/Helm run, so a missing
+        # secret fails here in seconds rather than mid-run. The bootstrap operator
+        # credentials are required unless SHIFTER_SKIP_OPERATOR_BOOTSTRAP=true.
+        # See docs/dev/deploy-secrets.md.
+        working-directory: scripts/bootstrap
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PUBLIC_HOSTNAME: ${{ secrets.GCP_PUBLIC_HOSTNAME }}
+          GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN: ${{ secrets.GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN }}
+          GCP_MASTER_AUTHORIZED_CIDRS: ${{ secrets.GCP_MASTER_AUTHORIZED_CIDRS }}
+        run: uv run python -m preflight --cloud gcp --env "${GCP_ENVIRONMENT}" --headless
       - name: Render local.auto.tfvars from secrets/variables
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
           GCP_PUBLIC_HOSTNAME: ${{ secrets.GCP_PUBLIC_HOSTNAME }}
           GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN: ${{ secrets.GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN }}
-          GCP_MASTER_AUTHORIZED_CIDRS: ${{ secrets.GCP_MASTER_AUTHORIZED_CIDRS }}
+          GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
+          GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
         # The committed `terraform.tfvars` ships an example.com baseline that
         # fails-loud on apply. Each deployment provides its real values via
         # the GitHub secrets/variables listed above; this step renders them
@@ -162,26 +196,13 @@ jobs:
             echo "::error::Required secret GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN is not set. See docs/dev/deploy-secrets.md."
             exit 1
           fi
-          # GCP_MASTER_AUTHORIZED_CIDRS is an HCL list literal — e.g. '["1.2.3.4/32"]'.
-          # An unset value falls back to '[]' (locks the public control-plane).
-          AUTHORIZED_CIDRS="${GCP_MASTER_AUTHORIZED_CIDRS:-[]}"
-          # Always authorize THIS runner's own egress IP so a stale/rotated
-          # GCP_MASTER_AUTHORIZED_CIDRS can never lock the deploy out of the
-          # public GKE control-plane (the "Apply GKE workload manifests" step
-          # runs kubectl against it). Self-hosted runner egress IPs rotate;
-          # merging the live IP each run keeps the deploy self-healing.
-          RUNNER_IP="$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null || curl -fsS --max-time 10 https://ifconfig.me 2>/dev/null || true)"
-          if printf '%s' "${RUNNER_IP}" | grep -qE '^[0-9]+(\.[0-9]+){3}$'; then
-            RUNNER_CIDR="\"${RUNNER_IP}/32\""
-            if [ "${AUTHORIZED_CIDRS}" = "[]" ] || [ -z "${AUTHORIZED_CIDRS}" ]; then
-              AUTHORIZED_CIDRS="[${RUNNER_CIDR}]"
-            elif ! printf '%s' "${AUTHORIZED_CIDRS}" | grep -qF "${RUNNER_IP}/32"; then
-              AUTHORIZED_CIDRS="${AUTHORIZED_CIDRS%]}, ${RUNNER_CIDR}]"
-            fi
-            echo "Authorizing runner egress IP ${RUNNER_IP}/32 for the GKE control-plane"
-          else
-            echo "::warning::Could not determine runner egress IP; relying on GCP_MASTER_AUTHORIZED_CIDRS only"
-          fi
+          # The GKE control plane is PRIVATE (#1723): it has no public endpoint,
+          # so there is no public IP to allowlist and no runner-IP merging to do.
+          # The deploy reaches the control plane over Connect Gateway (the fleet
+          # membership; see the "Configure kubectl for the GKE cluster" step),
+          # which is IAM-authenticated rather than network-allowlisted. A private
+          # endpoint requires master_authorized_networks to be enabled but permits
+          # an empty cidr_blocks list, so pin it empty.
           cat > "${TF_DIR}/local.auto.tfvars" <<EOF
           # Auto-generated by .github/workflows/_gcp-dev.yml; do not commit.
           project_id                    = "${GCP_PROJECT_ID}"
@@ -189,8 +210,20 @@ jobs:
           artifact_registry_location    = "${GCP_REGION}"
           public_hostname               = "${GCP_PUBLIC_HOSTNAME}"
           identity_allowed_email_domain = "${GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN}"
-          gke_master_authorized_cidrs   = ${AUTHORIZED_CIDRS}
+          gke_master_authorized_cidrs   = []
           EOF
+          # First Identity Platform operator credentials (issue #1570). The
+          # bootstrap script (scripts/bootstrap/gcp_control_plane.py) reads these
+          # from this overlay as the authoritative source, so a rotated password
+          # persists across redeploys instead of being lost. Appended only when
+          # the secrets are set; unset leaves the create-if-absent bootstrap on
+          # its existing fallback. Written by redirection, never echoed (#1015).
+          if [ -n "${GCP_BOOTSTRAP_ADMIN_EMAIL}" ]; then
+            printf 'gcp_bootstrap_admin_email    = "%s"\n' "${GCP_BOOTSTRAP_ADMIN_EMAIL}" >> "${TF_DIR}/local.auto.tfvars"
+          fi
+          if [ -n "${GCP_BOOTSTRAP_ADMIN_PASSWORD}" ]; then
+            printf 'gcp_bootstrap_admin_password = "%s"\n' "${GCP_BOOTSTRAP_ADMIN_PASSWORD}" >> "${TF_DIR}/local.auto.tfvars"
+          fi
       - name: Render range egress allowlist from shifter.yaml
         env:
           SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
@@ -295,13 +328,24 @@ jobs:
       - name: Configure kubectl for the GKE cluster
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        # The control plane is private (#1723): reach it over Connect Gateway via
+        # the cluster's fleet membership (name == cluster name, location == cluster
+        # region), not the (now non-existent) public endpoint. This is
+        # IAM-authenticated; kubectl authorizes through GKE's IAM->RBAC mapping
+        # (the CI service account holds roles/container.admin + the gkehub gateway
+        # roles). Requires the connectgateway/gkeconnect/gkehub APIs (enabled by
+        # platform-core) and the cluster's fleet { project } registration.
         run: |
           CLUSTER=$(python3 -c "import json;print(json.load(open('/tmp/gcp-terraform-outputs.json'))['gke_cluster_name']['value'])")
           LOCATION=$(python3 -c "import json;print(json.load(open('/tmp/gcp-terraform-outputs.json'))['gke_cluster_location']['value'])")
-          gcloud container clusters get-credentials "${CLUSTER}" \
-            --region "${LOCATION}" --project "${GCP_PROJECT_ID}"
+          gcloud container fleet memberships get-credentials "${CLUSTER}" \
+            --location "${LOCATION}" --project "${GCP_PROJECT_ID}"
       - name: Seed Identity Platform bootstrap operator
-        if: env.GCP_BOOTSTRAP_ADMIN_EMAIL != '' && env.GCP_BOOTSTRAP_ADMIN_PASSWORD != ''
+        # Runs unless operator bootstrap is explicitly opted out. The preflight
+        # step already failed the deploy if the credentials were missing without
+        # the opt-out, so reaching here means creds are present (seed) or the
+        # opt-out is set (skip) -- never a silent no-op on empty secrets.
+        if: env.SHIFTER_SKIP_OPERATOR_BOOTSTRAP != 'true'
         # Run under the bootstrap project's interpreter (Python 3.12 + its deps);
         # the runner's system python3 is too old for deploy.py's `X | None` unions.
         run: |
@@ -364,39 +408,30 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
       - name: Set short SHA
         run: echo "SHORT_SHA=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_ENV"
-      - name: Pin overlay image tags to short SHA
+      - name: Rewrite overlay image project and service accounts
         run: |
           python3 - <<'PY'
           import os
           import re
           from pathlib import Path
 
-          short_sha = os.environ["SHORT_SHA"]
           path = Path(os.environ["K8S_OVERLAY_DIR"]) / "kustomization.yaml"
           content = path.read_text(encoding="utf-8")
-
-          # Quote the tag: an all-numeric short SHA (e.g. 5660494) would otherwise
-          # be parsed as a YAML number and kustomize rejects newTag (must be string).
-          updated, replacements = re.subn(
-            r"(?m)^(\s*newTag:\s*)\S+\s*$",
-            lambda match: f'{match.group(1)}"{short_sha}"',
-            content,
-          )
-          if replacements == 0:
-            raise SystemExit(f"::error file={str(path)}::No image newTag entries found to pin")
 
           # The committed newName values carry a placeholder Artifact Registry
           # project; rewrite it to the deployment's real AR project (taken from
           # the build's PORTAL_IMAGE_ROOT) so pods pull from where the images were
-          # actually pushed, not the committed placeholder.
+          # actually pushed, not the committed placeholder. Image identity is
+          # pinned to a verified @sha256 digest AFTER the build (ADR-037-R6, the
+          # "Pin overlay images to verified digests" step below), never a tag.
           project = re.search(r"pkg\.dev/([^/]+)/", os.environ["PORTAL_IMAGE_ROOT"]).group(1)
           updated, name_fixes = re.subn(
             r"(?m)^(\s*newName:\s*\S*?pkg\.dev/)[^/]+/",
             rf"\g<1>{project}/",
-            updated,
+            content,
           )
           path.write_text(updated, encoding="utf-8")
-          print(f"Pinned {replacements} tags to {short_sha}; rewrote {name_fixes} image projects to {project}")
+          print(f"Rewrote {name_fixes} image projects to {project}")
 
           # The Workload Identity GSA annotations carry the same placeholder
           # project; point them at the deployment project so the pods' KSAs
@@ -413,6 +448,7 @@ jobs:
           PY
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build and push portal image
+        id: build-portal
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter
@@ -421,7 +457,11 @@ jobs:
           tags: |
             ${{ env.PORTAL_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
+          # Build provenance (ADR-037-R5): SBOM + max provenance, attested below.
+          provenance: mode=max
+          sbom: true
       - name: Build and push provisioner image
+        id: build-provisioner
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter
@@ -430,7 +470,10 @@ jobs:
           tags: |
             ${{ env.PROVISIONER_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
+          provenance: mode=max
+          sbom: true
       - name: Build and push guacd image
+        id: build-guacd
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter/engine/guacd
@@ -438,7 +481,10 @@ jobs:
           tags: |
             ${{ env.GUACD_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
+          provenance: mode=max
+          sbom: true
       - name: Build and push guacamole-client image
+        id: build-guacamole-client
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter/engine/guacamole
@@ -446,6 +492,32 @@ jobs:
           tags: |
             ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
+          provenance: mode=max
+          sbom: true
+      - name: Attest build provenance (portal)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.PORTAL_IMAGE_ROOT }}
+          subject-digest: ${{ steps.build-portal.outputs.digest }}
+          push-to-registry: false
+      - name: Attest build provenance (provisioner)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.PROVISIONER_IMAGE_ROOT }}
+          subject-digest: ${{ steps.build-provisioner.outputs.digest }}
+          push-to-registry: false
+      - name: Attest build provenance (guacd)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.GUACD_IMAGE_ROOT }}
+          subject-digest: ${{ steps.build-guacd.outputs.digest }}
+          push-to-registry: false
+      - name: Attest build provenance (guacamole-client)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}
+          subject-digest: ${{ steps.build-guacamole-client.outputs.digest }}
+          push-to-registry: false
       - uses: google-github-actions/get-gke-credentials@3da1e46a907576cefaa90c484278bb5b259dd395
         with:
           cluster_name: ${{ env.GKE_CLUSTER_NAME }}
@@ -453,6 +525,10 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
       - name: Render generated runtime env
         env:
+          # ENGINE_TASK_IMAGE is pinned to the verified provisioner @sha256
+          # digest (ADR-037-R6), not a mutable tag; the GKE admission policy
+          # (ADR-006-R4) follows this exact value.
+          PROVISIONER_DIGEST: ${{ steps.build-provisioner.outputs.digest }}
           # GCE range-cell backend config (issue #1387). Non-secret; sourced from
           # repository/environment variables so each account supplies its own
           # image families, zone, and service accounts. Unset variables fall back
@@ -479,7 +555,7 @@ jobs:
           # rendered or applied (ADR-008-R1/R3).
           python3 scripts/gcp/render_runtime_env.py \
             --terraform-output-json /tmp/gcp-terraform-outputs.json \
-            --image-tag "${SHORT_SHA}" \
+            --engine-image-digest "${PROVISIONER_DIGEST}" \
             --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env"
       - name: Render generated edge manifest
         run: |
@@ -502,6 +578,72 @@ jobs:
       # Roll out the production-secure workload (new runtime ConfigMap + restart)
       # BEFORE (re-)applying the public edge, so the public Ingress never routes
       # to pods still running an older, less-secure runtime config.
+      - name: Pin overlay images to verified digests
+        env:
+          PORTAL_DIGEST: ${{ steps.build-portal.outputs.digest }}
+          GUACD_DIGEST: ${{ steps.build-guacd.outputs.digest }}
+          GUACAMOLE_CLIENT_DIGEST: ${{ steps.build-guacamole-client.outputs.digest }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          # ADR-037-R6: deploy the exact verified image@sha256, not a mutable tag.
+          # Replace each overlay image's newTag with the digest built this run so
+          # `kubectl apply` and the provenance verification below reference the
+          # same immutable bytes; kustomize renders newName@digest.
+          path = Path(os.environ["K8S_OVERLAY_DIR"]) / "kustomization.yaml"
+          content = path.read_text(encoding="utf-8")
+          digests = {
+            "portal": os.environ["PORTAL_DIGEST"],
+            "guacd": os.environ["GUACD_DIGEST"],
+            "guacamole-client": os.environ["GUACAMOLE_CLIENT_DIGEST"],
+          }
+          for image, digest in digests.items():
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+              raise SystemExit(f"::error::invalid digest for {image}: {digest!r}")
+            pattern = re.compile(
+              r"(?m)^(?P<pre>\s*-\s*name:\s*\S*/" + re.escape(image)
+              + r"\s*\n\s*newName:\s*\S+\s*\n)\s*newTag:\s*\S+\s*$"
+            )
+            content, n = pattern.subn(rf"\g<pre>    digest: {digest}", content)
+            if n != 1:
+              raise SystemExit(
+                f"::error::expected exactly one overlay image entry for {image}, found {n}"
+              )
+          path.write_text(content, encoding="utf-8")
+          print("Pinned overlay images to verified digests:",
+                {k: v[:19] + "..." for k, v in digests.items()})
+          PY
+      - name: Verify image build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PORTAL_DIGEST: ${{ steps.build-portal.outputs.digest }}
+          PROVISIONER_DIGEST: ${{ steps.build-provisioner.outputs.digest }}
+          GUACD_DIGEST: ${{ steps.build-guacd.outputs.digest }}
+          GUACAMOLE_CLIENT_DIGEST: ${{ steps.build-guacamole-client.outputs.digest }}
+        run: |
+          # ADR-037-R6: verify the GitHub OIDC-signed provenance attestation for
+          # each built image@digest and the fixed Brad-Edwards/shifter identity
+          # before the GKE rollout. These are the same digests the overlay was
+          # just pinned to (and ENGINE_TASK_IMAGE), so the verified bytes are the
+          # deployed bytes. No bypass mode.
+          set -euo pipefail
+          verify() {
+            local root="$1" digest="$2" label="$3"
+            if [[ -z "$digest" || ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::${label} build did not produce a valid image digest to verify"
+              exit 1
+            fi
+            echo "Verifying provenance for ${label} (${digest})"
+            gh attestation verify "oci://${root}@${digest}" --repo Brad-Edwards/shifter
+          }
+          verify "${PORTAL_IMAGE_ROOT}" "${PORTAL_DIGEST}" "portal"
+          verify "${PROVISIONER_IMAGE_ROOT}" "${PROVISIONER_DIGEST}" "provisioner"
+          verify "${GUACD_IMAGE_ROOT}" "${GUACD_DIGEST}" "guacd"
+          verify "${GUACAMOLE_CLIENT_IMAGE_ROOT}" "${GUACAMOLE_CLIENT_DIGEST}" "guacamole-client"
+
       - name: Apply GKE workload manifests
         run: kubectl apply -k "${K8S_OVERLAY_DIR}"
       - name: Apply private-service NetworkPolicy

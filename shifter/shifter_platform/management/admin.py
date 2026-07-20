@@ -7,10 +7,11 @@ from .models import ActivityLog, UserProfile
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "deleted_at", "anonymized_at")
-    list_filter = ("deleted_at", "anonymized_at")
+    list_display = ("user", "is_ctf_account", "must_change_password", "deleted_at", "anonymized_at")
+    list_filter = ("is_ctf_account", "must_change_password", "deleted_at", "anonymized_at")
     search_fields = ("user__email",)
     raw_id_fields = ("user",)
+    readonly_fields = ("is_ctf_account",)
 
 
 @admin.register(ActivityLog)

@@ -36,6 +36,7 @@ locals {
 # and GCP_SERVICE_ACCOUNT values consumed as GitHub secrets.
 module "cicd_github_oidc" {
   source = "../../modules/cicd-github-oidc"
+  count  = var.enable_cicd_github_oidc ? 1 : 0
 
   project_id       = var.project_id
   environment      = var.environment
@@ -92,6 +93,7 @@ module "platform_core" {
   email_sender_domain               = var.email_sender_domain
   range_egress_mode                 = var.range_egress_mode
   range_egress_allowed_cidrs        = var.range_egress_allowed_cidrs
+  aces_package_bucket_name          = var.aces_package_bucket_name
   labels                            = local.labels
 
   messaging_enable_dlq                  = var.messaging_enable_dlq

@@ -121,7 +121,7 @@ class TestNGFWDeprovisionPage:
 class TestApiNGFWCreate:
     def _create(self, client, payload):
         return client.post(
-            reverse("mission_control:api_ngfw_create"),
+            reverse("v1:mission_control:ngfw-create"),
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -146,10 +146,10 @@ class TestApiNGFWCreate:
 
     def test_returns_400_for_invalid_json(self, user, client_for):
         response = client_for(user).post(
-            reverse("mission_control:api_ngfw_create"), data="not json", content_type="application/json"
+            reverse("v1:mission_control:ngfw-create"), data="not json", content_type="application/json"
         )
         assert response.status_code == 400
-        assert _json(response)["error"] == "Invalid JSON"
+        assert _json(response)["error"]["code"] == "parse_error"
 
     def test_returns_400_when_user_already_has_active_ngfw(
         self, user, client_for, ngfw_catalog, ngfw_credentials, cms_ngfw_app
@@ -188,7 +188,7 @@ class TestApiNGFWList:
     def test_returns_serialized_ngfws(self, user, client_for, cms_ngfw_app):
         cms_ngfw_app(user, name="JsonNGFW", serial="SER-123")
 
-        response = client_for(user).get(reverse("mission_control:api_ngfw_list"))
+        response = client_for(user).get(reverse("v1:mission_control:ngfw-list"))
 
         assert response.status_code == 200
         ngfws = _json(response)["ngfws"]
@@ -205,7 +205,7 @@ class TestApiNGFWList:
 class TestApiNGFWDestroy:
     def _destroy(self, client, app_id, confirm_name):
         return client.post(
-            reverse("mission_control:api_ngfw_destroy", kwargs={"app_id": str(app_id)}),
+            reverse("v1:mission_control:ngfw-destroy", kwargs={"app_id": str(app_id)}),
             data=json.dumps({"confirm_name": confirm_name}),
             content_type="application/json",
         )
@@ -226,7 +226,7 @@ class TestApiNGFWDestroy:
         from uuid import uuid4
 
         response = client_for(user).post(
-            reverse("mission_control:api_ngfw_destroy", kwargs={"app_id": str(uuid4())}),
+            reverse("v1:mission_control:ngfw-destroy", kwargs={"app_id": str(uuid4())}),
             data="x",
             content_type="application/json",
         )

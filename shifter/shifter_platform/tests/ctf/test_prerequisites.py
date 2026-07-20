@@ -232,7 +232,7 @@ class TestCheckPrerequisitesMet:
 
         participant = CTFParticipant.objects.create(
             event=draft_event,
-            user=ctf_participant.user,
+            user=None,
             email=ctf_participant.email,
             name="Test",
             status=ParticipantStatus.ACTIVE.value,
@@ -354,7 +354,7 @@ class TestGetAvailableChallengesWithPrereqs:
         available = get_available_challenges(draft_event.id, include_unreleased=True)
         available_ids = set(available.values_list("id", flat=True))
 
-        assert {challenge_a.id, challenge_b.id, challenge_c.id} == available_ids
+        assert available_ids == {challenge_a.id, challenge_b.id, challenge_c.id}
 
 
 class TestSubmitFlagPrerequisiteBlocking:

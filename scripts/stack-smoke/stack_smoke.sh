@@ -10,6 +10,9 @@
 #     the production Gunicorn/Uvicorn ASGI command as the non-root appuser;
 #   * /health returns 200 from the real dependency-aware django-health-check
 #     registry (DB + cache + storage + redis channel layer);
+#   * a real OIDC authorization-code login (against a local Cognito-shaped
+#     provider double) drives /login -> authorize -> /oidc/callback, provisions
+#     the first-login user + profile, and establishes the session used below (#988);
 #   * an authenticated websocket handshake completes through the real ASGI
 #     stack (AllowedHostsOriginValidator + AuthMiddlewareStack + a routed
 #     consumer);
@@ -65,6 +68,28 @@ PG=shifter-smoke-postgres
 REDIS=shifter-smoke-redis
 ELASTICMQ=shifter-smoke-elasticmq
 MIGRATE=shifter-smoke-migrate
+IDP=shifter-smoke-idp
+
+# --- Local Cognito-shaped OIDC provider double (#988) -----------------------
+# Drives the *real* login flow (/login -> authorize -> /oidc/callback ->
+# provision -> session) instead of minting a session directly. Auth-domain and
+# issuer are distinct Cognito bases, modeled as distinct path prefixes on this
+# one local service. Plain HTTP on the private smoke network: the token/JWKS/
+# UserInfo backchannel never leaves it, so OIDC_VERIFY_SSL stays at its
+# production default and no security posture is weakened for the smoke.
+IDP_PORT="${SMOKE_IDP_PORT:-8080}"
+STUB_CLIENT_ID=stack-smoke-client
+STUB_CLIENT_SECRET=stack-smoke-secret
+STUB_AUTH_DOMAIN="http://${IDP}:${IDP_PORT}/auth"
+STUB_ISSUER_URL="http://${IDP}:${IDP_PORT}/issuer"
+STUB_JWKS_PATH="/issuer/.well-known/jwks.json"
+# mozilla-django-oidc builds the redirect URI from the request host + forwarded
+# scheme; the login probe addresses the portal as https://${WEB}:8000, so this
+# is the exact callback the double must accept.
+STUB_REDIRECT_URI="https://${WEB}:8000/oidc/callback/"
+# Fixed synthetic identity the double mints (matches stub_idp.py defaults).
+STUB_SUBJECT=stack-smoke-oidc-subject
+STUB_EMAIL=stack-smoke-oidc@example.test
 
 # Worker / scheduler set: one "name|heartbeat_file|command" entry per line.
 # Default mirrors the production monitored set minimally: one SQS worker (proves
@@ -78,6 +103,8 @@ SPECS
 SMOKE_WORKER_SPECS="${SMOKE_WORKER_SPECS:-$SMOKE_WORKER_SPECS_DEFAULT}"
 
 declare -a WORKER_CONTAINERS=()
+# Mode-0600 temp files holding the captured session key; removed in cleanup.
+declare -a SESSION_FILES=()
 
 log() { printf '\n=== %s\n' "$*"; }
 note() { printf -- '--- %s\n' "$*"; }
@@ -91,14 +118,20 @@ cleanup() {
   if [[ $rc -ne 0 ]]; then
     log "FAILURE (exit ${rc}) - bounded container diagnostics"
     local c
-    for c in "$MIGRATE" "$WEB" ${WORKER_CONTAINERS[@]+"${WORKER_CONTAINERS[@]}"}; do
-      docker logs --tail 40 "$c" 2>&1 | sed "s/^/[$c] /" || true
+    for c in "$MIGRATE" "$WEB" "$IDP" ${WORKER_CONTAINERS[@]+"${WORKER_CONTAINERS[@]}"}; do
+      # Redact OIDC authorization-code-flow secrets that can surface in gunicorn
+      # request lines / IdP logs (auth code, state, nonce, tokens, session key,
+      # client secret) before emitting the bounded log tail (#988).
+      docker logs --tail 40 "$c" 2>&1 \
+        | sed -E 's/(code|state|nonce|access_token|id_token|sessionid|client_secret)=[^[:space:]&"]*/\1=REDACTED/g' \
+        | sed "s/^/[$c] /" || true
     done
   fi
   docker rm -f \
-    "$WEB" "$MIGRATE" "$PG" "$REDIS" "$ELASTICMQ" \
+    "$WEB" "$MIGRATE" "$PG" "$REDIS" "$ELASTICMQ" "$IDP" \
     ${WORKER_CONTAINERS[@]+"${WORKER_CONTAINERS[@]}"} >/dev/null 2>&1 || true
   docker network rm "$SMOKE_NETWORK" >/dev/null 2>&1 || true
+  rm -f ${SESSION_FILES[@]+"${SESSION_FILES[@]}"} >/dev/null 2>&1 || true
   return $rc
 }
 trap cleanup EXIT
@@ -160,6 +193,50 @@ assert_home_writable() {
   fi
 }
 
+assert_oidc_user_absent() {
+  # First-login provisioning is only *proven* if the account does not pre-exist:
+  # a stale row would let a broken provisioning path pass silently (#988).
+  if ! docker exec -e "EXPECT_EMAIL=${STUB_EMAIL}" "$WEB" python manage.py shell -c '
+import os, sys
+from django.contrib.auth import get_user_model
+if get_user_model().objects.filter(email__iexact=os.environ["EXPECT_EMAIL"]).exists():
+    print("OIDC login user exists before the flow ran (stale state)", file=sys.stderr)
+    sys.exit(1)
+'; then
+    fail "OIDC login user already exists before login (cannot prove first-login provisioning)"
+  fi
+}
+
+assert_oidc_user_provisioned() {
+  # Prove the callback provisioned exactly one user + one UserProfile bound to
+  # the verified (issuer, subject) — not a directly written setup row (#988).
+  if ! docker exec \
+    -e "EXPECT_EMAIL=${STUB_EMAIL}" \
+    -e "EXPECT_SUB=${STUB_SUBJECT}" \
+    -e "EXPECT_ISS=${STUB_ISSUER_URL}" \
+    "$WEB" python manage.py shell -c '
+import os, sys
+from django.contrib.auth import get_user_model
+from management.models import UserProfile
+users = list(get_user_model().objects.filter(email__iexact=os.environ["EXPECT_EMAIL"]))
+if len(users) != 1:
+    print(f"expected exactly one OIDC user, found {len(users)}", file=sys.stderr)
+    sys.exit(1)
+profile = getattr(users[0], "profile", None)
+if profile is None:
+    print("provisioned OIDC user has no UserProfile", file=sys.stderr)
+    sys.exit(1)
+if profile.cognito_sub != os.environ["EXPECT_SUB"] or profile.issuer != os.environ["EXPECT_ISS"]:
+    print("UserProfile is not bound to the verified (issuer, subject)", file=sys.stderr)
+    sys.exit(1)
+if UserProfile.objects.filter(cognito_sub=os.environ["EXPECT_SUB"]).count() != 1:
+    print("verified subject is bound to more than one profile", file=sys.stderr)
+    sys.exit(1)
+'; then
+    fail "first-login OIDC provisioning did not produce the expected user + bound profile"
+  fi
+}
+
 # --- main -------------------------------------------------------------------
 
 command -v docker >/dev/null 2>&1 || fail "docker is required"
@@ -188,21 +265,45 @@ docker run -d --name "$ELASTICMQ" --network "$SMOKE_NETWORK" \
   -v "${SCRIPT_DIR}/elasticmq.conf:/opt/elasticmq.conf:ro" \
   "$ELASTICMQ_IMAGE" >/dev/null
 
+# Local OIDC provider double (#988). Runs the stub under the built portal image's
+# interpreter (reusing its in-image PyJWT/cryptography); the script is bind-
+# mounted read-only and needs no cloud access.
+log "Starting the local OIDC provider double"
+docker run -d --name "$IDP" --network "$SMOKE_NETWORK" \
+  -v "${SCRIPT_DIR}:/smoke:ro" --entrypoint python \
+  "$SMOKE_IMAGE" /smoke/stub_idp.py \
+  --host 0.0.0.0 --port "$IDP_PORT" \
+  --issuer "$STUB_ISSUER_URL" --auth-domain "$STUB_AUTH_DOMAIN" \
+  --client-id "$STUB_CLIENT_ID" --client-secret "$STUB_CLIENT_SECRET" \
+  --redirect-uri "$STUB_REDIRECT_URI" \
+  --subject "$STUB_SUBJECT" --email "$STUB_EMAIL" >/dev/null
+
 wait_for 60 "postgres" docker exec "$PG" pg_isready -U "$DB_USER" -d "$DB_NAME"
 wait_for 60 "redis" docker exec "$REDIS" redis-cli ping
+wait_for 30 "oidc provider double (JWKS)" docker exec "$IDP" \
+  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${IDP_PORT}${STUB_JWKS_PATH}', timeout=2)"
 
 # Common runtime env: enough to satisfy production settings import and the real
 # entrypoint without any cloud access. Mirrors deploy_portal.sh env names.
 declare -a common_env=(
   -e ENVIRONMENT=production
+  # Production settings now resolve + validate the active cloud backend at import
+  # (config._runtime_env.resolve_cloud_provider, PLAT-2005) and fail closed when
+  # CLOUD_PROVIDER is absent, exactly as a real deploy must set it. The smoke boots
+  # the AWS-shaped runtime (ElasticMQ/SQS, boto3 endpoint), so it mirrors the AWS
+  # deploy by supplying the backend identity explicitly.
+  -e CLOUD_PROVIDER=aws
   -e "DB_HOST=${PG}" -e DB_PORT=5432 -e "DB_NAME=${DB_NAME}" -e "DB_USER=${DB_USER}" -e "DB_PASSWORD=${DB_PASSWORD}"
   -e "DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}"
   -e "FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY}"
   -e "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,${WEB}"
-  -e OIDC_RP_CLIENT_ID=stack-smoke-client
-  -e OIDC_RP_CLIENT_SECRET=stack-smoke-secret
-  -e OIDC_ISSUER_URL=https://issuer.example.test
-  -e OIDC_AUTH_DOMAIN=https://auth.example.test
+  # Point the real OIDC backend at the local Cognito-shaped provider double
+  # (#988) so the built image exercises the real authorization-code flow rather
+  # than a directly minted session. Auth-domain and issuer stay distinct bases.
+  -e "OIDC_RP_CLIENT_ID=${STUB_CLIENT_ID}"
+  -e "OIDC_RP_CLIENT_SECRET=${STUB_CLIENT_SECRET}"
+  -e "OIDC_ISSUER_URL=${STUB_ISSUER_URL}"
+  -e "OIDC_AUTH_DOMAIN=${STUB_AUTH_DOMAIN}"
   # Production settings require EMAIL_BACKEND to be explicit (config/_email.py);
   # real deploys pass it from rendered config. The smoke sends no mail, so use
   # the console backend (the same value config/_email.py uses as its dev default)
@@ -241,39 +342,50 @@ assert_skipped_migrations "$WEB"
 assert_home_writable "$WEB"
 note "HOME writable as the image's non-root user"
 
-log "Proving authenticated websocket handshake through the real ASGI stack"
-# Create a throwaway authenticated session in the smoke database via the running
-# container (no app change, no /dev-login). The key is captured from stdout only.
-session_key="$(
-  docker exec "$WEB" python manage.py shell -c '
-from django.contrib.auth import get_user_model
-from django.contrib.sessions.backends.db import SessionStore
-User = get_user_model()
-user, created = User.objects.get_or_create(username="stack-smoke")
-if created:
-    user.set_unusable_password()
-    user.save()
-store = SessionStore()
-store["_auth_user_id"] = str(user.pk)
-store["_auth_user_backend"] = "django.contrib.auth.backends.ModelBackend"
-store["_auth_user_hash"] = user.get_session_auth_hash()
-store.create()
-print(store.session_key)
-' 2>/dev/null | tail -n 1
-)"
-[[ -n "$session_key" ]] || fail "could not create a smoke session for the websocket probe"
+log "Establishing an authenticated session via the real OIDC login flow"
+# Replaces the #922 direct-session mint with the real authorization-code flow
+# against the local IdP double, so a regression in OIDC config, the callback,
+# first-login provisioning, or session establishment fails the smoke. Prove the
+# account does not exist yet: first-login provisioning must be what creates it
+# (a stale row would be a false pass).
+assert_oidc_user_absent
 
+# Drive /login/ -> authorize -> /oidc/callback/ from inside the network, so the
+# probe reaches both the portal and the IdP by name and follows the redirect
+# chain like a browser. Only the session key reaches stdout; write it to a
+# mode-0600 file whose *path* (never the value) is handed to the probes.
+session_file="$(mktemp)"
+chmod 600 "$session_file"
+SESSION_FILES+=("$session_file")
+session_key="$(
+  docker run --rm --network "$SMOKE_NETWORK" \
+    -v "${SCRIPT_DIR}:/smoke:ro" --entrypoint python \
+    "$SMOKE_IMAGE" /smoke/oidc_login.py \
+    --portal-origin "https://${WEB}:8000" \
+    --portal-transport "http://${WEB}:8000" \
+    --protected-path /dashboard/
+)"
+[[ -n "$session_key" ]] || fail "real OIDC login flow did not establish a session"
+printf '%s' "$session_key" > "$session_file"
+
+# Prove first-login provisioning resulted from the callback: exactly one Django
+# user + one UserProfile bound to the verified (issuer, subject).
+assert_oidc_user_provisioned
+note "First-login provisioning verified (one user + bound profile)"
+
+log "Proving authenticated websocket handshake through the real ASGI stack"
+# Reuses the callback-established session (no directly minted fallback).
 uv run --with 'websockets==12.0' python "${SCRIPT_DIR}/ws_handshake.py" \
   --url "ws://127.0.0.1:${SMOKE_WEB_PORT}/${SMOKE_WS_PATH}" \
-  --session "$session_key" \
+  --session-file "$session_file" \
   --origin "http://localhost"
 
 log "Asserting authenticated page renders and static assets resolve"
-# Reuses the same smoke session. Catches the June container-runtime class
-# (missing terminal sourcemaps / static assets) the source-tree tests miss.
+# Reuses the same callback-established session. Catches the June container-runtime
+# class (missing terminal sourcemaps / static assets) the source-tree tests miss.
 python3 "${SCRIPT_DIR}/page_smoke.py" \
   --base "http://127.0.0.1:${SMOKE_WEB_PORT}" \
-  --session "$session_key" \
+  --session-file "$session_file" \
   --paths "$SMOKE_PAGES"
 
 log "Booting worker / scheduler containers and asserting heartbeats"
@@ -294,4 +406,4 @@ while IFS='|' read -r wname hbfile wcmd; do
   note "${wname} heartbeat present"
 done <<< "$SMOKE_WORKER_SPECS"
 
-log "Stack smoke PASSED: built image boots, /health 200, websocket OPEN, worker heartbeats present"
+log "Stack smoke PASSED: built image boots, /health 200, real OIDC login + first-login provisioning, websocket OPEN, worker heartbeats present"

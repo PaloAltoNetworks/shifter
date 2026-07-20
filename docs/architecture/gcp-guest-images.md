@@ -103,6 +103,111 @@ conversion (the Kali repos do not carry it). The remaining `scripts/kali/*`
 steps then install the Kali toolset, Caldera and Claude Code on top. No imported
 base image and no `GCP_KALI_SOURCE_IMAGE` secret are required.
 
+## GCE range-cell images (build → validate → promote)
+
+The GCE range-cell backend (the default GCP range path) consumes the
+`googlecompute` images **directly** as GCE images — it does not use the qcow2
+export above (that is GDC-only). The provisioner resolves each logical guest role
+through `GCP_RANGE_{LINUX,KALI,WINDOWS,DC}_IMAGE` (a family URL or exact image),
+and `load_gce_range_cell_config` validates the reference shape, disk type, and a
+per-role **policy** minimum boot-disk size (not the actual source-image size)
+before any Compute Engine call so a malformed value fails fast instead of after
+a create attempt.
+
+An **immutable candidate image is the unit of validation and promotion**; a GCE
+image family is a mutable deployment channel, not evidence that a particular
+image was tested. The pipeline is three stages:
+
+```
+packer-gcp.yml         build    → GCE image  shifter-<type>-<ts>   (family shifter-<type>)
+packer-gcp-validate.yml validate → boot the EXACT candidate in a disposable,
+                                    isolated VM; label it validated=passed
+packer-gcp-promote.yml  promote  → copy the EXACT validated candidate to the prod
+                                    family; verify it, then deprecate the old head
+```
+
+1. **Validate** (`packer-gcp-validate.yml`) boots the concrete candidate in a
+   disposable VM with the runtime range-cell posture (**no external IP**, IAP
+   subnet, Shielded VM, project SSH keys blocked) and reboots it once. Evidence
+   is gathered **by the runner over an IAP tunnel**, not self-reported by the
+   guest: for Linux/polaris-vm the runner SSH-executes the check script (guest
+   agent, host sshd management port, Docker, baked compose config/images, and
+   that every declared compose service has a **running** container) and gates on
+   its exit code; for a pre-promoted DC the runner probes AD over LDAP (an
+   anonymous rootDSE query proving AD DS is serving the **expected forest**, with
+   **no first-boot promotion**). The candidate boots with **no service account
+   and no OAuth scopes**, so guest code cannot read a cloud token and mutate its
+   own image labels; the runner (WIF) holds all label authority. Passing again
+   after the reset proves a clean boot with no manual input. On success the
+   workflow labels the exact candidate `validated=passed` and uploads a bounded,
+   non-secret evidence artifact; the VM is always deleted. Only image types with
+   a matching validator are selectable (generic Linux, `polaris-vm`,
+   `dc-prebaked`); the sysprepped `windows` and first-boot-promotion `dc` images
+   are excluded. Per-container runtime health and seeded AD content that depend
+   on per-range credentials are a runtime/range-smoke concern, not part of this
+   candidate-boot gate.
+2. **Promote** (`packer-gcp-promote.yml`) takes the **exact** validated candidate
+   image name, verifies it carries `validated=passed`, copies that image into the
+   prod family (derived from the image's own family attribute, so `polaris-vm`
+   and purpose-scoped `<purpose>-dc` families work with no per-name logic),
+   verifies the new prod image is `READY`, and only then deprecates the previous
+   prod head. It never re-resolves "newest in the dev family" at promotion time.
+
+### polaris-vm range host (fail-closed compose stack)
+
+The Polaris range host is a Debian Docker host image (`polaris-vm.pkr.hcl`)
+running the polaris docker-compose stack. The stack lives outside this repo, so
+`host-setup.sh` fetches it from GCS at bake time. For a promotable image the
+stack is **mandatory** and verified: the build fails on a missing stack, a
+`POLARIS_STACK_SHA256` checksum mismatch, an invalid compose config, a failed
+build/pull, or a missing image. Set `GCP_POLARIS_STACK_SHA256` (and, optionally,
+`GCP_POLARIS_STACK_GENERATION` to pin the immutable object version).
+
+### Pre-promoted DC (`dc-prebaked`) vs. generic Windows/DC
+
+The `windows` and `dc` images are **sysprepped** (GCESysprep), so their
+build-time WinRM credential is discarded by sysprep. The pre-promoted
+`dc-prebaked` image is captured **un-sysprepped** on purpose — GCESysprep cannot
+generalize a promoted domain controller — so it needs deliberate credential
+hygiene rather than relying on sysprep:
+
+- The identical `BOREAS.LOCAL` machine/domain identity across ranges is
+  intentional (isolated, identical ranges) and is preserved.
+- The DSRM secret is **generated per build** and injected as a sensitive Packer
+  variable; there is no committed default DSRM password in the release contract.
+- A pre-capture cleanup provisioner strips build transcripts, the DNS-forwarder
+  handoff, and the staged AD-content seed (which carries baked passwords) so no
+  secret-bearing artifact ships in the disk.
+- The **live** domain Administrator credential is rotated **per range at
+  runtime** by `plans/dc_setup.py` (`DC_DOMAIN_PASSWORD`), not baked.
+
+### First live validation run (operator verification)
+
+The candidate-boot validation subsystem (`packer-gcp-validate.yml` and
+`shifter/packer/gcp/scripts/validate/*`) is exercised in CI only for template,
+workflow, and script **shape** (`packer validate`, `actionlint`, `shellcheck`,
+and the structural and behavioral unit tests). Its live behaviour is GCP-only
+and is not exercised until an operator dispatches the workflow against a real
+project: the IAP tunnel to the candidate VM, the runner's SSH to the polaris-vm
+management port (2222), and the DC LDAP rootDSE probe.
+
+Treat the **first `packer-gcp-validate.yml` run per environment** as the smoke
+test for that live path, and confirm:
+
+- `start-iap-tunnel` reaches the candidate on the SSH port (22 for generic
+  Linux, the configured management port for polaris-vm) and on 389 for a DC.
+- The injected instance SSH key lets the runner reach the guest as the
+  `validator` user (project SSH keys are blocked, so an instance key is used).
+- `ldapsearch` on the runner returns the expected forest rootDSE for a
+  `dc-prebaked` candidate.
+- The disposable validation VM is deleted on both success and failure.
+
+A failure on that first run is a wiring issue in the validation path, not a
+candidate-image defect; fix it before relying on the `validated=passed` label as
+a promotion gate. Follow-up hardening of this subsystem is tracked in #1621
+(attestation-bound evidence, dispatch-ref workflow trust) and #1622 (real
+source-image disk check, deeper DC service/content probing).
+
 ## Operating the pipeline
 
 Build + export one guest (Actions → "Packer GCE Image Build" → pick type/env, or):
@@ -113,5 +218,9 @@ gh workflow run packer-gcp.yml -f image_type=ubuntu -f environment=dev
 
 After all four guests (`ubuntu`, `kali`, `windows`, `dc`) are built and
 exported, wire each `GDC_<TYPE>_IMAGE_URL` and (re)deploy so the range
-provisioner picks them up. Promotion of dev images to prod is handled by
-`packer-gcp-promote.yml`.
+provisioner picks them up.
+
+For the GCE range-cell path, a dev image must pass the candidate-boot gate
+before it can ship: run `packer-gcp-validate.yml` for the built image, then
+`packer-gcp-promote.yml` with the exact validated image name. Promotion refuses
+an image that is not labelled `validated=passed`.

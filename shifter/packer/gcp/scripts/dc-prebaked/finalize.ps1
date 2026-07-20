@@ -60,4 +60,30 @@ finally {
 }
 
 Write-Host "=== polaris-dc finalize complete ==="
+
+# --- Pre-capture cleanup (un-sysprepped image) --------------------------------
+# The image is captured UN-SYSPREPPED (GCESysprep cannot generalize a promoted
+# DC), so the usual sysprep-time credential/transcript disposal does not happen.
+# Do it by hand HERE, in the still-authenticated finalize session: a2_setup.ps1
+# above reset the domain Administrator password, so a later separate provisioner
+# could not reconnect over WinRM to run cleanup (#1343 codex review). Strip the
+# staged AD-content seed (carries baked passwords), the DNS-forwarder handoff,
+# and the promote-bake transcript. The BOREAS.LOCAL identity is intentional and
+# left intact; the live Administrator credential is rotated per range at runtime
+# by plans/dc_setup.py (DC_DOMAIN_PASSWORD).
+Write-Host "Stripping build-time secret material before capture..."
+Remove-Item -Path "C:\polaris\a2_setup.ps1" -Force -ErrorAction SilentlyContinue
+if ((Test-Path "C:\polaris") -and -not (Get-ChildItem "C:\polaris" -Force)) {
+    Remove-Item -Path "C:\polaris" -Force -Recurse -ErrorAction SilentlyContinue
+}
+Remove-Item -Path "C:\dc-prebaked-dns-forwarder.txt" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "C:\dc-prebaked-promote-bake.log" -Force -ErrorAction SilentlyContinue
+# Fail-closed: the secret-bearing content seed must not survive into the image.
+if (Test-Path "C:\polaris\a2_setup.ps1") {
+    throw "cleanup failed: content seed C:\polaris\a2_setup.ps1 still present before capture"
+}
+Write-Host "=== pre-capture cleanup complete ==="
 Stop-Transcript
+# The finalize transcript is closed now; remove it last so no bake transcript
+# survives into the captured image.
+Remove-Item -Path "C:\dc-prebaked-finalize.log" -Force -ErrorAction SilentlyContinue

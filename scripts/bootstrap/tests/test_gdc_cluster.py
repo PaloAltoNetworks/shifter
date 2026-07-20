@@ -450,7 +450,9 @@ class TestGdcBootstrapCluster:
 
     def test_executes_bootstrap_steps_in_order(self, tmp_path):
         """The GDC bootstrap path should execute the expected sequence of helper steps."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        # range_backend="gdc" is what builds the ABM/GDC substrate (#1716); the gce
+        # default skips it and is covered by TestGdcBootstrapRangeBackend.
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1", range_backend="gdc")
         staged_assets = {
             "assets_dir": tmp_path / "cluster1",
             "ssh_metadata": tmp_path / "cluster1" / "ssh-metadata",
@@ -680,7 +682,8 @@ class TestGdcControlPlaneRollout:
         assert commands[0] == [
             "gcloud",
             "container",
-            "clusters",
+            "fleet",
+            "memberships",
             "get-credentials",
             "shifter-gcp-dev-platform",
             "--location",

@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 from django.contrib.auth.models import User
+from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import ParseError
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -16,9 +17,17 @@ from cms.services import complete_upload as cms_complete_upload
 from cms.services import initiate_upload as cms_initiate_upload
 from mission_control.api._base import MissionControlAPIView, _upload_write_permission, _validated
 from mission_control.api.permissions import HasMissionControlActor
-from mission_control.api.serializers import UploadCancelSerializer, UploadCompleteSerializer, UploadInitiateSerializer
+from mission_control.api.serializers import (
+    SuccessResponseSerializer,
+    UploadCancelSerializer,
+    UploadCompleteResponseSerializer,
+    UploadCompleteSerializer,
+    UploadInitiateResponseSerializer,
+    UploadInitiateSerializer,
+)
 from mission_control.upload_session import check_upload_in_progress, set_upload_in_progress, upload_lock_matches_token
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
+from shared.api.schema import ApiErrorSerializer
 from shared.api_tokens.models import ApiToken
 from shared.errors import classify_user_message
 from shared.exceptions import CMSError
@@ -32,6 +41,11 @@ class UploadInitiateView(MissionControlAPIView):
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _upload_write_permission()]
 
+    @extend_schema(
+        request=UploadInitiateSerializer,
+        responses={200: UploadInitiateResponseSerializer, 400: ApiErrorSerializer, 409: ApiErrorSerializer},
+        operation_id="api_v1_mission_control_upload_initiate",
+    )
     def post(self, request: Request) -> Response:
         """Create an upload session and presigned destination for an agent."""
         if check_upload_in_progress(request.session):
@@ -74,6 +88,11 @@ class UploadCompleteView(MissionControlAPIView):
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _upload_write_permission()]
 
+    @extend_schema(
+        request=UploadCompleteSerializer,
+        responses=UploadCompleteResponseSerializer,
+        operation_id="api_v1_mission_control_upload_complete",
+    )
     def post(self, request: Request) -> Response:
         """Finalize a completed upload and clear the session upload marker."""
         data, error = _validated(self, UploadCompleteSerializer, request.data)
@@ -110,6 +129,11 @@ class UploadCancelView(MissionControlAPIView):
             request.session, upload_token
         )
 
+    @extend_schema(
+        request=UploadCancelSerializer,
+        responses=SuccessResponseSerializer,
+        operation_id="api_v1_mission_control_upload_cancel",
+    )
     def post(self, request: Request) -> Response:
         """Cancel a validated current upload and clear the session marker."""
         try:

@@ -20,6 +20,12 @@ def _write(tmp_path: Path, body: str) -> Path:
     return path
 
 
+def _write_named(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(textwrap.dedent(body).lstrip())
+    return path
+
+
 class CheckTfIamElbScopeTest(unittest.TestCase):
     def test_wildcard_mutation_statement_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -136,8 +142,7 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                "ELBv2 create actions must require aws:RequestTag/ManagedBy"
-                in reason
+                "ELBv2 create actions must require aws:RequestTag/ManagedBy" in reason
                 for reason in reasons
             ),
             reasons,
@@ -360,7 +365,30 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
                 """,
             )
 
-            self.assertEqual(check_file(tf), [])
+            non_contract_violations = [
+                violation
+                for violation in check_file(tf)
+                if "VPN ELBv2 policy contract" not in violation.reason
+            ]
+            self.assertEqual(non_contract_violations, [])
+
+    def test_missing_vpn_contract_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                """
+                resource "aws_iam_policy" "gwlb" {
+                  policy = jsonencode({
+                    Statement = []
+                  })
+                }
+                """,
+            )
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any("VPN ELBv2 policy contract" in reason for reason in reasons), reasons
+        )
 
     def test_missing_gwy_resource_path_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -407,11 +435,250 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
         # would make check_file return [] (resource not found) and this test
         # would pass vacuously, defeating the regression coverage.
         self.assertIn(
-            'resource "aws_iam_role_policy" "gwlb"',
+            'resource "aws_iam_policy" "gwlb"',
             path.read_text(),
-            "iam.tf must contain aws_iam_role_policy.gwlb for this check to be meaningful",
+            "iam.tf must contain aws_iam_policy.gwlb for this check to be meaningful",
         )
         self.assertEqual(check_file(path), [])
+
+    def test_vpn_create_listener_must_authorize_parent_nlb_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                """
+                resource "aws_iam_policy" "gwlb" {
+                  policy = jsonencode({
+                    Statement = [
+                      {
+                        Sid      = "CreateVpnListener"
+                        Action   = ["elasticloadbalancing:CreateListener"]
+                        Resource = "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/net/shifter-vpn-*/*/*"
+                        Condition = {
+                          StringEquals = {
+                            "aws:RequestTag/shifter:system"      = "shifter"
+                            "aws:RequestTag/shifter:environment" = var.environment
+                            "aws:RequestTag/ManagedBy"           = "terraform"
+                          }
+                        }
+                      }
+                    ]
+                  })
+                }
+                """,
+            )
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any("parent shifter-vpn NLB" in reason for reason in reasons), reasons
+        )
+
+    def test_vpn_create_actions_must_not_mix_resource_types(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                """
+                resource "aws_iam_policy" "gwlb" {
+                  policy = jsonencode({
+                    Statement = [
+                      {
+                        Sid = "CreateVpnResources"
+                        Action = [
+                          "elasticloadbalancing:CreateLoadBalancer",
+                          "elasticloadbalancing:CreateTargetGroup",
+                          "elasticloadbalancing:CreateListener"
+                        ]
+                        Resource = [
+                          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*",
+                          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/net/shifter-vpn-*/*/*",
+                          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/shifter-vpn-*/*"
+                        ]
+                        Condition = {
+                          StringEquals = {
+                            "aws:RequestTag/shifter:system"      = "shifter"
+                            "aws:RequestTag/shifter:environment" = var.environment
+                            "aws:RequestTag/ManagedBy"           = "terraform"
+                          }
+                        }
+                      }
+                    ]
+                  })
+                }
+                """,
+            )
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any(
+                "create actions must use separate statements" in reason
+                for reason in reasons
+            ),
+            reasons,
+        )
+
+    def test_vpn_resource_allowlist_rejects_required_arn_plus_wildcard(self) -> None:
+        source = Path(
+            "platform/terraform/modules/engine-provisioner/iam.tf"
+        ).read_text()
+        exact = (
+            'Action   = "elasticloadbalancing:CreateLoadBalancer"\n'
+            '        Resource = "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*"'
+        )
+        broadened = (
+            'Action = "elasticloadbalancing:CreateLoadBalancer"\n'
+            "        Resource = [\n"
+            '          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*",\n'
+            '          "*"\n'
+            "        ]"
+        )
+        self.assertEqual(source.count(exact), 1)
+        source = source.replace(exact, broadened)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(Path(tmp), source)
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any("exact shifter-vpn namespace" in reason for reason in reasons), reasons
+        )
+
+    def test_vpn_action_allowlist_rejects_required_action_plus_wildcard(self) -> None:
+        source = Path(
+            "platform/terraform/modules/engine-provisioner/iam.tf"
+        ).read_text()
+        exact = 'Action   = "elasticloadbalancing:CreateLoadBalancer"'
+        broadened = (
+            "Action = [\n"
+            '          "elasticloadbalancing:CreateLoadBalancer",\n'
+            '          "elasticloadbalancing:*"\n'
+            "        ]"
+        )
+        self.assertEqual(source.count(exact), 1)
+        source = source.replace(exact, broadened)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(Path(tmp), source)
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any("explicitly approved actions" in reason for reason in reasons), reasons
+        )
+
+    def test_vpn_addtags_condition_rejects_required_values_plus_extra(self) -> None:
+        source = Path(
+            "platform/terraform/modules/engine-provisioner/iam.tf"
+        ).read_text()
+        marker = '"CreateListener"\n            ]'
+        marker_at = source.rfind(marker)
+        self.assertNotEqual(marker_at, -1)
+        source = (
+            source[:marker_at]
+            + '"CreateListener",\n              "DeleteLoadBalancer"\n            ]'
+            + source[marker_at + len(marker) :]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(Path(tmp), source)
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any(
+                "exact elasticloadbalancing:CreateAction allowlist" in reason
+                for reason in reasons
+            ),
+            reasons,
+        )
+
+    def test_vpn_create_listener_requires_parent_nlb_resource_tags(self) -> None:
+        source = Path(
+            "platform/terraform/modules/engine-provisioner/iam.tf"
+        ).read_text()
+        exact = '            "elasticloadbalancing:ResourceTag/ManagedBy"           = "terraform"\n'
+        listener_at = source.index('Action   = "elasticloadbalancing:CreateListener"')
+        tag_at = source.index(exact, listener_at)
+        statement_end = source.index("      },", listener_at)
+        self.assertLess(tag_at, statement_end)
+        source = source[:tag_at] + source[tag_at + len(exact) :]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(Path(tmp), source)
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any(
+                "CreateListener parent NLB ownership" in reason
+                and "ManagedBy" in reason
+                for reason in reasons
+            ),
+            reasons,
+        )
+
+    def test_vpn_and_gwlb_resources_must_not_share_a_statement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                """
+                resource "aws_iam_policy" "gwlb" {
+                  policy = jsonencode({
+                    Statement = [
+                      {
+                        Action = ["elasticloadbalancing:CreateLoadBalancer"]
+                        Resource = [
+                          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+                          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*"
+                        ]
+                        Condition = {
+                          StringEquals = {
+                            "aws:RequestTag/shifter:system"      = "shifter"
+                            "aws:RequestTag/shifter:environment" = var.environment
+                            "aws:RequestTag/ManagedBy"           = "terraform"
+                          }
+                        }
+                      }
+                    ]
+                  })
+                }
+                """,
+            )
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any("must not mix GWLB and VPN" in reason for reason in reasons), reasons
+        )
+
+    def test_vpn_listener_requires_creation_time_common_tags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write_named(
+                Path(tmp),
+                "vpn.tf",
+                """
+                resource "aws_lb_listener" "vpn" {
+                  load_balancer_arn = aws_lb.vpn[0].arn
+                  port              = 1194
+                  protocol          = "UDP"
+                }
+                """,
+            )
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any("local.common_tags" in reason for reason in reasons), reasons
+        )
+
+    def test_vpn_listener_with_creation_time_common_tags_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write_named(
+                Path(tmp),
+                "vpn.tf",
+                """
+                resource "aws_lb_listener" "vpn" {
+                  load_balancer_arn = aws_lb.vpn[0].arn
+                  port              = 1194
+                  protocol          = "UDP"
+                  tags              = local.common_tags
+                }
+                """,
+            )
+            self.assertEqual(check_file(tf), [])
 
 
 if __name__ == "__main__":

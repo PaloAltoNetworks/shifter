@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from cloud import get_secrets_store
+from cloud.exceptions import CloudProviderNotImplementedError
+from config import resolve_cloud_provider
 from executors.base import Executor
 from executors.ssm_executor import SSMExecutor
 
@@ -23,7 +25,7 @@ _SSH_USER_BY_OS = {
 
 
 def _get_provider() -> str:
-    return os.environ.get("CLOUD_PROVIDER", "aws")
+    return resolve_cloud_provider()
 
 
 def get_setup_document_name(os_type: str) -> str:
@@ -63,7 +65,6 @@ class GuestExecutionContext:
 def build_guest_execution_context(
     instance_data: dict[str, Any],
     *,
-    provider: str | None = None,
     os_type: str | None = None,
     role: str | None = None,
     kube_clients_builder: Callable[[], tuple[Any, Any, type]] | None = None,
@@ -71,15 +72,20 @@ def build_guest_execution_context(
 ) -> GuestExecutionContext:
     """Resolve the transport, target, and shell family for guest setup.
 
-    ``kube_clients_builder`` and ``secret_reader`` inject cloud boundaries for
-    tests while production uses the live Kubernetes and Secret Manager clients.
+    The active provider is resolved (and validated) via
+    ``config.resolve_cloud_provider`` -- guest transport (SSM vs in-range SSH)
+    is not a registry ``BackendCapability``, so this does not go through
+    ``cloud._require_capability`` (that seam is for the outer portal ->
+    provisioner task-runner dispatch). ``kube_clients_builder`` and
+    ``secret_reader`` inject cloud boundaries for tests while production uses
+    the live Kubernetes and Secret Manager clients.
     """
-    resolved_provider = provider or _get_provider()
+    provider = _get_provider()
     resolved_os_type = os_type or instance_data.get("os", "")
     resolved_role = role or instance_data.get("role", "")
     document_name = get_setup_document_name(resolved_os_type)
 
-    if resolved_provider == "gcp":
+    if provider == "gcp":
         if _is_gce_instance_output(instance_data):
             return _build_gce_execution_context(
                 instance_data,
@@ -97,16 +103,19 @@ def build_guest_execution_context(
             secret_reader=secret_reader,
         )
 
-    target = instance_data.get("instance_id", "")
-    if not target:
-        raise ValueError("AWS guest execution requires instance_id in instance output")
+    if provider == "aws":
+        target = instance_data.get("instance_id", "")
+        if not target:
+            raise ValueError("AWS guest execution requires instance_id in instance output")
 
-    return GuestExecutionContext(
-        executor=SSMExecutor(),
-        target=target,
-        document_name=document_name,
-        transport_name="ssm",
-    )
+        return GuestExecutionContext(
+            executor=SSMExecutor(),
+            target=target,
+            document_name=document_name,
+            transport_name="ssm",
+        )
+
+    raise CloudProviderNotImplementedError(provider)
 
 
 def _is_gce_instance_output(instance_data: dict[str, Any]) -> bool:
@@ -132,9 +141,9 @@ def _build_gce_execution_context(
     target = instance_data.get("private_ip", "")
     if not target:
         raise ValueError("GCE guest execution requires private_ip in instance output")
-    secret_id = instance_data.get("ssh_key_secret_arn", "")
+    secret_id = instance_data.get("gcp_host_ssh_key_secret_ref") or instance_data.get("ssh_key_secret_arn", "")
     if not secret_id:
-        raise ValueError("GCE guest execution requires ssh_key_secret_arn in instance output")
+        raise ValueError("GCE guest execution requires a host-management SSH secret reference")
     private_key = (secret_reader or get_secrets_store().get_secret)(secret_id)
     # Provisioner guest setup drives the host sshd, which for Docker-host guests
     # (e.g. the Polaris range host) is a different user + port than the

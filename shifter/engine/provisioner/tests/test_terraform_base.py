@@ -13,7 +13,7 @@ import pytest
 class TestBackendResolution:
     """Tests for Terraform backend selection and state key layout."""
 
-    @patch.dict("os.environ", {}, clear=True)
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True)
     def test_get_backend_type_defaults_to_s3(self):
         from terraform_base import get_backend_type
 
@@ -37,6 +37,24 @@ class TestBackendResolution:
 
         assert get_state_key("gcp/gdc-ranges", "req-123") == "gcp/gdc-ranges/req-123/default.tfstate"
 
+    @patch.dict("os.environ", {}, clear=True)
+    def test_get_backend_type_raises_for_unsupported_provider(self, monkeypatch):
+        """A future third backend must fail closed here rather than silently
+
+        getting treated as the AWS s3 backend (the previous ``gcp ? gcs : s3``
+        ternary routed any non-gcp value to AWS). ``resolve_cloud_provider``
+        itself only ever returns a KNOWN_BACKENDS value or raises, so this
+        exercises the failure mode via the module's imported resolver
+        reference rather than a real (currently unregistered) provider name.
+        """
+        import terraform_base
+        from cloud.exceptions import CloudProviderNotImplementedError
+
+        monkeypatch.setattr(terraform_base, "resolve_cloud_provider", lambda *a, **k: "azure")
+
+        with pytest.raises(CloudProviderNotImplementedError, match="azure"):
+            terraform_base.get_backend_type()
+
 
 class TestWorkspaceInitialization:
     """Tests for backend-specific terraform init arguments.
@@ -48,7 +66,7 @@ class TestWorkspaceInitialization:
     own has no usable post-condition for an external caller.
     """
 
-    @patch.dict("os.environ", {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
+    @patch.dict("os.environ", {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"}, clear=True)
     @patch("terraform_base.run_terraform")
     def test_init_uses_s3_backend_config(self, mock_run, tmp_path, monkeypatch):
         from terraform_base import apply
@@ -73,7 +91,7 @@ class TestWorkspaceInitialization:
 
     @patch.dict(
         "os.environ",
-        {"TF_STATE_BUCKET": "dev-range-pulumi-state-123456789012"},
+        {"TF_STATE_BUCKET": "dev-range-pulumi-state-123456789012", "CLOUD_PROVIDER": "aws"},
         clear=True,
     )
     @patch("terraform_base.run_terraform")
@@ -109,9 +127,14 @@ class TestWorkspaceInitialization:
         source = tmp_path / "src" / "modules" / "range"
         source.mkdir(parents=True)
         (source / "main.tf").write_text("# main\n")
+        # CLOUD_PROVIDER and TF_STATE_BUCKET are already set by the @patch.dict
+        # decorator above; re-setting them here via monkeypatch made monkeypatch
+        # record the decorator's own "gcp"/bucket values as the values to restore,
+        # so its teardown (which runs AFTER patch.dict restores the pristine env)
+        # leaked CLOUD_PROVIDER=gcp into the real environment and polluted later
+        # tests (e.g. test_config.py::TestGetRangeFromDb). Only TERRAFORM_WORKSPACE_DIR
+        # needs monkeypatch (it is not in the decorator).
         monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(tmp_path / "workspace"))
-        monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
-        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-gcp-dev-terraform-state")
 
         mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
         apply("gcp/gdc-ranges", "req-123", {}, source, "Range")
@@ -511,7 +534,7 @@ class TestWorkspaceStaging:
 
     @patch.dict(
         "os.environ",
-        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"},
+        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"},
         clear=True,
     )
     @patch("terraform_base.run_terraform")
@@ -562,7 +585,7 @@ class TestWorkspaceStaging:
 
     @patch.dict(
         "os.environ",
-        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"},
+        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"},
         clear=True,
     )
     @patch("terraform_base.run_terraform")
@@ -598,7 +621,7 @@ class TestWorkspaceStaging:
 
     @patch.dict(
         "os.environ",
-        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"},
+        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"},
         clear=True,
     )
     @patch("terraform_base.run_terraform")
@@ -636,7 +659,7 @@ class TestWorkspaceStaging:
 
     @patch.dict(
         "os.environ",
-        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"},
+        {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"},
         clear=True,
     )
     @patch("terraform_base.run_terraform")

@@ -75,7 +75,12 @@ def _set_ngfw_materialization_status(request: Request, status: str) -> None:
     ).prefetch_related(Prefetch("apps", queryset=ngfw_apps))
     for ngfw_instance in ngfw_instances:
         ngfw_instance.status = status
-        ngfw_instance.save(update_fields=["status", "updated_at"])
+        update_fields = ["status", "updated_at"]
+        if status == ResourceStatus.FAILED.value:
+            from engine.launch_intents import clear_provisioner_operation_after_failure
+
+            update_fields.extend(clear_provisioner_operation_after_failure(ngfw_instance))
+        ngfw_instance.save(update_fields=update_fields)
         for app in ngfw_instance.apps.all():
             app.status = status
             app.save(update_fields=["status", "updated_at"])

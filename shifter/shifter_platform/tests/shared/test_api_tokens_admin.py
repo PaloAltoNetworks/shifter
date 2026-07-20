@@ -22,6 +22,10 @@ from risk_register.models import AuditLog
 from shared.api_tokens import scopes
 from shared.api_tokens.admin import ApiTokenAdmin, ApiTokenForm
 from shared.api_tokens.models import ApiToken
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -68,8 +72,8 @@ class TestAdminCreate:
 
     def test_create_audits_with_staff_user_actor(self, admin_client, superuser):
         admin_client.post(ADD_URL, {"name": "ci", "scopes": '["risk:read"]'})
-        row = AuditLog.objects.filter(action=AuditLog.Action.CREATE).latest("timestamp")
-        assert row.actor_type == AuditLog.ActorType.USER
+        row = AuditLog.objects.filter(action=AuditAction.CREATE).latest("timestamp")
+        assert row.actor_type == AuditActorType.USER
         assert row.actor_id == superuser.id
 
     def test_form_rejects_invalid_scope(self):
@@ -116,8 +120,8 @@ class TestAdminRevoke:
         assert resp.status_code == 302
         token.refresh_from_db()
         assert token.revoked_at is not None
-        row = AuditLog.objects.filter(action=AuditLog.Action.DELETE).latest("timestamp")
-        assert row.actor_type == AuditLog.ActorType.USER
+        row = AuditLog.objects.filter(action=AuditAction.DELETE).latest("timestamp")
+        assert row.actor_type == AuditActorType.USER
         assert row.actor_id == superuser.id
 
 

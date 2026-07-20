@@ -6,6 +6,7 @@ command plane. It talks directly to Linux and Windows guests over OpenSSH.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import subprocess
@@ -188,8 +189,24 @@ class GuestSSHExecutor:
     ) -> CommandResult:
         host = instance_id
         remote_command = self._get_remote_command(document_name)
-        ssh_args = self._build_ssh_args(host, remote_command)
         command_input = self._build_command_input(script, stdin_input, document_name)
+        if document_name == "AWS-RunPowerShellScript" and stdin_input is not None:
+            # Secret-bearing PowerShell plans need two distinct channels: the
+            # non-secret script is encoded in argv, while runtime data alone is
+            # supplied on stdin. This keeps credentials out of PowerShell source,
+            # process argv, environment, metadata, and temporary scripts.
+            encoded_script = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+            remote_command = [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded_script,
+            ]
+            command_input = stdin_input
+        ssh_args = self._build_ssh_args(host, remote_command)
 
         logger.info("Running %s script over SSH on %s as %s", document_name, host, self._username)
 

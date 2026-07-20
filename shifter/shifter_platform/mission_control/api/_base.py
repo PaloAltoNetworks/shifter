@@ -8,8 +8,6 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.http import HttpRequest
 from rest_framework import permissions, serializers, status
-from rest_framework.exceptions import ParseError
-from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -64,28 +62,15 @@ def _credentials_write_permission() -> PermissionClass:
     return _scope_permission(scopes.MISSION_CONTROL_CREDENTIALS_WRITE)
 
 
+def _vpn_profile_read_permission() -> PermissionClass:
+    """Build the narrow Mission Control private-key delivery permission."""
+    return _scope_permission(scopes.MISSION_CONTROL_VPN_PROFILE_READ)
+
+
 class MissionControlAPIView(APIView):
     """Base class for authenticated Mission Control DRF endpoints."""
 
     permission_classes = [IsAuthenticatedSessionOrApiToken, HasMissionControlActor, _range_write_permission()]
-
-    def determine_version(self, request: Request, *args: Any, **kwargs: Any) -> tuple[Any, Any]:
-        """Force the compatibility namespace for legacy Mission Control routes."""
-        if _is_legacy_request(request):
-            return "v1", None
-        return super().determine_version(request, *args, **kwargs)
-
-    def handle_exception(self, exc: Exception) -> Response:
-        """Preserve legacy flat error payloads for old Mission Control routes."""
-        if _is_legacy_request(self.request):
-            if isinstance(exc, ParseError):
-                return Response({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
-            if isinstance(exc, DRFPermissionDenied) and str(getattr(exc, "detail", "")) == "Forbidden":
-                return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
-        response = super().handle_exception(exc)
-        if _is_legacy_request(self.request) and response is not None:
-            response.data = {"error": _legacy_error_message(response.data)}
-        return response
 
     def actor_user(self) -> User:
         """Return the user whose Mission Control resources this request acts on."""
@@ -95,12 +80,7 @@ class MissionControlAPIView(APIView):
         return user
 
     def invalid(self, serializer: serializers.Serializer) -> Response:
-        """Return validation errors in either legacy or canonical API format."""
-        if _is_legacy_request(self.request):
-            return Response(
-                {"error": _first_serializer_error(serializer.errors)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        """Return validation errors in the canonical API error format."""
         return api_error_response(
             code="invalid",
             message="Invalid request",
@@ -110,9 +90,7 @@ class MissionControlAPIView(APIView):
         )
 
     def bad_request(self, message: str) -> Response:
-        """Return a 400 response in either legacy or canonical API format."""
-        if _is_legacy_request(self.request):
-            return Response({"error": message}, status=status.HTTP_400_BAD_REQUEST)
+        """Return a 400 response in the canonical API error format."""
         return api_error_response(
             code="bad_request",
             message=message,
@@ -121,9 +99,7 @@ class MissionControlAPIView(APIView):
         )
 
     def not_found(self, message: str) -> Response:
-        """Return a 404 response in either legacy or canonical API format."""
-        if _is_legacy_request(self.request):
-            return Response({"error": message}, status=status.HTTP_404_NOT_FOUND)
+        """Return a 404 response in the canonical API error format."""
         return api_error_response(
             code="not_found",
             message=message,
@@ -132,9 +108,7 @@ class MissionControlAPIView(APIView):
         )
 
     def error_response(self, *, code: str, message: str, status_code: int) -> Response:
-        """Return a structured error while retaining legacy flat responses."""
-        if _is_legacy_request(self.request):
-            return Response({"error": message}, status=status_code)
+        """Return a structured error in the canonical API error format."""
         return api_error_response(code=code, message=message, status_code=status_code, request=self.request)
 
 
@@ -151,40 +125,6 @@ def _raw_request(drf_request: Request) -> HttpRequest:
     return cast(HttpRequest, raw)
 
 
-def _is_legacy_request(request: object) -> bool:
-    """Return whether a request is targeting the legacy URL namespace."""
-    return str(getattr(request, "path", "")).startswith("/mission-control/")
-
-
-def _first_serializer_error(errors: object) -> str:
-    """Extract the first human-readable DRF serializer error."""
-    message = "Invalid request"
-    if isinstance(errors, dict):
-        for value in errors.values():
-            message = _first_serializer_error(value)
-            break
-    elif isinstance(errors, list) and errors:
-        message = _first_serializer_error(errors[0])
-    elif errors:
-        message = str(errors)
-    return message
-
-
-def _legacy_error_message(data: object) -> str:
-    """Extract a legacy-compatible error string from a DRF error payload."""
-    message = "Request could not be processed"
-    if isinstance(data, dict):
-        error = data.get("error")
-        if isinstance(error, dict):
-            value = error.get("message") or error.get("detail") or error.get("code")
-            message = str(value or message)
-        elif error is not None:
-            message = str(error)
-        elif data.get("detail") is not None:
-            message = str(data["detail"])
-    return message
-
-
 def _validated(
     view: MissionControlAPIView,
     serializer_class: type[serializers.Serializer],
@@ -195,22 +135,3 @@ def _validated(
     if not serializer.is_valid():
         return None, view.invalid(serializer)
     return cast(dict[str, Any], serializer.validated_data), None
-
-
-def _is_empty_legacy_body(request: Request) -> bool:
-    """Return whether a legacy request supplied no body at all."""
-    if not _is_legacy_request(request):
-        return False
-    raw = getattr(request, "_request", request)
-    return getattr(raw, "body", b"") == b""
-
-
-def _guacamole_bootstrap_url_names(request: Request) -> dict[str, str]:
-    """Return canonical Guacamole bootstrap route names for canonical API calls."""
-    match = getattr(request, "resolver_match", None)
-    if getattr(match, "namespace", "") == "v1:mission_control":
-        return {
-            "status_url_name": "v1:mission_control:guacamole-bootstrap-status",
-            "open_url_name": "v1:mission_control:guacamole-bootstrap-open",
-        }
-    return {}

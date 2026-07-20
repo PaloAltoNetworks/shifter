@@ -140,7 +140,8 @@ class TestBuildGuestExecutionContext:
             {
                 "asset_type": "gce_vm",
                 "private_ip": "10.50.2.3",
-                "ssh_key_secret_arn": "projects/test/secrets/polaris-host-key",
+                "ssh_key_secret_arn": "projects/test/secrets/polaris-participant-key",
+                "gcp_host_ssh_key_secret_ref": "projects/test/secrets/polaris-host-key",
                 # Participant user is "kali" (container); the provisioner drives
                 # the host sshd as "ubuntu" on the management port.
                 "ssh_username": "kali",
@@ -155,6 +156,7 @@ class TestBuildGuestExecutionContext:
         assert isinstance(context.executor, GuestSSHExecutor)
         assert context.executor._username == "ubuntu"
         assert context.executor._port == 2222
+        secret_reader.assert_called_once_with("projects/test/secrets/polaris-host-key")
         context.close()
 
     @pytest.mark.parametrize("metadata", [{"gcp_instance_name": "range-vm-1"}, {"gcp_zone": "us-central1-b"}])
@@ -364,21 +366,40 @@ class TestBuildGuestExecutionContext:
                 }
             )
 
-    def test_unknown_provider_currently_falls_back_to_ssm(self, mocker, monkeypatch):
-        from executors.ssm_executor import SSMExecutor
+    def test_unknown_provider_fails_closed_instead_of_falling_back_to_ssm(self, monkeypatch):
+        """PLAT-2005: an unsupported CLOUD_PROVIDER must fail closed.
+
+        A typo'd/unsupported provider value used to fall through to the AWS SSM
+        path (the ``!= "gcp"`` check treated anything non-GCP as AWS). It must
+        now be rejected by ``config.resolve_cloud_provider`` before any
+        transport is selected.
+        """
+        from cloud.exceptions import CloudProviderNotImplementedError
 
         monkeypatch.setenv("CLOUD_PROVIDER", "gcq")
-        session = mocker.Mock()
-        session.client.side_effect = lambda service: f"{service}-client"
-        mocker.patch("boto3.Session", return_value=session)
 
-        context = build_guest_execution_context({"instance_id": "i-123", "os": "ubuntu", "role": "victim"})
+        with pytest.raises(CloudProviderNotImplementedError, match="gcq"):
+            build_guest_execution_context({"instance_id": "i-123", "os": "ubuntu", "role": "victim"})
 
-        assert isinstance(context.executor, SSMExecutor)
-        assert context.target == "i-123"
-        assert context.transport_name == "ssm"
-        assert context.executor._ssm_client == "ssm-client"
-        assert context.executor._ec2_client == "ec2-client"
+    def test_provider_kwarg_was_removed(self):
+        """The dead ``provider`` kwarg bypassed the validated resolver; no caller
+        ever passed it, so it must not exist on the signature any more."""
+        import inspect
+
+        signature = inspect.signature(build_guest_execution_context)
+        assert "provider" not in signature.parameters
+
+    def test_unsupported_resolved_provider_fails_via_explicit_dispatch(self, monkeypatch):
+        """A future third backend must be rejected by the explicit if-aws/if-gcp/else-raise
+        dispatch in the factory itself, not by a TASK_RUNNER capability check -- guest
+        transport (SSM vs in-range SSH) is not a registry BackendCapability."""
+        import executors.factory as factory
+        from cloud.exceptions import CloudProviderNotImplementedError
+
+        monkeypatch.setattr(factory, "resolve_cloud_provider", lambda *a, **k: "azure")
+
+        with pytest.raises(CloudProviderNotImplementedError, match="azure"):
+            build_guest_execution_context({"instance_id": "i-123", "os": "ubuntu", "role": "victim"})
 
 
 class TestBuildRangeKubeClients:

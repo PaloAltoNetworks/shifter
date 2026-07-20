@@ -228,6 +228,12 @@ def use_hint(
 
     assert_challenge_available_for_participant(participant, hint.challenge)
 
+    # Same compete gate as flag submission (status + CTF-604 observer rule);
+    # hint unlocks mutate score state, so watchers must be refused here too.
+    from ctf.services.participant.queries import assert_participant_can_compete
+
+    assert_participant_can_compete(participant)
+
     # Check if already unlocked (idempotent)
     existing = CTFHintUsage.objects.filter(participant=participant, hint=hint).first()
     if existing:

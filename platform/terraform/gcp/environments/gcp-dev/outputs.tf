@@ -33,6 +33,16 @@ output "gke_services_cidr" {
   value       = module.platform_core.gke_services_cidr
 }
 
+output "gke_pods_cidr" {
+  description = "GKE pod CIDR. Non-secret; source for the range-escape validation config (#1347)."
+  value       = module.platform_core.gke_pods_cidr
+}
+
+output "gke_nodes_cidr" {
+  description = "GKE node subnet CIDR. Non-secret; source for the range-escape validation config (#1347)."
+  value       = module.platform_core.gke_nodes_cidr
+}
+
 output "gke_cluster_name" {
   description = "Name of the GKE cluster."
   value       = module.platform_core.gke_cluster_name
@@ -155,11 +165,21 @@ output "workload_service_accounts" {
 }
 
 output "packer_workload_identity_provider" {
-  description = "GitHub OIDC provider resource name; set as the GCP_WORKLOAD_IDENTITY_PROVIDER GitHub secret."
-  value       = module.cicd_github_oidc.workload_identity_provider
+  description = "GitHub OIDC provider resource name; set as the GCP_WORKLOAD_IDENTITY_PROVIDER GitHub secret. Null when enable_cicd_github_oidc = false."
+  value       = one(module.cicd_github_oidc[*].workload_identity_provider)
 }
 
 output "packer_build_service_account_email" {
-  description = "Packer build service account email; set as the GCP_SERVICE_ACCOUNT GitHub secret."
-  value       = module.cicd_github_oidc.packer_build_service_account_email
+  description = "Packer build service account email; set as the GCP_SERVICE_ACCOUNT GitHub secret. Null when enable_cicd_github_oidc = false."
+  value       = one(module.cicd_github_oidc[*].packer_build_service_account_email)
+}
+
+output "range_host_service_account_email" {
+  description = "GCE range host SA email for hosts that need cloud APIs; set GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL for a same-project range cell."
+  value       = module.platform_core.range_host_service_account_email
+}
+
+output "range_vertex_service_account_email" {
+  description = "GCE range Vertex SA email; set GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL to this for a same-project range cell."
+  value       = module.platform_core.range_vertex_service_account_email
 }

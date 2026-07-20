@@ -57,6 +57,31 @@ locals {
 
   # DC instances for SSM parameter creation
   dc_instances = [for inst in local.all_instances : inst if inst.role == "dc"]
+
+  # Boot-time DNS pin for Linux range guests (issue #1632). The range-guest
+  # AMIs run systemd-resolved as the stub resolver (/etc/resolv.conf ->
+  # 127.0.0.53), but on some boots it comes up with no upstream DNS (the
+  # DHCP-provided VPC resolver is not registered with systemd-resolved), so
+  # the system resolver returns SERVFAIL. The SSM agent, which uses the
+  # system resolver, then loops on
+  # "lookup ssm...amazonaws.com on 127.0.0.53:53: server misbehaving" and
+  # never registers, so LinuxBootstrapPlan cannot run and range
+  # provisioning fails. Pin the link-local AmazonProvidedDNS
+  # (169.254.169.253 - reachable in every VPC regardless of CIDR) as the
+  # upstream so the agent's retries resolve. Defined once and injected into
+  # both Linux templates via the `dns_pin` variable. No-op on hosts without
+  # systemd-resolved (e.g. the containerized Kali stack on the polaris VM).
+  linux_range_dns_pin = <<-EOT
+    if [ -d /run/systemd/system ] && systemctl cat systemd-resolved.service >/dev/null 2>&1; then
+      echo "Pinning AmazonProvidedDNS for systemd-resolved..."
+      mkdir -p /etc/systemd/resolved.conf.d
+      printf '[Resolve]\nDNS=169.254.169.253\nFallbackDNS=169.254.169.253\n' > /etc/systemd/resolved.conf.d/amazon-vpc-dns.conf
+      systemctl restart systemd-resolved || true
+      echo "systemd-resolved DNS pinned to AmazonProvidedDNS"
+    else
+      echo "systemd-resolved not present; skipping DNS pin"
+    fi
+  EOT
 }
 
 #------------------------------------------------------------------------------
@@ -381,6 +406,7 @@ resource "aws_instance" "range" {
     each.value.role == "attacker" ? templatefile("${path.module}/templates/kali.sh.tpl", {
       hostname   = each.value.name != "" ? each.value.name : "shifter-kali-${var.range_id}"
       public_key = tls_private_key.instance[each.key].public_key_openssh
+      dns_pin    = local.linux_range_dns_pin
     }) :
     each.value.role == "dc" ? templatefile("${path.module}/templates/dc_windows.ps1.tpl", {
       hostname = each.value.name != "" ? each.value.name : "shifter-dc-${var.range_id}"
@@ -390,6 +416,7 @@ resource "aws_instance" "range" {
     }) :
     templatefile("${path.module}/templates/victim_linux.sh.tpl", {
       hostname = each.value.name != "" ? each.value.name : "shifter-victim-${var.range_id}"
+      dns_pin  = local.linux_range_dns_pin
     })
   )
 

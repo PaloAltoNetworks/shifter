@@ -47,8 +47,10 @@ def record_token_event(
     """
     # Lazy, call-local import: keeps shared.api_tokens import-clean of the app
     # layer (see module docstring).
-    from risk_register.models import AuditLog
-    from risk_register.services import (
+    from shared.audit import (
+        AuditAction,
+        AuditActorType,
+        AuditEntityType,
         AuditEvent,
         audit_log,
         get_client_ip,
@@ -56,17 +58,17 @@ def record_token_event(
     )
 
     action_by_event = {
-        TokenEvent.CREATED: AuditLog.Action.CREATE,
-        TokenEvent.REVOKED: AuditLog.Action.DELETE,
-        TokenEvent.AUTH_FAILED: AuditLog.Action.LOGIN_FAILED,
+        TokenEvent.CREATED: AuditAction.CREATE,
+        TokenEvent.REVOKED: AuditAction.DELETE,
+        TokenEvent.AUTH_FAILED: AuditAction.LOGIN_FAILED,
     }
     # Creation and revocation are browser-session admin actions performed by a
     # staff/superuser (actor_id is their user id); only the authentication
     # failure is attributable to the token principal itself.
     actor_type_by_event = {
-        TokenEvent.CREATED: AuditLog.ActorType.USER,
-        TokenEvent.REVOKED: AuditLog.ActorType.USER,
-        TokenEvent.AUTH_FAILED: AuditLog.ActorType.APIKEY,
+        TokenEvent.CREATED: AuditActorType.USER,
+        TokenEvent.REVOKED: AuditActorType.USER,
+        TokenEvent.AUTH_FAILED: AuditActorType.APIKEY,
     }
 
     source_ip = None
@@ -81,7 +83,7 @@ def record_token_event(
 
     audit_log(
         AuditEvent(
-            entity_type=AuditLog.EntityType.APIKEY,
+            entity_type=AuditEntityType.APIKEY,
             entity_id=token_pk or 0,
             action=action_by_event[event],
             actor_type=actor_type_by_event[event],

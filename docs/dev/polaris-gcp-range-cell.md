@@ -1,5 +1,7 @@
 # Running Polaris on the GCP range-cell backend
 
+Part of the Shifter deploy and operations docs; start at the [documentation home](../index.md).
+
 This runbook covers deploying the Polaris CTF scenario on the GCP Compute
 Engine range-cell backend (issue #1342). It complements the architecture
 guardrails in

@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 
 import { useBootstrapContext } from "@/app/bootstrap-context";
+import { riskEditPath, riskListPath } from "@/features/risk-register/routes";
 import { useDeleteRisk, useRestoreRisk, useRisk, useUpdateRisk } from "@/api/risks";
 import type { Risk } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -24,7 +25,7 @@ import { cn } from "@/lib/utils";
 
 import { SeverityBadge, StatusBadge } from "./badges";
 import { CommentsPanel } from "./CommentsPanel";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { HistoryPanel } from "./HistoryPanel";
 import { formatTimestamp } from "./format";
 
@@ -57,7 +58,7 @@ function DetailActions({
   }
   return (
     <>
-      <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} to={`/risks/${riskId}/edit`}>
+      <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} to={riskEditPath(riskId)}>
         Edit
       </Link>
       {risk.status === "closed" ? (
@@ -251,7 +252,7 @@ export function RiskDetailPage() {
         <AlertTitle>Risk unavailable</AlertTitle>
         <AlertDescription>
           This risk was not found or has been removed.{" "}
-          <Link className="underline" to="/">
+          <Link className="underline" to={riskListPath()}>
             Back to risks
           </Link>
           .
@@ -265,7 +266,7 @@ export function RiskDetailPage() {
   return (
     <>
       <nav className="mb-3 text-sm text-muted-foreground" aria-label="Breadcrumb">
-        <Link className="hover:text-foreground" to="/">
+        <Link className="hover:text-foreground" to={riskListPath()}>
           Risks
         </Link>
         <span className="px-1.5">/</span>
@@ -342,7 +343,7 @@ export function RiskDetailPage() {
         resolution={resolution}
         onResolutionChange={setResolution}
         onClose={closeDialog}
-        onDeleted={() => navigate("/")}
+        onDeleted={() => navigate(riskListPath())}
       />
     </>
   );

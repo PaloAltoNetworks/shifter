@@ -29,11 +29,12 @@ export default defineConfig({
     },
   },
   server: {
-    // Dev-only: proxy API + owned prefix to the Django/Daphne backend so
-    // cookies and CSRF behave same-origin during `npm run dev`.
+    // Dev-only: proxy the API to the Django/Daphne backend so cookies and CSRF
+    // behave same-origin during `npm run dev`. The SPA-owned page paths (root
+    // and /risk-register/*) are client-routed by Vite's SPA fallback and must
+    // NOT be proxied, or the client router never resolves them in dev (#1369).
     proxy: {
       "/api": "http://localhost:8000",
-      "/risk-register": "http://localhost:8000",
     },
   },
   test: {

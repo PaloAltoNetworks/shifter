@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import subprocess
 from unittest.mock import MagicMock
 
@@ -117,6 +118,30 @@ class TestGuestSSHExecutorRunCommand:
         ]
         assert "Administrator@10.10.1.10" in ssh_args
         assert mock_run.call_args.kwargs["input"].decode("utf-8") == 'Write-Output "ok"\n'
+
+    def test_windows_secret_stdin_is_separate_from_non_secret_encoded_source(self, mocker):
+        mock_run = mocker.patch("executors.guest_ssh_executor.subprocess.run")
+        mock_run.return_value = MagicMock(returncode=0, stdout=b"ok\n", stderr=b"")
+        script = "$secret = [Console]::In.ReadToEnd(); Write-Output 'ok'"
+        secret_input = "TOP-SECRET-RUNTIME-DATA\n"
+
+        executor = GuestSSHExecutor(private_key="PRIVATE KEY", username="Administrator")
+        try:
+            executor.run_command(
+                instance_id="10.10.1.10",
+                script=script,
+                stdin_input=secret_input,
+                document_name="AWS-RunPowerShellScript",
+            )
+        finally:
+            executor.close()
+
+        ssh_args = mock_run.call_args.args[0]
+        assert "-EncodedCommand" in ssh_args
+        encoded = ssh_args[ssh_args.index("-EncodedCommand") + 1]
+        assert base64.b64decode(encoded).decode("utf-16-le") == script
+        assert secret_input.strip() not in " ".join(ssh_args)
+        assert mock_run.call_args.kwargs["input"].decode("utf-8") == secret_input
 
     def test_timeout_maps_to_executor_timeout(self, mocker):
         mocker.patch(

@@ -95,6 +95,12 @@ build {
     script = "scripts/windows/claude-code.ps1"
   }
 
+  // Deterministic first-boot DNS via an EC2Launch v2 preReady task (issue #1633).
+  // AWS-only; must run before sysprep so the task is captured into the AMI.
+  provisioner "powershell" {
+    script = "scripts/aws/windows-ec2launch-dns.ps1"
+  }
+
   // Sysprep (MUST BE LAST - shuts down instance)
   provisioner "powershell" {
     script = "scripts/windows/sysprep.ps1"

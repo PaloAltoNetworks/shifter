@@ -449,6 +449,39 @@ def mock_env_vars(mocker):
 
 
 @pytest.fixture
+def aws_polaris_agent_env(monkeypatch) -> dict[str, str]:
+    """Apply a complete, valid AWS Polaris agent config env (#1377) and return it.
+
+    Shared across terraform_vars / instance_orchestrator / polaris_range_bootstrap
+    tests that need ``config.load_aws_polaris_agent_config()`` to succeed, so the
+    contract lives in one fixture instead of being duplicated per test module.
+    """
+    env = {
+        "AWS_POLARIS_AGENT_REGION": "us-east-2",
+        "AWS_POLARIS_AGENT_MAIN_MODEL_ID": "us.anthropic.claude-sonnet-4-6",
+        "AWS_POLARIS_AGENT_SMALL_MODEL_ID": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN": (
+            "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN": (
+            "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-haiku-4-5-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS": (
+            "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-6-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS": (
+            "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-v1:0"
+        ),
+        "AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS": "900",
+        "AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS": "300",
+        "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN": "arn:aws:iam::123456789012:policy/ShifterPermissionsBoundary",
+    }
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    return env
+
+
+@pytest.fixture
 def mock_env_vars_minimal(mocker):
     """Fixture providing minimal required environment variables."""
     env_vars = {

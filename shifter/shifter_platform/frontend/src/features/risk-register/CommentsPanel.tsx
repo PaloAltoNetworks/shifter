@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 
-import { ConfirmDialog } from "./ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { formatTimestamp } from "./format";
 
 function authorName(comment: Comment): string {

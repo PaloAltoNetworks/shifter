@@ -330,6 +330,35 @@ class TestRangeSpec:
         request = RangeSpec(scenario_id="basic", user_id=1, subnets=[])
         assert request.user_id == 1
 
+    def test_participant_access_requires_existing_member_ref(self):
+        """RangeSpec rejects participant access to non-members."""
+        from shared.schemas.range import RangeAccessBinding, RangeSpec
+
+        participant_access = [RangeAccessBinding(target_ref="foreign", channel="ssh")]
+        with pytest.raises(ValidationError, match="unknown member"):
+            RangeSpec(
+                scenario_id="basic",
+                user_id=1,
+                subnets=[],
+                participant_access=participant_access,
+            )
+
+    def test_participant_access_rejects_duplicate_target_channel(self):
+        """RangeSpec keeps participant authorization unambiguous."""
+        from shared.schemas.range import InstanceSpec, RangeAccessBinding, RangeSpec
+        from shared.schemas.subnet import SubnetSpec
+
+        instance = InstanceSpec(uuid="member-a", role="attacker", os_type="kali")
+        binding = RangeAccessBinding(target_ref="member-a", channel="ssh")
+        subnets = [SubnetSpec(name="attack", uuid="subnet-a", instances=[instance])]
+        with pytest.raises(ValidationError, match="duplicate target/channel"):
+            RangeSpec(
+                scenario_id="basic",
+                user_id=1,
+                subnets=subnets,
+                participant_access=[binding, binding],
+            )
+
     def test_all_instances_contains_instance_specs(self):
         """RangeSpec all_instances returns flattened InstanceSpec list."""
         from shared.schemas.range import InstanceSpec, RangeSpec

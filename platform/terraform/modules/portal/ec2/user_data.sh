@@ -344,6 +344,12 @@ echo "Deploying image: $IMAGE"
 # ------------------------------------------------------------------------------
 COMMON_ENV="-e AWS_REGION=$AWS_REGION"
 COMMON_ENV="$COMMON_ENV -e ENVIRONMENT=$DJANGO_ENVIRONMENT"
+# Explicit backend selection for the portal and workers (PLAT-2005). Runtime now
+# fails closed on a missing/unsupported backend instead of silently defaulting to
+# AWS, so every deployed role must receive CLOUD_PROVIDER explicitly.
+# Renderer-owned: ${cloud_provider} is a Terraform templatefile variable
+# (rendered from shifter.yaml at deploy time), not a hardcoded literal.
+COMMON_ENV="$COMMON_ENV -e CLOUD_PROVIDER=${cloud_provider}"
 COMMON_ENV="$COMMON_ENV -e AWS_S3_BUCKET_NAME=$S3_BUCKET"
 COMMON_ENV="$COMMON_ENV -e DB_SECRET_ARN=$DB_SECRET_ARN"
 COMMON_ENV="$COMMON_ENV -e APP_SECRET_ARN=$APP_SECRET_ARN"

@@ -22,11 +22,20 @@
 # no network).
 [CmdletBinding()]
 param(
-    [string]$DsrmPassword = "DsrmR3store!2026",
     [string]$DnsForwarder = "8.8.8.8"
 )
 $ErrorActionPreference = "Stop"
 Start-Transcript -Path "C:\dc-prebaked-promote-bake.log" -Append -Force
+
+# The DSRM (Directory Services Restore Mode) secret is baked into the forest, so
+# it must NOT be a committed default: a shared, source-controlled DSRM password
+# would ship in every promoted DC image. It is generated per build and injected
+# as a sensitive Packer env var (DC_DSRM_PASSWORD); cleanup.ps1 strips the build
+# transcript before capture. Refuse to promote without it.
+$DsrmPassword = $env:DC_DSRM_PASSWORD
+if ([string]::IsNullOrWhiteSpace($DsrmPassword)) {
+    throw "DC_DSRM_PASSWORD is required (generated per build, injected as a sensitive Packer var); refusing to bake a DC with a default DSRM secret."
+}
 
 $DomainName = if ($env:DC_DOMAIN_NAME) { $env:DC_DOMAIN_NAME } else { "boreas.local" }
 $NetbiosName = if ($env:DC_NETBIOS_NAME) { $env:DC_NETBIOS_NAME } else { "BOREAS" }

@@ -33,6 +33,16 @@ output "gke_services_cidr" {
   value       = var.gke_services_cidr
 }
 
+output "gke_pods_cidr" {
+  description = "GKE pod CIDR. Non-secret; range-cell escape validation (#1347) treats it as an expected-unreachable boundary."
+  value       = var.gke_pods_cidr
+}
+
+output "gke_nodes_cidr" {
+  description = "GKE node subnet CIDR. Non-secret; range-cell escape validation (#1347) treats it as an expected-unreachable boundary."
+  value       = var.gke_subnet_cidr
+}
+
 output "gke_subnetwork_name" {
   description = "Name of the GKE subnetwork."
   value       = module.portal_vpc.gke_subnetwork_name
@@ -157,6 +167,16 @@ output "workload_service_accounts" {
 output "node_service_account_email" {
   description = "Service account email for GKE nodes."
   value       = module.portal_iam.node_service_account_email
+}
+
+output "range_host_service_account_email" {
+  description = "Email of the GCE range host service account, attached only to hosts that need cloud APIs."
+  value       = module.portal_iam.range_host_service_account_email
+}
+
+output "range_vertex_service_account_email" {
+  description = "Email of the GCE range Vertex service account (per-range key minting)."
+  value       = module.portal_iam.range_vertex_service_account_email
 }
 
 output "workload_identity_pool" {

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { Loader2 } from "lucide-react";
 
+import { riskListPath, riskPath } from "@/features/risk-register/routes";
 import { useCreateRisk, useRisk, useUpdateRisk } from "@/api/risks";
 import { ApiError } from "@/api/errors";
 import { SEVERITIES, STATUSES, STRIDE_OPTIONS, strideList, type Risk } from "@/api/types";
@@ -189,9 +190,9 @@ export function RiskFormPage({ mode }: Readonly<{ mode: "create" | "edit" }>) {
     event.preventDefault();
     const payload = toPayload(state, mode === "edit");
     if (mode === "create") {
-      create.mutate(payload, { onSuccess: (risk) => navigate(`/risks/${risk.id}`) });
+      create.mutate(payload, { onSuccess: (risk) => navigate(riskPath(risk.id)) });
     } else if (riskId !== undefined) {
-      update.mutate(payload, { onSuccess: () => navigate(`/risks/${riskId}`) });
+      update.mutate(payload, { onSuccess: () => navigate(riskPath(riskId)) });
     }
   }
 
@@ -210,7 +211,7 @@ export function RiskFormPage({ mode }: Readonly<{ mode: "create" | "edit" }>) {
         <AlertTitle>Risk not found</AlertTitle>
         <AlertDescription>
           This risk may have been deleted.{" "}
-          <Link className="underline" to="/">
+          <Link className="underline" to={riskListPath()}>
             Back to risks
           </Link>
           .
@@ -219,12 +220,12 @@ export function RiskFormPage({ mode }: Readonly<{ mode: "create" | "edit" }>) {
     );
   }
 
-  const cancelHref = mode === "edit" && riskId ? `/risks/${riskId}` : "/";
+  const cancelHref = mode === "edit" && riskId ? riskPath(riskId) : riskListPath();
 
   return (
     <div className="mx-auto max-w-3xl">
       <nav className="mb-3 text-sm text-muted-foreground" aria-label="Breadcrumb">
-        <Link className="hover:text-foreground" to="/">
+        <Link className="hover:text-foreground" to={riskListPath()}>
           Risks
         </Link>
         <span className="px-1.5">/</span>

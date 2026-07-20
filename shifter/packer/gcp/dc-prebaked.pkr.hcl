@@ -99,6 +99,9 @@ build {
     environment_vars = [
       "DC_DOMAIN_NAME=${var.dc_domain_name}",
       "DC_NETBIOS_NAME=${var.dc_netbios_name}",
+      // Build-only DSRM secret, generated per build and injected as a sensitive
+      // var (never committed). promote-bake.ps1 refuses to promote without it.
+      "DC_DSRM_PASSWORD=${var.dc_dsrm_password}",
     ]
     script = "scripts/dc-prebaked/promote-bake.ps1"
   }
@@ -109,8 +112,11 @@ build {
     restart_timeout = "20m"
   }
 
-  // Post-reboot: wait for AD DS, seed the AD content (dc_content_script).
-  // MUST BE LAST — the content seed sets the CTF Administrator password.
+  // MUST BE LAST — post-reboot: wait for AD DS, seed the AD content
+  // (dc_content_script), then strip build transcripts and the staged AD-content
+  // seed before capture. Cleanup runs inside finalize.ps1 (not a separate
+  // provisioner) because the content seed resets the Administrator password, so
+  // a later provisioner could not reconnect over WinRM.
   provisioner "powershell" {
     elevated_user     = "Administrator"
     elevated_password = var.winrm_bootstrap_password

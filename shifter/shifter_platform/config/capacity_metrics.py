@@ -265,17 +265,23 @@ def _resolve_default_client_factory() -> Callable[[], _CloudWatchClient]:
 
     GCP publishes the same gauges to Cloud Monitoring through a
     ``put_metric_data``-compatible adapter; google libs are imported lazily by
-    the factory so the AWS path never loads them. Any other provider keeps the
-    CloudWatch (boto3) factory.
+    the factory so the AWS path never loads them. AWS keeps the CloudWatch
+    (boto3) factory. Any other provider is a configuration error: an optional
+    observability signal must never silently publish through the wrong
+    provider's client (docs/architecture/root-configured-backend-bundles.md,
+    "Do not fall through to AWS for an unknown provider").
     """
     from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
 
-    provider = str(getattr(settings, "CLOUD_PROVIDER", "aws")).lower()
+    provider = str(settings.CLOUD_PROVIDER).lower()
     if provider == "gcp":
         from config.capacity_metrics_gcp import build_gcp_client_factory
 
         return build_gcp_client_factory()
-    return _default_client_factory
+    if provider == "aws":
+        return _default_client_factory
+    raise ImproperlyConfigured(f"Unsupported CLOUD_PROVIDER for portal capacity metrics: {provider!r}")
 
 
 def build_emitter_from_config(

@@ -16,6 +16,7 @@ from .check_tf_sg_cidrs import check_file
 
 def _write(tmp_path: Path, name: str, body: str) -> Path:
     path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(body).lstrip())
     return path
 
@@ -82,6 +83,83 @@ class CheckTfSgCidrsTest(unittest.TestCase):
                 """,
             )
             self.assertEqual(check_file(tf), [])
+
+    def test_audited_public_openvpn_client_variable_passes(self) -> None:
+        # ADR-039-R10 permits only the request-owned mutual-TLS UDP edge to use
+        # this source. The private readiness port uses portal_vpc_cidr instead.
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                "shifter/engine/provisioner/terraform/modules/range/vpn.tf",
+                """
+                resource "aws_security_group" "vpn_nlb" {
+                  name   = "vpn-edge"
+                  vpc_id = var.range_vpc_id
+
+                  ingress {
+                    from_port   = 1194
+                    to_port     = 1194
+                    protocol    = "udp"
+                    cidr_blocks = [var.vpn_public_client_cidr]
+                  }
+                }
+                """,
+            )
+            self.assertEqual(check_file(tf), [])
+
+    def test_public_openvpn_variable_is_rejected_on_wrong_protocol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                "shifter/engine/provisioner/terraform/modules/range/vpn.tf",
+                """
+                resource "aws_security_group" "vpn_nlb" {
+                  ingress {
+                    from_port   = 1194
+                    to_port     = 1194
+                    protocol    = "tcp"
+                    cidr_blocks = [var.vpn_public_client_cidr]
+                  }
+                }
+                """,
+            )
+            self.assertEqual(len(check_file(tf)), 1)
+
+    def test_public_openvpn_variable_is_rejected_on_wrong_resource(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                "shifter/engine/provisioner/terraform/modules/range/vpn.tf",
+                """
+                resource "aws_security_group" "other" {
+                  ingress {
+                    from_port   = 1194
+                    to_port     = 1194
+                    protocol    = "udp"
+                    cidr_blocks = [var.vpn_public_client_cidr]
+                  }
+                }
+                """,
+            )
+            self.assertEqual(len(check_file(tf)), 1)
+
+    def test_public_openvpn_variable_is_rejected_outside_audited_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(
+                Path(tmp),
+                "vpn.tf",
+                """
+                resource "aws_security_group" "vpn_nlb" {
+                  ingress {
+                    from_port   = 1194
+                    to_port     = 1194
+                    protocol    = "udp"
+                    cidr_blocks = [var.vpn_public_client_cidr]
+                  }
+                }
+                """,
+            )
+            self.assertEqual(len(check_file(tf)), 1)
 
     def test_egress_zero_route_is_ignored(self) -> None:
         # Egress 0.0.0.0/0 is the standard NAT pattern — allowed.

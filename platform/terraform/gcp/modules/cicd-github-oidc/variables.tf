@@ -59,6 +59,22 @@ variable "image_reader_service_accounts" {
   default     = []
 }
 
+variable "allowed_workflow_refs" {
+  description = <<-EOT
+    GitHub refs whose OIDC tokens are accepted by the WIF provider. Tokens from
+    any other ref are rejected at the provider before the SA binding is consulted
+    (ADR-037-R7). Defaults to the two protected integration branches. Override
+    only with explicit justification documented in docs/adr/exceptions.yaml.
+  EOT
+  type        = list(string)
+  default     = ["refs/heads/dev", "refs/heads/main"]
+
+  validation {
+    condition     = length(var.allowed_workflow_refs) > 0
+    error_message = "allowed_workflow_refs must contain at least one ref."
+  }
+}
+
 variable "build_roles" {
   description = <<-EOT
     Project roles granted to the packer build service account. The GCE image
@@ -77,5 +93,14 @@ variable "build_roles" {
     "roles/storage.admin",
     "roles/cloudbuild.builds.editor",
     "roles/serviceusage.serviceUsageConsumer",
+    # Reach the PRIVATE GKE control plane over Connect Gateway (#1723): the
+    # gateway roles authorize the fleet-membership impersonation, and
+    # container.admin authorizes the actual kubectl apply via GKE's IAM->RBAC
+    # mapping (the deploy applies cluster-scoped objects: namespaces, CRDs,
+    # cluster services). Together these replace the old public-endpoint +
+    # runner-IP-allowlist access path removed from _gcp-dev.yml.
+    "roles/gkehub.gatewayEditor",
+    "roles/gkehub.viewer",
+    "roles/container.admin",
   ]
 }

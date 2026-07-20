@@ -29,8 +29,6 @@ def _make_unregistered_participant(event, idx):
         email=f"sched-hb-{idx}@test.com",
         name=f"Heartbeat Participant {idx}",
         status=ParticipantStatus.INVITED.value,
-        invite_token=f"hb-{event.pk}-{idx}",
-        invite_token_expires=timezone.now() + timedelta(days=7),
     )
 
 

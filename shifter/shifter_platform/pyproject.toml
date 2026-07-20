@@ -5,7 +5,7 @@ description = "Self-service cyber range platform"
 requires-python = ">=3.12"
 dependencies = [
     "asyncssh>=2.23.0",
-    "bleach>=6.3.0",
+    "bleach>=6.4.0",
     "boto3",
     "channels",
     "channels-redis",
@@ -32,6 +32,10 @@ dependencies = [
     "pycurl>=7.45.7",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
+    # Promoted from a transitive dep (via channels-redis) to a direct dep so the
+    # built-in Django RedisCache backend for launch-endpoint rate limiting (#322)
+    # does not rely on another package's transitive pin.
+    "redis>=5.0",
     "regex>=2026.6.28",
     "requests",
     # ACES contract/profile/conformance tooling + RuntimeTarget runtime (issue
@@ -41,8 +45,18 @@ dependencies = [
     # the hash-pinned portal image build (uv export --no-dev + --require-hashes)
     # can integrity-verify it; a git source has no emittable hash and broke the
     # build when this was promoted to a runtime dep (issue #1445). ACES is a
-    # deliberate, PyPI-pinned stack commitment (ADR-032-R4).
-    "aces-sdl>=0.19.1",
+    # deliberate, PyPI-pinned stack commitment (ADR-032-R4). Upgrade policy
+    # (ADR-032-R7): this floor is the supported-producer floor the provisioner
+    # consumer enforces (aces_plan.MINIMUM_ACES_SDL_VERSION, kept in agreement by
+    # tests/shared/aces/test_plan_provisioner_parity.py); changing it requires
+    # passing the ACES conformance gate (test_backend_conformance_gate.py).
+    # aces-scenario-packs 2.0.1 requires this exact SDL release.
+    "aces-sdl==0.23.0",
+    # ACES scenario-pack contract and canonical content-digest implementation
+    # used by the uniform content-ingestion path (#1578, ADR-034). Keep this
+    # exact: its schemas, validator, digest profile, and aces-sdl dependency are
+    # one versioned consumer contract.
+    "aces-scenario-packs==2.0.1",
     "uvicorn-worker",
     # uvicorn's WebSocket protocol backend. Not imported directly: the
     # Gunicorn/Uvicorn ASGI workers (entrypoint.sh) need websockets (or wsproto)
@@ -72,6 +86,7 @@ dev = [
     "types-requests>=2.33.0.20260513",
     "types-bleach>=6.3.0.20260508",
     "types-Markdown>=3.7.0",
+    "cel-python>=0.5.0",
 ]
 
 [tool.pytest.ini_options]
@@ -89,6 +104,30 @@ markers = [
     "redis: integration tests requiring a real Redis channel layer (run with -m redis -n0; needs a Redis service)",
     "postgres: integration tests requiring a real PostgreSQL backend (run with -m postgres; needs TEST_DB_BACKEND=postgres and a Postgres service)",
 ]
+# Warning policy (#1529 / REV1 Q6). pytest applies these top-to-bottom and the
+# LAST matching entry wins, so the narrow third-party ``ignore`` allowances sit
+# after the broad ``error`` rules and take precedence for their exact messages.
+filterwarnings = [
+    # Correctness failures (AC5): a coroutine left un-awaited or a resource
+    # (subprocess, socket, event loop) left unclosed is a real defect and must
+    # fail regardless of test order or xdist worker. Fix the originating
+    # fixture/mock -- never downgrade to ``ignore`` (see the LOCAL_PROVISIONER
+    # pin in conftest.py and the create_task stub in tests/mission_control/consumers).
+    "error::ResourceWarning",
+    "error:coroutine .* was never awaited:RuntimeWarning",
+    # First-party -- and any new/unclassified third-party -- deprecation fails
+    # (AC6). It must be fixed or explicitly baselined below, never buried under a
+    # blanket ``ignore::DeprecationWarning``.
+    "error::DeprecationWarning",
+    # Third-party deprecation allowances (AC6). Owner: @Brad-Edwards.
+    # django-health-check (pinned <5.0) deprecated its class-based checks for the
+    # v4 view-based API; migration + removal tracked in #1601. Matched by exact
+    # message so a new or changed deprecation still fails.
+    "ignore:The `health_check.db` app is deprecated:DeprecationWarning",
+    "ignore:`DatabaseBackend` is deprecated:DeprecationWarning",
+    "ignore:`DefaultFileStorageHealthCheck` is deprecated:DeprecationWarning",
+    "ignore:`CacheBackend.cache_key` is deprecated:DeprecationWarning",
+]
 
 [tool.coverage.run]
 # ``source = ["."]`` makes coverage record paths from the
@@ -99,12 +138,31 @@ markers = [
 # happen to share a sub-path (e.g. ``cms/services/_common.py`` and
 # ``engine/services/_common.py``) and attributes coverage to whichever
 # source root it picks, leaving the loser at 0%.
+#
+# Production-only measurement (#1529 / REV1 Q6): keeping ``source = ["."]``
+# preserves the repo-relative naming above, but tests, fixtures, and
+# conftest hooks must NOT participate in the metric — coverage of tests by
+# tests was inflating the reported number (94% observed vs ~88% real). The
+# ``omit`` list below excludes the whole test tree, all conftest hooks, and
+# migrations so the coverage report reflects owned production behavior only.
+# CI invokes ``--cov`` (no ``=.``) so this configuration — not the command
+# line — defines the measured universe.
 source = ["."]
 omit = [
-    "tests/conftest.py",
-    "tests/*/conftest.py",
+    "tests/*",
+    "*/tests/*",
+    "conftest.py",
+    "*/conftest.py",
     "*/migrations/*",
 ]
+
+[tool.coverage.report]
+# Non-regression floor (#1529 / REV1 Q6). Measured production-only baseline is
+# 88% (tests excluded -- the self-covering ``source = ["."]`` metric reported 94%);
+# the floor sits one point under it to absorb run-to-run variance and ratchets up
+# as coverage improves (a real reduction needs a reviewed exception). SonarCloud
+# owns the changed-code floor. See docs/dev/testing.md.
+fail_under = 87
 
 # Ruff - linting and formatting
 [tool.ruff]
@@ -204,10 +262,10 @@ warn_return_any = true
 # uv - dependency constraints for transitive security fixes
 [tool.uv]
 constraint-dependencies = [
-    "cryptography>=46.0.7",
+    "cryptography>=48.0.1",
     "pyopenssl>=26.0.0",
     "pyasn1>=0.6.3",
-    "ujson>=5.12.0",
+    "ujson>=5.13.0",
     "cbor2>=5.9.0",
     "urllib3>=2.6.3",
     "filelock>=3.20.3",

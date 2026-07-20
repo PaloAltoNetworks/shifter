@@ -30,6 +30,9 @@ PUB_RT = ["rtb-pub-a", "rtb-pub-b"]
 PRIV_RT = ["rtb-priv-a", "rtb-priv-b"]
 FW_RT = ["rtb-fw-a", "rtb-fw-b"]
 NAT = "nat-0123456789"
+# Per-AZ NAT ids ordered by AZ index (one NAT per AZ under inspection). NAT_IDS[0]
+# aliases NAT so single-NAT assertions/fallbacks keep referring to the same id.
+NAT_IDS = [NAT, "nat-bbbbbbbbbb"]
 ARN = "arn:aws:network-firewall:us-east-2:111122223333:firewall/dev-portal-firewall"
 VPC_CIDR = "10.0.0.0/16"
 
@@ -61,6 +64,7 @@ def _contract(enabled: bool = True) -> dict:
         "private_subnet_cidrs": PRIV_CIDRS,
         "firewall_subnet_cidrs": FW_CIDRS,
         "nat_gateway_id": NAT,
+        "nat_gateway_ids": NAT_IDS,
     }
 
 
@@ -97,8 +101,11 @@ def _route_tables() -> list[dict]:
             priv_routes.append({"DestinationCidrBlock": cidr, "VpcEndpointId": ep, "State": "active"})
         priv_routes.append({"DestinationCidrBlock": "0.0.0.0/0", "VpcEndpointId": ep, "State": "active"})
         tables.append({"RouteTableId": PRIV_RT[i], "Routes": priv_routes})
-        # Firewall RT: default route onward to the shared NAT gateway.
-        fw_routes = [_local_route(), {"DestinationCidrBlock": "0.0.0.0/0", "NatGatewayId": NAT, "State": "active"}]
+        # Firewall RT: default route onward to the SAME-AZ NAT gateway.
+        fw_routes = [
+            _local_route(),
+            {"DestinationCidrBlock": "0.0.0.0/0", "NatGatewayId": NAT_IDS[i], "State": "active"},
+        ]
         tables.append({"RouteTableId": FW_RT[i], "Routes": fw_routes})
     return tables
 
@@ -238,6 +245,34 @@ def test_firewall_default_wrong_nat_fails() -> None:
             r["NatGatewayId"] = "nat-wrong"
     failures = evaluate_inspection(_contract(), _sync_states(), "IN_SYNC", rts)
     assert any("rtb-fw-a" in f for f in failures)
+
+
+def test_firewall_default_cross_az_nat_fails() -> None:
+    # AZ b's firewall subnet routing to AZ a's NAT is exactly the cross-AZ
+    # black-hole the per-AZ NAT fix prevents (a firewall endpoint is AZ-bound and
+    # cannot forward to a NAT in another AZ). The assertion must reject it.
+    rts = _route_tables()
+    fw_b = next(t for t in rts if t["RouteTableId"] == "rtb-fw-b")
+    for r in fw_b["Routes"]:
+        if r["DestinationCidrBlock"] == "0.0.0.0/0":
+            r["NatGatewayId"] = NAT_IDS[0]  # AZ a's NAT, not AZ b's same-AZ NAT
+    failures = evaluate_inspection(_contract(), _sync_states(), "IN_SYNC", rts)
+    assert any("rtb-fw-b" in f for f in failures)
+
+
+def test_firewall_default_single_nat_fallback_passes() -> None:
+    # Backward compat: an older contract without nat_gateway_ids falls back to the
+    # single nat_gateway_id for every firewall RT (the legacy single-NAT topology).
+    contract = _contract()
+    del contract["nat_gateway_ids"]
+    rts = _route_tables()
+    for table in rts:
+        if table["RouteTableId"].startswith("rtb-fw-"):
+            for r in table["Routes"]:
+                if r["DestinationCidrBlock"] == "0.0.0.0/0":
+                    r["NatGatewayId"] = NAT
+    failures = evaluate_inspection(contract, _sync_states(), "IN_SYNC", rts)
+    assert not failures
 
 
 def test_blackhole_route_fails() -> None:

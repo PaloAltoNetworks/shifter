@@ -67,6 +67,8 @@ class TestRangeTokenAccess:
             "connection_urls": [],
             "aces_projection": None,
             "aces_participant_runtime": None,
+            "lifecycle": None,
+            "vpn_profile_available": False,
         }
 
     def test_token_without_range_read_scope_is_forbidden(self, client, user):

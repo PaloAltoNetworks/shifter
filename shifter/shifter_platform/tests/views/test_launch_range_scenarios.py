@@ -1,6 +1,6 @@
 """Behavior tests for the launch_range view.
 
-Drives the real ``mission_control:launch_range`` endpoint → real
+Drives the real ``v1:mission_control:range-launch`` endpoint → real
 ``cms_list_scenarios`` / ``cms_get_agent`` / ``cms_create_range`` against real
 ``Scenario`` / ``AgentConfig`` rows (a custom hydratable scenario + a real
 Windows agent), instead of patching the cms service functions / ``render`` /
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.django_db
 User = get_user_model()
 
 SCENARIO_ID = "launch-behavior-test"
-LAUNCH_URL = reverse("mission_control:launch_range")
+LAUNCH_URL = reverse("v1:mission_control:range-launch")
 
 # A scenario whose instances carry explicit os_types (kali attacker + windows
 # victim with an XDR agent), so it hydrates cleanly with a single Windows agent.
@@ -100,26 +100,28 @@ class TestLaunchRangeInputValidation:
         client, _user = launch_client
         response = client.post(LAUNCH_URL, data="not valid json{", content_type="application/json")
         assert response.status_code == 400
-        assert _json(response)["error"] == "Invalid JSON"
+        assert _json(response)["error"]["code"] == "parse_error"
 
     def test_returns_400_for_empty_body(self, launch_client):
         client, _user = launch_client
         response = client.post(LAUNCH_URL, data="", content_type="application/json")
         assert response.status_code == 400
-        assert _json(response)["error"] == "Invalid JSON"
+        error = _json(response)["error"]
+        assert error["code"] == "invalid"
+        assert "agent_id" in json.dumps(error["details"])
 
     def test_returns_400_when_no_agent_provided(self, launch_client, scenario):
         client, _user = launch_client
         response = _post(client, {"scenario": SCENARIO_ID})
         assert response.status_code == 400
-        assert "agent_id" in _json(response)["error"]
+        assert "agent_id" in json.dumps(_json(response)["error"]["details"])
 
     @pytest.mark.parametrize("bad_agent_id", [None, 0])
     def test_returns_400_for_falsy_agent_id(self, launch_client, scenario, bad_agent_id):
         client, _user = launch_client
         response = _post(client, {"agent_id": bad_agent_id, "scenario": SCENARIO_ID})
         assert response.status_code == 400
-        assert "agent_id" in _json(response)["error"]
+        assert "agent_id" in json.dumps(_json(response)["error"]["details"])
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +139,8 @@ class TestLaunchRangeScenarioValidation:
         client, _user = launch_client
         response = _post(client, {"agent_id": agent.id, "scenario": "no-such-scenario"})
         assert response.status_code == 400
-        assert "Invalid" in _json(response)["error"]
+        assert _json(response)["error"]["code"] == "bad_request"
+        assert "Invalid" in _json(response)["error"]["message"]
 
     def test_omitting_scenario_defaults_to_basic(self, launch_client, agent, scenario):
         """When no scenario is given the view defaults to 'basic' (a real builtin).
@@ -194,7 +197,7 @@ class TestLaunchRangeErrorHandling:
 
         second = _post(client, {"agent_id": agent.id, "scenario": SCENARIO_ID})
         assert second.status_code == 400
-        assert _json(second)["error"] == "You already have an active range"
+        assert _json(second)["error"]["message"] == "You already have an active range"
 
     def test_unknown_agent_maps_to_safe_message(self, launch_client, scenario):
         """A non-existent agent id surfaces a classified, non-leaking message."""
@@ -202,7 +205,7 @@ class TestLaunchRangeErrorHandling:
         response = _post(client, {"agent_id": 999999, "scenario": SCENARIO_ID})
         assert response.status_code == 400
         # Classified literal, not the raw exception text.
-        assert _json(response)["error"] in {"Resource not found", "Agent not available"}
+        assert _json(response)["error"]["message"] in {"Resource not found", "Agent not available"}
 
 
 # ---------------------------------------------------------------------------

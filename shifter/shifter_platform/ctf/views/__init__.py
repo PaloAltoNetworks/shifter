@@ -37,15 +37,18 @@ from ctf.views.admin_notifications import (
     admin_notification_create,
     admin_notification_list,
 )
+from ctf.views.admin_participant_accounts import admin_participant_batch
 from ctf.views.admin_people import (
     admin_participant_add,
     admin_participant_detail,
-    admin_participant_import,
+    admin_participant_email,
     admin_participant_list,
+    admin_participant_rename,
     admin_range_list,
     admin_scoreboard,
     admin_team_list,
 )
+from ctf.views.admin_people_import import admin_participant_import
 from ctf.views.api.challenges import (
     api_challenge_detail,
     api_challenge_list,
@@ -95,7 +98,6 @@ from ctf.views.api.ranges import (
     api_provision_event_spares,
     api_provision_participant_range,
     api_provision_ranges,
-    api_range_access,
     api_range_list,
     api_range_status,
     api_recover_participant_range,
@@ -110,8 +112,6 @@ from ctf.views.api.scoreboard import (
 )
 from ctf.views.participant import (
     ctf_help,
-    ctf_register,
-    ctf_register_exchange,
     participant_dashboard,
     participant_event,
     participant_range,
@@ -120,6 +120,7 @@ from ctf.views.participant import (
     scoreboard,
     team_join,
 )
+from ctf.views.participant_auth import ctf_change_password, ctf_login
 from ctf.views.participant_challenges import (
     challenge_detail,
     participant_challenges,
@@ -146,9 +147,12 @@ __all__ = [
     "admin_notification_create",
     "admin_notification_list",
     "admin_participant_add",
+    "admin_participant_batch",
     "admin_participant_detail",
+    "admin_participant_email",
     "admin_participant_import",
     "admin_participant_list",
+    "admin_participant_rename",
     "admin_range_list",
     "admin_scoreboard",
     "admin_team_list",
@@ -177,7 +181,6 @@ __all__ = [
     "api_provision_event_spares",
     "api_provision_participant_range",
     "api_provision_ranges",
-    "api_range_access",
     "api_range_list",
     "api_range_status",
     "api_rate_challenge",
@@ -194,9 +197,9 @@ __all__ = [
     "api_submit_flag",
     "api_use_hint",
     "challenge_detail",
+    "ctf_change_password",
     "ctf_help",
-    "ctf_register",
-    "ctf_register_exchange",
+    "ctf_login",
     "participant_challenges",
     "participant_dashboard",
     "participant_event",

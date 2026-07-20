@@ -10,6 +10,7 @@ from django.utils import timezone
 from pydantic import ValidationError as PydanticValidationError
 
 from cms.models import Scenario, ScenarioMetadata
+from cms.scenarios.legacy_ids import ScenarioIdCollisionError
 from cms.scenarios.registry import is_default_scenario
 from shared.log_sanitize import safe_log_value
 
@@ -67,6 +68,8 @@ def create_custom_scenario(
                 scenario.save()
             except PydanticValidationError as e:
                 raise ScenarioEditorError(f"Invalid scenario definition: {e}") from e
+            except ScenarioIdCollisionError as e:
+                raise ScenarioEditorError(str(e)) from e
     except IntegrityError:
         logger.exception(
             "create_scenario: integrity error (race), scenario_id=%s, user_id=%s",
@@ -122,6 +125,8 @@ def save_scenario_updates(
         scenario.save(update_fields=update_fields)
     except PydanticValidationError as e:
         raise ScenarioEditorError(f"Invalid scenario definition: {e}") from e
+    except ScenarioIdCollisionError as e:
+        raise ScenarioEditorError(str(e)) from e
 
     return scenario
 

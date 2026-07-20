@@ -13,8 +13,12 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
 from config import identity_platform as identity_platform_auth
-from risk_register.models import AuditLog
-from risk_register.services import AuthPrincipal, audit_auth_event, get_client_ip
+from shared.audit import (
+    AuditAction,
+    AuthPrincipal,
+    audit_auth_event,
+    get_client_ip,
+)
 from shared.auth import is_ctf_organizer, is_ctf_participant
 from shared.errors import classify_user_message
 
@@ -138,19 +142,28 @@ def legacy_oidc_authenticate(request):
 def dashboard_router(request):
     """Route authenticated users to the correct dashboard based on user type.
 
+    - platform SPA enabled -> the role-aware SPA home/dashboard at ``/``
     - standard users -> Mission Control dashboard
     - ctf_organizer -> CTF Admin dashboard
     - ctf_participant -> Mission Control dashboard (with restricted nav)
+
+    When ``PLATFORM_SPA_ENABLED`` is on, the first authenticated screen is the
+    platform shell's role-aware dashboard (#1369); the SPA decides the in-app
+    landing from the bootstrap payload. When off, the legacy per-role routing
+    below is unchanged, so rollback is a flag flip.
     """
+    if getattr(settings, "PLATFORM_SPA_ENABLED", False):
+        logger.debug("Routing %s to the platform SPA dashboard", request.user.email)
+        return HttpResponseRedirect(reverse("home"))
+    # Legacy routing: every user type currently lands on Mission Control; the
+    # per-type log lines are kept for operational visibility.
     if is_ctf_organizer(request.user):
         logger.debug("Routing organizer %s to Mission Control dashboard", request.user.email)
-        return HttpResponseRedirect(reverse(DASHBOARD_URL))
     elif is_ctf_participant(request.user):
         logger.debug("Routing participant %s to Mission Control dashboard", request.user.email)
-        return HttpResponseRedirect(reverse(DASHBOARD_URL))
     else:
         logger.debug("Routing standard user %s to Mission Control", request.user.email)
-        return HttpResponseRedirect(reverse(DASHBOARD_URL))
+    return HttpResponseRedirect(reverse(DASHBOARD_URL))
 
 
 @require_POST
@@ -161,7 +174,7 @@ def logout_view(request):
     session cleared and are redirected to Cognito's logout endpoint to
     also clear the identity provider session.
 
-    All other users (magic-link CTF participants, dev-login) get a
+    All other users (local CTF participants, dev-login) get a
     simple Django session logout and redirect to the landing page.
     """
     if not request.user.is_authenticated:
@@ -174,7 +187,7 @@ def logout_view(request):
     # Capture the audit identity and request context before Django ``logout``
     # flushes the session below.
     audit_auth_event(
-        action=AuditLog.Action.LOGOUT,
+        action=AuditAction.LOGOUT,
         principal=AuthPrincipal(user_id=request.user.id, email=email),
         source_ip=get_client_ip(request),
         user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],

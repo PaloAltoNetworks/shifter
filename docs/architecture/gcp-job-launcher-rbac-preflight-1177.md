@@ -11,6 +11,11 @@ This is a requirement-free security hardening run. The GitHub issue title,
 body, and acceptance criteria are the shipping contract. This note is not an
 implementation plan.
 
+The admission-shape decisions in this note remain applicable. Its allowance
+for the shared `workers` identity to submit provisioner Jobs is superseded by
+the dedicated launcher/worker ownership boundary in
+`docs/architecture/gcp-provisioner-launch-boundary-preflight-1518.md`.
+
 ## Scope Boundary
 
 The security invariant is: only the validated provisioner task-runner contract

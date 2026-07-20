@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from risk_register.models import AuditLog
-from risk_register.services import AuditEvent, audit_log
+from shared.audit import (
+    AuditActorType,
+    AuditEntityType,
+    AuditEvent,
+    audit_log,
+)
 from shared.auth import validate_cms_authoring_user
 from shared.exceptions import CMSError
 
@@ -38,12 +42,12 @@ def audit_scenario_change(
     if previous:
         audit_log(
             AuditEvent(
-                entity_type=AuditLog.EntityType.SCENARIO,
+                entity_type=AuditEntityType.SCENARIO,
                 # Scenario PKs are UUIDs and ScenarioMetadata PKs are ints;
                 # existing audit records use 0 and carry scenario_id in state.
                 entity_id=0,
                 action=action,
-                actor_type=AuditLog.ActorType.USER,
+                actor_type=AuditActorType.USER,
                 actor_id=actor_id,
                 previous_state=state,
             )
@@ -51,10 +55,10 @@ def audit_scenario_change(
     else:
         audit_log(
             AuditEvent(
-                entity_type=AuditLog.EntityType.SCENARIO,
+                entity_type=AuditEntityType.SCENARIO,
                 entity_id=0,
                 action=action,
-                actor_type=AuditLog.ActorType.USER,
+                actor_type=AuditActorType.USER,
                 actor_id=actor_id,
                 new_state=state,
             )

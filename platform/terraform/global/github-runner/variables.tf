@@ -37,6 +37,26 @@ variable "allow_default_vpc" {
   default     = false
 }
 
+variable "create_runner_network" {
+  description = <<-EOT
+    Provision a dedicated, ADR-004-R20-compliant runner VPC (non-default, NAT-only
+    egress, no private-DNS interface endpoints) via modules/github-runner-network
+    and place the runner in it. When true, its outputs take precedence over
+    vpc_id/subnet_id and allow_default_vpc. This is the automated bootstrap path
+    (issue #1433): it removes the need to supply a live vpc_id/subnet_id override
+    or opt into the account default VPC. Default false preserves the existing
+    operator-supplied-network / default-VPC-opt-in behavior.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "runner_network_cidr" {
+  description = "CIDR block for the dedicated runner VPC when create_runner_network = true."
+  type        = string
+  default     = "10.20.0.0/24"
+}
+
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string

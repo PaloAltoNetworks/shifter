@@ -2,11 +2,11 @@
 Django settings for Shifter platform.
 
 Sub-sections (Channels layer, cloud/AWS task-runner + queue config,
-``LOGGING`` dict, terminal CDN assets) are split into ``config/_*.py``
-modules and re-imported here. The split keeps this module under Sonar
-S104's 500-line cap without changing the public ``config.settings``
-surface — ``from config.settings import X`` continues to resolve every
-name it always has.
+``LOGGING`` dict, terminal CDN assets, SPA cutover rollout flags, terminal
+WebSocket capacity controls) are split into ``config/_*.py`` modules and
+re-imported here. The split keeps this module under Sonar S104's 500-line
+cap without changing the public ``config.settings`` surface — ``from
+config.settings import X`` continues to resolve every name it always has.
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ load_dotenv()
 # the wildcard *is* the contract (Django's official split-settings
 # pattern uses ``from .base import *``).
 from config._api_token_settings import *  # NOSONAR  # noqa: E402
+from config._browser_security import *  # NOSONAR  # noqa: E402
+from config._cache_settings import *  # NOSONAR  # noqa: E402
 from config._channels import *  # NOSONAR  # noqa: E402
 from config._channels import _build_channel_layers  # noqa: E402
 from config._cloud import *  # NOSONAR  # noqa: E402
@@ -33,6 +35,7 @@ from config._drf_settings import *  # NOSONAR  # noqa: E402
 from config._email import *  # NOSONAR  # noqa: E402
 from config._guacamole_settings import *  # NOSONAR  # noqa: E402
 from config._logging_config import *  # NOSONAR  # noqa: E402
+from config._rate_limit_settings import *  # NOSONAR  # noqa: E402
 from config._runtime_env import AUTH_PROVIDER, IS_TEST_RUN, require_environment, required_runtime_env  # noqa: E402
 from config._terminal_assets import *  # NOSONAR  # noqa: E402
 
@@ -77,7 +80,14 @@ if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY environment variable is required")
 # SECRET_KEY_FALLBACKS (zero-downtime rotation) lives in config._database_settings.
 
-DEBUG = _env_bool("DJANGO_DEBUG", False)
+# Under a test run (``IS_TEST_RUN`` = ``TESTING=1`` or pytest as argv[0]) the
+# posture defaults to DEBUG=True so a clean-checkout ``uv run pytest`` matches CI
+# instead of inheriting the production HTTPS posture that a bare run would get
+# from ``DJANGO_DEBUG`` being unset (#1529 / REV1 Q7). An explicit ``DJANGO_DEBUG``
+# always wins; production (``IS_TEST_RUN`` false) is unchanged and still defaults
+# to DEBUG=False. The test posture lives in config, per config._runtime_env owning
+# dev/test defaults -- not in a wrapper or a value CI must inject.
+DEBUG = _env_bool("DJANGO_DEBUG", IS_TEST_RUN)
 ENVIRONMENT = require_environment()
 _allowed_hosts_raw = required_runtime_env("DJANGO_ALLOWED_HOSTS", dev_default="localhost,127.0.0.1")
 ALLOWED_HOSTS = [host.strip() for host in _allowed_hosts_raw.split(",") if host.strip()]
@@ -100,6 +110,12 @@ CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()
 # Site URL for internal callbacks (e.g., provisioner callback)
 # Required in all environments - no default fallback
 SITE_URL = os.environ.get("SITE_URL")
+
+# Public documentation site (ADR-038). Templates link out to the hosted mkdocs
+# site rather than the retired in-app docs reader; kept here (config, not
+# hardcoded in templates) and exposed via mission_control.context_processors.
+# docs_site_url. Trailing slash so template paths append directly.
+DOCS_SITE_URL = os.environ.get("DOCS_SITE_URL", "https://brad-edwards.github.io/shifter/")
 
 # Application definition
 INSTALLED_APPS = [
@@ -124,7 +140,6 @@ INSTALLED_APPS = [
     "anymail",
     "mission_control.apps.MissionControlConfig",
     "risk_register.apps.RiskRegisterConfig",
-    "documentation.apps.DocumentationConfig",
     "engine.apps.EngineConfig",
     "cms.apps.CMSConfig",
     "management.apps.ManagementConfig",
@@ -142,12 +157,19 @@ MIDDLEWARE = [
     "config.middleware.RequestIDMiddleware",
     "config.middleware.RequestInFlightMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Browser security policy (ADR-036): native CSP beside SecurityMiddleware and
+    # outside WhiteNoise so legacy HTML, the SPA host, redirects, errors, APIs,
+    # and static responses pass through one policy boundary. The custom
+    # middleware sets only the headers Django does not own.
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
+    "config.middleware.BrowserPolicyHeadersMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "config.middleware.CTFAccountBoundaryMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -171,7 +193,8 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "mission_control.context_processors.active_range",
                 "mission_control.context_processors.terminal_cdn_assets",
-                "shared.context_processors.user_permissions",
+                "mission_control.context_processors.docs_site_url",
+                "config.context_processors.user_permissions",
                 "ctf.context_processors.ctf_navigation",
             ],
         },
@@ -199,13 +222,10 @@ CHANNEL_LAYERS = _build_channel_layers(os.environ)
 # exist. Non-secret boolean; absent env means disabled.
 WEBSOCKET_NOTIFICATIONS_ENABLED = _env_bool("WEBSOCKET_NOTIFICATIONS_ENABLED", False)
 
-# SPA cutover rollout flag (issue #1302, ADR-029). When enabled, the Risk
-# Register GET page paths under /risk-register/ are served by the React SPA
-# host view instead of the Django templates; the legacy POST action URLs stay
-# Django-handled for old tabs and rollback. When disabled (the default), the
-# portal renders the existing Django Risk Register templates unchanged.
-# Non-secret boolean; absent env means disabled. Flipping it is reversible.
-RISK_REGISTER_SPA_ENABLED = _env_bool("RISK_REGISTER_SPA_ENABLED", False)
+# SPA cutover rollout flags (issues #1302 / #1369 / #1370 / #1371 / #1372 / #1373,
+# ADR-013 / ADR-029) live in config/_spa_flags_settings.py to keep this module
+# under the Sonar S104 500-line cap; re-exported via star-import.
+from config._spa_flags_settings import *  # noqa: E402  # NOSONAR
 
 # Shared WebSocket notification replay bounds (issue #679).
 WEBSOCKET_NOTIFICATION_MAX_REPLAY = _env_int("WEBSOCKET_NOTIFICATION_MAX_REPLAY", 100)
@@ -214,45 +234,14 @@ WEBSOCKET_NOTIFICATION_RETENTION_DAYS = _env_int("WEBSOCKET_NOTIFICATION_RETENTI
 # ------------------------------------------------------------------------------
 # Terminal WebSocket capacity controls (issue #847)
 # ------------------------------------------------------------------------------
-# Browser SSH terminals run inside the portal ASGI process: each active session
-# holds a websocket FD, an SSH socket, asyncssh connection/process state, and a
-# read task. During a live event a burst of sessions (or a reconnect storm) can
-# saturate the event loop and exhaust file descriptors, making the whole portal
-# look unreliable. These bounds cap concurrency and reclaim idle/abandoned
-# sessions. A value <= 0 disables that individual limit.
-#
-# The caps are PER WORKER PROCESS. The production portal runs Gunicorn with
-# PORTAL_WEB_WORKERS Uvicorn workers (entrypoint.sh, #174), and the
-# TerminalSessionRegistry is process-local (one registry per worker), so the
-# real per-instance ceiling is PORTAL_WEB_WORKERS * TERMINAL_MAX_SESSIONS and the
-# per-user worst case is PORTAL_WEB_WORKERS * TERMINAL_MAX_SESSIONS_PER_USER.
-# These knobs and PORTAL_WEB_WORKERS are wired through SSM/tfvars (#930), so an
-# operator can retune them on a running instance without an image rebuild
-# (update the parameter, then converge/restart the container).
-#
-# TERMINAL_READ_POLL_SECONDS is how often an idle session's read loop wakes to
-# enforce the timeouts; it does NOT add latency to terminal output (output is
-# delivered as soon as it arrives). The previous hard-coded 0.1s poll woke every
-# idle terminal ~10x/second; a multi-second interval cuts idle CPU by orders of
-# magnitude. See docs/architecture/terminal-websocket-capacity-847.md.
-TERMINAL_MAX_SESSIONS = _env_int("TERMINAL_MAX_SESSIONS", 200)
-TERMINAL_MAX_SESSIONS_PER_USER = _env_int("TERMINAL_MAX_SESSIONS_PER_USER", 10)
-TERMINAL_IDLE_TIMEOUT_SECONDS = _env_int("TERMINAL_IDLE_TIMEOUT_SECONDS", 1800)
-TERMINAL_MAX_SESSION_SECONDS = _env_int("TERMINAL_MAX_SESSION_SECONDS", 28800)
-TERMINAL_READ_POLL_SECONDS = _env_int("TERMINAL_READ_POLL_SECONDS", 30)
-# Bounded executor that runs blocking terminal-connect work (SSH connect, audit
-# writes, ownership lookups) off the default thread-sensitive sync_to_async lane
-# that serves HTTP page renders, so a terminal connect storm cannot head-of-line
-# block page renders on the same ASGI worker (#929). Per-process, like the caps
-# above.
-TERMINAL_CONNECT_EXECUTOR_WORKERS = _env_int("TERMINAL_CONNECT_EXECUTOR_WORKERS", 8)
-# Bounded admission gate on top of the terminal executor. ThreadPoolExecutor
-# caps concurrent workers but has an unbounded submission queue, so a connect
-# storm could still pile arbitrary blocking work in-process. Admission capacity
-# is workers + this slack; once it is exhausted run_terminal_sync rejects with
-# TerminalExecutorSaturated and the connect is closed with SERVICE_UNAVAILABLE
-# (4503, retryable) instead of being queued without limit (#929).
-TERMINAL_CONNECT_EXECUTOR_QUEUE_SLACK = _env_int("TERMINAL_CONNECT_EXECUTOR_QUEUE_SLACK", 16)
+# The TERMINAL_* capacity knobs live in config/_terminal_settings.py to keep
+# this module under the Sonar S104 500-line cap; re-exported via star-import.
+# See docs/architecture/terminal-websocket-capacity-847.md.
+from config._terminal_settings import *  # noqa: E402  # NOSONAR
+
+# Launch-endpoint rate limiting (LAUNCH_RATE_LIMIT_ENABLED, LAUNCH_RATE_LIMITS)
+# lives in config/_rate_limit_settings.py (star-imported above) to keep this
+# module under the Sonar S104 500-line cap; see mission_control/api/rate_limit.py.
 
 # CTF scheduler (run_ctf_scheduler) stale-task recovery window. A long
 # SPIN_UP_RANGES run heartbeats its task's updated_at, so this only needs to
@@ -261,6 +250,12 @@ TERMINAL_CONNECT_EXECUTOR_QUEUE_SLACK = _env_int("TERMINAL_CONNECT_EXECUTOR_QUEU
 # jitter so a genuinely in-flight spin-up is never marked FAILED on the
 # multi-node portal. See docs/architecture/ctf-scheduler-concurrency-preflight-942.md.
 CTF_SCHEDULER_STALE_TASK_MINUTES = _env_int("CTF_SCHEDULER_STALE_TASK_MINUTES", 120)
+
+# CTF-1003: automated range cleanup destroys ranges in batches with a pause
+# between batches so a large event cannot drive the cloud APIs into
+# throttling. Non-secret integers.
+CTF_RANGE_CLEANUP_BATCH_SIZE = _env_int("CTF_RANGE_CLEANUP_BATCH_SIZE", 10)
+CTF_RANGE_CLEANUP_BATCH_PAUSE_SECONDS = _env_int("CTF_RANGE_CLEANUP_BATCH_PAUSE_SECONDS", 5)
 
 # ACES operation-record retention/cleanup knobs (issue #1277): snapshot TTL days
 # plus the dedicated prune service cadence/batch size. Non-secret integers.
@@ -346,7 +341,7 @@ if not DEBUG:
 # ------------------------------------------------------------------------------
 # Authentication
 # ------------------------------------------------------------------------------
-# Authentication backends, OIDC endpoint discovery, magic-link config,
+# Authentication backends, OIDC endpoint discovery, CTF local-auth config,
 # and ``OIDC_EXEMPT_URLS`` are defined in ``config._oidc_settings`` so
 # this module stays under the 500-line cap. Re-exported via star-import
 # here (``noqa`` suppresses the unused/ambiguous-import warnings — these

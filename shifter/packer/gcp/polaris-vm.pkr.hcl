@@ -11,15 +11,19 @@
 // The full compose stack (docker-compose.yml + build context) lives outside
 // this repo (scenario-dev/polaris/build is gitignored, and the AWS polaris-vm
 // AMI is likewise baked from an external stack). host-setup.sh fetches the
-// stack tarball from GCS at bake time (POLARIS_STACK_BUCKET / POLARIS_STACK_KEY)
-// and builds it; when unset it warns and leaves the host otherwise range-ready.
+// stack tarball from GCS at bake time (POLARIS_STACK_BUCKET / POLARIS_STACK_KEY /
+// POLARIS_STACK_GENERATION), verifies it against POLARIS_STACK_SHA256, and
+// builds it. The stack is MANDATORY for a promotable polaris-vm image
+// (POLARIS_REQUIRE_STACK=1): a missing stack, checksum mismatch, invalid compose
+// config, or failed build/pull fails the build.
 //
 // Consumed by the GCE range-cell backend: the deploy points
 // GCP_RANGE_KALI_IMAGE at this image family and the scenario's
 // `ami_key: polaris-vm` selects the Kali/attacker profile
-// (see gcp_range_cell_plan._host_access). The Windows DC uses the generic
-// `dc` GCE image family (dc.pkr.hcl); boreas.local is promoted per-range by
-// dc_setup, not baked.
+// (see gcp_range_cell_plan._host_access). The Windows DC uses a pre-promoted
+// per-purpose DC image family baked by dc-prebaked.pkr.hcl (e.g.
+// shifter-polaris-dc for BOREAS.LOCAL); the live domain Administrator credential
+// is rotated per range at runtime by plans/dc_setup.py (DC_DOMAIN_PASSWORD).
 source "googlecompute" "polaris-vm" {
   project_id              = var.project_id
   zone                    = var.zone
@@ -62,9 +66,13 @@ build {
     environment_vars = [
       "POLARIS_STACK_BUCKET=${var.polaris_stack_bucket}",
       "POLARIS_STACK_KEY=${var.polaris_stack_key}",
+      "POLARIS_STACK_GENERATION=${var.polaris_stack_generation}",
+      "POLARIS_STACK_SHA256=${var.polaris_stack_sha256}",
+      "POLARIS_REQUIRE_STACK=1",
     ]
     scripts = [
       "scripts/polaris/host-setup.sh",
+      "scripts/polaris/verify-stack.sh",
       "../scripts/common/cleanup.sh",
     ]
     execute_command = "sudo -S bash -c '{{ .Vars }} {{ .Path }}'"

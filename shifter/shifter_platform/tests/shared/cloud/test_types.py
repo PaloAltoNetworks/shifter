@@ -64,6 +64,9 @@ class TestProtocolStructuralTyping:
             def read_object_header(self, bucket, key, max_bytes):
                 return b""
 
+            def download_object(self, bucket, key, dest_path, *, max_bytes, expected_identity=None):
+                return {}
+
             def generate_presigned_upload_url(self, bucket, key, content_type, expires_in):
                 return ""
 

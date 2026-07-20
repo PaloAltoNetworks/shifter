@@ -21,6 +21,7 @@ from django.db import transaction
 from ctf.exceptions import CTFNotFoundError, CTFRangeError
 from ctf.models import CTFParticipant
 from shared.log_sanitize import safe_log_value
+from shared.range_instantiation_policy import POLICY_DENIAL_CODE
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,35 @@ def _is_already_assigned_error(exc: Exception) -> bool:
     assigned should be skipped, not counted as a provisioning failure.
     """
     return isinstance(exc, CTFRangeError) and "already has a range" in str(exc)
+
+
+def _underlying_policy_code(exc: Exception) -> str | None:
+    """Return the stable policy-denial code from a wrapped error's ``details``.
+
+    CMS carries the ADR-039 classification (identity-or-policy / prerequisite) in
+    ``CMSError.details["code"]`` (issue #1348); propagate it onto the CTFRangeError
+    so the retry wrapper can recognize a permanent denial.
+    """
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        code = details.get("code")
+        if isinstance(code, str) and code:
+            return code
+    return None
+
+
+def _is_permanent_provisioning_error(exc: Exception) -> bool:
+    """Return True for a provisioning error that must not be retried.
+
+    Covers the existing fast-fail validation errors (unregistered user, already
+    assigned) and any error carrying the permanent ADR-039 policy-denial code
+    (issue #1348): a GDC live-fire denial is permanent, so retrying it only re-runs
+    the same denial for every participant with backoff.
+    """
+    message = str(exc)
+    if "must be registered" in message or "already has a range" in message:
+        return True
+    return getattr(exc, "code", "") == POLICY_DENIAL_CODE
 
 
 def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
@@ -137,11 +167,13 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
                 scenario=event.scenario_id,
                 agents_by_os=agents_by_os,
                 ngfw_enabled=ngfw_enabled,
+                remote_access_teardown_at=event.get_cleanup_time(),
             )
         except Exception as e:
             logger.exception("Range provisioning failed for participant %s", safe_log_value(participant_id))
             raise CTFRangeError(
                 f"Range provisioning failed: {e}",
+                code=_underlying_policy_code(e),
                 details={"participant_id": str(participant_id)},
             ) from e
 
@@ -192,8 +224,9 @@ def provision_participant_range_with_retry(
             result["retries"] = attempt
             return result
         except CTFRangeError as e:
-            # Don't retry validation errors (no user, already assigned)
-            if "must be registered" in str(e) or "already has a range" in str(e):
+            # Don't retry permanent errors (validation failures, permanent policy
+            # denials) -- retrying only re-runs the same failure with backoff (#1348).
+            if _is_permanent_provisioning_error(e):
                 raise
             last_error = e
             if attempt < max_retries:

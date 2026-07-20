@@ -1,3 +1,6 @@
+{{- $runtimeEnv := deepCopy .Values.runtimeEnv -}}
+{{- $_ := set $runtimeEnv "ENGINE_TASK_NAMESPACE" .Values.namespaces.jobs -}}
+{{- $_ = set $runtimeEnv "ENGINE_TASK_SERVICE_ACCOUNT_NAME" .Values.serviceAccounts.provisioner.name -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,6 +9,6 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
 data:
-  {{- range $key, $value := .Values.runtimeEnv }}
+  {{- range $key, $value := $runtimeEnv }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}

@@ -8,6 +8,7 @@ so ``from ctf.models import X`` keeps working unchanged.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
@@ -266,6 +267,14 @@ class CTFScheduledTask(CTFBaseModel):
         blank=True,
         help_text="Additional task-specific data",
     )
+    retry_count = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Retries already consumed by this task (#526)",
+    )
+    max_retries = models.PositiveSmallIntegerField(
+        default=3,
+        help_text="Transient-failure retries allowed before the task is marked failed (#526)",
+    )
 
     class Meta:
         """Django model metadata."""
@@ -313,6 +322,38 @@ class CTFScheduledTask(CTFBaseModel):
         self.save(update_fields=["status", "executed_at", "error_message", "updated_at"])
         logger.error("Task %s failed: %s - %s", self.task_type, self.pk, error)
 
+    def retry_or_fail(self, error: str) -> bool:
+        """Requeue after a failure with exponential backoff, or mark failed (#526).
+
+        Handlers are idempotent (destroy skips destroyed ranges, transitions
+        guard on state, notification sends are per-recipient best-effort), so a
+        transient failure — mail outage, provider throttle, deadlock — is
+        retried up to ``max_retries`` times at 5 · 2^n minute intervals before
+        the task is recorded as failed.
+
+        Returns:
+            True when the task was requeued, False when it was marked failed.
+        """
+        if self.retry_count >= self.max_retries:
+            self.mark_failed(error)
+            return False
+        self.retry_count += 1
+        delay_minutes = 5 * (2 ** (self.retry_count - 1))
+        self.status = ScheduledTaskStatus.PENDING.value
+        self.scheduled_for = timezone.now() + timedelta(minutes=delay_minutes)
+        self.error_message = error
+        self.save(update_fields=["status", "scheduled_for", "retry_count", "error_message", "updated_at"])
+        logger.warning(
+            "Task %s failed (attempt %d/%d), retrying in %d min: %s - %s",
+            self.task_type,
+            self.retry_count,
+            self.max_retries,
+            delay_minutes,
+            self.pk,
+            error,
+        )
+        return True
+
     def mark_cancelled(self) -> None:
         """Mark task as cancelled."""
         self.status = ScheduledTaskStatus.CANCELLED.value
@@ -330,3 +371,61 @@ class CTFScheduledTask(CTFBaseModel):
         self.scheduled_for = timezone.now()
         self.save(update_fields=["status", "scheduled_for", "updated_at"])
         logger.info("Task %s requeued for resume: %s", self.task_type, self.pk)
+
+
+class CTFWebhook(CTFBaseModel):
+    """One organizer-registered webhook endpoint for an event (CTF-1203).
+
+    Deliveries POST a JSON payload with the event type, timestamp, and
+    entity data; a per-webhook secret produces an HMAC-SHA256 signature
+    header so receivers can authenticate payloads.
+    """
+
+    event = models.ForeignKey(
+        "ctf.CTFEvent",
+        on_delete=models.CASCADE,
+        related_name="webhooks",
+        help_text="Event this webhook is scoped to",
+    )
+    url = models.URLField(
+        max_length=500,
+        help_text="HTTPS endpoint that receives POSTed JSON payloads",
+    )
+    secret = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        help_text="Optional shared secret for the X-Shifter-Signature HMAC header",
+    )
+    subscribed_events = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Webhook event types to deliver (empty list means all)",
+    )
+    active = models.BooleanField(
+        default=True,
+        help_text="Inactive webhooks are kept for audit but never called",
+    )
+    last_status = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="Outcome of the most recent delivery attempt",
+    )
+    last_delivery_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the most recent delivery attempt finished",
+    )
+
+    class Meta:
+        """Django model metadata."""
+
+        db_table = "ctf_webhook"
+        ordering = ["created_at"]
+        verbose_name = "CTF Webhook"
+        verbose_name_plural = "CTF Webhooks"
+
+    def __str__(self) -> str:
+        """Return the webhook endpoint with its event."""
+        return f"{self.url} ({self.event_id})"

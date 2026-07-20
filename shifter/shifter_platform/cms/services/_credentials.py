@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any
 from django.utils import timezone
 
 from cms.exceptions import CMSError
-from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+)
 from shared.log_sanitize import safe_log_value
 
 from ._common import _validate_caller_user
@@ -111,10 +115,10 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
         )
 
         _audit_log_call(
-            entity_type=AuditLog.EntityType.CREDENTIAL,
+            entity_type=AuditEntityType.CREDENTIAL,
             entity_id=credential.id,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
+            action=AuditAction.CREATE,
+            actor_type=AuditActorType.USER,
             actor_id=user.id,
             new_state={
                 "credential_type": credential_type_slug,
@@ -215,10 +219,10 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
         credential.save(update_fields=["deleted_at"])
 
         _audit_log_call(
-            entity_type=AuditLog.EntityType.CREDENTIAL,
+            entity_type=AuditEntityType.CREDENTIAL,
             entity_id=credential_id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
+            action=AuditAction.DELETE,
+            actor_type=AuditActorType.USER,
             actor_id=user.id,
             previous_state=previous_state,
         )

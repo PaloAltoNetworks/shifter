@@ -8,7 +8,7 @@ that shipped to users in June (missing terminal sourcemaps / static assets):
 invisible to the source-tree test estate, which never serves through whitenoise
 off the image's collectstatic output.
 
-For each page it GETs the URL with the smoke session cookie and an
+For each page it GETs the URL with the session cookie and an
 ``X-Forwarded-Proto: https`` header (mirroring the production ALB, so the
 DEBUG=False image serves the page instead of issuing its HTTPS redirect), then:
 
@@ -20,9 +20,12 @@ DEBUG=False image serves the page instead of issuing its HTTPS redirect), then:
 * asserts the locale-aware template chain ran (an ``<html ... lang=...>`` tag),
   a light i18n-wiring signal on top of the image's build-time compilemessages.
 
-Range-dependent checks (live terminal data-exchange, Guacamole bootstrap, real
-OIDC login) are deliberately out of scope; they need a live range / IdP and are
-tracked separately. Stdlib only - no third-party deps, no secret values logged.
+The session it reuses is the one established by the real OIDC login flow
+(``oidc_login.py`` against the local provider double, #988), not a directly
+minted one; its key is read from a file (``--session-file``) so it never lands
+on argv. Range-dependent checks (live terminal data-exchange, Guacamole
+bootstrap) are still out of scope; they need a live range and are tracked
+separately. Stdlib only - no third-party deps, no secret values logged.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from urllib.parse import urljoin
 
 _STATIC_REF = re.compile(r'(?:src|href)="(/static/[^"]+)"')
@@ -67,10 +71,18 @@ def _check_asset(url: str, label: str, session: str, cookie_name: str, failures:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True, help="e.g. http://127.0.0.1:18000")
-    parser.add_argument("--session", required=True, help="Django session key")
+    # The session value is read from a file (its path is the argument) rather
+    # than passed on argv, so the key never appears in process listings, shell
+    # tracing, or CI annotations (#988).
+    parser.add_argument("--session-file", required=True, help="path to a mode-0600 file holding the session key")
     parser.add_argument("--paths", required=True, help="space-separated page paths")
     parser.add_argument("--cookie-name", default="sessionid")
     args = parser.parse_args()
+
+    session = Path(args.session_file).read_text(encoding="utf-8").strip()
+    if not session:
+        print("page-smoke: FAILED empty session file", file=sys.stderr)
+        return 1
 
     failures: list[str] = []
     saw_lang = False
@@ -78,7 +90,7 @@ def main() -> int:
 
     for path in args.paths.split():
         page_url = urljoin(args.base, path)
-        html_bytes = _check_asset(page_url, f"page {path}", args.session, args.cookie_name, failures)
+        html_bytes = _check_asset(page_url, f"page {path}", session, args.cookie_name, failures)
         if not html_bytes:
             continue
         html = html_bytes.decode("utf-8", "replace")
@@ -90,7 +102,7 @@ def main() -> int:
 
         for ref in dict.fromkeys(_STATIC_REF.findall(html)):
             asset_url = urljoin(args.base, ref)
-            data = _check_asset(asset_url, f"{path} asset {ref}", args.session, args.cookie_name, failures)
+            data = _check_asset(asset_url, f"{path} asset {ref}", session, args.cookie_name, failures)
             asset_count += 1
             if not data or not ref.endswith(".js"):
                 continue
@@ -101,7 +113,7 @@ def main() -> int:
             if not map_url.startswith(args.base):
                 continue  # external sourcemap - out of scope
             _check_asset(map_url, f"{path} sourcemap {match.group(1).decode('ascii', 'replace')}",
-                         args.session, args.cookie_name, failures)
+                         session, args.cookie_name, failures)
             asset_count += 1
 
     if not saw_lang:

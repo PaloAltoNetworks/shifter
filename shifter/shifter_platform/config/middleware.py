@@ -6,6 +6,7 @@ import uuid
 from typing import TYPE_CHECKING, cast
 
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction
+from django.conf import settings
 
 from config.capacity_metrics import inflight_requests
 
@@ -25,6 +26,28 @@ _HEALTH_PATHS = frozenset({"/health", "/health/"})
 # default ``"localhost,127.0.0.1"``), so downstream host validation admits
 # the probe without weakening ``ALLOWED_HOSTS`` for non-health paths.
 _HEALTH_ADMISSION_HOST = "localhost"
+
+_CTF_ACCOUNT_ALWAYS_ALLOWED = frozenset(
+    {
+        "/ctf/change-password/",
+        "/logout/",
+    }
+)
+
+# Mission Control range-access endpoints a live participant legitimately needs to
+# reach their OWN range box: the Guacamole RDP/SSH URL bootstrap plus its
+# status/open polling (issue #1740). These self-authorize per user — the
+# underlying resolvers (engine.services.get_rdp_connection_info /
+# get_ssh_connection_info via Range.resolve_active_for_instance) only return a
+# box in the requester's own active, ready range, and the bootstrap
+# status/open lookups are owner-scoped — so admitting the path is safe. This is
+# ADMISSION ONLY: the endpoints still enforce authentication, CSRF, actor/scope,
+# request-shape, ready-range ownership, declared participant channel, and
+# owner-scoped bootstrap delivery. The prefix is deliberately narrow: NGFW,
+# range lifecycle/history, credentials, uploads, agents, and scenarios stay
+# blocked. Any NEW route added under this prefix becomes reachable by temporary
+# accounts and therefore requires its own security review.
+_PARTICIPANT_MISSION_CONTROL_PREFIXES = ("/api/v1/mission-control/guacamole/",)
 
 
 class RequestIDMiddleware:
@@ -54,6 +77,42 @@ class RequestIDMiddleware:
         # Include in response for client correlation
         response["X-Request-ID"] = request_id
 
+        return response
+
+
+class CTFAccountBoundaryMiddleware:
+    """Deny marked temporary accounts outside participant-owned surfaces."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        from django.http import HttpResponse
+        from django.shortcuts import redirect
+
+        from management.services import is_ctf_password_change_required, is_temporary_ctf_account
+
+        user = request.user
+        if not is_temporary_ctf_account(user):
+            response = self.get_response(request)
+        else:
+            path = request.path
+            from ctf.services.participant.accounts import live_participant_for_user
+
+            participant_surface = (
+                (path.startswith("/ctf/") and not path.startswith("/ctf/admin/"))
+                or path.startswith("/api/v1/ctf/")
+                or path.startswith(_PARTICIPANT_MISSION_CONTROL_PREFIXES)
+            )
+            forbidden = (path != "/logout/" and live_participant_for_user(user) is None) or (
+                path not in _CTF_ACCOUNT_ALWAYS_ALLOWED and not participant_surface
+            )
+            if forbidden:
+                response = HttpResponse("Forbidden", status=403, content_type="text/plain")
+            elif is_ctf_password_change_required(user) and path not in _CTF_ACCOUNT_ALWAYS_ALLOWED:
+                response = redirect("ctf:ctf_change_password")
+            else:
+                response = self.get_response(request)
         return response
 
 
@@ -135,3 +194,42 @@ class RequestInFlightMiddleware:
             return await cast("Awaitable[HttpResponse]", self.get_response(request))
         finally:
             inflight_requests.decrement()
+
+
+class BrowserPolicyHeadersMiddleware:
+    """Set the browser-policy headers Django's own middleware does not own.
+
+    Adds ``Permissions-Policy`` and ``Reporting-Endpoints`` (the W3C reporting
+    group backing the CSP ``report-to`` directive) globally, beside the native
+    ``ContentSecurityPolicyMiddleware`` and ``SecurityMiddleware``. Values come
+    from :mod:`config._browser_security` (ADR-036). ``setdefault`` is used so a
+    deliberately stricter per-view header (e.g. the CTF invite ``no-referrer``)
+    is never clobbered.
+
+    Async-aware so it measures no request through Django's sync threadpool under
+    the ASGI worker (matching :class:`RequestInFlightMiddleware`).
+    """
+
+    async_capable = True
+    sync_capable = True
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+        self._is_async = iscoroutinefunction(get_response)
+        if self._is_async:
+            markcoroutinefunction(self)
+
+    def __call__(self, request: HttpRequest) -> HttpResponse | Awaitable[HttpResponse]:
+        if self._is_async:
+            return self._acall(request)
+        return self._apply(self.get_response(request))
+
+    async def _acall(self, request: HttpRequest) -> HttpResponse:
+        response = await cast("Awaitable[HttpResponse]", self.get_response(request))
+        return self._apply(response)
+
+    @staticmethod
+    def _apply(response: HttpResponse) -> HttpResponse:
+        response.setdefault("Permissions-Policy", settings.PERMISSIONS_POLICY)
+        response.setdefault("Reporting-Endpoints", settings.REPORTING_ENDPOINTS_HEADER)
+        return response

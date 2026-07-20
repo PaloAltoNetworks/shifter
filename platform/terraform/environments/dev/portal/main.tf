@@ -517,10 +517,11 @@ module "messaging" {
 module "ssm" {
   source = "../../../modules/portal/ssm"
 
-  environment = var.environment
-  name_prefix = local.name_prefix
-  aws_region  = var.aws_region
-  tags        = var.tags
+  environment    = var.environment
+  cloud_provider = var.cloud_provider
+  name_prefix    = local.name_prefix
+  aws_region     = var.aws_region
+  tags           = var.tags
 
   # ECR configuration
   ecr_registry        = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[0]
@@ -600,6 +601,7 @@ module "ec2" {
 
   aws_region               = var.aws_region
   environment              = var.environment
+  cloud_provider           = var.cloud_provider
   ec2_ami_id               = var.ec2_ami_id
   name_prefix              = local.name_prefix
   iam_name_prefix          = local.iam_name_prefix
@@ -626,6 +628,8 @@ module "ec2" {
   secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
   db_resource_id              = module.rds.db_resource_id
   s3_bucket_arn               = module.s3.bucket_arn
+  aces_package_bucket_arn     = var.aces_package_bucket_arn
+  aces_package_prefix         = var.aces_package_prefix
   app_port                    = var.app_port
   root_volume_size            = var.ec2_root_volume_size
 
@@ -662,16 +666,20 @@ module "ec2" {
   termination_drain_timeout               = var.termination_drain_timeout
   docker_stop_timeout                     = var.docker_stop_timeout
   instance_refresh_min_healthy_percentage = var.instance_refresh_min_healthy_percentage
+  health_check_type                       = var.health_check_type
+  health_check_grace_period               = var.health_check_grace_period
+  instance_refresh_instance_warmup        = var.instance_refresh_instance_warmup
 
   redis_endpoint     = var.enable_redis ? module.redis.redis_endpoint : ""
   scale_up_threshold = var.scale_up_threshold
   log_retention_days = var.log_retention_days
 
   # Messaging (SQS queues for message consumers)
-  sqs_queue_arns  = values(module.messaging.sqs_queue_arns)
-  sqs_queue_urls  = module.messaging.sqs_queue_urls
-  sqs_kms_key_arn = module.messaging.kms_key_arn
-  s3_kms_key_arn  = aws_kms_key.portal_s3.arn
+  sqs_queue_arns         = values(module.messaging.sqs_queue_arns)
+  sqs_queue_urls         = module.messaging.sqs_queue_urls
+  sqs_kms_key_arn        = module.messaging.kms_key_arn
+  range_events_topic_arn = module.messaging.sns_topic_arn
+  s3_kms_key_arn         = aws_kms_key.portal_s3.arn
 
   # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
@@ -851,6 +859,7 @@ module "engine_provisioner" {
   iam_name_prefix             = local.iam_name_prefix
   permissions_boundary_arn    = local.ci_role_permissions_boundary_arn
   environment                 = var.environment
+  cloud_provider              = var.cloud_provider
   tags                        = var.tags
   log_retention_days          = var.log_retention_days
   secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
@@ -890,6 +899,20 @@ module "engine_provisioner" {
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
 
+  # AWS Polaris Bedrock agent credential profile (#1377); off unless populated
+  # via the deploy-secrets tfvars for an environment that runs AWS Polaris. The
+  # engine-provisioner module turns these into the AWS_POLARIS_AGENT_* task env
+  # vars that config.load_aws_polaris_agent_config() consumes.
+  aws_polaris_agent_region                       = var.aws_polaris_agent_region
+  aws_polaris_agent_main_model_id                = var.aws_polaris_agent_main_model_id
+  aws_polaris_agent_small_model_id               = var.aws_polaris_agent_small_model_id
+  aws_polaris_agent_main_inference_profile_arn   = var.aws_polaris_agent_main_inference_profile_arn
+  aws_polaris_agent_small_inference_profile_arn  = var.aws_polaris_agent_small_inference_profile_arn
+  aws_polaris_agent_main_backing_model_arns      = var.aws_polaris_agent_main_backing_model_arns
+  aws_polaris_agent_small_backing_model_arns     = var.aws_polaris_agent_small_backing_model_arns
+  aws_polaris_agent_sts_session_duration_seconds = var.aws_polaris_agent_sts_session_duration_seconds
+  aws_polaris_agent_refresh_window_seconds       = var.aws_polaris_agent_refresh_window_seconds
+
   # AMIs (from SSM Parameter Store)
   kali_ami_id    = data.aws_ssm_parameter.kali_ami.value
   victim_ami_id  = data.aws_ssm_parameter.victim_ami.value
@@ -906,11 +929,16 @@ module "engine_provisioner" {
   victim_instance_type = var.victim_instance_type
 
   # S3
-  agent_s3_bucket           = module.s3.bucket_name
-  agent_s3_bucket_arn       = module.s3.bucket_arn
-  s3_endpoint_id            = try(data.terraform_remote_state.range.outputs.s3_endpoint_id, "")
-  firewall_endpoint_id      = data.terraform_remote_state.range.outputs.firewall_endpoint_id != null ? data.terraform_remote_state.range.outputs.firewall_endpoint_id : ""
-  range_egress_mode         = try(data.terraform_remote_state.range.outputs.range_egress_mode, "allowlist")
+  agent_s3_bucket          = module.s3.bucket_name
+  agent_s3_bucket_arn      = module.s3.bucket_arn
+  s3_endpoint_id           = try(data.terraform_remote_state.range.outputs.s3_endpoint_id, "")
+  firewall_endpoint_id     = data.terraform_remote_state.range.outputs.firewall_endpoint_id != null ? data.terraform_remote_state.range.outputs.firewall_endpoint_id : ""
+  range_egress_mode        = try(data.terraform_remote_state.range.outputs.range_egress_mode, "allowlist")
+  range_vpn_edge_subnet_id = try(data.terraform_remote_state.range.outputs.vpn_edge_subnet_id, "")
+  range_vpn_provider_endpoint_security_group_id = try(
+    data.terraform_remote_state.range.outputs.provider_api_endpoint_security_group_id,
+    "",
+  )
   ssm_endpoints_subnet_cidr = try(data.terraform_remote_state.range.outputs.ssm_endpoints_subnet_cidr, "")
 
   # Portal VPC configuration (for terminal SSH routing)

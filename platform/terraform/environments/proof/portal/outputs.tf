@@ -56,6 +56,7 @@ output "portal_inspection_assertion" {
     private_subnet_cidrs     = module.vpc.private_subnet_cidrs
     firewall_subnet_cidrs    = module.vpc.firewall_subnet_cidrs
     nat_gateway_id           = module.vpc.nat_gateway_id
+    nat_gateway_ids          = module.vpc.nat_gateway_ids
   }
 }
 

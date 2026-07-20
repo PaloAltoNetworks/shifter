@@ -9,7 +9,14 @@ rows; that side is tested in the provisioner suite.
 import pytest
 
 from engine.models import AcesImageMapping
-from engine.services import AcesImageMappingError, AcesImageMappingOptions, upsert_aces_image_mapping
+from engine.services import (
+    AcesImageMappingError,
+    AcesImageMappingOptions,
+    AcesImageMappingView,
+    disable_aces_image_mapping,
+    list_aces_image_mappings,
+    upsert_aces_image_mapping,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -75,7 +82,78 @@ class TestValidation:
             upsert_aces_image_mapping(provider="gce", source_name="kali", image_ref="")
 
     def test_rejects_non_positive_disk_size(self):
+        options = AcesImageMappingOptions(disk_size_gb=0)
         with pytest.raises(AcesImageMappingError):
-            upsert_aces_image_mapping(
-                provider="gce", source_name="kali", image_ref="img", options=AcesImageMappingOptions(disk_size_gb=0)
-            )
+            upsert_aces_image_mapping(provider="gce", source_name="kali", image_ref="img", options=options)
+
+
+class TestList:
+    def test_returns_views_in_natural_key_order(self):
+        upsert_aces_image_mapping(
+            provider="gce", source_name="kali", image_ref="img-v2", options=AcesImageMappingOptions(source_version="2")
+        )
+        upsert_aces_image_mapping(provider="gce", source_name="alpine", image_ref="img-any")
+        rows = list_aces_image_mappings()
+        assert [(r.source_name, r.source_version) for r in rows] == [("alpine", ""), ("kali", "2")]
+        assert all(isinstance(r, AcesImageMappingView) for r in rows)
+        assert rows[0].image_ref == "img-any"
+
+    def test_empty_registry_returns_empty_list(self):
+        assert list_aces_image_mappings() == []
+
+    def test_provider_filter(self):
+        upsert_aces_image_mapping(provider="gce", source_name="kali", image_ref="img")
+        upsert_aces_image_mapping(provider="aws", source_name="kali", image_ref="ami-1")
+        rows = list_aces_image_mappings(provider="aws")
+        assert [r.provider for r in rows] == ["aws"]
+
+    def test_include_disabled_false_hides_disabled_rows(self):
+        upsert_aces_image_mapping(provider="gce", source_name="kali", image_ref="img")
+        upsert_aces_image_mapping(
+            provider="gce", source_name="ubuntu", image_ref="img", options=AcesImageMappingOptions(enabled=False)
+        )
+        enabled_only = list_aces_image_mappings(include_disabled=False)
+        assert [r.source_name for r in enabled_only] == ["kali"]
+        assert len(list_aces_image_mappings()) == 2
+
+    def test_unknown_provider_filter_raises(self):
+        with pytest.raises(AcesImageMappingError):
+            list_aces_image_mappings(provider="azure")
+
+
+class TestDisable:
+    def test_disables_existing_row_preserving_image_ref(self):
+        upsert_aces_image_mapping(
+            provider="gce",
+            source_name="kali",
+            image_ref="img-keep",
+            options=AcesImageMappingOptions(source_version="1"),
+        )
+        view = disable_aces_image_mapping(provider="gce", source_name="kali", source_version="1")
+        assert view.enabled is False
+        assert view.image_ref == "img-keep"
+        assert AcesImageMapping.objects.get(source_name="kali").enabled is False
+
+    def test_targets_blank_version_fallback_row(self):
+        upsert_aces_image_mapping(provider="gce", source_name="kali", image_ref="img-any")
+        upsert_aces_image_mapping(
+            provider="gce", source_name="kali", image_ref="img-v1", options=AcesImageMappingOptions(source_version="1")
+        )
+        disable_aces_image_mapping(provider="gce", source_name="kali")
+        assert AcesImageMapping.objects.get(source_name="kali", source_version="").enabled is False
+        assert AcesImageMapping.objects.get(source_name="kali", source_version="1").enabled is True
+
+    def test_idempotent_on_already_disabled(self):
+        upsert_aces_image_mapping(
+            provider="gce", source_name="kali", image_ref="img", options=AcesImageMappingOptions(enabled=False)
+        )
+        view = disable_aces_image_mapping(provider="gce", source_name="kali")
+        assert view.enabled is False
+
+    def test_missing_mapping_raises(self):
+        with pytest.raises(AcesImageMappingError):
+            disable_aces_image_mapping(provider="gce", source_name="absent")
+
+    def test_unknown_provider_raises(self):
+        with pytest.raises(AcesImageMappingError):
+            disable_aces_image_mapping(provider="azure", source_name="kali")

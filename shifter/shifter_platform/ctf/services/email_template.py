@@ -52,6 +52,10 @@ ALLOWED_PLACEHOLDERS_BY_TYPE: dict[str, frozenset[str]] = {
     NotificationType.PROVISION_FAILURE.value: _COMMON | frozenset({"failure_count"}),
     NotificationType.EVENT_START.value: _COMMON,
     NotificationType.EVENT_END.value: _COMMON,
+    NotificationType.EVENT_RESULTS.value: _COMMON
+    | _PARTICIPANT
+    | frozenset({"final_rank", "final_score", "solve_count", "top_summary"}),
+    NotificationType.RANGE_READY.value: _COMMON | _PARTICIPANT | frozenset({"access_url"}),
 }
 
 

@@ -9,14 +9,14 @@ from uuid import UUID
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_variables
 from django.views.decorators.http import require_http_methods
 
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
-
-    from ctf.exceptions import CTFValidationError
 
 
 from ctf.views import _parsing
@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 _EVENT_NOT_FOUND_MSG = "Event not found"
 _FORBIDDEN_EVENT_MSG = "Forbidden: You do not have access to this event"
+_PARTICIPANT_NOT_FOUND_MSG = "Participant not found"
+_PARTICIPANT_LIST_ROUTE = "ctf:admin_participant_list"
+_PARTICIPANT_DETAIL_ROUTE = "ctf:admin_participant_detail"
 
 
 @login_required
@@ -90,86 +93,71 @@ def admin_participant_list(request: HttpRequest, event_id: UUID) -> HttpResponse
     return render(request, "ctf/admin/participant_list.html", context)
 
 
-def _participant_import_error_messages(exc: CTFValidationError) -> list[str]:
-    """Map a CSV participant-import validation error to display messages.
-
-    Preserves the original precedence (existing > duplicates > generic), kept
-    out of ``admin_participant_import`` to hold its cognitive complexity below
-    the SonarCloud threshold (python:S3776).
-    """
-    details = exc.details
-    errors = details.get("errors") or details.get("existing") or [str(exc)]
-    if details.get("duplicates"):
-        errors = [f"Duplicate emails: {', '.join(details['duplicates'])}"]
-    if details.get("existing"):
-        errors = [f"Already exists: {', '.join(details['existing'])}"]
-    return errors
-
-
 @login_required
 @ctf_organizer_required
-@require_http_methods(["GET", "POST"])
-def admin_participant_import(request: HttpRequest, event_id: UUID) -> HttpResponse:
-    """Import participants from CSV.
-
-    GET: Show import form.
-    POST: Process CSV file and create participants.
-
-    Args:
-        event_id: UUID of the event.
-    """
+@require_http_methods(["POST"])
+def admin_participant_rename(request: HttpRequest, participant_id: UUID) -> HttpResponse:
+    """Rename a participant's sole authentication handle."""
     from django.contrib import messages
     from django.http import Http404
 
     from ctf.exceptions import CTFNotFoundError, CTFValidationError
-    from ctf.forms import CTFParticipantImportForm
-    from ctf.services import bulk_import_participants, get_event
+    from ctf.forms import CTFParticipantRenameForm
+    from ctf.services.participant.accounts import rename_participant_username
 
-    try:
-        event = get_event(event_id)
-    except CTFNotFoundError:
-        raise Http404(_EVENT_NOT_FOUND_MSG) from None
-
-    # Check permission
-    if event.created_by_id != request.user.pk:
-        return HttpResponse(_FORBIDDEN_EVENT_MSG, status=403)
-
-    errors = None
-    imported_count = 0
-
-    if request.method == "POST":
-        form = CTFParticipantImportForm(request.POST, request.FILES)
-        if form.is_valid():
-            csv_file = request.FILES["csv_file"]
-            try:
-                csv_content = csv_file.read().decode("utf-8")  # type: ignore[union-attr]
-                participants = bulk_import_participants(event_id, csv_content)
-                imported_count = len(participants)
-                logger.info(
-                    "User %s imported %d participants to event %s",
-                    request.user.email,
-                    imported_count,
-                    safe_log_value(event_id),
-                )
-                messages.success(request, f"Successfully imported {imported_count} participants.")
-                return redirect("ctf:admin_participant_list", event_id=event_id)
-            except CTFValidationError as e:
-                errors = _participant_import_error_messages(e)
-    else:
-        form = CTFParticipantImportForm()
-
-    context = {
-        "event": event,
-        "form": form,
-        "errors": errors,
-        "imported_count": imported_count,
-    }
-
-    return render(request, "ctf/admin/participant_import.html", context)
+    form = CTFParticipantRenameForm(request.POST)
+    if form.is_valid():
+        try:
+            participant = rename_participant_username(
+                participant_id,
+                form.cleaned_data["username"],
+                actor=request.user,
+            )
+        except CTFNotFoundError:
+            raise Http404(_PARTICIPANT_NOT_FOUND_MSG) from None
+        except CTFValidationError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "Participant username updated.")
+            return redirect(_PARTICIPANT_DETAIL_ROUTE, participant_id=participant.pk)
+    messages.error(request, "Invalid participant username.")
+    return redirect(_PARTICIPANT_DETAIL_ROUTE, participant_id=participant_id)
 
 
 @login_required
 @ctf_organizer_required
+@require_http_methods(["POST"])
+def admin_participant_email(request: HttpRequest, participant_id: UUID) -> HttpResponse:
+    """Attach or clear a participant's delivery-only email address."""
+    from django.contrib import messages
+    from django.http import Http404
+
+    from ctf.forms import CTFParticipantEmailForm
+    from ctf.models import CTFParticipant
+
+    try:
+        participant = CTFParticipant.objects.select_related("event").get(
+            pk=participant_id,
+            deleted_at__isnull=True,
+        )
+    except CTFParticipant.DoesNotExist:
+        raise Http404(_PARTICIPANT_NOT_FOUND_MSG) from None
+    if participant.event.created_by_id != request.user.pk:
+        return HttpResponse(_FORBIDDEN_EVENT_MSG, status=403)
+    form = CTFParticipantEmailForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Invalid delivery email.")
+    else:
+        participant.email = form.cleaned_data["email"].strip().lower()
+        participant.save(update_fields=["email", "updated_at"])
+        messages.success(request, "Delivery email updated.")
+    return redirect(_PARTICIPANT_DETAIL_ROUTE, participant_id=participant_id)
+
+
+@login_required
+@ctf_organizer_required
+@never_cache
+@sensitive_variables("bootstrap_password")
 def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> HttpResponse:
     """Participant detail view.
 
@@ -180,14 +168,15 @@ def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> Http
     """
     from django.http import Http404
 
-    from ctf.exceptions import CTFNotFoundError
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
     from ctf.models import CTFSubmission
     from ctf.services import get_participant
+    from ctf.services.participant.accounts import effective_bootstrap_password
 
     try:
         participant = get_participant(participant_id)
     except CTFNotFoundError:
-        raise Http404("Participant not found") from None
+        raise Http404(_PARTICIPANT_NOT_FOUND_MSG) from None
 
     # Check permission - organizers can only access their own events' participants
     if participant.event.created_by_id != request.user.pk:
@@ -202,6 +191,12 @@ def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> Http
     total_score = participant.total_score
     solved_count = submissions.filter(is_correct=True).count()
     total_attempts = submissions.count()
+    # Fail closed (issue #1665): when no secure bootstrap credential is
+    # configured, disable the reveal action rather than 500 the organizer page.
+    try:
+        bootstrap_password = effective_bootstrap_password(participant.event)
+    except CTFValidationError:
+        bootstrap_password = None
 
     context = {
         "participant": participant,
@@ -210,6 +205,7 @@ def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> Http
         "total_score": total_score,
         "solved_count": solved_count,
         "total_attempts": total_attempts,
+        "bootstrap_password": bootstrap_password,
     }
 
     return render(request, "ctf/admin/participant_detail.html", context)
@@ -259,7 +255,7 @@ def admin_participant_add(request: HttpRequest, event_id: UUID) -> HttpResponse:
                     safe_log_value(event_id),
                 )
                 messages.success(request, f"Participant {participant.name} added successfully.")
-                return redirect("ctf:admin_participant_list", event_id=event_id)
+                return redirect(_PARTICIPANT_LIST_ROUTE, event_id=event_id)
             except CTFValidationError as e:
                 form.add_error(None, str(e))
     else:

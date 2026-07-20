@@ -81,11 +81,46 @@ variable "polaris_stack_key" {
   default     = "polaris/stack/polaris-stack.tar.gz"
 }
 
+variable "polaris_stack_sha256" {
+  type        = string
+  description = <<-DESC
+    Required sha256 digest of the Polaris compose-stack tarball for the
+    polaris-vm build. host-setup.sh verifies the fetched tarball against this
+    digest and fails the build on mismatch, so a mutable GCS key cannot change
+    what is baked without changing the declared hash. Empty is only valid for a
+    non-Polaris range-host profile (POLARIS_REQUIRE_STACK=0).
+  DESC
+  default     = ""
+}
+
+variable "polaris_stack_generation" {
+  type        = string
+  description = <<-DESC
+    Optional GCS object generation for the compose-stack tarball. When set the
+    fetch pins the exact immutable object version (gs://bucket/key#generation);
+    the sha256 digest verifies content integrity regardless.
+  DESC
+  default     = ""
+}
+
 # --- Pre-promoted DC (dc-prebaked) --------------------------------------------
 # The dc-prebaked template bakes an already-promoted domain controller so ranges
 # boot without a per-range ~15-20 min promotion (time-to-serve). One template
 # bakes many DC images: pick a profile var-file in dc-profiles/ (or override
 # these). Defaults reproduce the Polaris BOREAS.LOCAL image.
+
+variable "dc_dsrm_password" {
+  type        = string
+  sensitive   = true
+  description = <<-DESC
+    Build-only Directory Services Restore Mode (DSRM) password for the
+    dc-prebaked forest. Generated per build and injected with -var by the CI
+    workflow — NEVER commit a real value. promote-bake.ps1 refuses to promote a
+    DC without it, so a shared/source-controlled DSRM secret cannot ship in the
+    image. Empty is invalid for a dc-prebaked build.
+  DESC
+  default     = ""
+}
 
 variable "dc_image_purpose" {
   type        = string

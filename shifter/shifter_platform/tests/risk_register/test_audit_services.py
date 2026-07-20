@@ -1,10 +1,12 @@
-"""Behavior tests for risk_register.services audit logging functions.
+"""Behavior tests for the ``shared.audit`` emission policy and helpers.
 
 Drives the real audit functions against real ``AuditLog`` rows instead of
-patching ``AuditLog.log``; each test asserts on the persisted row the service
-returned. The one failure-path test triggers a real serialization rejection
-(a non-JSON payload) rather than mocking the manager to raise, exercising the
-"audit logging never breaks the caller" swallow through a real boundary fault.
+patching the writer. ``shared.audit`` no longer returns an ORM object across the
+port (#1523), so each test asserts on the persisted row queried from the owning
+read surface (``risk_register.AuditLog``) and on the boolean success signal.
+The one failure-path test triggers a real serialization rejection (a non-JSON
+payload) rather than mocking the writer to raise, exercising the "audit logging
+never breaks the caller" swallow through a real boundary fault.
 
 The request-context helpers (``get_client_ip`` / ``get_request_id`` /
 ``get_actor_from_request``) take a request object as input; building that input
@@ -17,9 +19,11 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from risk_register.audit_health import get_audit_health_snapshot, reset_audit_health
 from risk_register.models import AuditLog
-from risk_register.services import (
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
     AuditEvent,
     AuthPrincipal,
     RequestAudit,
@@ -32,8 +36,10 @@ from risk_register.services import (
     audit_role_sync,
     audit_session_event,
     get_actor_from_request,
+    get_audit_health_snapshot,
     get_client_ip,
     get_request_id,
+    reset_audit_health,
     select_trusted_client_ip,
 )
 
@@ -111,12 +117,12 @@ def mock_apikey_request():
 @pytest.mark.django_db
 class TestAuditLog:
     def test_creates_entry_with_correct_fields(self, staff_user):
-        entry = audit_log(
+        ok = audit_log(
             AuditEvent(
-                entity_type=AuditLog.EntityType.RANGE,
+                entity_type=AuditEntityType.RANGE,
                 entity_id=42,
-                action=AuditLog.Action.CREATE,
-                actor_type=AuditLog.ActorType.USER,
+                action=AuditAction.CREATE,
+                actor_type=AuditActorType.USER,
                 actor_id=staff_user.id,
                 new_state={"scenario": "test"},
                 context="test context",
@@ -126,12 +132,10 @@ class TestAuditLog:
             )
         )
 
-        assert entry is not None
-        stored = AuditLog.objects.get(pk=entry.pk)
-        assert stored.entity_type == AuditLog.EntityType.RANGE
-        assert stored.entity_id == 42
-        assert stored.action == AuditLog.Action.CREATE
-        assert stored.actor_type == AuditLog.ActorType.USER
+        assert ok is True
+        stored = AuditLog.objects.get(entity_type=AuditEntityType.RANGE, entity_id=42)
+        assert stored.action == AuditAction.CREATE
+        assert stored.actor_type == AuditActorType.USER
         assert stored.actor_id == staff_user.id
         assert stored.new_state == {"scenario": "test"}
         assert stored.context == "test context"
@@ -140,67 +144,69 @@ class TestAuditLog:
         assert stored.request_id == "req-123"
 
     def test_strict_reraises_on_persistence_failure(self):
-        """With ``strict=True`` a persistence fault propagates instead of None.
+        """With ``strict=True`` a persistence fault propagates instead of False.
 
         The role-sync audit path needs fail-closed behavior so a failed audit
         rolls back the role mutation it describes (issue #937 SEC-5).
         """
+        audit_event = AuditEvent(
+            entity_type=AuditEntityType.USER,
+            entity_id=1,
+            action=AuditAction.ROLE_SYNC,
+            new_state={"bad": {1, 2, 3}},
+        )
         with pytest.raises(TypeError):
             audit_log(
-                AuditEvent(
-                    entity_type=AuditLog.EntityType.USER,
-                    entity_id=1,
-                    action=AuditLog.Action.ROLE_SYNC,
-                    new_state={"bad": {1, 2, 3}},
-                ),
+                audit_event,
                 strict=True,
             )
 
-    def test_returns_none_when_row_cannot_be_persisted(self):
-        """A real serialization failure is swallowed; the caller gets None.
+    def test_returns_false_when_row_cannot_be_persisted(self):
+        """A real serialization failure is swallowed; the caller gets False.
 
         ``new_state`` is a JSONField, so a non-serializable value (a set) is
         rejected by the encoder during the write — a real boundary fault, not a
-        mocked one. ``audit_log`` must return None rather than propagate, which
+        mocked one. ``audit_log`` must return False rather than propagate, which
         is the whole contract of its except branch ("audit logging never breaks
         the caller"). The failed write poisons the surrounding test transaction,
         so no follow-up query is issued here.
         """
         result = audit_log(
             AuditEvent(
-                entity_type=AuditLog.EntityType.RANGE,
+                entity_type=AuditEntityType.RANGE,
                 entity_id=1,
-                action=AuditLog.Action.CREATE,
+                action=AuditAction.CREATE,
                 new_state={"bad": {1, 2, 3}},
             )
         )
-        assert result is None
+        assert result is False
 
-    def test_returns_none_failure_marks_audit_health_degraded(self):
+    def test_failure_marks_audit_health_degraded(self):
         result = audit_log(
             AuditEvent(
-                entity_type=AuditLog.EntityType.RANGE,
+                entity_type=AuditEntityType.RANGE,
                 entity_id=1,
-                action=AuditLog.Action.CREATE,
+                action=AuditAction.CREATE,
                 new_state={"bad": {1, 2, 3}},
             )
         )
 
         snapshot = get_audit_health_snapshot()
-        assert result is None
+        assert result is False
         assert snapshot.degraded is True
         assert snapshot.failure_count == 1
         assert snapshot.last_failure_reason == "TypeError"
 
     def test_strict_failure_marks_audit_health_degraded_before_reraising(self):
+        audit_event = AuditEvent(
+            entity_type=AuditEntityType.USER,
+            entity_id=1,
+            action=AuditAction.ROLE_SYNC,
+            new_state={"bad": {1, 2, 3}},
+        )
         with pytest.raises(TypeError):
             audit_log(
-                AuditEvent(
-                    entity_type=AuditLog.EntityType.USER,
-                    entity_id=1,
-                    action=AuditLog.Action.ROLE_SYNC,
-                    new_state={"bad": {1, 2, 3}},
-                ),
+                audit_event,
                 strict=True,
             )
 
@@ -216,9 +222,9 @@ class TestAuditLog:
 @pytest.mark.django_db
 class TestAuditRoleSync:
     def test_records_role_change_row(self):
-        entry = audit_role_sync(
+        ok = audit_role_sync(
             user_id=7,
-            actor_type=AuditLog.ActorType.USER,
+            actor_type=AuditActorType.USER,
             actor_id=7,
             change=StateChange(
                 previous={"user_type": "standard", "groups": []},
@@ -227,23 +233,23 @@ class TestAuditRoleSync:
             source="oidc",
             request=RequestAudit(source_ip="9.9.9.9"),
         )
-        stored = AuditLog.objects.get(pk=entry.pk)
-        assert stored.action == AuditLog.Action.ROLE_SYNC
-        assert stored.entity_type == AuditLog.EntityType.USER
-        assert stored.entity_id == 7
-        assert stored.actor_type == AuditLog.ActorType.USER
+        assert ok is True
+        stored = AuditLog.objects.get(action=AuditAction.ROLE_SYNC, entity_id=7)
+        assert stored.entity_type == AuditEntityType.USER
+        assert stored.actor_type == AuditActorType.USER
         assert stored.previous_state == {"user_type": "standard", "groups": []}
         assert stored.new_state == {"user_type": "ctf_participant", "groups": ["CTF Participant"]}
         assert stored.source_ip == "9.9.9.9"
 
     def test_raises_when_row_cannot_be_persisted(self):
         """Fail-closed: a persistence fault propagates so callers can roll back."""
+        state_change = StateChange(previous={"user_type": "standard"}, new={"groups": {1, 2, 3}})
         with pytest.raises(TypeError):
             audit_role_sync(
                 user_id=1,
-                actor_type=AuditLog.ActorType.USER,
+                actor_type=AuditActorType.USER,
                 actor_id=1,
-                change=StateChange(previous={"user_type": "standard"}, new={"groups": {1, 2, 3}}),
+                change=state_change,
                 source="oidc",
             )
 
@@ -254,16 +260,16 @@ class TestAuditRoleSync:
 @pytest.mark.django_db
 class TestAuditLogFromRequest:
     def test_extracts_request_context(self, mock_request, staff_user):
-        entry = audit_log_from_request(
+        ok = audit_log_from_request(
             mock_request,
-            entity_type=AuditLog.EntityType.RANGE,
+            entity_type=AuditEntityType.RANGE,
             entity_id=1,
-            action=AuditLog.Action.CREATE,
+            action=AuditAction.CREATE,
         )
 
-        assert entry is not None
-        stored = AuditLog.objects.get(pk=entry.pk)
-        assert stored.actor_type == AuditLog.ActorType.USER
+        assert ok is True
+        stored = AuditLog.objects.get(entity_type=AuditEntityType.RANGE, entity_id=1)
+        assert stored.actor_type == AuditActorType.USER
         assert stored.actor_id == staff_user.id
         # Rightmost (ALB-appended) hop, not the spoofable leftmost value.
         assert stored.source_ip == "10.0.0.2"
@@ -271,16 +277,17 @@ class TestAuditLogFromRequest:
         assert stored.request_id == "req-abc-123"
 
     def test_handles_apikey_auth(self, mock_apikey_request):
-        entry = audit_log_from_request(
+        ok = audit_log_from_request(
             mock_apikey_request,
-            entity_type=AuditLog.EntityType.RANGE,
+            entity_type=AuditEntityType.RANGE,
             entity_id=1,
-            action=AuditLog.Action.CREATE,
+            action=AuditAction.CREATE,
         )
 
-        assert entry is not None
-        assert entry.actor_type == AuditLog.ActorType.APIKEY
-        assert entry.actor_id == 42
+        assert ok is True
+        stored = AuditLog.objects.get(entity_type=AuditEntityType.RANGE, entity_id=1)
+        assert stored.actor_type == AuditActorType.APIKEY
+        assert stored.actor_id == 42
 
 
 # ---- audit_log_system_event() ----
@@ -289,26 +296,29 @@ class TestAuditLogFromRequest:
 @pytest.mark.django_db
 class TestAuditLogSystemEvent:
     def test_prefixes_source_to_context(self):
-        entry = audit_log_system_event(
-            entity_type=AuditLog.EntityType.RANGE,
+        ok = audit_log_system_event(
+            entity_type=AuditEntityType.RANGE,
             entity_id=1,
-            action=AuditLog.Action.READY,
+            action=AuditAction.READY,
             source="engine.handlers",
             context="range provisioned",
         )
 
-        assert entry is not None
-        assert entry.context == "[engine.handlers] range provisioned"
-        assert entry.actor_type == AuditLog.ActorType.SYSTEM
+        assert ok is True
+        stored = AuditLog.objects.get(entity_type=AuditEntityType.RANGE, entity_id=1)
+        assert stored.context == "[engine.handlers] range provisioned"
+        assert stored.actor_type == AuditActorType.SYSTEM
 
     def test_source_only_context(self):
-        entry = audit_log_system_event(
-            entity_type=AuditLog.EntityType.RANGE,
+        ok = audit_log_system_event(
+            entity_type=AuditEntityType.RANGE,
             entity_id=1,
-            action=AuditLog.Action.READY,
+            action=AuditAction.READY,
             source="engine.handlers",
         )
-        assert entry.context == "[engine.handlers]"
+        assert ok is True
+        stored = AuditLog.objects.get(entity_type=AuditEntityType.RANGE, entity_id=1)
+        assert stored.context == "[engine.handlers]"
 
 
 # ---- audit_auth_event() ----
@@ -317,8 +327,8 @@ class TestAuditLogSystemEvent:
 @pytest.mark.django_db
 class TestAuditAuthEvent:
     def test_records_login_event(self, staff_user):
-        entry = audit_auth_event(
-            action=AuditLog.Action.LOGIN,
+        ok = audit_auth_event(
+            action=AuditAction.LOGIN,
             principal=AuthPrincipal(
                 user_id=staff_user.id,
                 email="test@example.com",
@@ -328,12 +338,11 @@ class TestAuditAuthEvent:
             user_agent="Browser/1.0",
         )
 
-        assert entry is not None
-        stored = AuditLog.objects.get(pk=entry.pk)
-        assert stored.action == AuditLog.Action.LOGIN
-        assert stored.entity_type == AuditLog.EntityType.USER
+        assert ok is True
+        stored = AuditLog.objects.get(action=AuditAction.LOGIN)
+        assert stored.entity_type == AuditEntityType.USER
         assert stored.new_state == {"email": "test@example.com", "cognito_sub": "abc-123"}
-        assert stored.actor_type == AuditLog.ActorType.COGNITO
+        assert stored.actor_type == AuditActorType.COGNITO
 
 
 # ---- audit_session_event() ----
@@ -342,8 +351,8 @@ class TestAuditAuthEvent:
 @pytest.mark.django_db
 class TestAuditSessionEvent:
     def test_records_connect_event(self, staff_user):
-        entry = audit_session_event(
-            action=AuditLog.Action.CONNECT,
+        ok = audit_session_event(
+            action=AuditAction.CONNECT,
             user_id=staff_user.id,
             session=SessionInfo(
                 session_id="sess-abc",
@@ -354,10 +363,9 @@ class TestAuditSessionEvent:
             source_ip="10.0.0.1",
         )
 
-        assert entry is not None
-        stored = AuditLog.objects.get(pk=entry.pk)
-        assert stored.action == AuditLog.Action.CONNECT
-        assert stored.entity_type == AuditLog.EntityType.SESSION
+        assert ok is True
+        stored = AuditLog.objects.get(action=AuditAction.CONNECT)
+        assert stored.entity_type == AuditEntityType.SESSION
         assert stored.new_state["session_id"] == "sess-abc"
         assert stored.new_state["range_id"] == 42
         assert stored.new_state["session_type"] == "terminal"
@@ -365,8 +373,8 @@ class TestAuditSessionEvent:
 
     def test_records_user_email_when_provided(self, staff_user):
         """Session rows carry the user email so lifecycle events are attributable."""
-        entry = audit_session_event(
-            action=AuditLog.Action.DISCONNECT,
+        ok = audit_session_event(
+            action=AuditAction.DISCONNECT,
             user_id=staff_user.id,
             session=SessionInfo(
                 session_id="sess-xyz",
@@ -376,20 +384,20 @@ class TestAuditSessionEvent:
             context="close_code=1000 reason=idle_timeout",
         )
 
-        assert entry is not None
-        stored = AuditLog.objects.get(pk=entry.pk)
+        assert ok is True
+        stored = AuditLog.objects.get(action=AuditAction.DISCONNECT)
         assert stored.new_state["email"] == "operator@example.com"
 
     def test_omits_email_key_when_absent(self, staff_user):
         """No email is stored when the session has none, keeping rows minimal."""
-        entry = audit_session_event(
-            action=AuditLog.Action.CONNECT,
+        ok = audit_session_event(
+            action=AuditAction.CONNECT,
             user_id=staff_user.id,
             session=SessionInfo(session_id="sess-noemail", session_type="terminal"),
         )
 
-        assert entry is not None
-        stored = AuditLog.objects.get(pk=entry.pk)
+        assert ok is True
+        stored = AuditLog.objects.get(action=AuditAction.CONNECT)
         assert "email" not in stored.new_state
 
 
@@ -469,15 +477,15 @@ class TestGetRequestId:
 class TestGetActorFromRequest:
     def test_authenticated_user(self, mock_request):
         actor_type, actor_id = get_actor_from_request(mock_request)
-        assert actor_type == AuditLog.ActorType.USER
+        assert actor_type == AuditActorType.USER
         assert actor_id is not None
 
     def test_apikey_auth(self, mock_apikey_request):
         actor_type, actor_id = get_actor_from_request(mock_apikey_request)
-        assert actor_type == AuditLog.ActorType.APIKEY
+        assert actor_type == AuditActorType.APIKEY
         assert actor_id == 42
 
     def test_anonymous_returns_system(self, mock_request_simple):
         actor_type, actor_id = get_actor_from_request(mock_request_simple)
-        assert actor_type == AuditLog.ActorType.SYSTEM
+        assert actor_type == AuditActorType.SYSTEM
         assert actor_id is None

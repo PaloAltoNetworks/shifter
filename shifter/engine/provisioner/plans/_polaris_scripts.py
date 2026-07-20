@@ -25,7 +25,7 @@ if [[ -z "$KALI_PUBKEY" ]]; then
   echo "polaris bootstrap: KALI_PUBKEY is empty, refusing to rewrite override" >&2
   exit 1
 fi
-
+{{ aws_agent_setup_block }}
 cd /opt/polaris/scenario-dev/polaris/build
 
 # Per-range Ed25519 keypair for the A9 splice-relay credential gate
@@ -57,7 +57,7 @@ services:
       - "3389:3389"
     environment:
       KALI_AUTHORIZED_KEY: "$KALI_PUBKEY"
-      KALI_SPLICE_PRIVATE_KEY_B64: "$SPLICE_PRIVATE_KEY_B64"
+      KALI_SPLICE_PRIVATE_KEY_B64: "$SPLICE_PRIVATE_KEY_B64"{{ aws_agent_compose_block }}
   a9-splice:
     environment:
       A9_AUTHORIZED_KEY: "$SPLICE_PUBLIC_KEY"
@@ -296,79 +296,6 @@ echo "polaris splice watcher: installed and started"
 exit 0
 """
 
-# Verification: prove a14-kali is up and dns resolves dc01 to this range's
-# Configures Claude Code on the a14-kali container to talk to Bedrock.
-# The image already has CLAUDE_CODE_USE_BEDROCK=1 + the model env vars
-# baked into /etc/profile.d/, but the kali container ships with no AWS
-# credentials and on a default-VPC bridge network can't reach IMDS at
-# 169.254.169.254. This step fixes both:
-#   1. Resolves the bedrock-runtime VPC endpoint's private IP (via the
-#      Amazon resolver at 169.254.169.253) and writes /etc/hosts inside
-#      the a14-kali container so `bedrock-runtime.us-east-2.amazonaws.com`
-#      resolves to a privately-reachable address from inside the container.
-#   2. Writes /etc/profile.d/claude-bedrock.sh with CLAUDE_CODE_USE_BEDROCK,
-#      AWS_REGION, ANTHROPIC_MODEL, and ANTHROPIC_SMALL_FAST_MODEL.
-# Credential delivery: the polaris-vm EC2's instance profile carries the
-# bedrock-claude-code policy. Containers reach IMDS through the host's
-# bridge network, which requires HttpPutResponseHopLimit >= 2 on the
-# instance, set by the instance setup caller before this step runs.
-#
-# Smoke test: invoke `claude -p "reply ok"` from inside a14-kali. If
-# Bedrock isn't reachable or creds aren't flowing, the smoke test fails
-# and the engine reports the range as failed instead of marking it ready
-# and handing a broken environment to a participant. This was once a
-# manual post-provision hotfix run by the operator; integrating it here
-# makes provisioning self-sufficient.
-KALI_BEDROCK_SHARD_SCRIPT = """#!/bin/bash
-set -euo pipefail
-
-ANTHROPIC_MODEL="{{ anthropic_model }}"
-ANTHROPIC_SMALL_FAST_MODEL="{{ anthropic_small_fast_model }}"
-BEDROCK_FQDN="bedrock-runtime.us-east-2.amazonaws.com"
-
-# 1. Resolve VPCE private IP. Try host resolver first (VPC resolver may
-# already serve VPCE IPs), fall back to direct query against the Amazon
-# resolver to bypass the scenario's custom dns container.
-BEDROCK_IP="$(getent hosts "$BEDROCK_FQDN" | awk '{print $1; exit}')"
-case "$BEDROCK_IP" in
-  10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*) : ;;
-  *)
-    if command -v dig >/dev/null 2>&1; then
-      BEDROCK_IP="$(dig +short @169.254.169.253 "$BEDROCK_FQDN" | grep -E '^10\\.' | head -n1 || true)"
-    fi
-    ;;
-esac
-if [[ -z "$BEDROCK_IP" ]]; then
-  echo "polaris kali bedrock shard: could not resolve $BEDROCK_FQDN to a private IP" >&2
-  exit 2
-fi
-echo "polaris kali bedrock shard: bedrock VPCE IP = $BEDROCK_IP"
-
-# 2. Write /etc/profile.d/claude-bedrock.sh inside a14-kali. Same-account
-# mode: no static AWS creds; claude inherits the EC2 instance profile via
-# IMDSv2 through the docker bridge (requires hop limit >= 2 on the
-# instance, set by the instance setup caller).
-PROFILE_FILE="$(mktemp)"
-chmod 600 "$PROFILE_FILE"
-cat > "$PROFILE_FILE" <<PROFILE_EOF
-# Managed by polaris_range_bootstrap KaliBedrockShard step - do not edit manually.
-export CLAUDE_CODE_USE_BEDROCK=1
-export AWS_REGION=us-east-2
-export ANTHROPIC_MODEL=$ANTHROPIC_MODEL
-export ANTHROPIC_SMALL_FAST_MODEL=$ANTHROPIC_SMALL_FAST_MODEL
-PROFILE_EOF
-
-docker cp "$PROFILE_FILE" a14-kali:/etc/profile.d/claude-bedrock.sh
-docker exec a14-kali chmod 644 /etc/profile.d/claude-bedrock.sh
-rm -f "$PROFILE_FILE"
-
-# 3. /etc/hosts override (idempotent).
-HOSTS_LINE="$BEDROCK_IP $BEDROCK_FQDN"
-docker exec a14-kali bash -c "grep -Fq '$BEDROCK_FQDN' /etc/hosts || echo '$HOSTS_LINE' >> /etc/hosts"
-
-echo "polaris kali bedrock shard: config applied"
-"""
-
 
 # DC. If any check fails, the plan is reported as failed and the range
 # provisioner aborts. The dig query runs from inside a14-kali because
@@ -378,7 +305,13 @@ echo "polaris kali bedrock shard: config applied"
 # and points its /etc/resolv.conf at the dns container by default, so
 # `docker exec a14-kali dig` exercises the real participant resolution
 # path end-to-end.
-VERIFY_POLARIS_BOOTSTRAP_SCRIPT = """#!/bin/bash
+#
+# Shared by both providers (checks 1-6). #1377 slice 5 adds AWS-only checks
+# 7-11 (metadata firewall, STS refresh, per-range caller identity, Bedrock
+# smoke invocation, IMDS denial) as a *separate* provider-selected constant
+# (VERIFY_POLARIS_BOOTSTRAP_SCRIPT_AWS below) built from this shared body, so
+# the GCP verify step -- this constant -- never changes by a single byte.
+VERIFY_POLARIS_BOOTSTRAP_COMMON = """#!/bin/bash
 set -euo pipefail
 
 DC_IP="{{ dc_ip }}"
@@ -447,7 +380,12 @@ if ! systemctl is-active --quiet polaris-splice-watcher.service; then
   systemctl status polaris-splice-watcher.service --no-pager >&2 || true
   exit 1
 fi
+"""
 
+VERIFY_POLARIS_BOOTSTRAP_SCRIPT = (
+    VERIFY_POLARIS_BOOTSTRAP_COMMON
+    + """
 echo "polaris verify: dc01 -> $resolved, kali key installed, splice gated, watcher active"
 exit 0
 """
+)

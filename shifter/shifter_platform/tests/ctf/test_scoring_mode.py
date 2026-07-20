@@ -169,17 +169,15 @@ def test_create_event_accepts_scoring_mode(organizer_user):
 @pytest.mark.django_db
 def test_create_event_rejects_invalid_scoring_mode(organizer_user):
     now = timezone.now()
+    payload = {
+        "name": "Bad Mode",
+        "event_start": now + timedelta(days=1),
+        "event_end": now + timedelta(days=1, hours=8),
+        "scoring_mode": "unsupported-mode",
+    }
     with pytest.raises(CTFValidationError) as exc:
-        create_event(
-            organizer_user,
-            {
-                "name": "Bad Mode",
-                "event_start": now + timedelta(days=1),
-                "event_end": now + timedelta(days=1, hours=8),
-                "scoring_mode": "dynamic",
-            },
-        )
-    assert exc.value.details["scoring_mode"] == "dynamic"
+        create_event(organizer_user, payload)
+    assert exc.value.details["scoring_mode"] == "unsupported-mode"
 
 
 @pytest.mark.django_db

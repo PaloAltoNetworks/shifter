@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from rest_framework import status
-from rest_framework.exceptions import AuthenticationFailed, ValidationError
+from rest_framework.exceptions import AuthenticationFailed, Throttled, ValidationError
 
 from shared.api.errors import api_error_response, api_exception_handler
 
@@ -42,6 +42,24 @@ def test_authentication_errors_do_not_echo_raw_exception_text() -> None:
             "code": "authentication_failed",
             "message": "Authentication failed",
             "request_id": "req-auth",
+        }
+    }
+
+
+def test_throttled_errors_render_a_stable_throttle_message() -> None:
+    # DRF's Throttled detail ("...Expected available in N seconds") contains the
+    # token "expected", which the keyword classifier would otherwise mislabel as
+    # a validation error ("Invalid request"). A 429 must render the stable
+    # throttle message instead (issue #322 surfaced the first 429 responses).
+    response = api_exception_handler(Throttled(wait=60), _context("req-throttle"))
+
+    assert response is not None
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert response.data == {
+        "error": {
+            "code": "throttled",
+            "message": "Request was throttled",
+            "request_id": "req-throttle",
         }
     }
 

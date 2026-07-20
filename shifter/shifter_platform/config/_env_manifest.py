@@ -41,7 +41,20 @@ _EXPLICIT_BINDINGS = (
     EnvBinding(name="DB_PASSWORD", default=None, source_file=_DATABASE_SETTINGS_FILE),
     EnvBinding(name="DB_PORT", default=None, source_file=_DATABASE_SETTINGS_FILE),
     EnvBinding(name="DB_USER", default=None, source_file=_DATABASE_SETTINGS_FILE),
+    # Read via `_resolve_test_db_backend` (a `Mapping.get`, not a literal
+    # `os.environ.get`), so the AST walker cannot see it (#1524).
+    EnvBinding(name="TEST_DB_BACKEND", default="sqlite", source_file=_DATABASE_SETTINGS_FILE),
+    # Resolved via `resolve_cloud_provider()` (registry-validated, not a literal
+    # `os.environ.get`), so the AST walker cannot see it; declared explicitly to
+    # keep it in the manifest (PLAT-2005). The "aws" value is the dev/test/build
+    # default only -- a deployed process must receive it explicitly.
+    EnvBinding(name="CLOUD_PROVIDER", default="'aws'", source_file="config/_cloud.py"),
     EnvBinding(name="DJANGO_ALLOWED_HOSTS", default=None, source_file=_SETTINGS_FILE),
+    # Read via `_env_int(...)` (a helper, not a literal `os.environ.get`), so the
+    # AST walker cannot see it; declared explicitly per the audit config-binding
+    # guardrail (#1523). Governs trusted X-Forwarded-For proxy hops for audit
+    # source-IP attribution.
+    EnvBinding(name="AUDIT_TRUSTED_PROXY_HOPS", default="1", source_file=_SETTINGS_FILE),
     EnvBinding(name="EMAIL_BACKEND", default=None, source_file="config/_email.py"),
     EnvBinding(name="ENVIRONMENT", default=None, source_file=_SETTINGS_FILE),
     EnvBinding(name="FIELD_ENCRYPTION_KEY", default=None, source_file=_SETTINGS_FILE),
@@ -51,6 +64,17 @@ _EXPLICIT_BINDINGS = (
     EnvBinding(name="OIDC_RP_CLIENT_SECRET", default=None, source_file=_OIDC_SETTINGS_FILE),
     EnvBinding(name="API_TOKEN_LAST_USED_COALESCE_SECONDS", default="300", source_file=_API_POLICY_FILE),
     EnvBinding(name="API_TOKEN_MAX_TTL_DAYS", default="365", source_file=_API_POLICY_FILE),
+    # Read via `_env_bool(...)` (a helper, not a literal `os.environ.get`), so the
+    # AST walker cannot see it; declared explicitly to keep the Scenario Editor
+    # SPA rollout flag in the manifest (#1371).
+    EnvBinding(name="SCENARIO_EDITOR_SPA_ENABLED", default="False", source_file=_SETTINGS_FILE),
+    # Administer workspace SPA rollout flag (#1373); same `_env_bool` reason as
+    # the Scenario Editor flag above.
+    EnvBinding(name="ADMINISTER_SPA_ENABLED", default="False", source_file=_SETTINGS_FILE),
+    # Read via `_env_bool(...)` (a helper, not a literal `os.environ.get`), so the
+    # AST walker cannot see it; declared explicitly to keep the CTF workspace SPA
+    # rollout flag in the manifest (#1372).
+    EnvBinding(name="CTF_WORKSPACE_SPA_ENABLED", default="False", source_file=_SETTINGS_FILE),
 )
 
 

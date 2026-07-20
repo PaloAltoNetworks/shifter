@@ -338,8 +338,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     const wizard = new NGFWWizardManager({
         csrfToken: '{{ csrf_token }}',
-        provisionUrl: '/mission-control/api/ngfw/',
-        statusUrlTemplate: '/mission-control/api/ngfw/{id}/status/',
+        provisionUrl: '/api/v1/mission-control/ngfw/',
         detailUrlTemplate: '/mission-control/ngfw/{id}/'
     });
     wizard.init();

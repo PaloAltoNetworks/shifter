@@ -1,8 +1,16 @@
 """DRF serializers for Risk Register API."""
 
+from typing import Any
+
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from risk_register.models import AuditLog, Comment, Risk, StrideCategory
+from risk_register.models import (
+    AuditLog,
+    Comment,
+    Risk,
+    StrideCategory,
+)
 
 # SonarCloud S1192: extracted duplicated string literals.
 LIKELIHOOD_RANGE_MSG = "Likelihood score must be between 1 and 5"
@@ -139,7 +147,8 @@ class CommentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at"]
 
-    def get_author(self, obj):
+    @extend_schema_field(CommentAuthorSerializer)
+    def get_author(self, obj: Comment) -> dict[str, Any] | None:
         """Get author information."""
         if obj.author_user:
             return {

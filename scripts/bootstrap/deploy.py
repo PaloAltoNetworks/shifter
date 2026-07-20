@@ -35,6 +35,7 @@ import bootstrap_core as _bootstrap_core
 import cli as _cli
 import gcp_control_plane as _gcp_control_plane
 import gdc_cluster as _gdc_cluster
+import preflight as _preflight
 import terraform_backend as tb
 import terraform_deploy as _terraform_deploy_module
 import walkthrough as _walkthrough
@@ -43,6 +44,7 @@ _OWNING_MODULES: tuple[ModuleType, ...] = (
     _aws_bootstrap,
     _gdc_cluster,
     _gcp_control_plane,
+    _preflight,
     _terraform_deploy_module,
     _walkthrough,
     _cli,

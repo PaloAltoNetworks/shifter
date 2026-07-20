@@ -1,0 +1,349 @@
+name: Packer GCE Image Validate
+
+# Candidate-boot validation gate for GCE guest images (issue #1343 gap 2).
+#
+# packer validate + the structural tests protect template shape; a successful
+# image capture proves nothing about the guest. This workflow boots the CONCRETE
+# candidate image in a disposable, isolated validation VM (no external IP,
+# IAP-only, Shielded VM, project SSH keys blocked), reboots it once, and checks
+# the guest is actually healthy on a clean boot with no manual input.
+#
+# The evidence is gathered BY THE TRUSTED RUNNER, not self-reported by the guest
+# (#1343 codex security review): the runner opens an IAP tunnel to the candidate
+# and either SSH-executes the check script and gates on its exit code (Linux /
+# polaris-vm) or probes AD over LDAP (dc-prebaked). A candidate cannot forge a
+# pass. On success it labels the EXACT validated candidate `validated=passed` and
+# uploads a bounded, non-secret evidence artifact; packer-gcp-promote.yml refuses
+# to promote an image without that label. Runs in dev/proof (never prod).
+#
+# NOTE: the live behaviour (IAP tunnel to the polaris-vm management SSH port, AD
+# LDAP probe) is exercised by an operator against real GCP; CI covers template /
+# workflow / script shape only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_type:
+        description: 'GCE image to validate. Only image types with a matching validator are selectable: the generic Linux guests boot-check, polaris-vm checks the Docker stack, and dc-prebaked checks an already-serving DC. Sysprepped windows / first-boot-promotion dc images have no matching validator and are intentionally excluded.'
+        required: true
+        type: choice
+        options:
+          - ubuntu
+          - brokenbk
+          - kali
+          - polaris-vm
+          - dc-prebaked
+      environment:
+        description: 'GCP environment the candidate lives in'
+        required: true
+        type: choice
+        options:
+          - dev
+          - proof
+        default: dev
+      source_image:
+        description: 'Exact candidate image name to validate. Empty resolves the newest image in the image family at validate time and pins it.'
+        required: false
+        type: string
+        default: ''
+      dc_profile:
+        description: 'Pre-promoted DC profile (only used when image_type=dc-prebaked); selects the shifter-<profile>-dc family and expected domain.'
+        required: false
+        type: string
+        default: polaris
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate ${{ inputs.image_type }} GCE image in ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_TYPE: ${{ inputs.image_type }}
+      DC_PROFILE: ${{ inputs.dc_profile }}
+      SOURCE_IMAGE_INPUT: ${{ inputs.source_image }}
+    steps:
+      # Reject dispatches from non-protected refs BEFORE any checkout or cloud
+      # auth. The WIF attribute_condition enforces the same allowlist at the GCP
+      # level (ADR-037-R7), so this step is defense-in-depth: it makes the
+      # policy visible and catches cases where only the script — not the workflow
+      # file — has been tampered with. Runs before cloud credentials are issued.
+      - name: Reject non-protected dispatch refs
+        run: |
+          case "${GITHUB_REF}" in
+            refs/heads/dev|refs/heads/main) ;;
+            *)
+              echo "::error::packer-gcp-validate must run from a protected integration branch (refs/heads/dev or refs/heads/main), not '${GITHUB_REF}'. The GCP WIF provider enforces the same allowlist; a token issued from this ref would be rejected. See ADR-037-R7."
+              exit 1
+              ;;
+          esac
+
+      # Checkout the dispatched ref. By this point the ref guard above has
+      # already confirmed the ref is a protected branch, so the checked-out
+      # validator scripts come from reviewed, merged code — not from a
+      # collaborator's feature branch.
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Ensure GCP auth is configured
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          missing=""
+          [ -z "${GCP_SERVICE_ACCOUNT}" ] && missing="${missing} GCP_SERVICE_ACCOUNT"
+          [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ] && missing="${missing} GCP_WORKLOAD_IDENTITY_PROVIDER"
+          [ -z "${GCP_PROJECT_ID}" ] && missing="${missing} GCP_PROJECT_ID"
+          if [ -n "${missing}" ]; then
+            echo "::error::Required secret(s) not set:${missing}. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: ">= 416.0.0"
+
+      - name: Resolve the exact candidate image
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          # The image family is the deployment channel; the exact image is the
+          # validation/promotion unit. Derive the family from the image type
+          # (dc-prebaked is purpose-scoped: shifter-<profile>-dc).
+          case "${IMAGE_TYPE}" in
+            dc-prebaked) FAMILY="shifter-${DC_PROFILE}-dc" ;;
+            *)           FAMILY="shifter-${IMAGE_TYPE}" ;;
+          esac
+          if [ -n "${SOURCE_IMAGE_INPUT}" ]; then
+            CANDIDATE="${SOURCE_IMAGE_INPUT}"
+          else
+            # Resolve the newest image in the family ONCE and pin the exact name;
+            # everything downstream uses this concrete identity, never the family.
+            CANDIDATE="$(gcloud compute images describe-from-family "${FAMILY}" \
+              --project="${GCP_PROJECT_ID}" --format='value(name)')"
+          fi
+          if [ -z "${CANDIDATE}" ]; then
+            echo "::error::No candidate image found (image_type=${IMAGE_TYPE}, family=${FAMILY}). Build it first."
+            exit 1
+          fi
+          # Confirm the pinned candidate exists in this project and read its family.
+          IMG_FAMILY="$(gcloud compute images describe "${CANDIDATE}" \
+            --project="${GCP_PROJECT_ID}" --format='value(family)')"
+          # Bind the candidate to the selected profile: the image's own family
+          # MUST equal the family for the requested image_type/dc_profile. Without
+          # this a caller could validate a sensitive-family image (e.g. a
+          # purpose-DC) under a weak profile (e.g. ubuntu) and still get it
+          # labelled validated=passed for promotion (#1343 codex review).
+          if [ "${IMG_FAMILY}" != "${FAMILY}" ]; then
+            echo "::error::Candidate ${CANDIDATE} is in family '${IMG_FAMILY}', not the family '${FAMILY}' for image_type='${IMAGE_TYPE}'. The candidate and validation profile must be the same release identity."
+            exit 1
+          fi
+          echo "Validating candidate image: ${CANDIDATE} (family ${IMG_FAMILY})"
+          {
+            echo "CANDIDATE=${CANDIDATE}"
+            echo "IMAGE_FAMILY=${IMG_FAMILY}"
+            echo "VALIDATION_VM=shifter-validate-${IMAGE_TYPE}-${GITHUB_RUN_ID}"
+          } >> "$GITHUB_ENV"
+
+      - name: Create disposable validation VM
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
+          GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK || 'default' }}
+          GCP_VALIDATE_MACHINE_TYPE: ${{ vars.GCP_VALIDATE_MACHINE_TYPE || 'e2-standard-4' }}
+          GCP_RANGE_HOST_MGMT_SSH_PORT: ${{ vars.GCP_RANGE_HOST_MGMT_SSH_PORT || '2222' }}
+        run: |
+          set -euo pipefail
+          ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
+
+          # SSH port the runner probes: polaris-vm moves the host sshd to the
+          # management port; other Linux guests keep :22. dc-prebaked is probed
+          # over LDAP (no SSH), so this is unused for it.
+          case "${IMAGE_TYPE}" in
+            polaris-vm) SSH_PORT="${GCP_RANGE_HOST_MGMT_SSH_PORT}" ;;
+            *)          SSH_PORT="22" ;;
+          esac
+
+          # Runtime-equivalent posture: block PROJECT ssh keys (an INSTANCE key
+          # for the validator user is injected below for Linux, which
+          # block-project-ssh-keys does not affect).
+          META="block-project-ssh-keys=TRUE"
+          KEY_FLAG=""
+          DOMAIN=""
+          if [ "${IMAGE_TYPE}" = "dc-prebaked" ]; then
+            # Resolve the expected forest domain from the CHECKED-IN profile (the
+            # dc-profiles/ directory is the allowlist). Reject an unknown profile
+            # or one without a domain, and validate the profile as a strict slug
+            # so it can never traverse the path (#1343 codex Sec F2 + preflight).
+            if ! printf '%s' "${DC_PROFILE}" | grep -qE '^[a-z0-9][a-z0-9-]*$'; then
+              echo "::error::dc_profile '${DC_PROFILE}' is not a valid profile slug."
+              exit 1
+            fi
+            PROFILE_FILE="shifter/packer/gcp/dc-profiles/${DC_PROFILE}.pkrvars.hcl"
+            if [ ! -f "${PROFILE_FILE}" ]; then
+              echo "::error::Unknown dc_profile '${DC_PROFILE}': no checked-in ${PROFILE_FILE}."
+              exit 1
+            fi
+            DOMAIN="$(grep -E '^[[:space:]]*dc_domain_name[[:space:]]*=' "${PROFILE_FILE}" \
+              | head -n1 | sed -E 's/.*=[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')"
+            if [ -z "${DOMAIN}" ]; then
+              echo "::error::dc_profile '${DC_PROFILE}' declares no dc_domain_name in ${PROFILE_FILE}; cannot validate forest identity."
+              exit 1
+            fi
+          else
+            # Inject an ephemeral instance SSH key so the runner can exec the
+            # check script; the guest agent provisions the `validator` user.
+            ssh-keygen -t ed25519 -f /tmp/validator_key -N "" -q
+            printf 'validator:%s\n' "$(cat /tmp/validator_key.pub)" > /tmp/ssh-keys.txt
+            KEY_FLAG="--metadata-from-file=ssh-keys=/tmp/ssh-keys.txt"
+          fi
+          {
+            echo "ZONE=${ZONE}"
+            echo "SSH_PORT=${SSH_PORT}"
+            echo "EXPECTED_DOMAIN=${DOMAIN}"
+          } >> "$GITHUB_ENV"
+
+          # Disposable, isolated, runtime-equivalent posture: no external IP,
+          # Shielded VM (Secure Boot + vTPM + integrity monitoring), IAP subnet.
+          # The VM boots candidate-controlled code, so it runs with NO service
+          # account and NO OAuth scopes — a compromised candidate must not be
+          # able to read a cloud token from the metadata server and mutate its
+          # own image labels; the runner (WIF) holds all validation/label
+          # authority (#1343 codex Sec F1).
+          # shellcheck disable=SC2086
+          gcloud compute instances create "${VALIDATION_VM}" \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${ZONE}" \
+            --image="${CANDIDATE}" \
+            --image-project="${GCP_PROJECT_ID}" \
+            --machine-type="${GCP_VALIDATE_MACHINE_TYPE}" \
+            --no-address \
+            --subnet="${GCP_PACKER_SUBNETWORK}" \
+            --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
+            --no-service-account --no-scopes \
+            --metadata="${META}" \
+            ${KEY_FLAG} \
+            --labels=project=shifter,managed-by=packer-validate,image-type="${IMAGE_TYPE}"
+
+      - name: Assert runtime Shielded-VM posture and no external IP
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          EXT_IP="$(gcloud compute instances describe "${VALIDATION_VM}" \
+            --project="${GCP_PROJECT_ID}" --zone="${ZONE}" \
+            --format='value(networkInterfaces[0].accessConfigs[0].natIP)')"
+          if [ -n "${EXT_IP}" ]; then
+            echo "::error::Validation VM has an external IP (${EXT_IP}); refusing to validate on a public builder."
+            exit 1
+          fi
+          SB="$(gcloud compute instances describe "${VALIDATION_VM}" \
+            --project="${GCP_PROJECT_ID}" --zone="${ZONE}" \
+            --format='value(shieldedInstanceConfig.enableSecureBoot)')"
+          if [ "${SB}" != "True" ]; then
+            echo "::error::Validation VM does not have Secure Boot enabled; posture does not match runtime range cells."
+            exit 1
+          fi
+          echo "Posture OK: no external IP, Secure Boot enabled."
+
+      - name: Install AD probe tools (dc-prebaked only)
+        if: inputs.image_type == 'dc-prebaked'
+        run: sudo apt-get update && sudo apt-get install -y ldap-utils
+
+      - name: Gather evidence from the runner (first boot)
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          # The runner (not the guest) executes the checks over an IAP tunnel and
+          # gates on the result — the candidate cannot self-report a pass.
+          VM="${VALIDATION_VM}" ZONE="${ZONE}" GCP_PROJECT_ID="${GCP_PROJECT_ID}" \
+            IMAGE_TYPE="${IMAGE_TYPE}" SSH_PORT="${SSH_PORT}" \
+            EXPECTED_DOMAIN="${EXPECTED_DOMAIN}" SSH_KEY=/tmp/validator_key \
+            bash shifter/packer/gcp/scripts/validate/gather-evidence.sh
+
+      - name: Reboot and re-gather evidence (clean boot, no manual input)
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud compute instances reset "${VALIDATION_VM}" \
+            --project="${GCP_PROJECT_ID}" --zone="${ZONE}"
+          # Re-run the same runner-side checks after the reset; passing again
+          # proves the guest is healthy on a clean boot with no manual input.
+          VM="${VALIDATION_VM}" ZONE="${ZONE}" GCP_PROJECT_ID="${GCP_PROJECT_ID}" \
+            IMAGE_TYPE="${IMAGE_TYPE}" SSH_PORT="${SSH_PORT}" \
+            EXPECTED_DOMAIN="${EXPECTED_DOMAIN}" SSH_KEY=/tmp/validator_key \
+            bash shifter/packer/gcp/scripts/validate/gather-evidence.sh
+
+      - name: Label the validated candidate and write evidence
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          VALIDATED_AT="$(date -u +%Y%m%d%H%M%S)"
+          # Bind validation evidence to the EXACT candidate image via a non-secret
+          # label; promotion verifies validated=passed before copying it.
+          gcloud compute images update "${CANDIDATE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --update-labels="validated=passed,validated-run=${GITHUB_RUN_ID},validated-at=${VALIDATED_AT}"
+          # Bounded, non-secret evidence artifact (workflow record, not app state).
+          cat > validation-evidence.json <<JSON
+          {
+            "candidate_image": "${CANDIDATE}",
+            "project": "${GCP_PROJECT_ID}",
+            "image_family": "${IMAGE_FAMILY}",
+            "image_type": "${IMAGE_TYPE}",
+            "environment": "${{ inputs.environment }}",
+            "source_revision": "${GITHUB_SHA}",
+            "validation_run": "${GITHUB_RUN_ID}",
+            "validated_at_utc": "${VALIDATED_AT}",
+            "phases": ["first_boot_health", "reboot_health"],
+            "result": "passed"
+          }
+          JSON
+          {
+            echo "## GCE Image Validation Passed"
+            echo "- **Image type:** ${IMAGE_TYPE}"
+            echo "- **Candidate:** \`${CANDIDATE}\` (family \`${IMAGE_FAMILY}\`)"
+            echo "- **Labelled:** \`validated=passed\`, run \`${GITHUB_RUN_ID}\`"
+            echo ""
+            echo "**Next step:** promote \`${CANDIDATE}\` with packer-gcp-promote.yml."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.image_type }}-gce-validation-evidence
+          path: validation-evidence.json
+          if-no-files-found: ignore
+
+      - name: Delete the disposable validation VM
+        if: always()
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          # Cleanup runs even on failure; a cleanup failure is surfaced but must
+          # not overwrite the primary validation result.
+          if [ -n "${VALIDATION_VM:-}" ] && [ -n "${ZONE:-}" ]; then
+            gcloud compute instances delete "${VALIDATION_VM}" \
+              --project="${GCP_PROJECT_ID}" --zone="${ZONE}" --quiet \
+              || echo "::warning::Failed to delete validation VM ${VALIDATION_VM}; delete it manually."
+          fi

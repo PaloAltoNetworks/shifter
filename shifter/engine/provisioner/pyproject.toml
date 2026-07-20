@@ -9,12 +9,17 @@ dependencies = [
     "boto3>=1.43.8",
     "botocore>=1.43.8",
     "cffi>=2.0.0",
-    "cryptography>=46.0.7",
+    "cryptography>=48.0.1",
     "debugpy>=1.8.20",
     "dill>=0.4.1",
     "grpcio>=1.80.0",
     "Jinja2>=3.1.6",
     "jmespath>=1.1.0",
+    # Transitive requirement of the installation package (installation/__init__ ->
+    # publication -> jsonschema). The provisioner imports installation.registry to
+    # resolve/validate the backend at runtime (PLAT-2005), so it needs installation's
+    # own runtime deps (pydantic above; jsonschema here).
+    "jsonschema>=4.0",
     "kubernetes>=32.0.0",
     "paramiko>=4.0.0",
     "MarkupSafe>=3.0.3",
@@ -23,6 +28,7 @@ dependencies = [
     "psycopg>=3.3.4",
     "psycopg-binary>=3.3.4",
 "pycparser>=3.0",
+    "pydantic>=2.13.4",
     "python-dateutil>=2.9.0.post0",
     "PyYAML>=6.0.3",
     "redis>=5.2.1",
@@ -44,7 +50,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["../.."]
+pythonpath = ["../..", "../../shifter_platform"]
 
 [tool.ruff]
 target-version = "py312"
@@ -68,12 +74,33 @@ max-complexity = 15
 quote-style = "double"
 indent-style = "space"
 
+[tool.coverage.run]
+# Production-only coverage (#1529 / REV1 Q6). CI measures this package with
+# ``pytest --cov`` from the package root; without omitting the test tree the
+# tests cover themselves and inflate the reported metric. ``source = ["."]``
+# keeps repo-relative paths for the SonarCloud report while ``omit`` drops all
+# tests, conftest hooks, and fixtures so the number reflects owned production
+# behavior only.
+source = ["."]
+omit = [
+    "tests/*",
+    "*/tests/*",
+    "conftest.py",
+    "*/conftest.py",
+]
+
 [tool.coverage.report]
+# Non-regression floor (#1529 / REV1 Q6). Measured production-only baseline is
+# 80%; the floor sits one point under it to absorb run-to-run variance and
+# ratchets up as coverage improves (a real reduction needs a reviewed exception).
+# See docs/dev/testing.md.
+fail_under = 79
 # Keep coverage's default (pragma: no cover) and also exclude unreachable
 # abstract-mixin stubs so they need no inline `# pragma` directive (Sonar S139).
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",
+    'raise AcesContentDeliveryError\("ACES content delivery binding is missing"\)',
 ]
 
 # Type-check policy (#564). This package is an ENFORCED, blocking mypy scope:

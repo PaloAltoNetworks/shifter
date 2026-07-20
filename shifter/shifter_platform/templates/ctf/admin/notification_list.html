@@ -61,7 +61,7 @@
                 {% if n.status == "draft" %}
                     <div class="mt-md">
                         <form method="post"
-                              action="{% url 'ctf:api_notification_send' notification_id=n.id %}"
+                              action="{% url 'v1:ctf:api_notification_send' notification_id=n.id %}"
                               class="d-inline">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-primary">

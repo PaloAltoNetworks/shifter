@@ -1,4 +1,14 @@
-FROM python:3.12-slim-trixie
+# base image: python:3.12-slim-trixie
+FROM python@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
+
+# Image metadata. `maintainer` is the label SonarCloud docker:S7028 requires;
+# the org.opencontainers.image.* labels are the modern OCI equivalents.
+LABEL maintainer="Shifter maintainers" \
+      org.opencontainers.image.title="shifter-provisioner" \
+      org.opencontainers.image.description="Shifter engine provisioner (Terraform/Pulumi range provisioning)" \
+      org.opencontainers.image.source="https://github.com/Brad-Edwards/shifter" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.authors="Shifter maintainers"
 
 # Install Terraform and Pulumi CLI (pinned versions)
 ARG TERRAFORM_VERSION=1.14.3
@@ -10,16 +20,29 @@ ARG PULUMI_VERSION=3.142.0
 # Keeping these in one layer satisfies docker:S7031 (no consecutive RUNs).
 # --create-home gives Terraform/Pulumi a writable HOME for plugin caches.
 RUN apt-get update && apt-get install -y curl openssh-client unzip && \
-    # Install Terraform
-    curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL -o terraform.zip \
+    # Install Terraform, integrity-verified against HashiCorp's published
+    # SHA256SUMS before extraction (ADR-037-R3). The archive is saved under the
+    # exact name the checksum manifest references so `sha256sum -c` matches.
+    curl --proto '=https' --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL \
+      -o "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
       "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" && \
-    unzip terraform.zip -d /usr/local/bin && \
-    rm terraform.zip && \
-    # Install Pulumi (keeping for backward compatibility)
-    curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL -o pulumi.tar.gz \
+    curl --proto '=https' --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL \
+      -o terraform_SHA256SUMS \
+      "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_SHA256SUMS" && \
+    grep "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" terraform_SHA256SUMS | sha256sum -c - && \
+    unzip "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -d /usr/local/bin && \
+    rm "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" terraform_SHA256SUMS && \
+    # Install Pulumi, integrity-verified against the published checksums file
+    # before extraction (ADR-037-R3).
+    curl --proto '=https' --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL \
+      -o "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" \
       "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" && \
-    tar -xzf pulumi.tar.gz -C /usr/local/bin --strip-components=1 && \
-    rm pulumi.tar.gz && \
+    curl --proto '=https' --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL \
+      -o pulumi_checksums.txt \
+      "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-${PULUMI_VERSION}-checksums.txt" && \
+    grep "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" pulumi_checksums.txt | sha256sum -c - && \
+    tar -xzf "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" -C /usr/local/bin --strip-components=1 && \
+    rm "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" pulumi_checksums.txt && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     # Create non-root user matching shifter_platform's appuser:1000 / appgroup:1000.
     groupadd --gid 1000 appgroup && \
@@ -33,16 +56,36 @@ RUN apt-get update && apt-get install -y curl openssh-client unzip && \
     mkdir -p /var/run/provisioner/workspace && \
     chown -R appuser:appgroup /var/run/provisioner
 
-# Install Python dependencies
+# Install Python dependencies from reviewed, hash-pinned locks (ADR-037-R4).
+# requirements.lock is `uv export --frozen --no-dev` from uv.lock;
+# requirements-gcp.lock is `uv pip compile --generate-hashes` of the GCP extras,
+# constrained to the same resolved versions. `--require-hashes` makes pip refuse
+# any artifact whose hash is not listed. Regenerate both per
+# docs/architecture/rev1-build-deployment-provenance.md.
 WORKDIR /app
-COPY engine/provisioner/requirements.txt engine/provisioner/requirements-gcp.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -r requirements-gcp.txt
+COPY engine/provisioner/requirements.lock engine/provisioner/requirements-gcp.lock ./
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements.lock && \
+    pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements-gcp.lock
 
-# First-party wire-contract package (cyberscript) on PYTHONPATH — same pattern as
-# shifter_platform/Dockerfile. Constants-only imports avoid pulling Pydantic into
-# the provisioner runtime beyond what pip already installs for other deps.
+# First-party shared packages on PYTHONPATH (cyberscript = wire-contract constants,
+# installation = root installation config) — same pattern as shifter_platform/Dockerfile.
+# `config.resolve_cloud_provider` validates CLOUD_PROVIDER against
+# installation.registry (PLAT-2005), which needs pydantic; pydantic is a declared
+# provisioner runtime dependency (requirements.lock), installed above. Range-cell
+# consumers use only cyberscript's dependency-light envelope, exception, and digest
+# paths; canonical Pydantic validation runs producer-side before persistence.
 COPY cyberscript /opt/shifter-libs/cyberscript
+COPY installation /opt/shifter-libs/installation
+
+# Dependency-light platform contract modules used by the provisioner runtime.
+# Copy the whole `shared` package (same whole-dir pattern as cyberscript and
+# installation above) so imports like `shared.range_instantiation_policy`,
+# `shared.range_escape`, and `shared.log_sanitize` (added by the #1348 refactor)
+# resolve alongside `shared.range_cells`. `shared/__init__.py` re-exports only
+# from cyberscript (already present), and the provisioner never imports the
+# Django modules (models.py, admin.py, migrations, …), so copying the whole
+# package does not pull Django into the provisioner runtime.
+COPY shifter_platform/shared /opt/shifter-libs/shared
 
 # Copy provisioner code as root-owned, immutable image content. The runtime
 # user does NOT own /app — Terraform writes go to TERRAFORM_WORKSPACE_DIR

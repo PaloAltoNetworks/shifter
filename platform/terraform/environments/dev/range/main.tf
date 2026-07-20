@@ -29,6 +29,7 @@ module "vpc" {
 
   name_prefix              = local.name_prefix
   iam_name_prefix          = local.iam_name_prefix
+  environment              = var.environment
   permissions_boundary_arn = local.ci_role_permissions_boundary_arn
   vpc_cidr                 = var.vpc_cidr
   portal_vpc_cidr          = var.portal_vpc_cidr

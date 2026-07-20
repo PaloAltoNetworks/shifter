@@ -18,6 +18,7 @@ def test_deploy_entrypoint_is_a_facade_over_focused_modules():
         "cli.py",
         "gcp_control_plane.py",
         "gdc_cluster.py",
+        "preflight.py",
         "terraform_deploy.py",
         "walkthrough.py",
     }

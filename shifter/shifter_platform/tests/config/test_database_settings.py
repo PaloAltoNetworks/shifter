@@ -15,6 +15,7 @@ from config._database_settings import _build_databases
 def _clear_db_env(monkeypatch):
     for var in (
         "TESTING",
+        "TEST_DB_BACKEND",
         "ENVIRONMENT",
         "DJANGO_DEBUG",
         "DB_IAM_AUTH",
@@ -45,6 +46,71 @@ def test_testing_uses_sqlite(monkeypatch):
     monkeypatch.setenv("TESTING", "1")
     default = _build_databases()["default"]
     assert default["ENGINE"] == "django.db.backends.sqlite3"
+
+
+def test_testing_sqlite_backend_explicit(monkeypatch):
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TEST_DB_BACKEND", "sqlite")
+    default = _build_databases()["default"]
+    assert default["ENGINE"] == "django.db.backends.sqlite3"
+
+
+def test_testing_postgres_backend_uses_stock_postgresql(monkeypatch):
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TEST_DB_BACKEND", "postgres")
+    monkeypatch.setenv("DB_NAME", "shifter")
+    monkeypatch.setenv("DB_USER", "test")
+    monkeypatch.setenv("DB_PASSWORD", "test")
+    monkeypatch.setenv("DB_HOST", "localhost")
+    monkeypatch.setenv("DB_PORT", "5432")
+    default = _build_databases()["default"]
+    assert default["ENGINE"] == "django.db.backends.postgresql"
+    assert default["NAME"] == "shifter"
+    assert default["USER"] == "test"
+    assert default["HOST"] == "localhost"
+    assert default["PORT"] == "5432"
+
+
+def test_testing_postgres_backend_uses_dev_defaults_when_db_env_absent(monkeypatch):
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TEST_DB_BACKEND", "postgres")
+    default = _build_databases()["default"]
+    assert default["ENGINE"] == "django.db.backends.postgresql"
+    assert default["NAME"] == "shifter"
+    assert default["USER"] == "postgres"
+    assert default["PASSWORD"] == "postgres"
+    assert default["HOST"] == "localhost"
+    assert default["PORT"] == "5432"
+
+
+def test_testing_postgres_backend_ignores_iam(monkeypatch):
+    """Under TESTING the postgres lane uses the stock backend, never RDS IAM."""
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TEST_DB_BACKEND", "postgres")
+    monkeypatch.setenv("DB_IAM_AUTH", "true")
+    default = _build_databases()["default"]
+    assert default["ENGINE"] == "django.db.backends.postgresql"
+    assert "sslmode" not in default["OPTIONS"]
+
+
+@pytest.mark.parametrize("value", ["mysql", "sqlite3", "postgresql", "pg", "oracle"])
+def test_invalid_test_db_backend_raises(monkeypatch, value):
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TEST_DB_BACKEND", value)
+    with pytest.raises(ImproperlyConfigured, match="TEST_DB_BACKEND"):
+        _build_databases()
+
+
+def test_test_db_backend_selector_is_case_and_whitespace_insensitive(monkeypatch):
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TEST_DB_BACKEND", "  Postgres  ")
+    assert _build_databases()["default"]["ENGINE"] == "django.db.backends.postgresql"
 
 
 def test_password_path_uses_stock_backend(monkeypatch):

@@ -35,22 +35,9 @@ from .credentials import (
     SCMCredentialContext,
     SCMCredentialSpec,
 )
-from .range import (
-    AgentDetails,
-    DCConfig,
-    InstanceContext,
-    InstanceContextBase,
-    InstanceRef,
-    InstanceSpec,
-    RangeContext,
-    RangeContextBase,
-    RangeRef,
-    RangeSpec,
-    RangeSpecBase,
-)
 from .ctf import (
-    AssetSpec,
     CYBERSCRIPT_VERSION_V1,
+    AssetSpec,
     CTFRangeSpec,
     DataSeedSpec,
     DetectionStackSpec,
@@ -62,8 +49,23 @@ from .ctf import (
     ServiceSpec,
     ZoneSpec,
 )
+from .range import (
+    AgentDetails,
+    DCConfig,
+    InstanceContext,
+    InstanceContextBase,
+    InstanceRef,
+    InstanceSpec,
+    RangeAccessBinding,
+    RangeContext,
+    RangeContextBase,
+    RangeRef,
+    RangeSpec,
+    RangeSpecBase,
+)
 from .request import AnyRangeSpec, RequestSpec
 from .subnet import SubnetContext, SubnetRef, SubnetSpec
+
 
 # Rebuild models to resolve forward references after all imports complete
 # This must be done here to avoid circular import issues
@@ -88,10 +90,11 @@ def _rebuild_all_models() -> None:
 _rebuild_all_models()
 
 __all__ = [
-    "AnyRangeSpec",
+    "CYBERSCRIPT_VERSION_V1",
     "AgentAppContext",
     "AgentAppSpec",
     "AgentDetails",
+    "AnyRangeSpec",
     "AppContext",
     "AppContextBase",
     "AppRef",
@@ -103,14 +106,13 @@ __all__ = [
     "BehaviourContextBase",
     "BehaviourRef",
     "BehaviourSpecBase",
+    "CTFRangeSpec",
     "CredentialContext",
     "CredentialContextBase",
     "CredentialRef",
     "CredentialSpecBase",
-    "CYBERSCRIPT_VERSION_V1",
-    "CTFRangeSpec",
-    "DataSeedSpec",
     "DCConfig",
+    "DataSeedSpec",
     "DeploymentProfileContext",
     "DeploymentProfileSpec",
     "DetectionStackSpec",
@@ -130,15 +132,16 @@ __all__ = [
     "OtherAppContext",
     "OtherAppSpec",
     "ParticipantAccessSpec",
+    "RangeAccessBinding",
     "RangeContext",
     "RangeContextBase",
     "RangeRef",
     "RangeSpec",
     "RangeSpecBase",
     "RequestSpec",
-    "ScenarioOverlaySpec",
     "SCMCredentialContext",
     "SCMCredentialSpec",
+    "ScenarioOverlaySpec",
     "ServiceSpec",
     "SpecBase",
     "SubnetContext",

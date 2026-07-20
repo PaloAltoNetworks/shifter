@@ -52,7 +52,7 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture(autouse=True)
 def _reset_audit_health_state():
-    from risk_register.audit_health import reset_audit_health
+    from shared.audit import reset_audit_health
 
     reset_audit_health()
     yield
@@ -199,7 +199,7 @@ def test_audit_health_check_registers_idempotently(health_check_registry):
 
 def test_health_surfaces_degraded_audit_health_coarsely(health_check_registry):
     from config.health_checks import register_audit_log_degraded_health_check
-    from risk_register.audit_health import mark_audit_degraded
+    from shared.audit import mark_audit_degraded
 
     health_check_registry.clear()
     register_audit_log_degraded_health_check()
@@ -302,8 +302,9 @@ async def test_channel_layer_probe_fails_on_unexpected_round_trip_response():
         async def receive(self, channel: str) -> dict[str, str]:
             return {"type": "health.check", "id": "different"}
 
+    layer = MismatchedChannelLayer()
     with pytest.raises(ServiceUnavailable):
-        await _round_trip(MismatchedChannelLayer())
+        await _round_trip(layer)
 
 
 # ---------------------------------------------------------------------------

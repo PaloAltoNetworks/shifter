@@ -25,22 +25,63 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      # Fail-closed protected-ref gate (issue #1656). This job assumes the prod
+      # deploy role and overwrites the /shifter/ami/dc runtime pointer, so
+      # restrict it to a protected ref; a feature-branch dispatch could otherwise
+      # publish an attacker-chosen DC id to prod. Runs before checkout.
+      - name: Validate promote ref
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          # Gate on the full ref, not github.ref_name: a tag named dev or main
+          # shares the short name and would otherwise pass this gate from
+          # unprotected provenance (codex #1656). Only the protected branches
+          # are accepted.
+          case "$REF" in
+            refs/heads/dev | refs/heads/main) ;;
+            *)
+              echo "::error::DC promotion may only run from a protected branch (refs/heads/dev or refs/heads/main); got '${REF}'"
+              exit 1
+              ;;
+          esac
+
+      # Read the DC registry AND the resolver from the canonical protected dev
+      # branch, independent of the dispatched ref, so the same validated id backs
+      # dev/proof seeding and prod promotion (issue #1656). refs/heads/dev (not
+      # the short name dev) so a tag named dev cannot shadow the branch.
+      # persist-credentials:false keeps the checkout token out of Git config.
+      - name: Checkout trusted DC registry (protected provenance)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: refs/heads/dev
+          persist-credentials: false
 
       - name: Configure AWS credentials (prod)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
 
       - name: Update prod SSM from config
+        env:
+          TRUSTED_DC_JSON: ${{ github.workspace }}/shifter/packer/dc-amis.json
         run: |
-          AMI_ID=$(jq -r '.prod' shifter/packer/dc-amis.json)
+          set -euo pipefail
+          # Validate the prebaked prod DC id (shape + prod ownership + available)
+          # via the resolver shared with packer.yml before touching the runtime
+          # pointer; a failure leaves the previous /shifter/ami/dc intact.
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          PROVENANCE_SHA="$(git rev-parse HEAD)"
+          AMI_ID="$(DC_AMIS_JSON="$TRUSTED_DC_JSON" \
+            DC_ENV_KEY=prod \
+            EXPECTED_ACCOUNT_ID="$ACCOUNT_ID" \
+            bash shifter/packer/scripts/bake/resolve-dc-ami.sh)"
           {
             echo "## DC AMI Update (Prod)"
             echo "- **AMI ID:** \`$AMI_ID\`"
             echo "- **Source:** dc-amis.json (prebaked AMI)"
+            echo "- **Provenance:** dev@${PROVENANCE_SHA}"
           } >> "$GITHUB_STEP_SUMMARY"
 
           aws ssm put-parameter \
@@ -67,7 +108,7 @@ jobs:
 
     steps:
       - name: Configure AWS credentials (dev)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
           aws-region: us-east-2
@@ -87,7 +128,7 @@ jobs:
           echo "DEV_ACCOUNT_ID=$DEV_ACCOUNT_ID" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials (prod)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
@@ -98,7 +139,7 @@ jobs:
           echo "PROD_ACCOUNT_ID=$PROD_ACCOUNT_ID" >> "$GITHUB_ENV"
 
       - name: Switch back to dev to share AMI
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
           aws-region: us-east-2
@@ -127,7 +168,7 @@ jobs:
           echo "- **Shared AMI with prod account:** $PROD_ACCOUNT_ID" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure AWS credentials (prod) for copy
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2

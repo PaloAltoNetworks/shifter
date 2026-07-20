@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
 
+from installation import cli
 from installation.cli import main
+from installation.doctor import CheckScope, CheckStatus, CheckTier, DoctorCheckResult, DoctorReport
 
 
 def _write_yaml(path, data):
@@ -49,6 +52,102 @@ class TestValidateCommand:
         monkeypatch.chdir(tmp_path)
         assert main(["validate"]) == 1
         assert "shifter.yaml" in capsys.readouterr().err
+
+
+class TestInitCommand:
+    def test_scaffolds_the_selected_backend(self, tmp_path, capsys):
+        dest = tmp_path / "shifter.yaml"
+        rc = main(["init", "--backend", "aws", "-o", str(dest)])
+        assert rc == 0
+        assert "backend: aws" in dest.read_text(encoding="utf-8")
+        assert "doctor" in capsys.readouterr().out
+
+    def test_no_backend_lists_available_backends(self, capsys):
+        rc = main(["init"])
+        assert rc == 2
+        out = capsys.readouterr().out
+        assert "aws" in out
+        assert "gcp" in out
+
+    def test_unknown_backend_exits_nonzero(self, tmp_path, capsys):
+        rc = main(["init", "--backend", "azure", "-o", str(tmp_path / "shifter.yaml")])
+        assert rc == 1
+        assert "azure" in capsys.readouterr().err
+
+    def test_refuses_overwrite_without_force(self, tmp_path, capsys):
+        dest = tmp_path / "shifter.yaml"
+        dest.write_text("keep: me\n", encoding="utf-8")
+        assert main(["init", "--backend", "aws", "-o", str(dest)]) == 1
+        assert dest.read_text(encoding="utf-8") == "keep: me\n"
+        assert main(["init", "--backend", "aws", "-o", str(dest), "--force"]) == 0
+        assert "backend: aws" in dest.read_text(encoding="utf-8")
+
+
+class TestDoctorCommand:
+    def test_invalid_config_exits_nonzero(self, tmp_path, capsys):
+        _write_yaml(tmp_path / "shifter.yaml", {"backend": "azure", "deployment": {"name": "x", "domain": "localhost"}})
+        rc = main(["doctor", str(tmp_path / "shifter.yaml"), "--repo-root", str(tmp_path)])
+        assert rc == 1
+        combined = capsys.readouterr()
+        assert "FAIL" in combined.out
+        assert "not ready" in combined.err
+
+    def test_healthy_report_exits_zero_and_prints_tiers(self, tmp_path, monkeypatch, capsys):
+        report = DoctorReport(
+            backend="aws",
+            profile="prod",
+            results=[
+                DoctorCheckResult("root-config", CheckTier.LOCAL, CheckStatus.PASS, "valid"),
+                DoctorCheckResult("deployment-mutating", CheckTier.MUTATING, CheckStatus.INFO, "not run by doctor"),
+            ],
+        )
+        monkeypatch.setattr(cli, "run_doctor", lambda *a, **k: report)
+        rc = main(["doctor", str(tmp_path / "shifter.yaml")])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "local-only" in out
+        assert "deployment-mutating" in out
+        assert "OK" in out
+
+    def test_json_output_is_machine_readable(self, tmp_path, monkeypatch, capsys):
+        import json
+
+        report = DoctorReport(
+            backend="gcp",
+            profile="prod",
+            results=[DoctorCheckResult("root-config", CheckTier.LOCAL, CheckStatus.PASS, "valid")],
+        )
+        monkeypatch.setattr(cli, "run_doctor", lambda *a, **k: report)
+        rc = main(["doctor", str(tmp_path / "shifter.yaml"), "--json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["backend"] == "gcp"
+        assert payload["ok"] is True
+
+    def test_forwards_path_checks_and_repo_root_flags(self, tmp_path, monkeypatch):
+        # A recording fake (not an argument-blind lambda) proves _cmd_doctor forwards the
+        # config path, --checks scope, and --repo-root to run_doctor. Without this, a refactor
+        # that hardcoded scope/repo_root would silently drop the operator's flags.
+        calls: dict[str, object] = {}
+
+        def fake_run_doctor(path, *, scope, repo_root, **kwargs):
+            calls["path"] = path
+            calls["scope"] = scope
+            calls["repo_root"] = repo_root
+            return DoctorReport(
+                backend="aws",
+                profile="prod",
+                results=[DoctorCheckResult("root-config", CheckTier.LOCAL, CheckStatus.PASS, "valid")],
+            )
+
+        monkeypatch.setattr(cli, "run_doctor", fake_run_doctor)
+        cfg = tmp_path / "shifter.yaml"
+        other_root = tmp_path / "other-root"
+        rc = main(["doctor", str(cfg), "--checks", "cloud", "--repo-root", str(other_root)])
+        assert rc == 0
+        assert calls["path"] == Path(str(cfg))
+        assert calls["scope"] is CheckScope.CLOUD
+        assert calls["repo_root"] == Path(str(other_root))
 
 
 class TestArgParsing:

@@ -45,6 +45,21 @@ PROVENANCE_SUMMARY_KEYS: tuple[str, ...] = (
 )
 
 
+def scenario_source(scenario_type: str, is_default: bool) -> str:
+    """Classify a scenario's source: builtin | custom | aces | ctf.
+
+    Single server-owned source of truth for the source classification. Both the
+    catalog projection (this module) and the scenario-editor detail projection
+    (``cms.api.views``) derive ``source`` from here, and the SPA consumes the
+    server value rather than re-deriving it from ``scenario_type`` / ``is_default``.
+    """
+    if scenario_type == ACES_SCENARIO_TYPE:
+        return "aces"
+    if scenario_type == "ctf":
+        return "ctf"
+    return "builtin" if is_default else "custom"
+
+
 def get_catalog_presentation(scenario_id: str) -> dict[str, Any] | None:
     """Return the read-only presentation DTO for a scenario id, or None if absent.
 
@@ -97,11 +112,14 @@ def _to_presentation(entry: dict[str, Any], aces_sources: dict[str, AcesPackageS
 
 def _base_presentation(entry: dict[str, Any]) -> dict[str, Any]:
     """Build the source-agnostic base DTO (identity, access overlay, launchability, empty aces)."""
+    scenario_type = entry.get("scenario_type", "demo")
+    is_default = entry.get("is_default", False)
     return {
         "id": entry["id"],
         "name": entry["name"],
-        "scenario_type": entry.get("scenario_type", "demo"),
-        "is_default": entry.get("is_default", False),
+        "scenario_type": scenario_type,
+        "source": scenario_source(scenario_type, is_default),
+        "is_default": is_default,
         "enabled": entry.get("enabled", True),
         "staff_only": entry.get("staff_only", False),
         "launchable": entry.get("launchable", True),

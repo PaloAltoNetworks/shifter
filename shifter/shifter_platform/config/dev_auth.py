@@ -13,6 +13,7 @@ from django.http import HttpRequest, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 
+from config.organizer_authority import grant_local_organizer
 from config.user_type_sync import sync_user_type
 from shared.log_sanitize import safe_log_value
 
@@ -116,12 +117,24 @@ def dev_login(request):
             user_type = "standard"
 
         user, _created = User.objects.get_or_create(username=email, defaults={"email": email, "is_active": True})
-        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        from management.services import is_temporary_ctf_account
+
+        if is_temporary_ctf_account(user):
+            return HttpResponseForbidden("Temporary CTF accounts cannot use platform authentication")
+        login(request, user, backend="config.auth.PlatformModelBackend")
 
         # Sync CTF group membership + profile via the shared, audited helper so
         # dev-login produces the same fail-closed ROLE_SYNC audit trail as the
-        # real identity providers (issue #937 SEC-5).
+        # real identity providers (issue #937 SEC-5). Only participant/standard
+        # are reachable through this self-service path.
         sync_user_type(user, user_type, source="dev_login", request=request)
+        if user_type == "ctf_organizer":
+            # Organizer is administrator-controlled (#1516) and no longer granted
+            # by the self-service user_type sync above. dev-login is a dev-only,
+            # peer-restricted local-admin path (guarded above), so it grants
+            # organizer explicitly and audited here to keep the organizer surface
+            # testable in development.
+            grant_local_organizer(user, source="dev_login", request=request)
         logger.info("Dev login: set user_type=%s for %s", safe_log_value(user_type), safe_log_value(email))
 
         # Redirect to appropriate dashboard

@@ -25,7 +25,7 @@ class TestAWSNetworkInventory:
             "Subnets": [{"CidrBlock": "10.1.2.0/28"}, {"CidrBlock": "10.1.2.16/28"}]
         }
 
-        with patch.object(inventory, "_get_client", return_value=mock_ec2):
+        with patch("boto3.client", return_value=mock_ec2):
             result = inventory.list_subnet_cidrs("vpc-123")
 
         assert result == ["10.1.2.0/28", "10.1.2.16/28"]
@@ -34,7 +34,7 @@ class TestAWSNetworkInventory:
         inventory = AWSNetworkInventory()
         mock_cloudwatch = MagicMock()
 
-        with patch.object(inventory, "_get_client", return_value=mock_cloudwatch):
+        with patch("boto3.client", return_value=mock_cloudwatch):
             inventory.publish_subnet_exhaustion_alarm("vpc-123", "10.1", 28)
 
         mock_cloudwatch.put_metric_data.assert_called_once()
@@ -52,7 +52,7 @@ class TestAWSNetworkInventory:
         )
 
         with (
-            patch.object(inventory, "_get_client", return_value=mock_ec2),
+            patch("boto3.client", return_value=mock_ec2),
             pytest.raises(CloudNetworkInventoryError, match="Failed to list AWS subnet CIDRs"),
         ):
             inventory.list_subnet_cidrs("vpc-missing")
@@ -61,7 +61,7 @@ class TestAWSNetworkInventory:
 class TestGCPNetworkInventory:
     """GCP network inventory behavior."""
 
-    @patch.dict("os.environ", {}, clear=True)
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True)
     def test_list_subnet_cidrs_requires_gdc_access_bundle(self):
         inventory = GCPNetworkInventory()
 
@@ -137,7 +137,7 @@ class TestGCPNetworkInventory:
                 },
                 clear=False,
             ),
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True),
         ):
             result = inventory.list_subnet_cidrs("cluster1")
 

@@ -44,10 +44,9 @@ class TestCmsListScenariosLaunchability:
         assert "polaris-pending" not in ids  # non-launchable ACES entry excluded
 
     def test_includes_launchable_aces_with_adapter(self, user, monkeypatch):
-        monkeypatch.setattr(
-            "cms.scenarios.registry._LAUNCH_ADAPTER_CONTRACT_PROFILES",
-            frozenset({("aces", "shifter")}),
-        )
+        from django.conf import settings
+
+        monkeypatch.setattr(settings, "ACES_NATIVE_PROVISIONING_ENABLED", True)
         _make_aces(user, "polaris-ok", conformance_status="passed")
         _make_aces(user, "polaris-pending", conformance_status="pending")
 

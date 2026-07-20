@@ -28,11 +28,13 @@
                class="btn btn-primary">{% trans "Add Participant" %}</a>
             <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}"
                class="btn btn-secondary">{% trans "Import CSV" %}</a>
+            <a href="{% url 'ctf:admin_participant_batch' event_id=event.pk %}"
+               class="btn btn-secondary">{% trans "Generate Accounts" %}</a>
             {% if total_count > 0 %}
                 <button type="button"
                         class="btn btn-primary"
                         onclick="sendAllInvites()">
-                    {% blocktrans %}Send All Links ({{ total_count }}){% endblocktrans %}
+                    {% blocktrans %}Reset and Send Credentials ({{ total_count }}){% endblocktrans %}
                 </button>
             {% endif %}
         </div>
@@ -105,6 +107,9 @@
                             {% trans "Email" %}
                         </th>
                         <th>
+                            {% trans "Username" %}
+                        </th>
+                        <th>
                             {% trans "Status" %}
                         </th>
                         {% if event.team_mode %}
@@ -136,6 +141,9 @@
                             </td>
                             <td>
                                 {{ participant.email }}
+                            </td>
+                            <td>
+                                {% if participant.user %}{{ participant.user.username }}{% else %}-{% endif %}
                             </td>
                             <td>
                                 {% if participant.status == 'invited' %}
@@ -225,9 +233,9 @@
 {% block extra_js %}
     <script>
 function sendAllInvites() {
-    if (!confirm('Send magic link emails to all participants?')) return;
+    if (!confirm('Reset and send credentials to all participants with email?')) return;
 
-    fetch(`{% url 'ctf:api_send_invitations' event_id=event.pk %}`, {
+    fetch(`{% url 'v1:ctf:api_send_invitations' event_id=event.pk %}`, {
         method: 'POST',
         headers: {
             'X-CSRFToken': '{{ csrf_token }}',
@@ -249,9 +257,9 @@ function sendAllInvites() {
 }
 
 function resendInvite(participantId) {
-    if (!confirm('Send magic link email to this participant?')) return;
+    if (!confirm('Reset this participant password and send credentials?')) return;
 
-    fetch(`/ctf/api/participants/${participantId}/resend-invite/`, {
+    fetch(`/api/v1/ctf/participants/${participantId}/resend-invite/`, {
         method: 'POST',
         headers: {
             'X-CSRFToken': '{{ csrf_token }}',

@@ -373,6 +373,40 @@ import-linter graph and ADR checks are Python-only). Landing the stack requires:
   `docs/adr/documentation-coverage.yaml` with a user doc and a technical doc
   when the first module ships.
 
+## Platform shell mount and route ownership (#1369)
+
+The platform shell (#1369) generalizes the first Risk Register SPA into one
+shell and fixes the route-ownership model that later Phase 2 modules extend:
+
+- **One router, one bundle, one basename.** The single Vite bundle mounts one
+  `createBrowserRouter` at basename `/`. There are no per-module routers,
+  fetch clients, or error classes (ADR-013 / ADR-029). The Risk Register is
+  rehomed as a child of this router (`/risk-register/*`); the module-specific
+  SPA host and basename introduced in #1302 are retired.
+- **SPA host + prefix + flag + legacy fallback.** A single flag-gated host view
+  (`shared.spa_host.platform_spa_host`) serves the shell for the SPA-owned page
+  paths: the site root `/` (home/dashboard) and `/risk-register/*`. The root is
+  wired as an *exact* match (no global catch-all), so `/privacy/`, `/login/`,
+  and other Django routes are untouched. Rollout is the reversible, non-secret
+  `PLATFORM_SPA_ENABLED` setting, read per request; the legacy Django pages
+  stay in place for rollback. `RISK_REGISTER_SPA_ENABLED` remains honoured for
+  the Risk Register paths during the transition.
+- **Navigation is one shared contract.** Primary nav, mode switching,
+  breadcrumbs, and contextual subnav render from `frontend/src/app/nav.ts`
+  (UX-003 minimum fields plus the #1368 presentation fields). Adding a surface
+  adds one entry; not-yet-migrated surfaces link to their legacy Django route.
+  Navigation visibility is advisory UX only; endpoints remain the authority.
+- **Shell state is typed bootstrap; dashboard data is a serializer-backed read.**
+  Principal, advisory permission flags, UX mode eligibility, and feature flags
+  extend the `/api/v1/bootstrap/` serializer (`shared`-layer, no cross-app
+  imports). The operational dashboard summary is a bounded cross-app read at the
+  composition root (`config.api_dashboard`, `/api/v1/dashboard/summary/`),
+  since `shared` may not import `cms`/`ctf` services (ADR-001).
+- **Deferred to module issues.** Per-surface implementation for Mission Control,
+  Scenario Editor, CTF, and Admin (#1370–#1373) and the Risk Register *visual*
+  alignment (#1374) are out of scope here; this issue delivers the shell they
+  mount into. See `docs/architecture/spa-platform-shell-preflight-1369.md`.
+
 ## Constraints honored
 
 - Canonical DRF `/api/v1/` is the only data surface; no ad hoc JSON routes.

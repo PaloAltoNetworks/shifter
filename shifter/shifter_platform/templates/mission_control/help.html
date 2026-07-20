@@ -20,9 +20,9 @@
             {% trans "Full guides for using Shifter." %}
         </p>
         <div class="flex-row gap-md">
-            <a href="{% url 'documentation:page' 'getting-started/quickstart' %}"
+            <a href="{{ DOCS_SITE_URL }}getting-started/quickstart/"
                class="btn btn-primary">{% trans "Quickstart Guide" %}</a>
-            <a href="{% url 'documentation:index' %}"
+            <a href="{{ DOCS_SITE_URL }}"
                class="btn btn-secondary">{% trans "All Documentation" %}</a>
         </div>
     </div>
@@ -33,23 +33,23 @@
         </div>
         <ul class="text-muted list-styled">
             <li>
-                <a href="{% url 'documentation:page' 'getting-started/concepts' %}"
+                <a href="{{ DOCS_SITE_URL }}getting-started/concepts/"
                    class="link">{% trans "Key Concepts" %}</a> {% trans "- Agents, ranges, scenarios" %}
             </li>
             <li>
-                <a href="{% url 'documentation:page' 'features/agents' %}"
+                <a href="{{ DOCS_SITE_URL }}features/agents/"
                    class="link">{% trans "Agents Guide" %}</a> {% trans "- Upload and manage installers" %}
             </li>
             <li>
-                <a href="{% url 'documentation:page' 'features/ranges' %}"
+                <a href="{{ DOCS_SITE_URL }}features/ranges/"
                    class="link">{% trans "Ranges Guide" %}</a> {% trans "- Launch and manage environments" %}
             </li>
             <li>
-                <a href="{% url 'documentation:page' 'features/terminal' %}"
+                <a href="{{ DOCS_SITE_URL }}features/terminal/"
                    class="link">{% trans "Terminal Guide" %}</a> {% trans "- SSH and RDP access" %}
             </li>
             <li>
-                <a href="{% url 'documentation:page' 'reference/faq' %}"
+                <a href="{{ DOCS_SITE_URL }}reference/faq/"
                    class="link">{% trans "FAQ" %}</a> {% trans "- Common questions" %}
             </li>
         </ul>

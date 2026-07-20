@@ -101,7 +101,7 @@ def _resolve_rdp_conn(user: User, instance_uuid: str) -> dict[str, Any]:
 
 def _generate_rdp_url(
     *,
-    user_email: str,
+    username: str,
     conn_info: dict[str, Any],
     guacamole_signing_secret: str,
     guacamole_base_url: str,
@@ -116,7 +116,7 @@ def _generate_rdp_url(
             GuacRDPUrlRequest(
                 base_url=guacamole_base_url,
                 secret_key=guacamole_signing_secret,
-                username=user_email,
+                username=username,
                 connection_name=conn_info["connection_name"],
                 hostname=conn_info["private_ip"],
                 expires_minutes=5,
@@ -170,7 +170,7 @@ def _resolve_ngfw_ssh(user: User, app_id: str) -> _SSHConn:
 
 def _generate_ngfw_ssh_url(
     *,
-    user_email: str,
+    username: str,
     app_id: str,
     ssh_conn: _SSHConn,
     guacamole_signing_secret: str,
@@ -185,7 +185,7 @@ def _generate_ngfw_ssh_url(
             GuacSSHUrlRequest(
                 base_url=guacamole_base_url,
                 secret_key=guacamole_signing_secret,
-                username=user_email,
+                username=username,
                 connection_name=f"ngfw-{app_id}",
                 hostname=ssh_conn.host,
                 port=ssh_conn.port,
@@ -197,15 +197,13 @@ def _generate_ngfw_ssh_url(
         )
     except ValueError as e:
         logger.exception(
-            "Failed to generate NGFW SSH URL: user=%s ngfw_uuid=%s",
-            safe_log_value(user_email),
+            "Failed to generate NGFW SSH URL: ngfw_uuid=%s",
             safe_log_value(app_id),
         )
         raise _ViewError(JsonResponse({"error": "Failed to generate SSH URL"}, status=500)) from e
     except Exception as e:
         logger.exception(
-            "Unexpected error generating NGFW SSH URL: user=%s ngfw_uuid=%s",
-            safe_log_value(user_email),
+            "Unexpected error generating NGFW SSH URL: ngfw_uuid=%s",
             safe_log_value(app_id),
         )
         raise _ViewError(JsonResponse({"error": INTERNAL_SERVER_ERROR}, status=500)) from e
@@ -249,7 +247,7 @@ def _resolve_range_ssh(user: User, instance_uuid: str) -> dict[str, Any]:
 
 def _generate_range_ssh_url(
     *,
-    user_email: str,
+    username: str,
     instance_uuid: str,
     ssh_info: dict[str, Any],
     guacamole_signing_secret: str,
@@ -264,7 +262,7 @@ def _generate_range_ssh_url(
             GuacSSHUrlRequest(
                 base_url=guacamole_base_url,
                 secret_key=guacamole_signing_secret,
-                username=user_email,
+                username=username,
                 connection_name=ssh_info["connection_name"],
                 hostname=ssh_info["host"],
                 port=ssh_info["port"],
@@ -276,15 +274,13 @@ def _generate_range_ssh_url(
         )
     except ValueError as e:
         logger.exception(
-            "Failed to generate range SSH URL: user=%s instance_uuid=%s",
-            safe_log_value(user_email),
+            "Failed to generate range SSH URL: instance_uuid=%s",
             safe_log_value(instance_uuid),
         )
         raise _ViewError(JsonResponse({"error": "Failed to generate SSH URL"}, status=500)) from e
     except Exception as e:
         logger.exception(
-            "Unexpected error generating range SSH URL: user=%s instance_uuid=%s",
-            safe_log_value(user_email),
+            "Unexpected error generating range SSH URL: instance_uuid=%s",
             safe_log_value(instance_uuid),
         )
         raise _ViewError(JsonResponse({"error": INTERNAL_SERVER_ERROR}, status=500)) from e

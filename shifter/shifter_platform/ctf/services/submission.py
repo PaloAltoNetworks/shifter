@@ -6,16 +6,16 @@ Provides business logic for flag submission and scoring.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.db.models import QuerySet
-from django.utils import timezone
 
-from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFValidationError
-from ctf.models import CTFChallenge, CTFChallengeRating, CTFEvent, CTFParticipant, CTFSubmission
+from ctf.enums import ScoringMode
+from ctf.exceptions import CTFNotFoundError, CTFValidationError
+from ctf.models import CTFChallenge, CTFChallengeRating, CTFParticipant, CTFSubmission
 from ctf.services.challenge import verify_flag
 from shared.log_sanitize import safe_log_value
 
@@ -24,150 +24,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-def _count_attempts_in_current_window(
-    submissions_qs: QuerySet[CTFSubmission],
-    cooldown_seconds: int,
-) -> int:
-    """Count submissions in the current timeout window.
-
-    Walks backwards through submissions (newest first). Any gap >= cooldown
-    between consecutive submissions marks a window reset — only submissions
-    after the most recent such gap count toward the current window.
-    """
-    timestamps = list(submissions_qs.order_by("-submitted_at").values_list("submitted_at", flat=True))
-    if not timestamps:
-        return 0
-
-    # Also check gap from now to most recent submission
-    elapsed_since_last = (timezone.now() - timestamps[0]).total_seconds()
-    if elapsed_since_last >= cooldown_seconds:
-        # window has reset
-        return 0
-
-    # the most recent submission
-    count = 1
-    for i in range(len(timestamps) - 1):
-        gap = (timestamps[i] - timestamps[i + 1]).total_seconds()
-        if gap >= cooldown_seconds:
-            # found a reset boundary
-            break
-        count += 1
-
-    return count
+# Pacing gates split out for size (python:S104); same-transaction semantics.
+from ctf.services.submission_gates import (  # noqa: E402
+    _check_attempt_limit_or_raise,
+    _check_submission_cooldown_or_raise,
+)
 
 
-def _check_attempt_limit_or_raise(
-    all_submissions: QuerySet[CTFSubmission],
-    event: CTFEvent,
-    challenge: CTFChallenge,
-    challenge_id: UUID,
-) -> int:
-    """Enforce per-challenge max-attempts (timeout or lockout mode); return the count to record.
-
-    Returns the attempt count that the eventual `CTFSubmission` row should be
-    one-based against. Raises `CTFRateLimitError` if the participant is over
-    the cap. `challenge.max_attempts <= 0` disables the check.
-    """
-    total_attempt_count = all_submissions.count()
-    if not (challenge.max_attempts > 0 and event.attempt_limit_mode == "timeout"):
-        if challenge.max_attempts > 0 and total_attempt_count >= challenge.max_attempts:
-            raise CTFRateLimitError(
-                f"Maximum attempts ({challenge.max_attempts}) exceeded",
-                details={
-                    "challenge_id": str(challenge_id),
-                    "max_attempts": challenge.max_attempts,
-                    "attempts_used": total_attempt_count,
-                    "attempt_limit_mode": "lockout",
-                },
-            )
-        return total_attempt_count
-
-    # Timeout mode: count only submissions in the current window.
-    attempt_cooldown = event.attempt_limit_cooldown_seconds
-    attempt_count = _count_attempts_in_current_window(all_submissions, attempt_cooldown)
-    if attempt_count < challenge.max_attempts:
-        return attempt_count
-
-    last_submission_time = all_submissions.order_by("-submitted_at").values_list("submitted_at", flat=True).first()
-    if last_submission_time is None:
-        # Defensive: should be unreachable since attempt_count > 0
-        return 0
-    elapsed = (timezone.now() - last_submission_time).total_seconds()
-    retry_after = int(attempt_cooldown - elapsed) + 1
-    raise CTFRateLimitError(
-        f"Maximum attempts ({challenge.max_attempts}) reached. Try again in {retry_after} seconds.",
-        details={
-            "challenge_id": str(challenge_id),
-            "max_attempts": challenge.max_attempts,
-            "attempts_used": attempt_count,
-            "retry_after_seconds": retry_after,
-            "attempt_limit_mode": "timeout",
-        },
-    )
-
-
-def _check_submission_cooldown_or_raise(
-    participant: CTFParticipant, challenge: CTFChallenge, challenge_id: UUID
-) -> None:
-    """Enforce the time-based submission cooldown; raise `CTFRateLimitError` if active."""
-    cooldown = participant.event.submission_cooldown_seconds
-    if cooldown <= 0:
-        return
-    last_submission_time = (
-        CTFSubmission.objects.filter(participant=participant, challenge=challenge)
-        .order_by("-submitted_at")
-        .values_list("submitted_at", flat=True)
-        .first()
-    )
-    if last_submission_time is None:
-        return
-    elapsed = (timezone.now() - last_submission_time).total_seconds()
-    if elapsed >= cooldown:
-        return
-    retry_after = int(cooldown - elapsed) + 1
-    retry_at = last_submission_time + timedelta(seconds=cooldown)
-    raise CTFRateLimitError(
-        f"Please wait {retry_after} seconds before submitting again (retry at {retry_at.isoformat()})",
-        details={
-            "challenge_id": str(challenge_id),
-            "retry_after_seconds": retry_after,
-            "retry_at": retry_at.isoformat(),
-            "cooldown_seconds": cooldown,
-        },
-    )
-
-
-def submit_flag(
-    participant_id: UUID,
-    challenge_id: UUID,
-    submitted_flag: str,
-    ip_address: str | None = None,
-) -> CTFSubmission:
-    """Submit a flag for a challenge.
-
-    Args:
-        participant_id: UUID of the participant.
-        challenge_id: UUID of the challenge.
-        submitted_flag: The flag value submitted.
-        ip_address: Client IP address for audit.
-
-    Returns:
-        The CTFSubmission instance.
-
-    Raises:
-        CTFNotFoundError: If participant or challenge doesn't exist.
-        CTFStateError: If event is not active or challenge not released.
-        CTFRateLimitError: If max attempts exceeded.
-        CTFValidationError: If submission is invalid.
-    """
-    logger.info(
-        "Flag submission: participant=%s, challenge=%s",
-        participant_id,
-        safe_log_value(challenge_id),
-    )
-
-    # Get participant and challenge
+def _load_submission_entities(participant_id: UUID, challenge_id: UUID) -> tuple[CTFParticipant, CTFChallenge]:
+    """Load the submitting participant and target challenge or raise not-found."""
     try:
         participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
@@ -183,49 +48,68 @@ def submit_flag(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
         ) from None
+    return participant, challenge
 
-    # Issue #769: shared participant→challenge availability policy. Same
-    # contract as use_hint(), so hints can never be easier to obtain than
-    # flag submission. Covers event match, ACTIVE status, competition
-    # window (CTF-702), visibility, release state, and prerequisites.
-    from ctf.services.challenge import assert_challenge_available_for_participant
 
-    assert_challenge_available_for_participant(participant, challenge)
+def _verify_and_score(participant: CTFParticipant, challenge: CTFChallenge, submitted_flag: str) -> tuple[bool, int]:
+    """Verify the flag and compute the awarded points without mutating state.
 
-    event = participant.event
-
-    # Verify the flag and compute points BEFORE taking the participant row lock:
-    # a programmable/http flag check can be slow or make an outbound call, and we
-    # must not hold the lock across it. These reads do not mutate state.
+    Runs BEFORE the participant row lock is taken: a programmable/http flag
+    check can be slow or make an outbound call, and we must not hold the lock
+    across it.
+    """
     from ctf.services.hint import get_total_hint_penalty
     from ctf.services.scoring import calculate_solve_points
 
     total_hint_penalty = get_total_hint_penalty(participant.id, challenge.id)
     is_correct = verify_flag(challenge, submitted_flag.strip())
-    points = calculate_solve_points(event, challenge, total_hint_penalty) if is_correct else 0
+    points = calculate_solve_points(participant.event, challenge, total_hint_penalty) if is_correct else 0
     if is_correct:
         logger.info(
             "Correct flag submitted: participant=%s, challenge=%s, points=%d",
-            participant_id,
-            safe_log_value(challenge_id),
+            participant.id,
+            safe_log_value(challenge.id),
             points,
         )
     else:
         logger.debug(
             "Incorrect flag submitted: participant=%s, challenge=%s",
-            participant_id,
-            safe_log_value(challenge_id),
+            participant.id,
+            safe_log_value(challenge.id),
         )
+    return is_correct, points
 
-    # Serialize per participant so the already-solved / attempt-limit / cooldown
-    # checks and the INSERT cannot interleave with a concurrent submission for
-    # the same challenge (#1135, #1137). Without the lock two concurrent correct
-    # submissions both passed the already-solved check and double-scored, and
-    # concurrent wrong guesses both passed the max_attempts cap. The reads below
-    # run under select_for_update so they are authoritative; the partial unique
-    # constraint on (participant, challenge) WHERE is_correct is the DB backstop.
+
+def _record_submission_locked(
+    participant: CTFParticipant,
+    challenge: CTFChallenge,
+    submitted_flag: str,
+    *,
+    is_correct: bool,
+    points: int,
+    ip_address: str | None,
+) -> CTFSubmission:
+    """Re-check gating under the participant lock, insert, and maintain scores.
+
+    Serializes per participant so the already-solved / attempt-limit / cooldown
+    checks and the INSERT cannot interleave with a concurrent submission for
+    the same challenge (#1135, #1137). Without the lock two concurrent correct
+    submissions both passed the already-solved check and double-scored, and
+    concurrent wrong guesses both passed the max_attempts cap. The reads below
+    run under select_for_update so they are authoritative; the partial unique
+    constraint on (participant, challenge) WHERE is_correct is the DB backstop.
+    """
+    event = participant.event
+    challenge_id = challenge.id
+    dynamic_mode = event.scoring_mode == ScoringMode.DYNAMIC.value
     with transaction.atomic():
         CTFParticipant.objects.select_for_update().get(pk=participant.id)
+        if dynamic_mode:
+            # Serialize dynamic re-pricing per challenge (CTF-202): concurrent
+            # solvers hold different participant locks, so the challenge row is
+            # the shared lock that makes the solve count, the retroactive
+            # points update, and the score recomputes one atomic step.
+            CTFChallenge.objects.select_for_update().get(pk=challenge.pk)
 
         submissions = CTFSubmission.objects.filter(participant=participant, challenge=challenge)
         if submissions.filter(is_correct=True).exists():
@@ -263,13 +147,111 @@ def submit_flag(
         # transaction as the authoritative write. Only a correct submission
         # changes score/solve-count/last-solve, so incorrect attempts stay
         # cheap (no recompute) — important under wrong-answer load.
-        if is_correct:
+        if is_correct and dynamic_mode:
+            # Dynamic mode re-prices every correct solve (including this one)
+            # and recomputes all affected participant/team scores (CTF-202).
+            from ctf.services.scoring import apply_dynamic_decay
+
+            apply_dynamic_decay(challenge)
+            submission.refresh_from_db(fields=["points_awarded"])
+        elif is_correct:
             from ctf.services.scoring import recompute_participant_score, recompute_team_score
 
             recompute_participant_score(participant.id)
             recompute_team_score(participant.team_id)
 
+        if is_correct:
+            first_blood = CTFSubmission.objects.filter(challenge=challenge, is_correct=True).count() == 1
+        else:
+            first_blood = False
+
+    if is_correct:
+        # CTF-802/CTF-1203: post-commit fanout so a bus or receiver hiccup can
+        # never roll back the solve.
+        from ctf.services.webhook import emit_webhook
+
+        solve_data = {
+            "challenge_id": str(challenge.pk),
+            "challenge_name": challenge.name,
+            "participant_id": str(participant.pk),
+            "participant_name": participant.name,
+            "points": submission.points_awarded,
+        }
+        emit_webhook(challenge.event, "flag_solve", solve_data)
+        if first_blood:
+            from ctf.services.notification import publish_event_notification
+
+            publish_event_notification(
+                challenge.event,
+                "first_blood",
+                {
+                    "challenge_id": str(challenge.pk),
+                    "challenge_name": challenge.name,
+                    "participant_name": participant.name,
+                },
+            )
+            emit_webhook(challenge.event, "first_blood", solve_data)
+
     return submission
+
+
+def submit_flag(
+    participant_id: UUID,
+    challenge_id: UUID,
+    submitted_flag: str,
+    ip_address: str | None = None,
+) -> CTFSubmission:
+    """Submit a flag for a challenge.
+
+    Orchestrates the explicit units: entity loading, the shared availability
+    policy, lock-free verification/scoring, and the locked attempt recording.
+
+    Args:
+        participant_id: UUID of the participant.
+        challenge_id: UUID of the challenge.
+        submitted_flag: The flag value submitted.
+        ip_address: Client IP address for audit.
+
+    Returns:
+        The CTFSubmission instance.
+
+    Raises:
+        CTFNotFoundError: If participant or challenge doesn't exist.
+        CTFStateError: If event is not active or challenge not released.
+        CTFRateLimitError: If max attempts exceeded.
+        CTFValidationError: If submission is invalid.
+    """
+    logger.info(
+        "Flag submission: participant=%s, challenge=%s",
+        participant_id,
+        safe_log_value(challenge_id),
+    )
+
+    participant, challenge = _load_submission_entities(participant_id, challenge_id)
+
+    # Compete gate before any flag verification work: refuses unregistered,
+    # disqualified, and banned rows plus observers (CTF-604/605/609).
+    from ctf.services.participant.queries import assert_participant_can_compete
+
+    assert_participant_can_compete(participant)
+
+    # Issue #769: shared participant→challenge availability policy. Same
+    # contract as use_hint(), so hints can never be easier to obtain than
+    # flag submission. Covers event match, ACTIVE status, competition
+    # window (CTF-702), visibility, release state, and prerequisites.
+    from ctf.services.challenge import assert_challenge_available_for_participant
+
+    assert_challenge_available_for_participant(participant, challenge)
+
+    is_correct, points = _verify_and_score(participant, challenge, submitted_flag)
+    return _record_submission_locked(
+        participant,
+        challenge,
+        submitted_flag,
+        is_correct=is_correct,
+        points=points,
+        ip_address=ip_address,
+    )
 
 
 def get_participant_submissions(
@@ -404,16 +386,11 @@ def rate_challenge(
     # Codex review (#765 cycle 6): an internal caller passing a raw
     # participant_id for an INVITED or DISQUALIFIED row would otherwise
     # bypass the access predicate the views apply via
-    # `is_active_participant`. Mirror that here.
-    from ctf.services.participant.queries import _PLAYING_PARTICIPANT_STATUSES
+    # `is_active_participant`. The shared compete assert also enforces the
+    # CTF-604 observer rule at this choke point.
+    from ctf.services.participant.queries import assert_participant_can_compete
 
-    if participant.registered_at is None or participant.status not in _PLAYING_PARTICIPANT_STATUSES:
-        from ctf.exceptions import CTFStateError as _CTFStateError
-
-        raise _CTFStateError(
-            "Participant is not eligible",
-            details={"participant_id": str(participant.id), "status": participant.status},
-        )
+    assert_participant_can_compete(participant)
 
     try:
         challenge = CTFChallenge.objects.get(pk=challenge_id)

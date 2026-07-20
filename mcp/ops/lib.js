@@ -28,6 +28,12 @@ export const DEFAULT_GITHUB_REPO = "Brad-Edwards/shifter";
 /** Protected integration branch for prod AMI promotion workflows. */
 export const PROMOTE_AMI_REF = "dev";
 
+/** Protected refs a base/DC AMI build or promotion may be dispatched from (#1656). */
+export const PROTECTED_AMI_REFS = Object.freeze(["dev", "main"]);
+
+/** Default protected ref for base/DC AMI builds (issue #1656). */
+export const BUILD_AMI_REF = "dev";
+
 export const BASE_AMI_TYPES = Object.freeze([
   "kali",
   "ubuntu",
@@ -148,6 +154,24 @@ export function resolveGitRef(cwd, options = {}) {
     return defaultRef;
   }
   return ref;
+}
+
+/**
+ * Resolve + validate the dispatch ref for base/DC AMI build/promote workflows.
+ *
+ * Base builds and prod promotions run only from a protected ref (dev|main): a
+ * feature-branch copy of the workflow could otherwise weaken its own inline
+ * protected-ref gate before it runs (#1656). Default to BUILD_AMI_REF (dev) and
+ * reject any non-protected ref rather than dispatch the working-tree branch.
+ */
+export function resolveProtectedAmiRef(ref) {
+  const branch = ref ?? BUILD_AMI_REF;
+  if (!PROTECTED_AMI_REFS.includes(branch)) {
+    throw new Error(
+      `AMI workflow ref must be a protected branch (${PROTECTED_AMI_REFS.join(" or ")}); got '${branch}'`,
+    );
+  }
+  return branch;
 }
 
 // --- AWS ---

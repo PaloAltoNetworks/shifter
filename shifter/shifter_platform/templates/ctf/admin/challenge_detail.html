@@ -334,7 +334,7 @@
                                 <tr>
                                     <td>
                                         <button type="button"
-                                                data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
+                                                data-download-url="{% url 'v1:ctf:api_file_download' file.pk %}">
                                             {{ file.display }}
                                         </button>
                                     </td>
@@ -706,7 +706,7 @@ function addFlag() {
     if (!flagValue) { alert('Flag value is required'); return; }
     const flagType = document.getElementById('new-flag-type').value;
     const caseSensitive = document.getElementById('new-flag-case-sensitive').value === 'true';
-    fetch("{% url 'ctf:api_add_flag' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_add_flag' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
         body: JSON.stringify({flag: flagValue, flag_type: flagType, case_sensitive: caseSensitive})
@@ -714,7 +714,7 @@ function addFlag() {
         if (data.error) { alert(data.error); } else { location.reload(); }
     });
 }
-const REMOVE_FLAG_URL = "{% url 'ctf:api_remove_flag' flag_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_FLAG_URL = "{% url 'v1:ctf:api_remove_flag' flag_id='00000000-0000-0000-0000-000000000000' %}";
 function removeFlag(flagId) {
     if (!confirm('Remove this flag?')) return;
     const url = REMOVE_FLAG_URL.replace('00000000-0000-0000-0000-000000000000', flagId);
@@ -726,7 +726,7 @@ function removeFlag(flagId) {
     });
 }
 
-const REMOVE_FILE_URL = "{% url 'ctf:api_challenge_file_delete' file_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_FILE_URL = "{% url 'v1:ctf:api_challenge_file_delete' file_id='00000000-0000-0000-0000-000000000000' %}";
 function removeFile(fileId) {
     if (!confirm('Remove this file?')) return;
     const url = REMOVE_FILE_URL.replace('00000000-0000-0000-0000-000000000000', fileId);
@@ -742,7 +742,7 @@ function addPrerequisite() {
     const select = document.getElementById('prereq-challenge-select');
     const challengeId = select.value;
     if (!challengeId) { alert('Select a challenge'); return; }
-    fetch("{% url 'ctf:api_challenge_prerequisites' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_challenge_prerequisites' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
         body: JSON.stringify({required_challenge_id: challengeId})
@@ -752,7 +752,7 @@ function addPrerequisite() {
 }
 
 const REMOVE_PREREQ_URL =
-    "{% url 'ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
+    "{% url 'v1:ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
 function removePrerequisite(prereqId) {
     if (!confirm('Remove this prerequisite?')) return;
     const url = REMOVE_PREREQ_URL.replace('00000000-0000-0000-0000-000000000000', prereqId);
@@ -770,7 +770,7 @@ function addHint() {
     const order = parseInt(document.getElementById('new-hint-order').value) || 0;
     if (!text) { alert('Hint text is required.'); return; }
 
-    fetch("{% url 'ctf:api_challenge_hints' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_challenge_hints' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
         body: JSON.stringify({text: text, penalty: penalty, order: order}),
@@ -779,7 +779,7 @@ function addHint() {
     });
 }
 
-const REMOVE_HINT_URL = "{% url 'ctf:api_hint_delete' hint_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_HINT_URL = "{% url 'v1:ctf:api_hint_delete' hint_id='00000000-0000-0000-0000-000000000000' %}";
 function removeHint(hintId) {
     if (!confirm('Remove this hint?')) return;
     const url = REMOVE_HINT_URL.replace('00000000-0000-0000-0000-000000000000', hintId);

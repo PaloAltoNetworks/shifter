@@ -36,11 +36,16 @@ def minimal_config() -> dict[str, Any]:
 
 @pytest.fixture
 def aws_config() -> dict[str, Any]:
-    """A complete root config for the ``aws`` backend (declares the secrets aws requires)."""
+    """A complete root config for the ``aws`` backend.
+
+    Declares the secrets aws requires and the ``region`` its closed settings model requires
+    (#728). ``region`` is not optional for AWS, so a complete config carries it.
+    """
     return {
         "backend": "aws",
         "deployment": {"name": "shifter", "domain": "shifter.example.com"},
         "secrets": {"django_secret_key": "prompt", "db_password": "prompt"},
+        "settings": {"region": "us-east-2"},
     }
 
 

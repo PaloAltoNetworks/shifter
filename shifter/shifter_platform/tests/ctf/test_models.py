@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.test import override_settings
 from django.utils import timezone
 
 from ctf.enums import (
@@ -436,47 +435,6 @@ class TestCTFParticipantModel:
         assert p.is_registered is False
 
     @pytest.mark.parametrize(
-        "expires_offset,expected",
-        [
-            pytest.param(timedelta(days=7), True, id="valid"),
-            pytest.param(timedelta(hours=-1), False, id="expired"),
-        ],
-    )
-    def test_participant_is_invite_valid(self, expires_offset, expected):
-        """Test is_invite_valid for various token expiry times."""
-        p = make_participant(invite_token_expires=timezone.now() + expires_offset)
-        assert p.is_invite_valid is expected
-
-    @override_settings(MAGIC_LINK_EXPIRY_HOURS=24)
-    def test_invite_expiry_uses_event_end_for_event_links(self):
-        """Event-backed magic links remain valid through the CTF event end."""
-        now = timezone.now()
-        event = make_ctf_event(event_end=now + timedelta(days=3))
-
-        expiry = CTFParticipant.default_invite_token_expiry(event, now=now)
-
-        assert expiry == event.event_end
-
-    @override_settings(MAGIC_LINK_EXPIRY_HOURS=24, MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS=36)
-    def test_invite_expiry_honors_optional_event_maximum(self):
-        """Operators can explicitly cap unusually long event-backed token lifetimes."""
-        now = timezone.now()
-        event = make_ctf_event(event_end=now + timedelta(days=3))
-
-        expiry = CTFParticipant.default_invite_token_expiry(event, now=now)
-
-        assert expiry == now + timedelta(hours=36)
-
-    @override_settings(MAGIC_LINK_EXPIRY_HOURS=2)
-    def test_invite_expiry_falls_back_to_config_without_event_end(self):
-        """The configured hour TTL only applies when no event end is available."""
-        now = timezone.now()
-
-        expiry = CTFParticipant.default_invite_token_expiry(None, now=now)
-
-        assert expiry == now + timedelta(hours=2)
-
-    @pytest.mark.parametrize(
         "aggregate_total,expected",
         [
             pytest.param(250, 250, id="has-score"),
@@ -552,8 +510,6 @@ class TestCTFSubmissionModel:
             event=event,
             email="test@test.com",
             name="Test Participant",
-            invite_token="tok",
-            invite_token_expires=timezone.now() + timedelta(days=1),
         )
         challenge = CTFChallenge(
             id=uuid4(),
@@ -588,8 +544,6 @@ class TestCTFSubmissionModel:
             event=event1,
             email="test@test.com",
             name="Test",
-            invite_token="tok",
-            invite_token_expires=timezone.now() + timedelta(days=1),
         )
         challenge = CTFChallenge(
             id=uuid4(),

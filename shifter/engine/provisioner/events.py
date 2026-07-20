@@ -57,6 +57,13 @@ STATUS_FAILED = ResourceStatus.FAILED.value
 STATUS_DESTROYING = ResourceStatus.DESTROYING.value
 STATUS_DESTROYED = ResourceStatus.DESTROYED.value
 
+# ACES-native operational-evidence event types (ADR-031). MUST match the platform
+# consumer constants in shared.messages.events. These carry the ACES sidecar
+# operation_status / runtime_snapshot records the platform persists; Range.status
+# stays driven by the range.status.updated events above.
+EVENT_TYPE_ACES_OPERATION = "range.aces.operation"
+EVENT_TYPE_ACES_SNAPSHOT = "range.aces.snapshot"
+
 
 def _get_sns_topic_arn() -> str:
     """Get event topic identifier from environment.
@@ -319,6 +326,66 @@ def publish_cancelled(request_id: str, range_id: int, user_id: int) -> None:
     )
 
     _enqueue_event(event)
+
+
+def _aces_event(
+    event_type: str, request_id: str, range_id: int, user_id: int, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Build an ACES operational-evidence event envelope (payload may hold lists)."""
+    return {
+        "event_type": event_type,
+        "event_id": str(uuid4()),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "request_id": request_id,
+        "range_id": range_id,
+        "user_id": user_id,
+        **payload,
+    }
+
+
+def publish_aces_operation(
+    *, request_id: str, range_id: int, user_id: int, operation_id: str, status: str, status_reason: str | None = None
+) -> None:
+    """Emit an ACES operation_status observation for the sidecar record.
+
+    The platform consumer persists it as an ``operation_status`` AcesOperationRecord
+    (redacted at the write boundary). Range.status stays driven by the neutral
+    ``publish_status_update``/``publish_ready``/``publish_failed`` events.
+    """
+    payload: dict[str, Any] = {
+        "operation_id": operation_id,
+        "aces_status": status,
+        "source_timestamp": datetime.now(UTC).isoformat(),
+    }
+    if status_reason:
+        payload["status_reason"] = status_reason
+    logger.info(
+        "Publishing ACES operation status=%s request_id_fp=%s",
+        safe_log_value(status),
+        safe_log_fingerprint(request_id),
+    )
+    _enqueue_event(_aces_event(EVENT_TYPE_ACES_OPERATION, request_id, range_id, user_id, payload))
+
+
+def publish_aces_snapshot(
+    *, request_id: str, range_id: int, user_id: int, operation_id: str, resources: list[dict[str, str]]
+) -> None:
+    """Emit an ACES runtime_snapshot of the provisioned topology for the sidecar record.
+
+    ``resources`` must already be the bounded/redacted structure from
+    ``aces_snapshot.snapshot_resources`` (never raw GCE outputs).
+    """
+    payload: dict[str, Any] = {
+        "operation_id": operation_id,
+        "resources": resources,
+        "source_timestamp": datetime.now(UTC).isoformat(),
+    }
+    logger.info(
+        "Publishing ACES runtime snapshot resources=%d request_id_fp=%s",
+        len(resources),
+        safe_log_fingerprint(request_id),
+    )
+    _enqueue_event(_aces_event(EVENT_TYPE_ACES_SNAPSHOT, request_id, range_id, user_id, payload))
 
 
 # =============================================================================

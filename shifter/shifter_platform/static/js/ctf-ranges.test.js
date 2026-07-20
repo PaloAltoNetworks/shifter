@@ -39,9 +39,9 @@ describe('CTFRangeManager', () => {
 
         manager = new globalThis.CTFRangeManager({
             csrfToken: 'test-csrf',
-            provisionAllUrl: '/ctf/api/events/evt-1/ranges/provision/',
-            rangeListUrl: '/ctf/api/events/evt-1/ranges/',
-            spareProvisionUrl: '/ctf/api/events/evt-1/spares/',
+            provisionAllUrl: '/api/v1/ctf/events/evt-1/ranges/provision/',
+            rangeListUrl: '/api/v1/ctf/events/evt-1/ranges/',
+            spareProvisionUrl: '/api/v1/ctf/events/evt-1/spares/',
         });
         manager._reload = jest.fn();
         manager.init();
@@ -56,7 +56,7 @@ describe('CTFRangeManager', () => {
             await manager.provisionAll();
 
             expect(fetchMock).toHaveBeenCalledWith(
-                '/ctf/api/events/evt-1/ranges/provision/',
+                '/api/v1/ctf/events/evt-1/ranges/provision/',
                 {
                     method: 'POST',
                     headers: {
@@ -182,7 +182,7 @@ describe('CTFRangeManager', () => {
             await manager.provisionOne('aaa-111', btn);
 
             expect(fetchMock).toHaveBeenCalledWith(
-                '/ctf/api/participants/aaa-111/range/provision/',
+                '/api/v1/ctf/participants/aaa-111/range/provision/',
                 {
                     method: 'POST',
                     headers: {
@@ -240,7 +240,7 @@ describe('CTFRangeManager', () => {
             await manager.destroyOne('bbb-222', btn);
 
             expect(fetchMock).toHaveBeenCalledWith(
-                '/ctf/api/participants/bbb-222/range/destroy/',
+                '/api/v1/ctf/participants/bbb-222/range/destroy/',
                 {
                     method: 'POST',
                     headers: {
@@ -299,7 +299,7 @@ describe('CTFRangeManager', () => {
             await manager.setSparePool();
 
             expect(fetchMock).toHaveBeenCalledWith(
-                '/ctf/api/events/evt-1/spares/',
+                '/api/v1/ctf/events/evt-1/spares/',
                 {
                     method: 'POST',
                     headers: {

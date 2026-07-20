@@ -8,9 +8,22 @@ from pathlib import Path
 
 PROVISIONER_ROOT = Path(__file__).resolve().parents[1]
 
+# Directories that never hold provisioner source: virtualenvs, caches, build
+# output, VCS. Excluded so the scan does not pick up installed third-party
+# packages (e.g. an in-tree `.venv/.../pydantic/__init__.py` that legitimately
+# does `from main import ...`), which would otherwise false-positive locally
+# while passing in CI (which has no in-tree venv).
+_EXCLUDED_DIRS = frozenset(
+    {".venv", "venv", ".tox", ".git", "__pycache__", "site-packages", "node_modules", "build", "dist", ".ruff_cache"}
+)
+
 
 def _python_files() -> list[Path]:
-    return sorted(PROVISIONER_ROOT.rglob("*.py"))
+    return sorted(
+        path
+        for path in PROVISIONER_ROOT.rglob("*.py")
+        if not any(part in _EXCLUDED_DIRS for part in path.relative_to(PROVISIONER_ROOT).parts)
+    )
 
 
 def test_production_modules_do_not_import_main_as_dependency() -> None:

@@ -7,7 +7,7 @@ has no Django dependency and different cloud service needs.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -62,6 +62,37 @@ class ObjectStorage(Protocol):
     def object_exists(self, bucket: str, key: str) -> bool: ...
 
     def delete_object(self, bucket: str, key: str) -> None: ...
+
+    def head_object(self, bucket: str, key: str) -> dict[str, Any]:
+        """Return object metadata/identity.
+
+        Always includes ``content_length`` and ``etag``. Providers may include
+        additional identity fields (for example GCS ``generation``) used as the
+        strongest available precondition by :meth:`download_object`.
+        """
+        ...
+
+    def download_object(
+        self,
+        bucket: str,
+        key: str,
+        dest_path: str,
+        *,
+        max_bytes: int,
+        expected_identity: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Download a full object to ``dest_path``, bounded by ``max_bytes``.
+
+        When ``expected_identity`` (as returned by :meth:`head_object`, carrying
+        provider-specific ``etag`` / ``generation``) is supplied, the download is
+        bound to that exact object version so an object replaced after validation
+        fails closed with ``ObjectPreconditionError`` (defeats a
+        head-then-download TOCTOU). Raises ``CloudStorageError`` when the object
+        exceeds ``max_bytes`` or on any other failure, and ``ValueError`` when
+        ``max_bytes`` is not positive. Returns the realized object identity
+        (always ``content_length`` and ``etag``; providers may add ``generation``).
+        """
+        ...
 
 
 @runtime_checkable

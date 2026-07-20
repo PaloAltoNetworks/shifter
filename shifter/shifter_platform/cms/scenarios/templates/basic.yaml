@@ -15,6 +15,12 @@ instances:
     os_type: from_agent
     xdr_agent: false
 
+participant_access:
+  - target: Attacker
+    channel: ssh
+  - target: Attacker
+    channel: rdp
+
 subnets:
   - name: core
     instances: [Attacker, Workstation]

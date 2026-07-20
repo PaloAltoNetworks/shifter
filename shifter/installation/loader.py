@@ -202,9 +202,12 @@ def _backend_issues_from_raw(data: dict[str, Any]) -> list[ConfigIssue]:
     issues: list[ConfigIssue] = []
     settings = data.get("settings", {})
     if isinstance(settings, dict):
-        issues.extend(bundle.settings_issues(settings))
-        # range_egress (PLAT-220) is cross-backend; the bundle-specific check above
-        # may pass-through a settings_model=None backend without inspecting it.
+        # range_egress (PLAT-220) is a shared, cross-backend platform setting validated by
+        # installation.range_egress — not a backend-owned key. Keep it out of the (possibly
+        # closed, #1116/#728 AWS) settings_model check so an ``extra='forbid'`` model does
+        # not reject it as unknown, then validate it via its own owner below.
+        backend_settings = {k: v for k, v in settings.items() if k != range_egress.SETTINGS_KEY}
+        issues.extend(bundle.settings_issues(backend_settings))
         _, range_egress_issues = range_egress.validate_settings_block(settings)
         issues.extend(range_egress_issues)
     secrets = data.get("secrets", {})
@@ -238,14 +241,22 @@ def load_root_config(path: str | Path) -> RootConfig:
     # against the registry unexpectedly yielding None (covered by tests).
     if bundle is None:
         return config
+    # range_egress (PLAT-220) is a shared, cross-backend platform setting owned and
+    # validated by installation.range_egress (verbatim, non-secret CIDR diagnostics, #775).
+    # It is not a backend-owned key, so split it out before the bundle's (possibly closed,
+    # #1116/#728 AWS) settings_model runs: the model validates only backend-owned keys, and
+    # range_egress keeps its own owner and error quality. It is re-attached below for the
+    # shared validation pass so the normalized policy lands back on ``config.settings``.
+    backend_settings = {k: v for k, v in config.settings.items() if k != range_egress.SETTINGS_KEY}
     try:
-        normalized_settings = bundle.validate_settings(config.settings)
+        normalized_settings = bundle.validate_settings(backend_settings)
     except InstallationConfigError as exc:
         # Aggregate the settings *and* secret-reference problems before raising.
         raise InstallationConfigError([*exc.issues, *bundle.secret_reference_issues(config.secrets)]) from exc
+    if range_egress.SETTINGS_KEY in config.settings:
+        normalized_settings[range_egress.SETTINGS_KEY] = config.settings[range_egress.SETTINGS_KEY]
     # Cross-backend settings validation (PLAT-220 range_egress). Lives in the loader
-    # because the policy shape applies identically to AWS and GCP; per-backend
-    # settings_model migrations (#1116 / #1117) may later move this onto the model.
+    # because the policy shape applies identically to AWS and GCP.
     normalized_settings, range_egress_issues = range_egress.validate_settings_block(normalized_settings)
     if range_egress_issues:
         raise InstallationConfigError([*range_egress_issues, *bundle.secret_reference_issues(config.secrets)])

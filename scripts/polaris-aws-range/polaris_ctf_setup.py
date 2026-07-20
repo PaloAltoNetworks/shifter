@@ -2,10 +2,10 @@
 
 Creates an ACTIVE CTFEvent owned by a named superuser for scenario
 `polaris_manual_test`, then invites a single participant via the real
-ctf.services.participant.invite_participant service so the Django user
-and the magic link token are generated exactly as they would be for a
-real CTF cohort. Emits JSON on stdout with the IDs + token the caller
-needs to wire the range and build the magic link URL.
+ctf.services.participant.invite_participant service so the isolated Django
+account is generated exactly as it would be for a real CTF cohort. Emits JSON
+on stdout with non-secret IDs, username, and the dedicated login URL. The
+bootstrap password is intentionally not printed or persisted.
 
 Run inside the portal Docker container:
 
@@ -66,6 +66,7 @@ from django.contrib.auth import get_user_model  # noqa: E402
 from ctf.enums import EventStatus  # noqa: E402
 from ctf.models import CTFEvent  # noqa: E402
 from ctf.services.participant import invite_participant  # noqa: E402
+from ctf.services.notification import _build_ctf_login_url  # noqa: E402
 
 EVENT_NAME = os.environ.get("POLARIS_CTF_EVENT_NAME", "POLARIS Cold-Rebuild Smoke")
 SCENARIO_ID = os.environ.get("POLARIS_CTF_SCENARIO_ID", "polaris_manual_test")
@@ -108,8 +109,7 @@ print(
     f"status={participant.status} user_id={participant.user_id}"
 )
 print(
-    f"invite_token: {participant.invite_token} "
-    f"(expires {participant.invite_token_expires.isoformat()})"
+    f"participant_username: {participant.user.username} login_url: {_build_ctf_login_url()}"
 )
 
 print(
@@ -119,8 +119,8 @@ print(
             "participant_id": str(participant.id),
             "participant_user_id": participant.user_id,
             "participant_email": participant.email,
-            "invite_token": participant.invite_token,
-            "invite_token_expires": participant.invite_token_expires.isoformat(),
+            "participant_username": participant.user.username,
+            "login_url": _build_ctf_login_url(),
         }
     )
 )

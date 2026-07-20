@@ -366,6 +366,7 @@ platform/terraform/gcp/environments/**/tfplan.binary
 platform/terraform/gcp/environments/**/plan.out
 platform/terraform/gcp/environments/**/*.tfplan
 platform/terraform/gcp/environments/**/*.tfplan.binary
+platform/terraform/gcp/environments/**/tfplan.*
 
 # Deployment-specific tfvars overrides. The committed `terraform.tfvars`
 # files in `platform/terraform/.../portal/` and `platform/terraform/gcp/.../`
@@ -495,3 +496,6 @@ temp/
 
 # Operator-local deployment config (synced to SHIFTER_CONFIG_* secrets; never commit)
 /shifter.yaml
+
+# mkdocs build output (docs site is published by .github/workflows/docs.yml)
+/site/

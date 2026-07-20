@@ -26,6 +26,11 @@ if TYPE_CHECKING:
 _DEFAULT_COALESCE_SECONDS = 300
 
 
+def _invalid_token_message() -> str:
+    """Return the intentionally generic bearer authentication failure."""
+    return "Invalid or expired API token"
+
+
 class ApiTokenAuthentication(authentication.BaseAuthentication):
     """Bearer-token authentication for the platform API."""
 
@@ -54,9 +59,13 @@ class ApiTokenAuthentication(authentication.BaseAuthentication):
             record_token_event(
                 TokenEvent.AUTH_FAILED,
                 request=request,
-                context="Invalid or expired API token",
+                context=_invalid_token_message(),
             )
-            raise exceptions.AuthenticationFailed("Invalid or expired API token")
+            raise exceptions.AuthenticationFailed(_invalid_token_message())
+
+        if token.created_by_id and getattr(getattr(token.created_by, "profile", None), "is_ctf_account", False):
+            token.revoke()
+            raise exceptions.AuthenticationFailed(_invalid_token_message())
 
         coalesce_seconds = getattr(settings, "API_TOKEN_LAST_USED_COALESCE_SECONDS", _DEFAULT_COALESCE_SECONDS)
         token.touch_last_used(coalesce_seconds=coalesce_seconds)

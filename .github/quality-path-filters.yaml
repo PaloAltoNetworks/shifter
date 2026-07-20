@@ -1,93 +1,459 @@
-# Path filter categories for _quality.yml subtree targeting (issue #774).
-# Consumed by the `paths` job in .github/workflows/_quality.yml via
-# dorny/paths-filter. A change under `.github/workflows/**` forces the
-# full matrix through the `ci_workflows` output combined with `run_all`.
+# Production-path quality-ownership contract (#1530, GEN-002).
+#
+# Single versioned, machine-readable source of truth for CI quality routing
+# AND ownership. Consumed by:
+#   * scripts/quality_ownership/classify_paths.py  -> the always-run `paths`
+#     job in .github/workflows/_quality.yml. It validates this contract and
+#     rejects an unknown changed path *before* emitting any job-selection
+#     output (fail-closed execution boundary), then writes the per-category
+#     GITHUB_OUTPUT keys the downstream jobs consume.
+#   * scripts/adr_guard/adr_guard.py `quality-path-ownership` check -> the
+#     ci-level conformance guard (estate completeness, per-path ownership
+#     completeness across lint/security/test, and routing reachability against
+#     the real workflow).
+#
+# Schema (validated by scripts/quality_ownership/contract.py):
+#   schema_version        : must be 1.
+#   force_full_matrix     : globs that force the full quality matrix (the CI
+#                           control plane). A change here reruns every job and
+#                           emits the `ci_workflows` output; a broken pipeline
+#                           cannot slip through.
+#   quality_units[]       : production owners.
+#     id                  : the GITHUB_OUTPUT key downstream jobs condition on.
+#     paths               : repo-relative globs (`dir/**` or fnmatch).
+#     packages            : optional #1523 first-party package identifiers,
+#                           reconciled against
+#                           scripts/check_layer_imports/layer_imports.yaml.
+#     sonar               : whether a change participates in SonarCloud scope.
+#     mcp                 : {package, fanout_all_on_change} for MCP matrix jobs.
+#     responsibilities    : lint / security / test -> the blocking jobs (or
+#                           {job, matrix} selectors) that enforce each. A unit
+#                           may leave a responsibility empty when NO blocking
+#                           job covers its paths (a genuine gap); the gap is
+#                           recorded as a time-bounded docs/adr/exceptions.yaml
+#                           entry, never a silent pass.
+#   exclusions[]          : narrow, typed carve-outs from production ownership
+#                           ({type, reason, paths}). type is a closed enum.
+#
+# Ownership completeness is evaluated per production PATH: the union of every
+# unit matching a path must cover lint AND security AND test. Precedence is
+# most-specific-pattern-wins, so a unit glob (e.g. docs/adr/**) can be owned
+# even though a broader exclusion (docs/**) also matches.
 
-ci_workflows:
-  - '.github/workflows/**'
-  - '.github/quality-path-filters.yaml'
+schema_version: 1
 
-shifter_platform:
-  - 'shifter/shifter_platform/**'
-  - '.importlinter'
+force_full_matrix:
+  - .github/workflows/**
+  - .github/quality-path-filters.yaml
 
-provisioner:
-  - 'shifter/engine/provisioner/**'
+quality_units:
+  - id: shifter_platform
+    paths:
+      - shifter/shifter_platform/**
+      - .importlinter
+    packages:
+      - engine
+      - cms
+      - management
+      - ctf
+      - risk_register
+      - mission_control
+      - shared
+      - config
+    sonar: true
+    responsibilities:
+      lint: [shifter-platform-lint, shifter-platform-lint-js]
+      security: [shifter-platform-sast]
+      test: [shifter-platform-tests, shifter-platform-tests-postgres, shifter-platform-js-tests]
 
-cyberscript:
-  - 'shifter/cyberscript/**'
+  - id: provisioner
+    paths:
+      - shifter/engine/provisioner/**
+    sonar: true
+    responsibilities:
+      lint: [provisioner-lint]
+      security: [provisioner-sast]
+      test: [shifter-engine-tests]
 
-packer:
-  - 'shifter/packer/**'
+  - id: cyberscript
+    paths:
+      - shifter/cyberscript/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: [cyberscript-tests]
 
-bootstrap:
-  - 'scripts/bootstrap/**'
+  - id: packer
+    paths:
+      - shifter/packer/**
+    sonar: true
+    responsibilities:
+      lint: [packer-lint]
+      security: [packer-sast]
+      test: [packer-tests]
 
-gcp_scripts:
-  - 'scripts/gcp/**'
+  - id: bootstrap
+    paths:
+      - scripts/bootstrap/**
+    sonar: true
+    responsibilities:
+      lint: [bootstrap-lint]
+      security: [bootstrap-sast]
+      test: [bootstrap-tests]
 
-check_layer_imports:
-  - 'scripts/check_layer_imports/**'
+  - id: gcp_scripts
+    paths:
+      - scripts/gcp/**
+    sonar: false
+    responsibilities:
+      lint: [gcp-scripts-lint]
+      security: [gcp-scripts-sast]
+      test: [gcp-scripts-tests]
 
-check_rds_pending_modifications:
-  - 'scripts/check_rds_pending_modifications/**'
+  - id: check_layer_imports
+    paths:
+      - scripts/check_layer_imports/**
+    sonar: true
+    responsibilities:
+      lint: [check-layer-imports-lint]
+      security: [check-layer-imports-sast]
+      test: [check-layer-imports-tests]
 
-handle_sd_replacement:
-  - 'scripts/handle_sd_replacement/**'
+  - id: check_rds_pending_modifications
+    paths:
+      - scripts/check_rds_pending_modifications/**
+    sonar: false
+    responsibilities:
+      lint: [check-rds-pending-modifications-lint]
+      security: []
+      test: [check-rds-pending-modifications-tests]
 
-assert_portal_inspection:
-  - 'scripts/assert_portal_inspection/**'
+  - id: handle_sd_replacement
+    paths:
+      - scripts/handle_sd_replacement/**
+    sonar: false
+    responsibilities:
+      lint: [handle-sd-replacement-lint]
+      security: []
+      test: [handle-sd-replacement-tests]
 
-installation:
-  - 'shifter/installation/**'
+  - id: assert_portal_inspection
+    paths:
+      - scripts/assert_portal_inspection/**
+    sonar: false
+    responsibilities:
+      lint: [assert-portal-inspection-lint]
+      security: []
+      test: [assert-portal-inspection-tests]
 
-event_load_harness:
-  - 'uat/event-load-harness/**'
+  - id: installation
+    paths:
+      - shifter/installation/**
+    sonar: true
+    responsibilities:
+      lint: [installation-lint]
+      security: [installation-sast]
+      test: [installation-tests]
 
-terraform:
-  - 'platform/terraform/**'
-  - '.tflint.hcl'
-  - 'scripts/check_tf_iam_ec2_scope/**'
-  - 'scripts/check_tf_iam_elb_scope/**'
-  - 'scripts/check_tf_sg_cidrs/**'
-  - 'scripts/check_tf_kms_secrets_grant/**'
-  - 'scripts/check_tf_rds_security/**'
-  - 'scripts/check_tf_iam_ssm_range_scope/**'
-  - 'scripts/check_portal_target_sg_sources/**'
+  - id: event_load_harness
+    paths:
+      - uat/event-load-harness/**
+    sonar: false
+    responsibilities:
+      lint: [event-load-harness-lint]
+      security: [event-load-harness-sast]
+      test: [event-load-harness-tests]
 
-k8s:
-  - 'platform/k8s/**'
-  - '.kube-linter.yaml'
+  - id: terraform
+    paths:
+      - platform/terraform/**
+      - .tflint.hcl
+      - scripts/check_tf_iam_ec2_scope/**
+      - scripts/check_tf_iam_elb_scope/**
+      - scripts/check_tf_sg_cidrs/**
+      - scripts/check_tf_kms_secrets_grant/**
+      - scripts/check_tf_rds_security/**
+      - scripts/check_tf_iam_ssm_range_scope/**
+      - scripts/check_tf_iam_bedrock_agent_scope/**
+      - scripts/check_portal_target_sg_sources/**
+      - scripts/check_tf_roots/**
+      - scripts/polaris-aws-range/**
+      - shifter/engine/provisioner/terraform/**
+    sonar: false
+    responsibilities:
+      lint: [terraform-lint]
+      security: [security-iac]
+      test: [terraform-validate]
 
-mcp_ngfw:
-  - 'mcp/ngfw/**'
+  - id: k8s
+    paths:
+      - platform/k8s/**
+      - .kube-linter.yaml
+    sonar: false
+    responsibilities:
+      lint: [k8s-lint]
+      security: []
+      test: [k8s-schema]
 
-mcp_ops:
-  - 'mcp/ops/**'
+  - id: mcp_ngfw
+    paths:
+      - mcp/ngfw/**
+    sonar: true
+    mcp:
+      package: ngfw
+    responsibilities:
+      lint: [{job: mcp-lint, matrix: {package: ngfw}}]
+      security: []
+      test: [{job: mcp-tests, matrix: {package: ngfw}}]
 
-mcp_planner:
-  - 'mcp/planner/**'
+  - id: mcp_ops
+    paths:
+      - mcp/ops/**
+    sonar: true
+    mcp:
+      package: ops
+    responsibilities:
+      lint: [{job: mcp-lint, matrix: {package: ops}}]
+      security: []
+      test: [{job: mcp-tests, matrix: {package: ops}}]
 
-mcp_shared:
-  - 'mcp/shared/**'
+  - id: mcp_planner
+    paths:
+      - mcp/planner/**
+    sonar: true
+    mcp:
+      package: planner
+    responsibilities:
+      lint: [{job: mcp-lint, matrix: {package: planner}}]
+      security: []
+      test: [{job: mcp-tests, matrix: {package: planner}}]
 
-adr_guard:
-  - 'scripts/adr_guard/**'
-  - 'docs/adr/**'
-  - '.pre-commit-config.yaml'
-  - 'AGENTS.md'
-  - '.ground-control.yaml'
-  - '.gc/plan-rules.md'
-  - '.shifter.yaml'
+  - id: mcp_shared
+    paths:
+      - mcp/shared/**
+    sonar: true
+    mcp:
+      package: shared
+      fanout_all_on_change: true
+    responsibilities:
+      lint: [{job: mcp-lint, matrix: {package: shared}}]
+      security: []
+      test: []
 
-ctfd_workshop:
-  - 'scripts/ctfd-workshop/**'
+  - id: adr_guard
+    paths:
+      - scripts/adr_guard/**
+      - scripts/quality_ownership/**
+      - docs/adr/**
+      - .pre-commit-config.yaml
+      - AGENTS.md
+      - .ground-control.yaml
+      - .gc/plan-rules.md
+      - .shifter.yaml
+      - docs/architecture/aces-migration-parity-inventory.yaml
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: [adr-guard-tests]
 
-polaris_aws_range:
-  - 'scripts/polaris-aws-range/**'
+  - id: ctfd_workshop
+    paths:
+      - scripts/ctfd-workshop/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: [ctfd-workshop-tests]
 
-scenario_smoketest:
-  - 'scenario-dev/polaris/tests/**'
+  - id: polaris_aws_range
+    paths:
+      - scripts/polaris-aws-range/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: [polaris-aws-range-tests]
 
-stack_smoke:
-  - 'scripts/stack-smoke/**'
+  - id: polaris_tests
+    paths:
+      - scenario-dev/polaris/tests/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: [polaris-tests]
+
+  - id: stack_smoke
+    paths:
+      - scripts/stack-smoke/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: [stack-smoke]
+
+  # Tracked build / deployment / runtime inputs are production owners, not
+  # exclusions (ADR-004-R23 forbids exempting shipped build/runtime material via
+  # exclusions). They have no dedicated blocking quality job yet, so every
+  # responsibility is a visible, dated ADR-004-R23 gap tracked by #1698 rather
+  # than a hidden config exclusion.
+  - id: container_images
+    paths:
+      - shifter/gdc-vm-images/**
+      - shifter/engine/guacamole/**
+      - shifter/engine/guacd/**
+      - shifter/.dockerignore
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: []
+
+  - id: charts
+    paths:
+      - platform/charts/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: []
+
+  - id: cloudformation
+    paths:
+      - platform/cloudformation/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: []
+
+  - id: branding_assets
+    paths:
+      - assets/**
+    sonar: false
+    responsibilities:
+      lint: []
+      security: []
+      test: []
+
+exclusions:
+  - type: docs
+    reason: >-
+      Documentation prose (Markdown, diagrams, and supporting assets). Not
+      product or infrastructure source; docs-only skipping is governed by
+      deploy.yml quality_relevant routing, and guardrail docs under docs/adr/**
+      are owned by the adr_guard unit via most-specific precedence.
+    paths:
+      - docs/**
+      - README.md
+      - CHANGELOG.md
+      - CODE_OF_CONDUCT.md
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - SUPPORT.md
+      - LICENSE
+      - '**/*.md'
+
+  - type: docs
+    reason: >-
+      Towncrier release-note fragments. Collated into CHANGELOG.md at release
+      time; not executable source.
+    paths:
+      - changelog.d/**
+
+  - type: metadata
+    reason: >-
+      Repository and agent metadata / tooling configuration (editor, agent,
+      and spec harness settings). Not product or infrastructure source.
+    paths:
+      - .claude/**
+      - .cursor/**
+      - .gemini/**
+      - .specify/**
+      - .github/CODEOWNERS
+      - .github/actionlint.yaml
+      - .github/codeql/**
+      - .github/copilot-instructions.md
+      - .github/dependabot.yml
+      - .github/pull_request_template.md
+      - .gitattributes
+      - .gitignore
+      - .gitguardian.yaml
+      - .gitleaks.toml
+      - .snyk
+      - .vale.ini
+      - .mcp.json
+      - CLAUDE.md
+
+  - type: config
+    reason: >-
+      Repository build / release / lint tool configuration governed by its own
+      tooling (mkdocs, towncrier, sonar, make, npm lockfile). Not product or
+      infrastructure source subject to the production three-owner rule.
+    paths:
+      - Makefile
+      - mkdocs.yml
+      - towncrier.toml
+      - sonar-project.properties
+      - package-lock.json
+
+  - type: config
+    reason: >-
+      CI / deploy / guard helper scripts governed by pre-commit hooks and the
+      jobs that invoke them (terraform-lint IaC guards, deploy helpers, dev/ops
+      utilities). Not product or infrastructure source that ships at runtime.
+    paths:
+      - scripts/check_tf_runner_network/**
+      - scripts/check_tf_iam_ssm_scope/**
+      - scripts/check_tf_iam_role_naming/**
+      - scripts/check_tf_gcp_runner_network/**
+      - scripts/check_tf_gcp_iam_resource_scope/**
+      - scripts/check_tf_gcp_wif_trust/**
+      - scripts/check_gcp_tf_modules/**
+      - scripts/check_checkov_invocation_parity/**
+      - scripts/portal_deploy/**
+      - scripts/portal-deploy/**
+      - scripts/post_deploy_smoke/**
+      - scripts/terraform/**
+      - scripts/ctf-scenario/**
+      - scripts/tests/**
+      # Root-level helper scripts are enumerated (not a scripts/* wildcard) so a
+      # new script package under scripts/ still fails closed as unclassified.
+      - scripts/ami.sh
+      - scripts/bump-version.sh
+      - scripts/check-ngfw.sh
+      - scripts/config-claude.sh
+      - scripts/count-loc.sh
+      - scripts/delete-user.sh
+      - scripts/dev-box.sh
+      - scripts/find-orphan-instances.py
+      - scripts/fix_resume.py
+      - scripts/get-devbox-password.sh
+      - scripts/iam-deploy.sh
+      - scripts/local-provisioner-env.sh
+      - scripts/runner-deploy.sh
+      - scripts/setup-worktree.sh
+      - scripts/shifter-django-admin-tunnel.sh
+      - scripts/smoke-test-windows.sh
+      - scripts/smoke-test.sh
+      - scripts/sync-deploy-secrets.sh
+      - scripts/update-coverage-readme.py
+
+  - type: config
+    reason: >-
+      Scenario authoring content and packages (Polaris and ACES-validation
+      scenario material, briefing/design notes, container and content-package
+      inputs). Authoring content, not product source; Polaris smoke tests are
+      owned separately by the polaris_tests unit.
+    paths:
+      - scenario-dev/**
+
+  - type: test
+    reason: >-
+      Standalone UAT scripts and fixtures not part of a production package's
+      own test suite.
+    paths:
+      - uat/uat_test_script.py
+      - uat/test.txt

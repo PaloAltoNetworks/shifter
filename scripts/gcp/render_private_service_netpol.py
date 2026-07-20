@@ -10,21 +10,25 @@ authorizing those endpoints must be generated at deploy time and shipped
 alongside the existing `platform-runtime.generated.env` and
 `platform-edge.generated.yaml`.
 
-Output: a single NetworkPolicy ("allow-platform-private-service-egress")
-in the `shifter-platform` namespace, with per-host `/32` ipBlocks for the
-Cloud SQL and Memorystore private IPs, plus the GKE services CIDR (used by
-restricted.googleapis.com). Ports: 5432 (Cloud SQL), 6378 (Memorystore TLS,
-ADR-008-R6), and 6379 (plaintext Redis, kept for compatibility with
-pre-#963 environments). The narrow per-host CIDRs match the Helm chart's
-`privateServiceCidrs` flow in `scripts/bootstrap/deploy.py` so the two
-deploy paths share the same private-service contract.
+Output: up to three NetworkPolicies in `shifter-platform`: one platform-wide
+policy with per-host `/32` ipBlocks for Cloud SQL and Memorystore; one policy
+that allows only the dedicated provisioner-launcher pod to reach the in-cluster
+Kubernetes API in the GKE services CIDR; and — when the `range_network_cidr`
+Terraform output is set — a participant/operator range-access policy (issue
+#1349) that authorizes the portal and guacd workloads to dial range guests on
+the range network over SSH (22) and RDP (3389). Ports: 443 (Kubernetes API),
+5432 (Cloud SQL), 6378 (Memorystore TLS, ADR-008-R6), 6379 (plaintext Redis,
+kept for compatibility with pre-#963 environments), and 22/3389 (range access).
+The narrow per-host CIDRs match the Helm chart's `privateServiceCidrs` flow in
+`scripts/bootstrap/deploy.py`, and the range-access policy matches the chart's
+`rangeAccessCidrs` flow, so the two deploy paths share the same contracts.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 
@@ -77,11 +81,49 @@ def render_netpol(outputs: dict[str, object]) -> str:
         if cidr not in seen:
             seen.add(cidr)
             ordered_cidrs.append(cidr)
-    if gke_services_cidr not in seen:
-        seen.add(gke_services_cidr)
-        ordered_cidrs.append(gke_services_cidr)
-
     ip_blocks = "\n".join(f"        - ipBlock:\n            cidr: {cidr}" for cidr in ordered_cidrs)
+
+    # Participant/operator range access (issue #1349): authorize the portal
+    # (browser SSH terminal) and guacd (Guacamole SSH/RDP) workloads to dial
+    # range guests on the range network. Kustomize sibling of the Helm chart's
+    # `rangeAccessCidrs` flow; both converge on one range-access contract. The
+    # range network CIDR is optional (absent before the range network exists),
+    # in which case the policy is omitted rather than rendered empty.
+    range_access_section = ""
+    range_network_cidr = str(outputs.get("range_network_cidr", {}).get("value", "")).strip()
+    if range_network_cidr:
+        # Validate the authored CIDR so a malformed value fails the render step
+        # rather than shipping a broken NetworkPolicy manifest.
+        ip_network(range_network_cidr, strict=False)
+        range_access_section = f"""---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-range-access-egress-generated
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - portal
+          - guacd
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {range_network_cidr}
+      ports:
+        - protocol: TCP
+          port: 22
+        - protocol: TCP
+          port: 3389
+"""
 
     # YAML is hand-formatted (rather than via PyYAML) for two reasons:
     # the manifest is short and structurally fixed, and the workflow runs
@@ -114,7 +156,29 @@ spec:
         - protocol: TCP
           # Memorystore TLS endpoint (ADR-008-R6, #963).
           port: 6378
-"""
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-provisioner-launcher-kubernetes-api-egress-generated
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: worker-provisioner-launcher
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {gke_services_cidr}
+      ports:
+        - protocol: TCP
+          port: 443
+{range_access_section}"""
 
 
 def main() -> int:

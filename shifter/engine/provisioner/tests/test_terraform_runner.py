@@ -21,7 +21,7 @@ class TestDestroyNgfw:
     readOnlyRootFilesystem.
     """
 
-    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"}, clear=True)
     @patch("terraform_base.run_terraform")
     def test_destroy_with_variables_writes_tfvars(self, mock_run, tmp_path, monkeypatch):
         """When variables are provided, destroy should write tfvars and pass -var-file."""
@@ -41,7 +41,7 @@ class TestDestroyNgfw:
         assert any("-var-file=" in arg for arg in destroy_args)
         assert not (workspace_root / "req-123").exists()
 
-    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"}, clear=True)
     @patch("terraform_base.run_terraform")
     def test_destroy_without_variables_no_var_file(self, mock_run, tmp_path, monkeypatch):
         """When no variables provided, destroy should not pass -var-file."""
@@ -61,7 +61,7 @@ class TestDestroyNgfw:
         assert "-auto-approve" in destroy_args
         assert not (workspace_root / "req-123").exists()
 
-    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state", "CLOUD_PROVIDER": "aws"}, clear=True)
     def test_destroy_cleans_up_workspace_on_failure(self, tmp_path, monkeypatch):
         """Staged workspace must be removed even when terraform destroy fails."""
         from terraform_runner import destroy_ngfw
@@ -263,6 +263,21 @@ class TestNgfwTerraformOrchestrationHelpers:
         with pytest.raises(ValueError, match="Unknown operation"):
             _run_ngfw_operation_for_provider("rotate", "req-3", "inst-3", "app-3", app_spec, "americas")
 
+    def test_provider_dispatch_raises_for_unsupported_provider(self, monkeypatch):
+        """A future third backend must fail closed rather than being routed through
+        the AWS Terraform provision/deprovision path (the previous ``is_gcp`` boolean
+        treated any non-gcp value as AWS)."""
+        import ngfw_terraform
+        from cloud.exceptions import CloudProviderNotImplementedError
+
+        monkeypatch.setattr(ngfw_terraform, "resolve_cloud_provider", lambda *a, **k: "azure")
+
+        with pytest.raises(CloudProviderNotImplementedError, match="azure"):
+            ngfw_terraform._run_ngfw_operation_for_provider("up", "req-1", "inst-1", "app-1", {}, "americas")
+
+        with pytest.raises(CloudProviderNotImplementedError, match="azure"):
+            ngfw_terraform._run_ngfw_operation_for_provider("destroy", "req-1", "inst-1", "app-1", {}, "americas")
+
     @patch.dict(
         "os.environ",
         {
@@ -282,6 +297,17 @@ class TestNgfwTerraformOrchestrationHelpers:
         destroy_variables = mock_destroy_ngfw.call_args.kwargs["variables"]
         assert destroy_variables["name_prefix"] == "ngfw-user-7"
         mock_cleanup_state.assert_called_once_with("req-1")
+
+    def test_cleanup_failed_ngfw_provision_raises_for_unsupported_provider(self, monkeypatch):
+        """Cleanup must not silently fall through to the AWS Terraform destroy path
+        for a future third backend."""
+        import ngfw_terraform
+        from cloud.exceptions import CloudProviderNotImplementedError
+
+        monkeypatch.setattr(ngfw_terraform, "resolve_cloud_provider", lambda *a, **k: "azure")
+
+        with pytest.raises(CloudProviderNotImplementedError, match="azure"):
+            ngfw_terraform._cleanup_failed_ngfw_provision("req-1", "inst-1", {"user_id": 7})
 
     @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True)
     def test_cleanup_failed_ngfw_provision_destroys_gdc_state(self, monkeypatch):
@@ -728,3 +754,15 @@ class TestBuildProviderState:
         assert state["data_attachment_id"] == "ngfw-user-42/vmseries:eth1"
         assert state["attached_ranges"] == []
         assert state["provider_metadata"]["gcp"]["product"] == "palo-alto-vm-series"
+
+    def test_raises_for_unsupported_provider(self, monkeypatch):
+        """The AWS-shaped provider_state (management_ip/dataplane_ip/data_eni_id
+        field names) must not be built for a future third backend just because
+        it isn't gcp."""
+        import ngfw_terraform_state
+        from cloud.exceptions import CloudProviderNotImplementedError
+
+        monkeypatch.setattr(ngfw_terraform_state, "resolve_cloud_provider", lambda *a, **k: "azure")
+
+        with pytest.raises(CloudProviderNotImplementedError, match="azure"):
+            ngfw_terraform_state._build_provider_state({"management_ip": "10.1.5.10"})

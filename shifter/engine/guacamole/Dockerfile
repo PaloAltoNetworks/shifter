@@ -16,7 +16,8 @@
 # Reference: https://guacamole.apache.org/doc/gug/guacamole-docker.html
 
 ARG GUACAMOLE_VERSION=1.5.5
-FROM guacamole/guacamole:${GUACAMOLE_VERSION}
+# base image: guacamole 1.5.5 (keep in sync with GUACAMOLE_VERSION)
+FROM guacamole/guacamole@sha256:0f62f6d17ab379e46aa66874b2ff564dab856a6ef5e754a69cbb34c32d3e588a
 
 # Install PostgreSQL client for schema initialization
 USER root

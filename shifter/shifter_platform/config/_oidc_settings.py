@@ -15,6 +15,11 @@ from config._runtime_env import AUTH_PROVIDER, IS_TEST_RUN, required_runtime_env
 
 __all__ = [
     "AUTHENTICATION_BACKENDS",
+    "CTF_DEFAULT_PARTICIPANT_PASSWORD",
+    "CTF_LOGIN_RATE_LIMIT_MAX",
+    "CTF_LOGIN_RATE_LIMIT_WINDOW_SECONDS",
+    "CTF_ORGANIZER_PROVIDER_GROUPS",
+    "CTF_PARTICIPANT_ACCOUNT_RETENTION_HOURS",
     "IDENTITY_ALLOWED_EMAILS",
     "IDENTITY_ALLOWED_EMAIL_DOMAIN",
     "IDENTITY_PLATFORM_API_KEY",
@@ -25,10 +30,9 @@ __all__ = [
     "LOGIN_REDIRECT_URL",
     "LOGIN_URL",
     "LOGOUT_REDIRECT_URL",
-    "MAGIC_LINK_EXPIRY_HOURS",
-    "MAGIC_LINK_SINGLE_USE",
     "OIDC_CREATE_USER",
     "OIDC_EXEMPT_URLS",
+    "OIDC_ISSUER_URL",
     "OIDC_OP_AUTHORIZATION_ENDPOINT",
     "OIDC_OP_JWKS_ENDPOINT",
     "OIDC_OP_LOGOUT_URL_METHOD",
@@ -61,24 +65,24 @@ def _env_csv(name: str) -> list[str]:
 if AUTH_PROVIDER == "identity_platform":
     AUTHENTICATION_BACKENDS = [
         "config.identity_platform.IdentityPlatformBackend",
-        "django.contrib.auth.backends.ModelBackend",
+        "config.auth.PlatformModelBackend",
+        "config.auth.CTFParticipantBackend",
     ]
 else:
     AUTHENTICATION_BACKENDS = [
         "config.oidc.ShifterOIDCBackend",
-        "django.contrib.auth.backends.ModelBackend",
+        "config.auth.PlatformModelBackend",
+        "config.auth.CTFParticipantBackend",
     ]
 
-# Magic link authentication (PLAT-101). Event-backed CTF participant links use
-# the event end as their expiry by default; MAGIC_LINK_EXPIRY_HOURS is the
-# fallback when no event end is available. Operators that need a stricter
-# event-link ceiling can set MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS.
-MAGIC_LINK_EXPIRY_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRY_HOURS", "24"))
-_MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS = os.environ.get("MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS")
-MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS = (
-    int(_MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS) if _MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS else None
-)
-MAGIC_LINK_SINGLE_USE = os.environ.get("MAGIC_LINK_SINGLE_USE", "False").lower() == "true"
+# Optional platform-wide CTF bootstrap credential. Fails closed: the default is
+# empty, never an authenticating value. When unset, per-event
+# ``participant_password_override`` is the only accepted source and the
+# participant-account service refuses to provision without one (issue #1665).
+CTF_DEFAULT_PARTICIPANT_PASSWORD = os.environ.get("CTF_DEFAULT_PARTICIPANT_PASSWORD", "")
+CTF_PARTICIPANT_ACCOUNT_RETENTION_HOURS = int(os.environ.get("CTF_PARTICIPANT_ACCOUNT_RETENTION_HOURS", "24"))
+CTF_LOGIN_RATE_LIMIT_MAX = int(os.environ.get("CTF_LOGIN_RATE_LIMIT_MAX", "5"))
+CTF_LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("CTF_LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300"))
 
 # OIDC settings - loaded from environment for AWS/Cognito deployments.
 if AUTH_PROVIDER == "oidc":
@@ -100,6 +104,15 @@ IDENTITY_PLATFORM_TOTP_DISPLAY_NAME = os.environ.get(
 PLATFORM_BOOTSTRAP_STAFF_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_STAFF_EMAILS")
 PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS")
 
+# Verified, administrator-controlled provider group names that grant the local
+# ``CTF Organizer`` group at login (issue #1516). Organizer authority is never
+# derivable from self-service identity/profile data; it comes only from these
+# admin-managed provider groups (mapped in ``config.organizer_authority``) or
+# explicit local assignment. Provider group names are case-sensitive, so this
+# uses the case-preserving parser. Fail-closed: unset grants no organizer via the
+# provider path (local Django-admin assignment still works).
+CTF_ORGANIZER_PROVIDER_GROUPS = _env_list("CTF_ORGANIZER_PROVIDER_GROUPS")
+
 # Always define OIDC_OP_* variables to avoid runtime errors.
 # ``_oidc_placeholder`` indirection sidesteps bandit's B105 false-positive
 # on the empty-string literal for *_TOKEN_ENDPOINT (the variable name
@@ -110,6 +123,12 @@ OIDC_OP_AUTHORIZATION_ENDPOINT = _oidc_placeholder
 OIDC_OP_TOKEN_ENDPOINT = _oidc_placeholder
 OIDC_OP_USER_ENDPOINT = _oidc_placeholder
 OIDC_OP_JWKS_ENDPOINT = _oidc_placeholder
+# Expected ID-token issuer for config.oidc.ShifterOIDCBackend.verify_token's
+# exact-match check (issue #1521). Placeholder outside AUTH_PROVIDER="oidc" so
+# the setting always exists; mozilla-django-oidc's base verify_token does not
+# check this itself (it decodes with verify_aud=False and is not given an
+# expected issuer), so the adapter validates it explicitly against this value.
+OIDC_ISSUER_URL = _oidc_placeholder
 
 if AUTH_PROVIDER == "oidc":
     # Cognito has two different base URLs:
@@ -117,6 +136,7 @@ if AUTH_PROVIDER == "oidc":
     # - Issuer URL: for JWKS (token verification)
     _oidc_auth_domain = required_runtime_env("OIDC_AUTH_DOMAIN", dev_default="https://auth.example.test")
     _oidc_issuer = required_runtime_env("OIDC_ISSUER_URL", dev_default="https://issuer.example.test")
+    OIDC_ISSUER_URL = _oidc_issuer
     # OAuth endpoints use the auth domain
     OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_auth_domain}/oauth2/authorize"
     OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_auth_domain}/oauth2/token"
@@ -160,17 +180,15 @@ OIDC_EXEMPT_URLS = [
     "/dev-login/",
     # View enforces production blocking directly
     "/dev-logout/",
-    # CTF magic link registration (token is the auth)
-    "/ctf/register/",
-    # CTF magic link token exchange (token is the auth; CSRF-protected POST)
-    "/ctf/register/exchange/",
+    # Dedicated local CTF participant authentication (still CSRF protected)
+    "/ctf/login/",
+    "/ctf/change-password/",
     # CTF help page
     "/ctf/help/",
 ]
 
-# Session cookie lifetime — makes Django's 14-day default explicit.
-# CTF participants auth via magic link (ModelBackend), so OIDC SessionRefresh
-# won't expire their sessions. This ensures no surprises from Django defaults.
+# Session cookie lifetime — makes Django's 14-day default explicit. Temporary
+# CTF sessions are additionally bounded by the live-event account policy.
 # 14 days
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
 

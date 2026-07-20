@@ -33,7 +33,7 @@ describe('resendInvite', () => {
         await globalThis.resendInvite('p-42', 'csrf-xyz');
 
         expect(fetchMock).toHaveBeenCalledWith(
-            '/ctf/api/participants/p-42/resend-invite/',
+            '/api/v1/ctf/participants/p-42/resend-invite/',
             {
                 method: 'POST',
                 headers: {
@@ -107,7 +107,7 @@ describe('initParticipantTimeline', () => {
 
         expect(globalThis.initScoreTimeline).toHaveBeenCalledWith(
             'score-timeline-chart',
-            '/ctf/api/participants/p-42/score-timeline/',
+            '/api/v1/ctf/participants/p-42/score-timeline/',
         );
     });
 });

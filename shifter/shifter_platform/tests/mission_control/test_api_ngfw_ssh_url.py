@@ -22,9 +22,13 @@ from django.contrib.auth import get_user_model
 from django.test import RequestFactory
 from rest_framework.test import force_authenticate
 
-from mission_control.views import api_ngfw_ssh_url, guacamole_bootstrap_status
+from mission_control.api.views import api_ngfw_ssh_url, guacamole_bootstrap_status
 
-pytestmark = pytest.mark.django_db
+# transaction=True (real commits, no wrapping transaction): the inline Guacamole
+# bootstrap path calls close_old_connections(), which corrupts pytest-django's
+# rolled-back wrapping transaction on PostgreSQL ("connection is closed"). SQLite
+# tolerated it; a real backend does not (#1524).
+pytestmark = pytest.mark.django_db(transaction=True)
 
 User = get_user_model()
 

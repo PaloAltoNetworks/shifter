@@ -10,6 +10,7 @@ import logging
 from django.dispatch import receiver
 
 from cms.services import range_status_changed
+from shared.enums import ResourceStatus
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,12 @@ def sync_ctf_participant_range_status(
 
     updated = 0
     for participant in participants:
-        if participant.range_status != new_status:
+        if new_status == ResourceStatus.DESTROYED.value:
+            participant.range_instance_id = None
+            participant.range_status = ""
+            participant.save(update_fields=["range_instance_id", "range_status", "updated_at"])
+            updated += 1
+        elif participant.range_status != new_status:
             participant.range_status = new_status
             participant.save(update_fields=["range_status", "updated_at"])
             updated += 1
@@ -65,11 +71,11 @@ def sync_ctf_spare_range_status(
     """
     from ctf.enums import SpareRangeStatus
     from ctf.models import CTFSpareRange
-    from shared.enums import ResourceStatus
 
     status_map = {
         ResourceStatus.READY.value: SpareRangeStatus.READY.value,
         ResourceStatus.FAILED.value: SpareRangeStatus.FAILED.value,
+        ResourceStatus.DESTROYED.value: SpareRangeStatus.FAILED.value,
     }
     mapped_status = status_map.get(new_status)
     if mapped_status is None:
@@ -84,7 +90,16 @@ def sync_ctf_spare_range_status(
     for spare in spares:
         if spare.status != mapped_status:
             spare.status = mapped_status
-            spare.save(update_fields=["status", "updated_at"])
+            terminal = new_status in {ResourceStatus.FAILED.value, ResourceStatus.DESTROYED.value}
+            owner = spare.owner_user if terminal else None
+            if terminal:
+                spare.owner_user = None
+                spare.save(update_fields=["status", "owner_user", "updated_at"])
+                from ctf.services.range.spares import delete_managed_spare_user
+
+                delete_managed_spare_user(owner)
+            else:
+                spare.save(update_fields=["status", "updated_at"])
             updated += 1
 
     if updated:

@@ -1,4 +1,4 @@
-# POLARIS / NORTHSTORM CTF — Scenario Development
+# POLARIS / NORTHSTORM CTF—Scenario Development
 
 Consolidated working directory for the NORTHSTORM CTF range (Operation POLARIS).
 Everything related to designing, building, deploying, and testing the range
@@ -50,8 +50,6 @@ scenario-dev/polaris/
 │   ├── isolation-smoketest.sh      cross-cutting network boundary validation (70 checks)
 │   ├── smoketests/                 one per asset, pointed at the live range from its pivot container
 │   │   ├── A0-smoketest.sh ... A14-smoketest.(sh|py)
-│   ├── scenario_smoketest/         pre-event challenge-hint → flag verifier (Python package; see its README)
-│   ├── test_scenario_smoketest.py  unit tests for scenario_smoketest
 │   └── walkthroughs/               step-by-step happy-path participant guides, grouped by flag range
 │       ├── README.md
 │       ├── 00-range-access-docker.md
@@ -84,6 +82,13 @@ trust these in this order:
 If these disagree, reconcile the docs against the actual build and walkthroughs
 first instead of assuming the older design prose is correct.
 
+Per-scenario verification adapters and answer material are not stored in this
+tree. Shifter core provides only the neutral discovery, runner, prerequisite,
+aggregation, and redacted-report framework. Operators install a reviewed,
+version-pinned verification distribution separately and select its exact
+distribution version and entry point. See the
+[scenario-verification technical guide](../../docs/technical/shifter_platform/scenario-verification.md).
+
 ## Getting started
 
 For AWS standalone/default-VPC bring-up, use
@@ -93,13 +98,13 @@ the same `tests/` validation scripts over SSM.
 
 Legacy local-compose flow:
 
-1. **Deploy** — on the range host:
+1. **Deploy**—on the range host:
    ```
    rsync -a scenario-dev/polaris/ ctf-range-builder:/home/atomik/range/
    ssh ctf-range-builder 'bash /home/atomik/range/tests/setup.sh'
    ```
 
-2. **Test** — run the full sweep:
+2. **Test**—run the full sweep:
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/run-all-smoketests.sh'
    ```
@@ -107,18 +112,15 @@ Legacy local-compose flow:
    Infrastructure-level: per-asset connectivity + cross-cutting network
    isolation. Does not verify CTFd challenge content.
 
-3. **Verify scenario content** — pre-event content check that every CTFd
-   covered hint path produces the configured flag:
-   ```
-   ssh ctf-range-builder 'cd /home/atomik/range/tests && python3 -m scenario_smoketest --only 1,2,3,4,5,6,31'
-   ```
-   Content-level (vs. step 2's infra sweep). Current executable adapter
-   coverage is challenges `1-6` and `31`; an unfiltered run intentionally exits
-   non-zero while uncovered board challenges remain. Full usage, flags, and the
-   CTFd-token security model live in
-   [`tests/scenario_smoketest/README.md`](tests/scenario_smoketest/README.md).
+3. **Verify scenario content**—in a separate least-privilege operator
+   environment, run the explicitly selected, version-pinned installed
+   verification distribution against the staged range. Keep its bindings and
+   credentials outside this repository. A cutover-grade redacted report must
+   cover the declared acceptance universe with zero failed, blocked, errored,
+   or missing checks. The core package deliberately supplies no Polaris
+   adapter, board reader, answer key, or scenario-specific CLI.
 
-4. **Reset** — before each test or between participant sessions:
+4. **Reset**—before each test or between participant sessions:
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/reset.sh'
    ```

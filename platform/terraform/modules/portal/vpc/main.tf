@@ -5,7 +5,7 @@
 # - Public subnets (for ALB, NAT Gateway)
 # - Private subnets (for RDS, ECS tasks)
 # - Internet Gateway
-# - NAT Gateway (single, cost-optimized)
+# - NAT Gateway (per-AZ when portal inspection is on, else single cost-optimized)
 # - Route tables
 
 data "aws_availability_zones" "available" {
@@ -14,6 +14,17 @@ data "aws_availability_zones" "available" {
 
 locals {
   azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
+
+  # NAT gateway count. When portal inspection is enabled each AZ's private
+  # tier egresses through its OWN-AZ firewall endpoint (inspection.tf), and an
+  # AWS Network Firewall endpoint is AZ-bound: it cannot forward inspected
+  # traffic to a NAT gateway in another AZ, so a single shared NAT black-holes
+  # every AZ except the NAT's own (issue: proof us-east-2b login 504s). A NAT
+  # per AZ (each firewall subnet -> same-AZ NAT) is therefore required whenever
+  # inspection is on. With inspection off, private subnets route straight to the
+  # NAT and cross-AZ NAT routing works normally, so a single NAT stays the
+  # cost-optimized default.
+  nat_gateway_count = var.enable_portal_inspection ? var.az_count : 1
 
   iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
 
@@ -109,29 +120,31 @@ resource "aws_route_table_association" "public" {
 }
 
 # ------------------------------------------------------------------------------
-# NAT Gateway (single for cost optimization, can be per-AZ for HA)
+# NAT Gateway (per-AZ when inspection is on, else single cost-optimized)
 # ------------------------------------------------------------------------------
+# See local.nat_gateway_count: inspection forces one NAT per AZ so each AZ's
+# firewall endpoint egresses via a same-AZ NAT.
 
 # checkov:skip=CKV2_AWS_19:EIP attached to NAT Gateway, not EC2 - see #222
 resource "aws_eip" "nat" {
-  count  = var.enable_nat_gateway ? 1 : 0
+  count  = var.enable_nat_gateway ? local.nat_gateway_count : 0
   domain = "vpc"
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-nat-eip"
+    Name = "${var.name_prefix}-nat-eip-${local.azs[count.index]}"
   })
 
   depends_on = [aws_internet_gateway.this]
 }
 
 resource "aws_nat_gateway" "this" {
-  count = var.enable_nat_gateway ? 1 : 0
+  count = var.enable_nat_gateway ? local.nat_gateway_count : 0
 
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public[0].id
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-nat"
+    Name = "${var.name_prefix}-nat-${local.azs[count.index]}"
   })
 
   depends_on = [aws_internet_gateway.this]

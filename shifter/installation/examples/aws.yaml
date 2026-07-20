@@ -16,7 +16,7 @@ deployment:
   name: shifter
   # Public hostname users reach this deployment at. Must be a real DNS name.
   domain: shifter.example.com
-  # Deployment tier. One of: prod, dev.
+  # Deployment tier. One of: prod, dev (proof is an internal readiness tier).
   profile: prod
 
 # References to the secrets this deployment needs. The names on the right are
@@ -26,9 +26,10 @@ secrets:
   django_secret_key: shifter/prod/django-secret-key
   db_password: shifter/prod/db-password
 
-# Backend-specific settings. The root schema checks that this is a mapping.
-# Deployment tooling validates the values it consumes.
+# Backend-specific settings. The AWS backend validates these against a closed model,
+# so unknown keys are rejected. `region` is required.
 settings:
+  # AWS region to deploy into, e.g. us-east-2.
   region: us-east-2
 
   # PLAT-220: range network egress policy. Same shape on AWS and GCP. Omit the

@@ -54,9 +54,10 @@ non-secret env values, not by real provider auth.
 - Prove a websocket handshake through `config.asgi:application`,
   `AllowedHostsOriginValidator`, `AuthMiddlewareStack`, and a real routed
   consumer. Since routed consumers require authentication for meaningful accept,
-  the smoke must use a real Django session or a narrowly scoped authenticated
-  setup against the running container rather than adding an unauthenticated
-  test websocket route.
+  the smoke must use a real Django session rather than adding an unauthenticated
+  test websocket route. (Superseded by #988: that session is now established by
+  the real OIDC authorization-code login flow against a local provider double,
+  not a directly minted one. See `oidc-stack-smoke-preflight-988.md`.)
 - Preserve the migration ownership split from #918/#953: runtime web and
   worker containers should not each run migrations. A stack smoke may run one
   explicit migration path and then boot long-running containers with
@@ -104,10 +105,11 @@ Security layers the intended design must satisfy:
   Redis TLS/AUTH posture. The smoke may choose plaintext local Redis, but it
   must not relax the `REDIS_TLS=true` password/CA checks.
 - Auth surface: `/health` stays unauthenticated and coarse; websocket routes
-  stay authenticated. If the smoke creates a session, it should create only a
-  local throwaway user in the smoke database and should not enable
-  `/dev-login/` by setting `ENVIRONMENT=development` on a production-shaped
-  container.
+  stay authenticated. It must not enable `/dev-login/` by setting
+  `ENVIRONMENT=development` on a production-shaped container. (Superseded by
+  #988: rather than minting a local throwaway session, the smoke now obtains the
+  session through the real OIDC login flow against a local Cognito-shaped
+  provider double, which also exercises first-login provisioning.)
 - OS/process exposure: command argv and logs may contain image tags, container
   names, ports, and non-secret test values. They must not contain secret manager
   payloads, signed URLs, Redis passwords, Django session cookies, or full

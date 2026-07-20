@@ -103,6 +103,7 @@ def _setup_one_other_instance(
     actual_dc_ip: str | None,
     actual_domain: str | None,
     range_id: int,
+    polaris_agent_role_arn: str = "",
 ) -> tuple[str, bool, str | None]:
     """Run setup for a single non-DC VM. Returns (instance_id, success, error)."""
     inst_id = inst["instance_id"]
@@ -145,6 +146,7 @@ def _setup_one_other_instance(
                 dc_ip=actual_dc_ip or "",
                 public_key=inst.get("public_key", ""),
                 range_id=range_id,
+                agent_role_arn=polaris_agent_role_arn,
             )
             _set_attacker_container_password_after_bootstrap(
                 instance_data=inst,
@@ -179,6 +181,7 @@ def _setup_other_instances_parallel(
     actual_dc_ip: str | None,
     actual_domain: str | None,
     range_id: int,
+    polaris_agent_role_arn: str = "",
 ) -> None:
     """Run setup for non-DC VMs in parallel; raise on any failure."""
     if not other_instances:
@@ -193,6 +196,7 @@ def _setup_other_instances_parallel(
                 actual_dc_ip,
                 actual_domain,
                 range_id,
+                polaris_agent_role_arn,
             ): inst
             for inst in other_instances
         }
@@ -208,10 +212,13 @@ def run_instance_setup(
     dc_ip: str | None = None,
     domain_name: str | None = None,
     range_id: int = 0,
+    polaris_agent_role_arn: str = "",
 ) -> None:
     """Run setup for all instances after infrastructure is ready.
 
     Runs DC setup first (blocking), then all other instances in parallel.
+    ``polaris_agent_role_arn`` is the non-secret per-range Polaris Bedrock
+    agent role ARN (Terraform output, #1377); empty when not a Polaris range.
     """
     uuid_to_config = _build_uuid_to_config(range_spec)
     pod_instances, vm_instances = _partition_pod_vs_vm(instances_output)
@@ -225,5 +232,7 @@ def run_instance_setup(
 
     actual_dc_ip, actual_domain = _resolve_dc_ip_and_domain(dc_instances, uuid_to_config, dc_ip, domain_name)
 
-    _setup_other_instances_parallel(other_instances, uuid_to_config, actual_dc_ip, actual_domain, range_id)
+    _setup_other_instances_parallel(
+        other_instances, uuid_to_config, actual_dc_ip, actual_domain, range_id, polaris_agent_role_arn
+    )
     logger.info("All instance setup complete")

@@ -73,6 +73,187 @@ resource "aws_iam_role" "github_actions" {
 }
 
 # ------------------------------------------------------------------------------
+# Least-privilege base-image-pipeline role (#1656)
+#
+# The packer.yml base `build` job must not run under the broad github_actions
+# deploy role above: that role legitimately passes portal EC2, ECS, Lambda,
+# RDS-monitoring, and every range role to AWS services, so it cannot
+# simultaneously prove that a base-image verification instance may receive ONLY
+# the range instance role. This dedicated principal IS the IAM boundary the
+# workflow's inline ref gate is not:
+#
+#   * OIDC trust is pinned to the EXACT protected-branch subjects
+#     (refs/heads/dev, refs/heads/main) - never repo:...:* - so a pull-request
+#     or feature-branch job cannot assume it even if it can dispatch the
+#     workflow.
+#   * iam:PassRole is scoped to the EXACT env range role
+#     (shifter-${var.environment}-range-range-instance) passed to
+#     ec2.amazonaws.com and nothing else, so the fresh-boot verifier can launch
+#     a range-profile instance while the role cannot exfiltrate a more-privileged
+#     profile (AWS warns role tags / profile-name checks are not a PassRole
+#     boundary).
+#   * EC2 is the amazon-ebs builder + verifier + always() cleanup action set;
+#     SSM is the verifier (DescribeInstanceInformation / SendCommand /
+#     GetCommandInvocation) plus publication of the /shifter/ami/* base pointers
+#     only. No IAM mutation, Secrets Manager, arbitrary Parameter Store, or
+#     scenario-artifact access.
+#
+# The exact-subject and exact-range-role invariants are enforced by
+# scripts/check_tf_iam_role_naming (ADR-004-R22). Binding design note:
+# docs/architecture/packer-base-build-privilege-boundary-preflight-1656.md.
+# ------------------------------------------------------------------------------
+resource "aws_iam_role" "github_actions_image" {
+  name = "github-actions-shifter-${var.environment}-image"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            # EXACT protected-branch subjects only (never repo:...:*). The base
+            # build runs from dev|main (the workflow's inline ref gate); a
+            # feature-branch or pull-request subject receives no AWS role.
+            "token.actions.githubusercontent.com:sub" = [
+              "repo:${var.github_org}/${var.github_repo}:ref:refs/heads/dev",
+              "repo:${var.github_org}/${var.github_repo}:ref:refs/heads/main"
+            ]
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "github-actions-shifter-${var.environment}-image"
+    Project     = "shifter"
+    Environment = var.environment
+  }
+}
+
+# Packer amazon-ebs AMI/instance/snapshot operations cannot be meaningfully
+# ARN-scoped, so the EC2 statement keeps Resource "*" and constrains by action to
+# the documented builder+verifier+cleanup set (never ec2:*). The PassRole and SSM
+# statements ARE tightly scoped. The checkov skips below cover only unavoidable
+# Packer EC2 findings; the least-privilege boundary is the action list plus the
+# exact PassRole/SSM-publish resources (#1656).
+resource "aws_iam_role_policy" "image_pipeline" {
+  # checkov:skip=CKV_AWS_355:Packer EC2 build/verify actions are not ARN-scopable; scoped by action, not ec2:*. Risk accepted, see #1656.
+  # checkov:skip=CKV_AWS_290:EC2 build/verify needs Resource=*; PassRole is the exact range role and SSM publish is /shifter/ami/* PutParameter only. See #1656.
+  # checkov:skip=CKV_AWS_287:ec2:GetPasswordData is required for Packer Windows base builds (WinRM admin password) and is not ARN-scopable; the role grants no other credential-exposure action. Risk accepted, see #1656.
+  name = "shifter-${var.environment}-image-pipeline"
+  role = aws_iam_role.github_actions_image.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # amazon-ebs builder + fresh-boot verifier + always() cleanup. RebootInstances
+        # covers the verifier's reboot-survival check (base-image-verify.sh).
+        Sid    = "Ec2ImageBuildAndVerify"
+        Effect = "Allow"
+        Action = [
+          "ec2:AttachVolume",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:CopyImage",
+          "ec2:CreateImage",
+          "ec2:CreateKeyPair",
+          "ec2:CreateSecurityGroup",
+          "ec2:CreateSnapshot",
+          "ec2:CreateTags",
+          "ec2:CreateVolume",
+          "ec2:DeleteKeyPair",
+          "ec2:DeleteSecurityGroup",
+          "ec2:DeleteSnapshot",
+          "ec2:DeleteVolume",
+          "ec2:DeregisterImage",
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeImageAttribute",
+          "ec2:DescribeImages",
+          "ec2:DescribeInstances",
+          "ec2:DescribeInstanceStatus",
+          "ec2:DescribeInstanceTypes",
+          "ec2:DescribeKeyPairs",
+          "ec2:DescribeRegions",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSnapshots",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeTags",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeVpcs",
+          "ec2:DetachVolume",
+          "ec2:GetPasswordData",
+          "ec2:ModifyImageAttribute",
+          "ec2:ModifyInstanceAttribute",
+          "ec2:ModifySnapshotAttribute",
+          "ec2:RebootInstances",
+          "ec2:RegisterImage",
+          "ec2:RunInstances",
+          "ec2:StopInstances",
+          "ec2:TerminateInstances"
+        ]
+        Resource = "*"
+      },
+      {
+        # The fresh-boot verifier launches a candidate with the range instance
+        # profile (base-image-verify.sh --iam-instance-profile). This role may
+        # pass ONLY the exact env range role to EC2 - not shifter-*, not
+        # *-range-instance, not any other role - so a tampered verify profile
+        # cannot exfiltrate a more-privileged role.
+        Sid      = "PassRangeInstanceRoleToEc2Only"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-range-range-instance"
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "ec2.amazonaws.com"
+          }
+        }
+      },
+      {
+        # Verifier SSM checks: confirm the candidate registers with SSM and can
+        # resolve DNS via Run Command. List actions are not ARN-scopable.
+        Sid    = "SsmVerifyInstanceInformation"
+        Effect = "Allow"
+        Action = [
+          "ssm:DescribeInstanceInformation",
+          "ssm:GetCommandInvocation"
+        ]
+        Resource = "*"
+      },
+      {
+        # SendCommand scoped to instances in this account and the two documents
+        # the verifier invokes (Linux + Windows DNS resolution probe).
+        Sid    = "SsmVerifyRunCommand"
+        Effect = "Allow"
+        Action = ["ssm:SendCommand"]
+        Resource = [
+          "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
+          "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
+          "arn:aws:ssm:${var.aws_region}::document/AWS-RunPowerShellScript"
+        ]
+      },
+      {
+        # Publish the validated base AMI id to the runtime pointer. Write-only
+        # (the build only ever put-parameters /shifter/ami/<type>; it never reads
+        # a parameter), scoped to the /shifter/ami/* namespace - not arbitrary
+        # Parameter Store, and no read grant that would trip credential-exposure.
+        Sid      = "PublishBaseAmiPointer"
+        Effect   = "Allow"
+        Action   = ["ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/ami/*"
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Managed IAM Policies
 #
 # Consolidated by AWS service category (#254) to stay under AWS's hard limit of
@@ -127,10 +308,20 @@ resource "aws_iam_policy" "ci_role_permissions_boundary" {
         # do not populate iam:PassedToService, so StringNotEquals matches on the
         # absent key — all non-PassRole IAM mutation) stays denied. The service
         # list mirrors the deploy role's own IAMPassRole grant above.
-        Sid      = "DenyIamEscalation"
-        Effect   = "Deny"
-        Action   = "iam:*"
-        Resource = "*"
+        Sid    = "DenyIamEscalation"
+        Effect = "Deny"
+        Action = "iam:*"
+        # Carve the exact runtime-managed role/profile namespaces OUT of this
+        # blanket IAM deny so the provisioner can create them at range provision
+        # time. Each CreateRole grant requires THIS boundary and neither runtime
+        # path can strip it. The explicit tamper denies below keep that cap in
+        # place as defense-in-depth. These are namespace exceptions to a deny,
+        # not grants; the provisioner identity policy remains the allow boundary.
+        NotResource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-polaris-agent",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-vpn-gateway",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/shifter-${var.environment}-*-vpn-gateway"
+        ]
         Condition = {
           StringNotEquals = {
             "iam:PassedToService" = [
@@ -146,6 +337,34 @@ resource "aws_iam_policy" "ci_role_permissions_boundary" {
             ]
           }
         }
+      },
+      {
+        # Defense-in-depth for the polaris-agent namespace carve-out above. The
+        # per-range polaris agent role (#1377) is created by the provisioner with
+        # THIS boundary attached (enforced by the provisioner identity policy's
+        # iam:PermissionsBoundary condition), so its effective permissions stay
+        # capped even if its inline policy were broad. Explicitly deny stripping
+        # or swapping that boundary on the agent roles so the cap can never be
+        # removed after creation.
+        Sid    = "DenyPolarisAgentBoundaryTamper"
+        Effect = "Deny"
+        Action = [
+          "iam:PutRolePermissionsBoundary",
+          "iam:DeleteRolePermissionsBoundary"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-polaris-agent"
+      },
+      {
+        # The VPN role and instance-profile namespaces are excluded from the
+        # blanket IAM deny only so the provisioner can manage request-owned
+        # gateways. Keep the role's mandatory boundary immutable after create.
+        Sid    = "DenyVpnGatewayBoundaryTamper"
+        Effect = "Deny"
+        Action = [
+          "iam:PutRolePermissionsBoundary",
+          "iam:DeleteRolePermissionsBoundary"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-vpn-gateway"
       }
     ]
   })
@@ -171,6 +390,27 @@ resource "aws_iam_policy" "compute" {
         Effect   = "Allow"
         Action   = ["ec2:*"]
         Resource = "*"
+      },
+      {
+        # Packer's amazon-ebs SSM communicator (ssh_interface = "session_manager",
+        # used by the no-inbound techvault / polaris-vm scenario bakes) opens an
+        # SSH-over-SSM tunnel to the EC2 builder via the AWS-StartSSHSession
+        # document. The management policy's SSMRunCommand grant covers SendCommand
+        # but not StartSession, so the scenario bakes fail with AccessDenied
+        # without this. Lives in the compute policy (it targets EC2 build hosts)
+        # to keep the management managed-policy under the 6144-char limit (#254).
+        Sid    = "SSMSessionManagerForPackerBuilds"
+        Effect = "Allow"
+        Action = [
+          "ssm:StartSession",
+          "ssm:TerminateSession",
+          "ssm:ResumeSession"
+        ]
+        Resource = [
+          "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
+          "arn:aws:ssm:${var.aws_region}::document/AWS-StartSSHSession",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:session/*"
+        ]
       },
       {
         Sid    = "AutoScaling"
@@ -556,6 +796,23 @@ resource "aws_iam_policy" "data" {
           "arn:aws:s3:::shifter-infra-*/*",
           "arn:aws:s3:::shifter-*-infra-*",
           "arn:aws:s3:::shifter-*-infra-*/*"
+        ]
+      },
+      {
+        Sid    = "S3BakeBucketsRead"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket",
+          "s3:GetObject"
+        ]
+        # Scenario bake buckets (e.g. shifter-polaris-bake-<account>). The
+        # polaris bake verifies the operator-uploaded build tarball exists
+        # before standing up a golden range. Read-only: the operator uploads
+        # the tarball out of band and the range instance role (granted in
+        # scripts/polaris-aws-range) does the actual download.
+        Resource = [
+          "arn:aws:s3:::shifter-*-bake-*",
+          "arn:aws:s3:::shifter-*-bake-*/*"
         ]
       },
       {
@@ -974,6 +1231,21 @@ resource "aws_iam_policy" "management" {
         ]
       },
       {
+        Sid    = "SSMPublicServiceParametersRead"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        # AWS-owned PUBLIC parameters (no account in the ARN) used to resolve
+        # current base AMIs at build time - e.g. the Canonical Ubuntu and
+        # Amazon Linux AMI-ID parameters the scenario bakes (techvault /
+        # polaris golden ranges) read. Read-only; scoped to /aws/service/*.
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}::parameter/aws/service/*"
+        ]
+      },
+      {
         Sid      = "Cognito"
         Effect   = "Allow"
         Action   = ["cognito-idp:*"]
@@ -1225,6 +1497,11 @@ moved {
 output "github_actions_role_arn" {
   description = "ARN of the IAM role for GitHub Actions (add to GitHub secrets as AWS_ROLE_ARN)"
   value       = aws_iam_role.github_actions.arn
+}
+
+output "github_actions_image_role_arn" {
+  description = "ARN of the least-privilege base-image-pipeline role for packer.yml base builds (add to GitHub secrets as AWS_IMAGE_ROLE_ARN_<ENV>) (#1656)"
+  value       = aws_iam_role.github_actions_image.arn
 }
 
 output "oidc_provider_arn" {

@@ -12,6 +12,12 @@ def test_collect_env_bindings_includes_environment():
     assert "DB_HOST" in names
 
 
+def test_collect_env_bindings_includes_test_db_backend():
+    """The explicit TEST_DB_BACKEND selector must appear in the manifest (#1524)."""
+    names = {binding.name for binding in collect_env_bindings()}
+    assert "TEST_DB_BACKEND" in names
+
+
 def test_env_manifest_is_current():
     assert manifest_is_current(), (
         "config/env-manifest.json is stale; run `python manage.py generate_env_manifest` from shifter_platform"

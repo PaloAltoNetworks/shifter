@@ -11,16 +11,16 @@ from ctf.exceptions import CTFValidationError
 from ctf.services.participant import bulk_import_participants, invite_participant
 
 
-class TestRegistrationDeadlineEnforcement:
-    """Registration deadline must be enforced when inviting participants."""
+class TestRegistrationDeadlineSemantics:
+    """CTF-705: the deadline closes self-registration; organizer adds bypass it."""
 
-    def test_invite_rejects_after_deadline(self, ctf_event):
-        """invite_participant raises CTFValidationError after deadline passes."""
+    def test_invite_allowed_after_deadline(self, ctf_event):
+        """Organizer manual adds work after the deadline (late stragglers)."""
         ctf_event.registration_deadline = timezone.now() - timedelta(hours=1)
         ctf_event.save(update_fields=["registration_deadline"])
 
-        with pytest.raises(CTFValidationError, match="Registration deadline has passed"):
-            invite_participant(ctf_event.pk, "late@test.com", "Late User")
+        participant = invite_participant(ctf_event.pk, "late@test.com", "Late User")
+        assert participant.email == "late@test.com"
 
     def test_invite_allows_before_deadline(self, ctf_event):
         """invite_participant succeeds before deadline."""
@@ -31,22 +31,22 @@ class TestRegistrationDeadlineEnforcement:
         participant = invite_participant(ctf_event.pk, "early@test.com", "Early User")
         assert participant.email == "early@test.com"
 
-    def test_invite_allows_when_no_deadline(self, ctf_event):
-        """invite_participant succeeds when no deadline is set."""
+    def test_effective_deadline_defaults_to_event_start(self, ctf_event):
+        """CTF-705: an unset deadline reads as the event start for display."""
         assert ctf_event.registration_deadline is None
+        assert ctf_event.effective_registration_deadline == ctf_event.event_start
 
         participant = invite_participant(ctf_event.pk, "anytime@test.com", "Anytime User")
         assert participant.email == "anytime@test.com"
 
-    def test_bulk_import_rejects_after_deadline(self, ctf_event):
-        """bulk_import_participants raises CTFValidationError after deadline passes."""
+    def test_bulk_import_allowed_after_deadline(self, ctf_event):
+        """Organizer-driven import also bypasses the self-registration deadline."""
         ctf_event.registration_deadline = timezone.now() - timedelta(hours=1)
         ctf_event.save(update_fields=["registration_deadline"])
 
         csv_content = "Alice,alice@test.com\nBob,bob@test.com"
-
-        with pytest.raises(CTFValidationError, match="Registration deadline has passed"):
-            bulk_import_participants(ctf_event.pk, csv_content)
+        result = bulk_import_participants(ctf_event.pk, csv_content)
+        assert len(result["created"]) == 2
 
     def test_bulk_import_allows_before_deadline(self, ctf_event):
         """bulk_import_participants succeeds before deadline."""
@@ -54,8 +54,9 @@ class TestRegistrationDeadlineEnforcement:
         ctf_event.save(update_fields=["registration_deadline"])
 
         csv_content = "Alice,alice@test.com"
-        participants = bulk_import_participants(ctf_event.pk, csv_content)
-        assert len(participants) == 1
+        result = bulk_import_participants(ctf_event.pk, csv_content)
+        assert len(result["created"]) == 1
+        assert result["errors"] == []
 
 
 @pytest.mark.django_db

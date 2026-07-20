@@ -60,6 +60,28 @@ class ObjectStorage(Protocol):
 
     def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes: ...
 
+    def download_object(
+        self,
+        bucket: str,
+        key: str,
+        dest_path: str,
+        *,
+        max_bytes: int,
+        expected_identity: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Download a full object to ``dest_path``, bounded by ``max_bytes``.
+
+        When ``expected_identity`` (as returned by :meth:`head_object`, carrying
+        provider-specific ``etag`` / ``generation``) is supplied, the download is
+        bound to that exact object version so an object replaced after validation
+        fails closed with ``ObjectPreconditionError`` (defeats a
+        head-then-download TOCTOU). Raises ``CloudStorageError`` when the object
+        exceeds ``max_bytes`` or on any other failure, and ``ValueError`` when
+        ``max_bytes`` is not positive. Returns the realized object identity
+        (always ``content_length`` and ``etag``; providers may add ``generation``).
+        """
+        ...
+
     def generate_presigned_upload_url(
         self,
         bucket: str,
@@ -90,6 +112,7 @@ class TaskRunner(Protocol):
         container_name: str,
         env_overrides: dict[str, str] | None = None,
         network_config: dict[str, Any] | None = None,
+        task_identity: str | None = None,
     ) -> str | None: ...
 
     def get_task_status(self, cluster: str, task_id: str) -> dict[str, Any] | None: ...

@@ -8,19 +8,26 @@ let it deploy to both dev and prod.
 
 - `aws_instance.runner[count]`: Amazon Linux 2023, t3.large, no inbound
   rules (egress to GitHub/ECR/SSM). Access via SSM Session Manager.
-- Placement is controlled by `var.vpc_id` / `var.subnet_id` and the
-  `var.allow_default_vpc` opt-in (ADR-004-R20). By default the stack fails closed
-  on the account default VPC, where a range's private-DNS interface endpoints can
-  hijack the runner's AWS API resolution; the preferred placement is a dedicated
-  runner VPC or the portal VPC private tier. Setting `allow_default_vpc = true`
-  accepts that risk and auto-resolves the default VPC plus a subnet (no committed
-  IDs). aws-dev/aws-proof opt in today; the design is being reassessed in #1437.
+- Placement is controlled by `var.create_runner_network`, `var.vpc_id` /
+  `var.subnet_id`, and the `var.allow_default_vpc` opt-in (ADR-004-R20). By
+  default the stack fails closed on the account default VPC, where a range's
+  private-DNS interface endpoints can hijack the runner's AWS API resolution.
+  Setting `create_runner_network = true` (issue #1433) provisions a dedicated,
+  ADR-004-R20-compliant runner VPC (non-default, NAT-only egress, no private-DNS
+  interface endpoints) via `modules/github-runner-network` and places the runner
+  in it; its outputs take precedence over `vpc_id`/`subnet_id` and
+  `allow_default_vpc`. Otherwise supply a non-default `vpc_id`/`subnet_id` (a
+  dedicated runner VPC or the portal VPC private tier), or set
+  `allow_default_vpc = true` to accept default-VPC placement and auto-resolve the
+  default VPC plus a subnet (no committed IDs). aws-dev/aws-proof opt in today;
+  the design is being reassessed in #1437.
 - IAM instance profile with inline SSM Session Manager and ECR push/pull
   policies. Inline policies avoid `iam:AttachRolePolicy`, which may be
   denied by AWS Organizations SCPs in fresh managed accounts.
 - Launch user data installs Docker, the build chain, the .NET runtime libs
   the Actions binary needs, and downloads the latest runner tarball.
-  **Registration is manual** -- see below.
+  Registration is **automated** by the bootstrap `runners` path (see below);
+  the manual `config.sh` recipe is kept only as a fallback.
 
 State backend: `<env>.s3.tfbackend` (partial; bucket/key supplied at
 `terraform init` time).
@@ -110,7 +117,7 @@ on rolling out the monitor to existing runners.
 See the response runbook:
 [`docs/ops/github-runner-health-alerts.md`](../../../../docs/ops/github-runner-health-alerts.md).
 
-## Registering a runner (one-time per instance)
+## Registering a runner
 
 Each EC2 ships ready to register but not yet registered. `./config.sh`
 needs a single-use **registration token** from GitHub. The token is
@@ -118,6 +125,25 @@ exchanged once for long-lived runner credentials stored in `.runner` /
 `.credentials` on the instance. After that, the runner stays authenticated
 indefinitely. You only mint a new token when adding,
 re-registering, or replacing a runner.
+
+### Automated (recommended)
+
+The bootstrap `runners` subcommand applies this root and registers every runner
+end-to-end (issue #1433). It provisions the dedicated runner VPC by default,
+mints a single-use token **per runner**, delivers it inside one JSON SSM
+`--parameters` body (so the operator log redactor masks the whole blob and no
+token lands in Terraform state, user data, SSM Parameter Store, Secrets Manager,
+or logs), and verifies each runner online via the GitHub API:
+
+```bash
+./scripts/bootstrap/deploy.py runners --env dev --profile aws-dev
+# --use-existing-network   reuse an already-configured vpc_id/subnet_id / default-VPC opt-in
+# --dry-run                show the plan without minting a token or sending SSM commands
+```
+
+### Manual (fallback)
+
+For a one-off registration outside the bootstrap flow:
 
 ```bash
 export AWS_PROFILE=aws-dev

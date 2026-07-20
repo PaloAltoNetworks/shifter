@@ -11,6 +11,8 @@ from collections.abc import Callable
 from typing import Any, cast
 
 import terraform_runner
+from cloud.exceptions import CloudProviderNotImplementedError
+from config import resolve_cloud_provider
 from events import (
     STATUS_FAILED,
     STATUS_PROVISIONING,
@@ -49,25 +51,32 @@ def _run_ngfw_operation_for_provider(
     sls_region: str,
 ) -> None:
     """Dispatch the requested NGFW operation to the configured cloud provider path."""
-    is_gcp = os.environ.get("CLOUD_PROVIDER", "aws") == "gcp"
-    if operation == "up":
-        if is_gcp:
+    provider = resolve_cloud_provider()
+    if operation not in ("up", "destroy"):
+        raise ValueError(f"Unknown operation: {operation}")
+
+    if provider == "gcp":
+        if operation == "up":
             _run_gdc_provision(request_id, instance_id, app_id, app_spec, sls_region)
         else:
-            _run_provision(request_id, instance_id, app_id, app_spec, sls_region)
-    elif operation == "destroy":
-        if is_gcp:
             _run_gdc_deprovision(request_id, instance_id, app_id)
+        return
+
+    if provider == "aws":
+        if operation == "up":
+            _run_provision(request_id, instance_id, app_id, app_spec, sls_region)
         else:
             _run_deprovision(request_id, instance_id, app_id)
-    else:
-        raise ValueError(f"Unknown operation: {operation}")
+        return
+
+    raise CloudProviderNotImplementedError(provider)
 
 
 def _cleanup_failed_ngfw_provision(request_id: str, instance_id: str, app_spec: dict[str, Any]) -> None:
     """Best-effort cleanup for a failed NGFW provision operation."""
     logger.info("NGFW provision failed - attempting auto-cleanup...")
-    if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
+    provider = resolve_cloud_provider()
+    if provider == "gcp":
         gdc_state = get_ngfw_data_by_request_id(request_id).get("state", {})
         if gdc_state:
             import gdc_vmseries_ngfw
@@ -75,13 +84,17 @@ def _cleanup_failed_ngfw_provision(request_id: str, instance_id: str, app_spec: 
             gdc_vmseries_ngfw.destroy_ngfw(gdc_state)
         return
 
-    tf_vars = _build_tf_variables(request_id, instance_id, app_spec)
-    terraform_runner.destroy_ngfw(
-        request_id,
-        terraform_runner.NGFW_MODULE_PATH,
-        variables=tf_vars,
-    )
-    terraform_runner.cleanup_ngfw_state(request_id)
+    if provider == "aws":
+        tf_vars = _build_tf_variables(request_id, instance_id, app_spec)
+        terraform_runner.destroy_ngfw(
+            request_id,
+            terraform_runner.NGFW_MODULE_PATH,
+            variables=tf_vars,
+        )
+        terraform_runner.cleanup_ngfw_state(request_id)
+        return
+
+    raise CloudProviderNotImplementedError(provider)
 
 
 def run_ngfw_terraform(operation: str, request_id: str) -> None:

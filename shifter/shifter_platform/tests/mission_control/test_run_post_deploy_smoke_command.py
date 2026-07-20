@@ -58,11 +58,8 @@ def smoke_command_mocks(monkeypatch):
     monkeypatch.setattr(smoke_command, "probe_rdp_endpoint", mocks.probe_rdp)
     monkeypatch.setattr(smoke_command, "get_ssh_connection_info", mocks.ssh_info)
     monkeypatch.setattr(smoke_command, "get_rdp_connection_info", mocks.rdp_info)
-    # Both variants now resolve agents (basic's from_agent victim requires one),
-    # so provide the agent IDs the variants read. create_range is mocked, so the
-    # values are inert.
-    monkeypatch.setenv("SMOKE_LINUX_AGENT_ID", "43")
-    monkeypatch.setenv("SMOKE_WINDOWS_AGENT_ID", "42")
+    # The smoke provisions from base AMIs (no from_agent instances), so no
+    # SMOKE_*_AGENT_ID env is needed and create_range receives empty agents.
     return mocks
 
 
@@ -87,6 +84,8 @@ def test_run_post_deploy_smoke_success(
         str(request_id),
     )
     smoke_command_mocks.probe_ssh.assert_called_once_with("10.0.0.1", 22)
+    # Platform smoke: create_range gets empty agents_by_os (no agent fixture).
+    assert smoke_command_mocks.cms.create_range.call_args[0][2] == {}
 
 
 def test_run_post_deploy_smoke_missing_user_email(monkeypatch) -> None:
@@ -135,6 +134,39 @@ def test_run_post_deploy_smoke_provision_timeout(
     smoke_command_mocks.cms.destroy_range_by_request_id.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "terminal_status",
+    [ResourceStatus.FAILED, ResourceStatus.DESTROYED],
+)
+def test_run_post_deploy_smoke_terminal_status_fails_immediately_and_cleans_up(
+    terminal_status,
+    smoke_user,
+    monkeypatch,
+    fast_clock,
+    smoke_command_mocks,
+) -> None:
+    monkeypatch.setenv("SMOKE_TEST_USER_EMAIL", smoke_user.email)
+    request_id = uuid4()
+    sleeps: list[int] = []
+    monkeypatch.setattr(smoke_command.time, "sleep", sleeps.append)
+    smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
+    smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
+    smoke_command_mocks.cms.get_range_status_by_id.return_value = terminal_status.value
+
+    with pytest.raises(
+        CommandError,
+        match=rf"terminal status {terminal_status.value}.*request_id={request_id}",
+    ):
+        call_command("run_post_deploy_smoke", "--variant", "linux", "--poll-interval", "1")
+
+    assert sleeps == []
+    smoke_command_mocks.cms.get_range_status_by_id.assert_called_once_with(1)
+    smoke_command_mocks.cms.destroy_range_by_request_id.assert_called_once_with(
+        smoke_user,
+        str(request_id),
+    )
+
+
 def test_run_post_deploy_smoke_connectivity_failure(
     smoke_user,
     monkeypatch,
@@ -175,17 +207,16 @@ def test_run_post_deploy_smoke_windows_rdp_path(
     smoke_command_mocks,
 ) -> None:
     monkeypatch.setenv("SMOKE_TEST_USER_EMAIL", smoke_user.email)
-    monkeypatch.setenv("SMOKE_WINDOWS_AGENT_ID", "42")
-    monkeypatch.setenv("SMOKE_LINUX_AGENT_ID", "43")
     request_id = uuid4()
     windows_uuid = str(uuid4())
     smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
     smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
     smoke_command_mocks.cms.get_range_status_by_id.return_value = ResourceStatus.READY.value
+    # smoke_windows probes the plain Windows victim over RDP (role "victim", not "dc").
     smoke_command_mocks.cms.get_range_by_request_id.return_value = _range_context(
         instances=[
             SimpleNamespace(role="attacker", uuid=str(uuid4())),
-            SimpleNamespace(role="dc", uuid=windows_uuid),
+            SimpleNamespace(role="victim", uuid=windows_uuid),
         ]
     )
     smoke_command_mocks.rdp_info.return_value = {"host": "10.0.0.5", "port": 3389}

@@ -1,0 +1,40 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <link rel="icon" href="data:,">
+        <style>
+            .email-body {
+                font-family: Arial, sans-serif;
+                max-width: 600px;
+                margin: 0 auto;
+            }
+        </style>
+        <title>{% trans "Final results" %}</title>
+    </head>
+    <body class="email-body">
+        <h2>
+            {% blocktrans with v1=event.name %}{{ v1 }}: final results{% endblocktrans %}
+        </h2>
+        <p>
+            {% blocktrans with v1=participant.name %}Hi {{ v1 }},{% endblocktrans %}
+        </p>
+        <p>
+            {% trans "The event has ended. Your final standing:" %}
+        </p>
+        <ul>
+            <li>{% trans "Rank:" %} {{ final_rank }}</li>
+            <li>{% trans "Score:" %} {{ final_score }}</li>
+            <li>{% trans "Solves:" %} {{ solve_count }}</li>
+        </ul>
+        <p>
+            {% trans "Top of the board:" %} {{ top_summary }}
+        </p>
+        <p>
+            <em>{% blocktrans with v1=event.name %}— {{ v1 }} Organizers{% endblocktrans %}</em>
+        </p>
+    </body>
+</html>

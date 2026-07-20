@@ -18,8 +18,13 @@ from django.utils import timezone
 from cms.assets.s3 import S3Error
 from cms.assets.s3 import delete_agent as s3_delete
 from cms.models import AgentConfig, AgentType, OperatingSystem
-from risk_register.models import AuditLog
-from risk_register.services import AuditEvent, audit_log
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+    AuditEvent,
+    audit_log,
+)
 from shared.exceptions import AssetError
 from shared.log_sanitize import safe_log_value
 
@@ -136,10 +141,10 @@ def create_agent(user: User, spec: AgentUploadSpec) -> AgentConfig:
 
     audit_log(
         AuditEvent(
-            entity_type=AuditLog.EntityType.AGENT,
+            entity_type=AuditEntityType.AGENT,
             entity_id=agent.id,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
+            action=AuditAction.CREATE,
+            actor_type=AuditActorType.USER,
             actor_id=user.id,
             new_state=new_state,
         )
@@ -183,10 +188,10 @@ def delete_agent(agent: AgentConfig) -> None:
     # Audit log agent deletion
     audit_log(
         AuditEvent(
-            entity_type=AuditLog.EntityType.AGENT,
+            entity_type=AuditEntityType.AGENT,
             entity_id=agent.id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
+            action=AuditAction.DELETE,
+            actor_type=AuditActorType.USER,
             actor_id=agent.user.id,
             previous_state=previous_state,
         )

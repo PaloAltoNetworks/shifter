@@ -485,7 +485,7 @@ class TestBracketViews:
             registered_at=timezone.now(),
         )
         response = authenticated_organizer_client.post(
-            f"/ctf/api/participants/{participant.pk}/bracket/",
+            f"/api/v1/ctf/participants/{participant.pk}/bracket/",
             json.dumps({"bracket_id": str(beginner.id)}),
             content_type="application/json",
         )
@@ -511,7 +511,7 @@ class TestBracketViews:
             bracket=beginner,
         )
         response = authenticated_organizer_client.post(
-            f"/ctf/api/participants/{participant.pk}/bracket/",
+            f"/api/v1/ctf/participants/{participant.pk}/bracket/",
             json.dumps({"bracket_id": None}),
             content_type="application/json",
         )

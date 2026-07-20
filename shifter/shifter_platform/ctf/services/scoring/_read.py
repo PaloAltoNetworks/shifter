@@ -41,7 +41,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 
 from ctf.models import CTFAward, CTFParticipant, CTFSubmission, CTFTeam
-from ctf.services.participant import eligible_participant_q
+from ctf.services.participant import ranked_participant_q
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -193,7 +193,7 @@ def _materialized_scoreboard(
         base_filter["bracket_id"] = bracket_id
 
     participants = (
-        CTFParticipant.objects.filter(eligible_participant_q(), **base_filter)
+        CTFParticipant.objects.filter(ranked_participant_q(), **base_filter)
         .annotate(
             computed_score=F("cached_score"),
             solve_count=F("cached_solve_count"),
@@ -233,7 +233,7 @@ def _recompute_scoreboard(
         base_filter["bracket_id"] = bracket_id
 
     participants = (
-        CTFParticipant.objects.filter(eligible_participant_q(), **base_filter)
+        CTFParticipant.objects.filter(ranked_participant_q(), **base_filter)
         .annotate(
             submission_score=Coalesce(
                 Subquery(
@@ -332,22 +332,23 @@ def _recompute_team_scoreboard(
 
     Pre-aggregate submissions and awards as separate per-team subqueries (each
     over its own join) and add them in Python, so a member with both a solve and
-    an award does not cause cartesian-product row multiplication. Eligibility is
-    applied inside each subquery so disqualified members do not leak into totals.
+    an award does not cause cartesian-product row multiplication. Ranked-visibility is
+    applied inside each subquery so non-ranked members (disqualified, banned,
+    hidden, observers) do not leak into totals.
     """
-    member_eligibility_via_team = eligible_participant_q("members__")
+    member_eligibility_via_team = ranked_participant_q("members__")
 
     submission_qs = CTFSubmission.objects.filter(
         is_correct=True,
         participant__team_id=OuterRef("pk"),
-    ).filter(eligible_participant_q("participant__"))
+    ).filter(ranked_participant_q("participant__"))
     if freeze_at:
         submission_qs = submission_qs.filter(submitted_at__lt=freeze_at)
     if bracket_id is not None:
         submission_qs = submission_qs.filter(participant__bracket_id=bracket_id)
 
     award_qs = CTFAward.objects.filter(participant__team_id=OuterRef("pk")).filter(
-        eligible_participant_q("participant__")
+        ranked_participant_q("participant__")
     )
     if freeze_at:
         award_qs = award_qs.filter(created_at__lt=freeze_at)
@@ -396,7 +397,7 @@ def _recompute_team_scoreboard(
     dedupe_qs = CTFSubmission.objects.filter(
         is_correct=True,
         participant__team__event_id=event_id,
-    ).filter(eligible_participant_q("participant__"))
+    ).filter(ranked_participant_q("participant__"))
     if freeze_at:
         dedupe_qs = dedupe_qs.filter(submitted_at__lt=freeze_at)
     if bracket_id is not None:
@@ -439,7 +440,7 @@ def get_participant_rank(participant_id: UUID) -> int | None:
     # participant does not appear on the board, so both return None (matching the
     # prior get_scoreboard-based behavior) without a second eligibility lookup.
     participant = (
-        CTFParticipant.objects.filter(eligible_participant_q(), pk=participant_id)
+        CTFParticipant.objects.filter(ranked_participant_q(), pk=participant_id)
         .only("event_id", "cached_score", "last_solve_at")
         .first()
     )
@@ -450,7 +451,7 @@ def get_participant_rank(participant_id: UUID) -> int | None:
     my_last = participant.last_solve_at or _RANK_NULL_LAST
 
     ahead = (
-        CTFParticipant.objects.filter(eligible_participant_q(), event_id=participant.event_id)
+        CTFParticipant.objects.filter(ranked_participant_q(), event_id=participant.event_id)
         .annotate(eff_last=Coalesce("last_solve_at", Value(_RANK_NULL_LAST, output_field=DateTimeField())))
         .filter(Q(cached_score__gt=my_score) | Q(cached_score=my_score, eff_last__lt=my_last))
         .count()

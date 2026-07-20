@@ -21,7 +21,8 @@ from installation.registry import (
 # What the provisional registry must keep accepting (carried over unchanged from the
 # pre-#1113 ``installation.backends`` data, which the registry supersedes).
 _EXPECTED_PROFILES: dict[str, frozenset[str]] = {
-    "aws": frozenset({"prod", "dev"}),
+    # AWS admits the real ``proof`` tier (#728); GCP stays prod/dev (#729, no proof tier).
+    "aws": frozenset({"prod", "dev", "proof"}),
     "gcp": frozenset({"prod", "dev"}),
 }
 
@@ -43,14 +44,10 @@ def test_each_bundle_is_a_well_formed_backend_bundle(name):
     assert bundle.name == name
     assert bundle.contract_version in SUPPORTED_CONTRACT_VERSIONS
     assert bundle.supported_profiles == _EXPECTED_PROFILES[name]
-    # Provisional entries: per-backend settings / secret-reference enforcement lands with
-    # the migration issues, so the schema accepts any settings mapping and references for
-    # now.
-    assert bundle.settings_model is None
-    assert all(secret.reference_pattern is None for secret in bundle.required_secrets)
-    # A backend that ships today still declares the tools, secrets, checks, outputs, owned
-    # files, and capabilities it needs — the contract is machine-readable enough for
-    # validation and docs generation.
+    # A backend that ships today declares the tools, secrets, checks, outputs, owned files,
+    # and capabilities it needs — the contract is machine-readable enough for validation and
+    # docs generation. (settings_model / reference_pattern completeness is asserted per
+    # backend below: both aws (#728) and gcp (#729) are migrated.)
     assert bundle.required_tools
     assert bundle.required_secrets
     assert bundle.validation_checks
@@ -58,6 +55,42 @@ def test_each_bundle_is_a_well_formed_backend_bundle(name):
     assert bundle.capabilities
     assert bundle.generated_outputs
     assert bundle.owned_files.infrastructure
+
+
+def test_aws_bundle_is_migrated_with_a_closed_settings_model_and_reference_patterns():
+    # #728: the AWS bundle is no longer provisional — it exposes a closed (extra='forbid')
+    # settings model and a machine-readable reference pattern on every required secret.
+    from pydantic import BaseModel
+
+    from installation.registry import AwsSettings
+
+    aws = BACKEND_BUNDLES["aws"]
+    assert aws.settings_model is AwsSettings
+    assert issubclass(aws.settings_model, BaseModel)
+    assert aws.settings_model.model_config.get("extra") == "forbid"
+    assert aws.required_secrets  # django_secret_key + db_password
+    assert all(secret.reference_pattern for secret in aws.required_secrets)
+
+
+def test_gcp_bundle_is_migrated_with_a_closed_settings_model_and_reference_pattern():
+    # #729 completed the GCP bundle: a closed settings model and an enforced secret
+    # reference grammar for the operator-supplied Django secret.
+    from installation.settings_gcp import GcpBackendSettings
+
+    gcp = BACKEND_BUNDLES["gcp"]
+    assert gcp.settings_model is GcpBackendSettings
+    assert gcp.settings_model.model_config.get("extra") == "forbid"
+    django = next(s for s in gcp.required_secrets if s.logical_name == "django_secret_key")
+    assert django.reference_pattern is not None
+
+
+def test_aws_admits_the_real_proof_profile_but_gcp_does_not():
+    # proof is a real AWS deployment tier (platform/terraform/environments/proof plus the
+    # aws-proof deploy path in deploy.yml / _core.yml / _range.yml); it is admitted
+    # explicitly rather than stranded (#728). GCP's proof, if any, is #729.
+    aws = BACKEND_BUNDLES["aws"]
+    assert aws.supports_profile("proof")
+    assert "proof" not in BACKEND_BUNDLES["gcp"].supported_profiles
 
 
 def test_get_backend_bundle_round_trips():

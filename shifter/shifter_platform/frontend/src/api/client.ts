@@ -24,6 +24,11 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+export interface DownloadOptions extends RequestOptions {
+  expectedMediaType: string;
+  maxBytes: number;
+}
+
 function newRequestId(): string {
   // crypto.randomUUID exists only in secure contexts (HTTPS / localhost). Over
   // plain HTTP (a LAN/dev origin) it is undefined, so fall back to
@@ -49,26 +54,45 @@ function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   return `${url.pathname}${url.search}`;
 }
 
-export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+function buildRequest(options: RequestOptions): {
+  method: string;
+  init: RequestInit;
+} {
   const method = (options.method ?? "GET").toUpperCase();
   const headers: Record<string, string> = { "X-Request-ID": newRequestId() };
 
   let body: BodyInit | undefined;
-  if (options.body !== undefined) {
+  if (options.body instanceof FormData) {
+    body = options.body;
+  } else if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
   if (UNSAFE_METHODS.has(method)) {
     headers["X-CSRFToken"] = getCsrfToken();
   }
-
-  const response = await fetch(buildUrl(path, options.query), {
+  return {
     method,
-    headers,
-    body,
-    credentials: "same-origin",
-    signal: options.signal,
-  });
+    init: {
+      method,
+      headers,
+      body,
+      credentials: "same-origin",
+      signal: options.signal,
+    },
+  };
+}
+
+function errorFromPayload(status: number, payload: unknown): ApiError {
+  const envelope =
+    (payload as { error?: ApiErrorEnvelope } | undefined)?.error ??
+    ({ code: "error", message: `Request failed (${status})` } satisfies ApiErrorEnvelope);
+  return new ApiError(status, envelope);
+}
+
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { init } = buildRequest(options);
+  const response = await fetch(buildUrl(path, options.query), init);
 
   if (response.status === 204) {
     return undefined as T;
@@ -78,11 +102,39 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   const payload: unknown = text ? JSON.parse(text) : undefined;
 
   if (!response.ok) {
-    const envelope =
-      (payload as { error?: ApiErrorEnvelope } | undefined)?.error ??
-      ({ code: "error", message: `Request failed (${response.status})` } satisfies ApiErrorEnvelope);
-    throw new ApiError(response.status, envelope);
+    throw errorFromPayload(response.status, payload);
   }
 
   return payload as T;
+}
+
+/** Fetch a bounded binary response while retaining the canonical JSON error path. */
+export async function apiDownload(path: string, options: DownloadOptions): Promise<Blob> {
+  const { init } = buildRequest(options);
+  const response = await fetch(buildUrl(path, options.query), init);
+  const mediaType = response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+
+  if (!response.ok) {
+    const text = await response.text();
+    let payload: unknown;
+    try {
+      payload = text ? JSON.parse(text) : undefined;
+    } catch {
+      payload = undefined;
+    }
+    throw errorFromPayload(response.status, payload);
+  }
+  if (mediaType !== options.expectedMediaType.toLowerCase()) {
+    throw new ApiError(502, { code: "unexpected_response", message: "The server returned an invalid download." });
+  }
+
+  const contentLength = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(contentLength) && contentLength > options.maxBytes) {
+    throw new ApiError(502, { code: "unexpected_response", message: "The download exceeded the allowed size." });
+  }
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength > options.maxBytes) {
+    throw new ApiError(502, { code: "unexpected_response", message: "The download exceeded the allowed size." });
+  }
+  return new Blob([bytes], { type: options.expectedMediaType });
 }

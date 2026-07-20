@@ -8,8 +8,11 @@ ranges for an event. Loads participants through the shared validator in
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+from django.conf import settings
 
 from ctf.exceptions import CTFNotFoundError, CTFRangeError
 from ctf.models import CTFEvent, CTFParticipant
@@ -118,24 +121,33 @@ def cleanup_event_ranges(event_id: UUID) -> dict[str, Any]:
             details={"event_id": str(event_id)},
         ) from None
 
-    participants = CTFParticipant.objects.filter(
-        event=event,
-        range_instance_id__isnull=False,
-    ).select_related("user")
+    participants = list(
+        CTFParticipant.objects.filter(
+            event=event,
+            range_instance_id__isnull=False,
+        ).select_related("user")
+    )
 
     destroyed = 0
     failed = 0
 
-    for participant in participants:
-        try:
-            _destroy_single_range(participant, participant.user)
-            destroyed += 1
-        except Exception:
-            failed += 1
-            logger.exception(
-                "Failed to destroy range for participant %s",
-                participant.pk,
-            )
+    # CTF-1003: destroy in batches with a pause between them so a large event
+    # does not hammer the cloud APIs into throttling.
+    batch_size = max(1, int(getattr(settings, "CTF_RANGE_CLEANUP_BATCH_SIZE", 10)))
+    batch_pause = float(getattr(settings, "CTF_RANGE_CLEANUP_BATCH_PAUSE_SECONDS", 5))
+    for start in range(0, len(participants), batch_size):
+        if start and batch_pause > 0:
+            time.sleep(batch_pause)
+        for participant in participants[start : start + batch_size]:
+            try:
+                _destroy_single_range(participant, participant.user)
+                destroyed += 1
+            except Exception:
+                failed += 1
+                logger.exception(
+                    "Failed to destroy range for participant %s",
+                    participant.pk,
+                )
 
     _cleanup_event_spares_best_effort(event_id)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from mission_control.api._vpn import MissionControlVpnProfileView
 from mission_control.api.aces import (
     AcesOperationReceiptListView,
     AcesOperationStatusListView,
@@ -23,8 +24,10 @@ from mission_control.api.ranges import (
     CancelRangeView,
     CurrentRangeView,
     DestroyRangeView,
+    ExtendRangeLeaseView,
     LaunchRangeView,
     PauseRangeView,
+    RangeHistoryView,
     ResumeRangeView,
     ScenarioListView,
 )
@@ -38,9 +41,11 @@ from mission_control.api.resources import (
 from mission_control.api.uploads import UploadCancelView, UploadCompleteView, UploadInitiateView
 from mission_control.views._guacamole import _get_guac_settings
 
-# Legacy ``mission_control.views`` export names. These remain callables so
-# existing direct imports and URL names keep working while the implementation is
-# DRF underneath.
+# Function-style handles for the Mission Control DRF views, used by unit tests
+# that exercise view behaviour directly. The ``/api/v1/mission-control/`` URLconf
+# mounts the view classes (``*.as_view()``) directly; these aliases are the
+# canonical import target now that the legacy ``/mission-control/api/*``
+# re-export layer was retired (#1328).
 get_range = CurrentRangeView.as_view()
 launch_range = LaunchRangeView.as_view()
 cancel_range = CancelRangeView.as_view()
@@ -75,16 +80,19 @@ __all__ = (
     "CredentialDeleteView",
     "CurrentRangeView",
     "DestroyRangeView",
+    "ExtendRangeLeaseView",
     "GuacamoleBootstrapOpenView",
     "GuacamoleBootstrapStatusView",
     "GuacamoleNGFWSSHURLView",
     "GuacamoleRDPURLView",
     "GuacamoleRangeSSHURLView",
     "LaunchRangeView",
+    "MissionControlVpnProfileView",
     "NGFWCreateView",
     "NGFWDestroyView",
     "NGFWListView",
     "PauseRangeView",
+    "RangeHistoryView",
     "ResumeRangeView",
     "ScenarioListView",
     "UploadCancelView",

@@ -394,3 +394,81 @@ class TestRangeInstanceRangeSpec:
 
         field = RangeInstance._meta.get_field("range_spec")
         assert isinstance(field, JSONField)
+
+
+# ---------------------------------------------------------------------------
+# TestActiveRangeUniqueConstraint (#307)
+# ---------------------------------------------------------------------------
+
+
+class TestActiveRangeUniqueConstraint:
+    """The partial unique constraint enforcing one active range per (user, source).
+
+    "Active" mirrors ``cms.services.get_active_range``: a non-soft-deleted row
+    whose status is not ``destroying``. This is the race-proof DB backstop behind
+    the friendly service pre-check (#307), scoped per source so #450's Mission
+    Control + CTF coexistence is preserved.
+
+    These tests assert the DB behavior directly (``IntegrityError`` is raised on
+    both SQLite and PostgreSQL), so no ``postgres`` marker is needed; the
+    ``_range_create_concurrency`` module proves the real concurrent race.
+    """
+
+    def _active(self, RangeInstance, **kwargs):
+        defaults = {"scenario_id": "basic", "user_id": 1, "status": "provisioning"}
+        defaults.update(kwargs)
+        return RangeInstance.objects.create(**defaults)
+
+    def test_constraint_is_declared(self, RangeInstance):
+        from cms.models import ACTIVE_RANGE_UNIQUE_CONSTRAINT
+
+        names = {c.name for c in RangeInstance._meta.constraints}
+        assert ACTIVE_RANGE_UNIQUE_CONSTRAINT in names
+
+    @pytest.mark.django_db
+    def test_second_active_same_source_rejected(self, RangeInstance):
+        from django.db import IntegrityError, transaction
+
+        self._active(RangeInstance, user_id=1)
+        with pytest.raises(IntegrityError), transaction.atomic():
+            self._active(RangeInstance, user_id=1)
+
+    @pytest.mark.django_db
+    def test_mission_control_and_ctf_coexist(self, RangeInstance):
+        # #450: the same user may hold one MC and one CTF active range at once.
+        self._active(RangeInstance, user_id=1, range_source="mission_control")
+        self._active(RangeInstance, user_id=1, range_source="ctf")  # must not raise
+        assert RangeInstance.objects.filter(user_id=1).count() == 2
+
+    @pytest.mark.django_db
+    def test_different_users_unaffected(self, RangeInstance):
+        self._active(RangeInstance, user_id=1)
+        self._active(RangeInstance, user_id=2)  # must not raise
+        assert RangeInstance.objects.filter(status="provisioning").count() == 2
+
+    @pytest.mark.django_db
+    def test_new_active_allowed_after_terminal_soft_delete(self, RangeInstance):
+        # DESTROYED is terminal: save() soft-deletes the row (deleted_at set), so
+        # it leaves the active predicate and frees the slot.
+        first = self._active(RangeInstance, user_id=1)
+        first.status = "destroyed"
+        first.save()
+        first.refresh_from_db()
+        assert first.deleted_at is not None
+
+        self._active(RangeInstance, user_id=1)  # must not raise
+        assert RangeInstance.objects.filter(user_id=1).count() == 1
+        assert RangeInstance.all_objects.filter(user_id=1).count() == 2
+
+    @pytest.mark.django_db
+    def test_destroying_frees_the_slot(self, RangeInstance):
+        # DESTROYING is not terminal (no soft-delete) but is excluded from the
+        # active predicate, so a new range may be launched while one is torn down.
+        first = self._active(RangeInstance, user_id=1, status="provisioning")
+        first.status = "destroying"
+        first.save()
+        first.refresh_from_db()
+        assert first.deleted_at is None
+
+        self._active(RangeInstance, user_id=1)  # must not raise
+        assert RangeInstance.objects.filter(user_id=1).exclude(status="destroying").count() == 1

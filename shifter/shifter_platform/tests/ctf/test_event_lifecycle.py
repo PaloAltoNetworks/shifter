@@ -119,6 +119,24 @@ def _make_mock_event(**kwargs):
     return _MockEvent(**kwargs)
 
 
+def _make_db_event(organizer_user, status, name="Lifecycle Event", **overrides):
+    """Create a real CTFEvent in the given status for behavioral transition tests."""
+    from ctf.models import CTFEvent
+
+    fields = {
+        "name": name,
+        "description": "Behavioral lifecycle test event",
+        "created_by": organizer_user,
+        "status": status,
+        "event_start": timezone.now() + timedelta(days=1),
+        "event_end": timezone.now() + timedelta(days=1, hours=8),
+        "scenario_id": "basic",
+        "auto_cleanup": False,
+    }
+    fields.update(overrides)
+    return CTFEvent.objects.create(**fields)
+
+
 @pytest.fixture
 def mock_event():
     """A scheduled event owned by user pk=1."""
@@ -176,7 +194,7 @@ def _mock_auth_organizer(mock_user):
         patch("django.contrib.auth.middleware.get_user", return_value=mock_user),
         patch("ctf.context_processors.ctf_navigation", return_value=ctx_proc_defaults),
         patch("mission_control.context_processors.active_range", return_value=range_ctx_defaults),
-        patch("shared.context_processors.user_permissions", return_value={"can_access_threat_research": False}),
+        patch("config.context_processors.user_permissions", return_value={"can_access_threat_research": False}),
     ):
         yield
 
@@ -215,15 +233,20 @@ class TestEventStatusTransitions:
     ORM .save() and .refresh_from_db() are mocked on the event objects.
     """
 
-    def test_schedule_draft_event(self, mock_event_draft):
-        """Should be able to schedule a draft event."""
-        with patch("ctf.services.event._schedule_event_tasks"):
-            from ctf.services import schedule_event
+    @pytest.mark.django_db
+    def test_schedule_draft_event(self, organizer_user):
+        """Scheduling a draft event opens registration and creates its tasks."""
+        from ctf.models import CTFScheduledTask
+        from ctf.services import schedule_event
 
-            result = schedule_event(mock_event_draft)
+        event = _make_db_event(organizer_user, EventStatus.DRAFT.value)
+        result = schedule_event(event)
+
         assert result is True
-        assert mock_event_draft.status == EventStatus.REGISTRATION.value
-        mock_event_draft.save.assert_called_once()
+        event.refresh_from_db()
+        assert event.status == EventStatus.REGISTRATION.value
+        # Observable side effect of scheduling: lifecycle automation tasks exist.
+        assert CTFScheduledTask.objects.filter(event=event).exists()
 
     def test_activate_scheduled_event(self, mock_event):
         """Should be able to activate a scheduled event."""
@@ -260,31 +283,36 @@ class TestEventStatusTransitions:
         event.refresh_from_db()
         assert event.status == EventStatus.ENDED.value
 
-    def test_cancel_draft_event(self, mock_event_draft):
+    @pytest.mark.django_db
+    def test_cancel_draft_event(self, organizer_user):
         """Should be able to cancel a draft event."""
-        with (
-            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
-            patch("ctf.services.event._cancel_event_tasks"),
-            patch("ctf.services.range.cleanup_event_ranges"),
-        ):
+        with patch("ctf.services.range.cleanup_event_ranges"):
             from ctf.services import cancel_event
 
-            result = cancel_event(mock_event_draft)
+            event = _make_db_event(organizer_user, EventStatus.DRAFT.value)
+            result = cancel_event(event)
         assert result is True
-        assert mock_event_draft.status == EventStatus.CANCELLED.value
+        event.refresh_from_db()
+        assert event.status == EventStatus.CANCELLED.value
 
-    def test_cancel_scheduled_event(self, mock_event):
-        """Should be able to cancel a scheduled event."""
-        with (
-            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
-            patch("ctf.services.event._cancel_event_tasks"),
-            patch("ctf.services.range.cleanup_event_ranges"),
-        ):
-            from ctf.services import cancel_event
+    @pytest.mark.django_db
+    def test_cancel_scheduled_event(self, organizer_user):
+        """Cancelling a scheduled event cancels its pending automation tasks."""
+        from ctf.enums import ScheduledTaskStatus
+        from ctf.models import CTFScheduledTask
+        from ctf.services import cancel_event, schedule_event
 
-            result = cancel_event(mock_event)
+        event = _make_db_event(organizer_user, EventStatus.DRAFT.value)
+        schedule_event(event)
+        assert CTFScheduledTask.objects.filter(event=event, status=ScheduledTaskStatus.PENDING.value).exists()
+
+        with patch("ctf.services.range.cleanup_event_ranges"):
+            result = cancel_event(event)
+
         assert result is True
-        assert mock_event.status == EventStatus.CANCELLED.value
+        event.refresh_from_db()
+        assert event.status == EventStatus.CANCELLED.value
+        assert not CTFScheduledTask.objects.filter(event=event, status=ScheduledTaskStatus.PENDING.value).exists()
 
     def test_cannot_activate_draft_event(self, mock_event_draft):
         """Should not be able to activate a draft event directly."""
@@ -395,32 +423,28 @@ class TestEventStatusTransitions:
         assert result is False
         assert archived_event.status == EventStatus.ARCHIVED.value
 
-    def test_cancel_paused_event(self):
+    @pytest.mark.django_db
+    def test_cancel_paused_event(self, organizer_user):
         """Should be able to cancel a paused event."""
         from ctf.services import cancel_event
 
-        paused_event = _make_mock_event(status=EventStatus.PAUSED.value)
-        with (
-            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
-            patch("ctf.services.event._cancel_event_tasks"),
-            patch("ctf.services.range.cleanup_event_ranges"),
-        ):
+        paused_event = _make_db_event(organizer_user, EventStatus.PAUSED.value)
+        with patch("ctf.services.range.cleanup_event_ranges"):
             result = cancel_event(paused_event)
         assert result is True
+        paused_event.refresh_from_db()
         assert paused_event.status == EventStatus.CANCELLED.value
 
-    def test_cancel_registration_event(self):
+    @pytest.mark.django_db
+    def test_cancel_registration_event(self, organizer_user):
         """Should be able to cancel an event in registration."""
         from ctf.services import cancel_event
 
-        reg_event = _make_mock_event(status=EventStatus.REGISTRATION.value)
-        with (
-            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
-            patch("ctf.services.event._cancel_event_tasks"),
-            patch("ctf.services.range.cleanup_event_ranges"),
-        ):
+        reg_event = _make_db_event(organizer_user, EventStatus.REGISTRATION.value)
+        with patch("ctf.services.range.cleanup_event_ranges"):
             result = cancel_event(reg_event)
         assert result is True
+        reg_event.refresh_from_db()
         assert reg_event.status == EventStatus.CANCELLED.value
 
     def test_valid_transitions_covers_all_states(self):
@@ -527,62 +551,79 @@ class TestEventServices:
         assert mine.pk in pks
         assert theirs.pk not in pks
 
-    def test_get_event_returns_event(self, mock_event):
+    def test_get_organizer_events_filters_by_status(self, organizer_user):
+        """get_organizer_events(status=...) applies the status filter against real rows.
+
+        Regression guard for the admin_event_list ``?status=`` path: dropping
+        ``filter(status=status)`` would leak the active event into a draft-only
+        query here, where the view test that mocks the service could not catch it.
+        """
+        from ctf.models import CTFEvent
+        from ctf.services import get_organizer_events
+
+        draft = CTFEvent.objects.create(
+            name="Draft one",
+            created_by=organizer_user,
+            status=EventStatus.DRAFT.value,
+            event_start=timezone.now() + timedelta(days=1),
+            event_end=timezone.now() + timedelta(days=1, hours=8),
+            scenario_id="basic",
+        )
+        active = CTFEvent.objects.create(
+            name="Active one",
+            created_by=organizer_user,
+            status=EventStatus.ACTIVE.value,
+            event_start=timezone.now() + timedelta(days=1),
+            event_end=timezone.now() + timedelta(days=1, hours=8),
+            scenario_id="basic",
+        )
+
+        draft_pks = {e.pk for e in get_organizer_events(organizer_user, status=EventStatus.DRAFT.value)}
+        assert draft.pk in draft_pks
+        assert active.pk not in draft_pks
+
+    @pytest.mark.django_db
+    def test_get_event_returns_event(self, organizer_user):
         """get_event should return event by ID."""
-        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
-            mock_objects.get.return_value = mock_event
-            from ctf.services import get_event
+        from ctf.services import get_event
 
-            event = get_event(mock_event.pk)
+        created = _make_db_event(organizer_user, EventStatus.REGISTRATION.value)
+        assert get_event(created.pk) == created
 
-        assert event == mock_event
-
+    @pytest.mark.django_db
     def test_get_event_not_found(self):
         """get_event should raise CTFNotFoundError for nonexistent event."""
         from ctf.exceptions import CTFNotFoundError
-        from ctf.models import CTFEvent
+        from ctf.services import get_event
 
-        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
-            mock_objects.get.side_effect = CTFEvent.DoesNotExist
-            from ctf.services import get_event
+        missing_id = uuid4()
+        with pytest.raises(CTFNotFoundError):
+            get_event(missing_id)
 
-            with pytest.raises(CTFNotFoundError):
-                get_event(uuid4())
+    @pytest.mark.django_db
+    def test_update_event(self, organizer_user):
+        """update_event should update and persist event fields."""
+        from ctf.services import update_event
 
-    def test_update_event(self, mock_event_draft):
-        """update_event should update event fields."""
-        mock_event_draft.is_modifiable = True
-        mock_event_draft.event_start = timezone.now() + timedelta(days=7)
-        mock_event_draft.event_end = timezone.now() + timedelta(days=7, hours=8)
-
-        with (
-            patch("ctf.services.event.CTFEvent.objects") as mock_objects,
-            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
-        ):
-            mock_objects.get.return_value = mock_event_draft
-            from ctf.services import update_event
-
-            updated = update_event(
-                mock_event_draft.pk,
-                {"name": "Updated Name", "description": "Updated description"},
-            )
-
-        assert updated.name == "Updated Name"
-        assert updated.description == "Updated description"
-
-    def test_update_event_blocked_for_terminal(self):
-        """update_event should block updates to terminal status events."""
-        from ctf.exceptions import CTFStateError
-
-        completed_event = _make_mock_event(
-            name="Completed",
-            status=EventStatus.ENDED.value,
-            is_modifiable=False,
+        event = _make_db_event(organizer_user, EventStatus.DRAFT.value)
+        updated = update_event(
+            event.pk,
+            {"name": "Updated Name", "description": "Updated description"},
         )
 
-        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
-            mock_objects.get.return_value = completed_event
-            from ctf.services import update_event
+        assert updated.name == "Updated Name"
+        event.refresh_from_db()
+        assert event.name == "Updated Name"
+        assert event.description == "Updated description"
 
-            with pytest.raises(CTFStateError):
-                update_event(completed_event.pk, {"name": "New Name"})
+    @pytest.mark.django_db
+    def test_update_event_blocked_for_terminal(self, organizer_user):
+        """update_event should block updates to terminal status events."""
+        from ctf.exceptions import CTFStateError
+        from ctf.services import update_event
+
+        completed_event = _make_db_event(organizer_user, EventStatus.ENDED.value, name="Completed")
+        with pytest.raises(CTFStateError):
+            update_event(completed_event.pk, {"name": "New Name"})
+        completed_event.refresh_from_db()
+        assert completed_event.name == "Completed"

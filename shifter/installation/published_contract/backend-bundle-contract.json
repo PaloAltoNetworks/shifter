@@ -1,0 +1,2224 @@
+{
+  "backend_bundle_schema": {
+    "$defs": {
+      "BackendCapability": {
+        "description": "A cloud-neutral capability protocol a backend can satisfy.\n\nThese name the seams under ``shared.cloud`` and ``engine/provisioner/cloud`` that\ndomain code already calls; a backend bundle *declares* which it provides, but it\ndoes not let domain code import provider packages directly.",
+        "enum": [
+          "storage",
+          "queue-consumer",
+          "queue-publisher",
+          "task-runner",
+          "secrets",
+          "config-store",
+          "event-bus",
+          "database-auth",
+          "network-inventory"
+        ],
+        "title": "BackendCapability",
+        "type": "string"
+      },
+      "BackendMaturity": {
+        "description": "How production-ready a backend bundle is.",
+        "enum": [
+          "experimental",
+          "beta",
+          "stable",
+          "deprecated"
+        ],
+        "title": "BackendMaturity",
+        "type": "string"
+      },
+      "CommandSpec": {
+        "additionalProperties": false,
+        "description": "A backend check/renderer invocation, as an argv array (never a shell string).",
+        "properties": {
+          "argv": {
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\s;&|`$<>]+$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "prefixItems": [
+              {
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              }
+            ],
+            "title": "Argv",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "argv",
+          "description"
+        ],
+        "title": "CommandSpec",
+        "type": "object"
+      },
+      "GeneratedOutput": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "sensitivity": {
+                  "const": "secret-value"
+                }
+              },
+              "required": [
+                "sensitivity"
+              ]
+            },
+            "then": {
+              "properties": {
+                "destination": {
+                  "enum": [
+                    "kubernetes-secret",
+                    "provider-secret-store"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "description": "A runtime/infrastructure/CI value a backend renderer produces.\n\n``sensitivity`` and ``destination`` together keep secret *values* out of non-secret\nplaces: a ``SECRET_VALUE`` output may only be placed in a Kubernetes Secret or a\nprovider secret store, never in a ConfigMap, Terraform variables, Helm values, a\ngenerated file, generated docs, a dry-run, or a plan comment.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/$defs/OutputDestination"
+          },
+          "kind": {
+            "$ref": "#/$defs/OutputKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "process_roles": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ProcessRole"
+            },
+            "title": "Process Roles",
+            "type": "array"
+          },
+          "sensitivity": {
+            "$ref": "#/$defs/OutputSensitivity"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "owner",
+          "source",
+          "destination",
+          "sensitivity",
+          "description"
+        ],
+        "title": "GeneratedOutput",
+        "type": "object"
+      },
+      "HealthCheck": {
+        "additionalProperties": false,
+        "description": "A read-only post-render or post-deploy probe.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_credentials": {
+            "title": "Requires Credentials",
+            "type": "boolean"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "target",
+          "requires_credentials",
+          "timeout_seconds",
+          "description"
+        ],
+        "title": "HealthCheck",
+        "type": "object"
+      },
+      "OutputDestination": {
+        "description": "Where a generated output is placed.\n\nUsed together with :class:`OutputSensitivity` to keep secret *values* out of\nnon-secret destinations: a ``SECRET_VALUE`` output may only land in a secret store.",
+        "enum": [
+          "runtime-env",
+          "kubernetes-secret",
+          "provider-secret-store",
+          "terraform-variables",
+          "helm-values",
+          "generated-file"
+        ],
+        "title": "OutputDestination",
+        "type": "string"
+      },
+      "OutputKind": {
+        "description": "The shape of a generated output.",
+        "enum": [
+          "runtime-env",
+          "terraform-var",
+          "terraform-output",
+          "helm-value",
+          "k8s-artifact",
+          "compat-alias"
+        ],
+        "title": "OutputKind",
+        "type": "string"
+      },
+      "OutputSensitivity": {
+        "description": "How a generated output must be handled.\n\n``PUBLIC`` values may appear in ConfigMaps, generated docs, and dry-run output;\n``SECRET_REFERENCE`` values are pointers (a provider secret name, a GitHub Actions\nsecret name, an env var, or ``prompt``); ``SECRET_VALUE`` is the secret material\nitself and must stay in a secret store or Kubernetes Secret — never a ConfigMap,\nlog, dry-run, or plan comment.",
+        "enum": [
+          "public",
+          "secret-reference",
+          "secret-value"
+        ],
+        "title": "OutputSensitivity",
+        "type": "string"
+      },
+      "OwnedFiles": {
+        "additionalProperties": false,
+        "description": "Repo-relative path roots a backend bundle owns, grouped by purpose.\n\nValidation and docs generation use these to find a backend's files without a branch\nrouter. Every entry must be repository-relative (no absolute host paths, no ``..``).",
+        "properties": {
+          "docs": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Docs",
+            "type": "array"
+          },
+          "examples": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "infrastructure": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Infrastructure",
+            "type": "array"
+          },
+          "kubernetes": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Kubernetes",
+            "type": "array"
+          },
+          "scripts": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Scripts",
+            "type": "array"
+          },
+          "workflows": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "title": "OwnedFiles",
+        "type": "object"
+      },
+      "ProcessRole": {
+        "description": "Which Shifter process a generated runtime output is for.",
+        "enum": [
+          "portal",
+          "worker",
+          "provisioner",
+          "range-task"
+        ],
+        "title": "ProcessRole",
+        "type": "string"
+      },
+      "RequiredSecret": {
+        "additionalProperties": false,
+        "description": "A secret the backend needs, declared by logical name and reference grammar.\n\nThe root config holds *references* (a per-provider secret name, a GitHub Actions\nsecret name, an env var, or ``prompt``), never values. ``reference_grammar`` is the\nhuman-readable description of what a valid reference looks like for this backend;\n``reference_pattern`` is the optional machine-readable form — an anchored regex a\nconsumer can match a supplied reference against. The provisional registry entries\nleave ``reference_pattern`` unset (no enforcement) until the backend supplies one,\njust like :attr:`BackendBundle.settings_model`.",
+        "properties": {
+          "logical_name": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Logical Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "reference_grammar": {
+            "title": "Reference Grammar",
+            "type": "string"
+          },
+          "reference_pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Pattern"
+          }
+        },
+        "required": [
+          "logical_name",
+          "purpose",
+          "reference_grammar"
+        ],
+        "title": "RequiredSecret",
+        "type": "object"
+      },
+      "RequiredTool": {
+        "additionalProperties": false,
+        "description": "A command-line tool the backend's setup/deploy/doctor flow needs.\n\n``name`` is the bare executable name a setup/doctor flow looks up on PATH (e.g.\n``terraform``, ``uv``), so it is held to the same grammar as a command spec's\n``argv[0]`` — not free-form text.",
+        "properties": {
+          "min_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Version"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "purpose"
+        ],
+        "title": "RequiredTool",
+        "type": "object"
+      },
+      "ValidationCheck": {
+        "additionalProperties": false,
+        "description": "A check a backend runs (or front-runs) before mutating infrastructure.",
+        "properties": {
+          "blocking": {
+            "default": true,
+            "title": "Blocking",
+            "type": "boolean"
+          },
+          "command": {
+            "$ref": "#/$defs/CommandSpec"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "command",
+          "description"
+        ],
+        "title": "ValidationCheck",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "The machine-readable contract a Shifter backend bundle exposes (PLAT-2003).",
+    "properties": {
+      "capabilities": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/BackendCapability"
+        },
+        "title": "Capabilities",
+        "type": "array",
+        "uniqueItems": true
+      },
+      "contract_version": {
+        "enum": [
+          1
+        ],
+        "title": "Contract Version",
+        "type": "integer"
+      },
+      "description": {
+        "title": "Description",
+        "type": "string"
+      },
+      "docs": {
+        "default": [],
+        "items": {
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+          "type": "string"
+        },
+        "title": "Docs",
+        "type": "array"
+      },
+      "generated_outputs": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/GeneratedOutput"
+        },
+        "title": "Generated Outputs",
+        "type": "array"
+      },
+      "health_checks": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/HealthCheck"
+        },
+        "title": "Health Checks",
+        "type": "array"
+      },
+      "maturity": {
+        "$ref": "#/$defs/BackendMaturity"
+      },
+      "name": {
+        "pattern": "^[a-z][a-z0-9-]*$",
+        "title": "Name",
+        "type": "string"
+      },
+      "owned_files": {
+        "$ref": "#/$defs/OwnedFiles",
+        "default": {
+          "docs": [],
+          "examples": [],
+          "infrastructure": [],
+          "kubernetes": [],
+          "scripts": [],
+          "workflows": []
+        }
+      },
+      "required_secrets": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RequiredSecret"
+        },
+        "title": "Required Secrets",
+        "type": "array"
+      },
+      "required_tools": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RequiredTool"
+        },
+        "title": "Required Tools",
+        "type": "array"
+      },
+      "settings_schema": {
+        "anyOf": [
+          {
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "The backend's settings JSON schema, or null when the bundle declares no settings model.",
+        "title": "Settings Schema"
+      },
+      "supported_profiles": {
+        "items": {
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "type": "string"
+        },
+        "title": "Supported Profiles",
+        "type": "array",
+        "uniqueItems": true
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      },
+      "validation_checks": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ValidationCheck"
+        },
+        "title": "Validation Checks",
+        "type": "array"
+      }
+    },
+    "required": [
+      "contract_version",
+      "name",
+      "title",
+      "maturity",
+      "description",
+      "supported_profiles"
+    ],
+    "title": "BackendBundle",
+    "type": "object"
+  },
+  "backends": {
+    "aws": {
+      "capabilities": [
+        "config-store",
+        "database-auth",
+        "event-bus",
+        "network-inventory",
+        "queue-consumer",
+        "queue-publisher",
+        "secrets",
+        "storage",
+        "task-runner"
+      ],
+      "contract_version": 1,
+      "description": "Shifter on AWS: ECS task execution, RDS, SQS, S3, Secrets Manager, and Cognito/OIDC identity, provisioned by the Terraform modules under platform/terraform (and the CloudFormation under platform/cloudformation) and deployed by the AWS workflow.",
+      "docs": [
+        "docs/architecture/root-configured-backend-bundles.md",
+        "shifter/installation/README.md"
+      ],
+      "generated_outputs": [
+        {
+          "description": "Selects the cloud adapter family at runtime for the portal, workers, and provisioner; emitted by the backend, never set from a branch name.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "CLOUD_PROVIDER",
+          "owner": "aws backend runtime-env renderer",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "the backend runtime-env renderer"
+        },
+        {
+          "description": "Reference to the app secret bundle (the AWS-style alias entrypoint.sh normalizes) in the portal/worker runtime environment; the process fetches the value from AWS Secrets Manager at startup (entrypoint.sh) — a reference only, the secret value stays in AWS Secrets Manager.",
+          "destination": "runtime-env",
+          "kind": "compat-alias",
+          "name": "APP_SECRET_ARN",
+          "owner": "aws backend runtime-env renderer",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "the backend runtime-env renderer (a AWS Secrets Manager reference for the app secret bundle (the AWS-style alias entrypoint.sh normalizes))"
+        },
+        {
+          "description": "Reference to the database secret (the AWS-style alias entrypoint.sh normalizes) in the portal/worker runtime environment; the process fetches the value from AWS Secrets Manager at startup (entrypoint.sh) — a reference only, the secret value stays in AWS Secrets Manager.",
+          "destination": "runtime-env",
+          "kind": "compat-alias",
+          "name": "DB_SECRET_ARN",
+          "owner": "aws backend runtime-env renderer",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "the backend runtime-env renderer (a AWS Secrets Manager reference for the database secret (the AWS-style alias entrypoint.sh normalizes))"
+        }
+      ],
+      "health_checks": [
+        {
+          "description": "Read-only probe of the portal /health/ endpoint after deploy.",
+          "name": "portal-health",
+          "requires_credentials": false,
+          "target": "https://<deployment.domain>/health/",
+          "timeout_seconds": 10
+        }
+      ],
+      "maturity": "stable",
+      "name": "aws",
+      "owned_files": {
+        "docs": [
+          "docs/technical/dev/ci-cd.md"
+        ],
+        "examples": [
+          "shifter/installation/examples/aws.yaml"
+        ],
+        "infrastructure": [
+          "platform/terraform/modules",
+          "platform/terraform/environments",
+          "platform/cloudformation"
+        ],
+        "kubernetes": [],
+        "scripts": [
+          "scripts/bootstrap"
+        ],
+        "workflows": [
+          ".github/workflows/deploy.yml"
+        ]
+      },
+      "required_secrets": [
+        {
+          "logical_name": "django_secret_key",
+          "purpose": "seeds the app secret bundle (Django SECRET_KEY) for the portal and workers",
+          "reference_grammar": "an AWS Secrets Manager secret name or ARN, a GitHub Actions secret name, an environment variable, or the literal 'prompt'",
+          "reference_pattern": "[A-Za-z0-9][A-Za-z0-9._/+=@:-]*"
+        },
+        {
+          "logical_name": "db_password",
+          "purpose": "application database password",
+          "reference_grammar": "an AWS Secrets Manager secret name or ARN, a GitHub Actions secret name, an environment variable, or the literal 'prompt'",
+          "reference_pattern": "[A-Za-z0-9][A-Za-z0-9._/+=@:-]*"
+        }
+      ],
+      "required_tools": [
+        {
+          "min_version": null,
+          "name": "uv",
+          "purpose": "run the Shifter installation tooling (shifter-config validate)"
+        },
+        {
+          "min_version": null,
+          "name": "terraform",
+          "purpose": "provision AWS infrastructure (platform/terraform)"
+        },
+        {
+          "min_version": null,
+          "name": "aws",
+          "purpose": "AWS CLI: authentication, Secrets Manager, and ECS deployment"
+        },
+        {
+          "min_version": null,
+          "name": "docker",
+          "purpose": "build the Shifter Platform container image"
+        }
+      ],
+      "settings_schema": {
+        "additionalProperties": false,
+        "description": "Closed operator-intent settings for the AWS backend (PLAT-2006, GH #728).\n\nOnly genuine operator intent lives here. Terraform variables, generated runtime\noutputs, workflow secret names, and provider SDK payloads are *not* settings — copying\nthem in would turn ``settings`` into a second provider schema (preflight #728).\n``extra='forbid'`` fails unknown AWS settings closed, so a typo or a stale key is a\nconfig-time error rather than a silently-ignored value.\n\nThe shared cross-backend ``range_egress`` policy is intentionally *absent*: it is owned\nand validated by :mod:`installation.range_egress` (which surfaces verbatim, non-secret\nCIDR diagnostics, #775), and the loader validates it separately for every backend. See\nthe module docstring.",
+        "properties": {
+          "region": {
+            "pattern": "^[a-z]{2}(?:-[a-z]+)+-\\d+$",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "region"
+        ],
+        "title": "AwsSettings",
+        "type": "object"
+      },
+      "supported_profiles": [
+        "dev",
+        "prod",
+        "proof"
+      ],
+      "title": "Amazon Web Services",
+      "validation_checks": [
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "uv",
+              "run",
+              "--project",
+              "shifter/installation",
+              "shifter-config",
+              "validate",
+              "shifter.yaml"
+            ],
+            "description": "Validate the root installation config (shifter.yaml) shape."
+          },
+          "description": "Fail fast on a malformed shifter.yaml before any backend infrastructure runs.",
+          "name": "root-config"
+        }
+      ]
+    },
+    "gcp": {
+      "capabilities": [
+        "config-store",
+        "database-auth",
+        "event-bus",
+        "network-inventory",
+        "queue-consumer",
+        "queue-publisher",
+        "secrets",
+        "storage",
+        "task-runner"
+      ],
+      "contract_version": 1,
+      "description": "Shifter on GCP: GKE workloads, Cloud SQL, Pub/Sub, GCS, Secret Manager, and Identity Platform identity, provisioned by the Terraform configuration under platform/terraform/gcp with Kubernetes overlays under platform/k8s/gcp and the shared Helm chart under platform/charts/shifter.",
+      "docs": [
+        "docs/architecture/root-configured-backend-bundles.md",
+        "shifter/installation/README.md"
+      ],
+      "generated_outputs": [
+        {
+          "description": "Public GCP runtime configuration value (AGENT_STORAGE_BUCKET) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "AGENT_STORAGE_BUCKET",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the APP_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "APP_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (AUTH_PROVIDER) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "AUTH_PROVIDER",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (CLOUD_PROJECT_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "CLOUD_PROJECT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (CLOUD_PROVIDER) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "CLOUD_PROVIDER",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (CSRF_COOKIE_SECURE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "CSRF_COOKIE_SECURE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DB_HOST) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_HOST",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DB_NAME) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_NAME",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DB_PORT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_PORT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the DB_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DB_USER) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_USER",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the DC_DOMAIN_PASSWORD_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DC_DOMAIN_PASSWORD_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DJANGO_ALLOWED_HOSTS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DJANGO_ALLOWED_HOSTS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DJANGO_CSRF_TRUSTED_ORIGINS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DJANGO_CSRF_TRUSTED_ORIGINS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DJANGO_DEBUG) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DJANGO_DEBUG",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (EMAIL_BACKEND) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "EMAIL_BACKEND",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (ENGINE_TASK_IMAGE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "ENGINE_TASK_IMAGE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_PROJECT_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_PROJECT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_BACKEND) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_BACKEND",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_CELL_PROJECT_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_CELL_PROJECT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the GDC_ACCESS_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GDC_ACCESS_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GDC_NETWORK_DNS_NAMESERVERS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GDC_NETWORK_DNS_NAMESERVERS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GDC_NETWORK_INTERFACE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GDC_NETWORK_INTERFACE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GDC_RANGE_NAMESPACE_PREFIX) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GDC_RANGE_NAMESPACE_PREFIX",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GDC_STATIC_IP_RESERVATION_COUNT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GDC_STATIC_IP_RESERVATION_COUNT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GOOGLE_CLOUD_PROJECT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GOOGLE_CLOUD_PROJECT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GUACAMOLE_API_BASE_URL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_API_BASE_URL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GUACAMOLE_BASE_URL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_BASE_URL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GUACAMOLE_POSTGRESQL_DATABASE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_POSTGRESQL_DATABASE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GUACAMOLE_POSTGRESQL_HOSTNAME) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_POSTGRESQL_HOSTNAME",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GUACAMOLE_POSTGRESQL_PORT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_POSTGRESQL_PORT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the GUACAMOLE_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_ALLOWED_EMAIL_DOMAIN) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_ALLOWED_EMAIL_DOMAIN",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_PLATFORM_API_KEY) emitted into the platform runtime environment. Browser client configuration for Identity Platform, not an authentication secret: it is public, but must not be dumped through logs or error messages.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_PLATFORM_API_KEY",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_PLATFORM_AUTH_DOMAIN) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_PLATFORM_AUTH_DOMAIN",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_PLATFORM_ISSUER) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_PLATFORM_ISSUER",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_PLATFORM_PROJECT_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_PLATFORM_PROJECT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_PLATFORM_TOTP_DISPLAY_NAME) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (PORTAL_NETWORK_CIDRS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PORTAL_NETWORK_CIDRS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (QUEUE_CMS_CONSUMER_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "QUEUE_CMS_CONSUMER_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (QUEUE_CMS_PUBLISHER_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "QUEUE_CMS_PUBLISHER_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (QUEUE_ENGINE_CONSUMER_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "QUEUE_ENGINE_CONSUMER_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (QUEUE_ENGINE_PUBLISHER_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "QUEUE_ENGINE_PUBLISHER_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (QUEUE_MC_CONSUMER_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "QUEUE_MC_CONSUMER_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (QUEUE_MC_PUBLISHER_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "QUEUE_MC_PUBLISHER_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_EVENTS_TOPIC_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_EVENTS_TOPIC_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_NETWORK_CIDR) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_NETWORK_CIDR",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_NETWORK_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_NETWORK_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_NETWORK_REGION) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_NETWORK_REGION",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_VPC_CIDR) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_VPC_CIDR",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_VPC_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_VPC_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (REDIS_HOST) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "REDIS_HOST",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (REDIS_PORT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "REDIS_PORT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the REDIS_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "REDIS_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (REDIS_TLS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "REDIS_TLS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (SESSION_COOKIE_SECURE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "SESSION_COOKIE_SECURE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (SITE_URL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "SITE_URL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (STORAGE_BUCKET_NAME) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "STORAGE_BUCKET_NAME",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (TF_STATE_BUCKET) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "TF_STATE_BUCKET",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DEFAULT_FROM_EMAIL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DEFAULT_FROM_EMAIL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the EMAIL_API_KEY_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "EMAIL_API_KEY_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_CELL_NETWORK_MODE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_CELL_NETWORK_MODE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_DC_DISK_SIZE_GB) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_DC_DISK_SIZE_GB",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_DC_DISK_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_DC_DISK_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_DC_IMAGE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_DC_IMAGE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_DC_MACHINE_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_DC_MACHINE_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_EGRESS_ALLOW_CIDRS) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_EGRESS_ALLOW_CIDRS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_HOST_MGMT_SSH_PORT) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_HOST_MGMT_SSH_PORT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_ANTHROPIC_MODEL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_KALI_ANTHROPIC_MODEL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_DISK_SIZE_GB) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_KALI_DISK_SIZE_GB",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_DISK_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_KALI_DISK_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_IMAGE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_KALI_IMAGE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_MACHINE_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_KALI_MACHINE_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_LINUX_DISK_SIZE_GB) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_LINUX_DISK_SIZE_GB",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_LINUX_DISK_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_LINUX_DISK_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_LINUX_IMAGE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_LINUX_IMAGE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_LINUX_MACHINE_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_LINUX_MACHINE_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_PLANE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_PLANE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_PRIVATE_GOOGLE_ACCESS) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_PRIVATE_GOOGLE_ACCESS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_VERTEX_PROJECT_ID) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_VERTEX_PROJECT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_VERTEX_REGION) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_VERTEX_REGION",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_WINDOWS_DISK_SIZE_GB) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_WINDOWS_DISK_SIZE_GB",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_WINDOWS_DISK_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_WINDOWS_DISK_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_WINDOWS_IMAGE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_WINDOWS_IMAGE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_RANGE_WINDOWS_MACHINE_TYPE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_RANGE_WINDOWS_MACHINE_TYPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner",
+            "range-task"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_ALLOWED_EMAILS) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_ALLOWED_EMAILS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (MAILGUN_SENDER_DOMAIN) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MAILGUN_SENDER_DOMAIN",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (PLATFORM_BOOTSTRAP_STAFF_EMAILS) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PLATFORM_BOOTSTRAP_STAFF_EMAILS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (POLARIS_TESTS_BUCKET) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "POLARIS_TESTS_BUCKET",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (POLARIS_TESTS_KEY) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "POLARIS_TESTS_KEY",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_NETWORK_ZONE) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_NETWORK_ZONE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        }
+      ],
+      "health_checks": [
+        {
+          "description": "Read-only probe of the portal /health/ endpoint after deploy.",
+          "name": "portal-health",
+          "requires_credentials": false,
+          "target": "https://<deployment.domain>/health/",
+          "timeout_seconds": 10
+        }
+      ],
+      "maturity": "stable",
+      "name": "gcp",
+      "owned_files": {
+        "docs": [
+          "platform/terraform/gcp/README.md",
+          "platform/k8s/gcp/README.md"
+        ],
+        "examples": [
+          "shifter/installation/examples/gcp.yaml"
+        ],
+        "infrastructure": [
+          "platform/terraform/gcp"
+        ],
+        "kubernetes": [
+          "platform/k8s/gcp",
+          "platform/charts/shifter"
+        ],
+        "scripts": [
+          "scripts/gcp",
+          "scripts/bootstrap"
+        ],
+        "workflows": [
+          ".github/workflows/_gcp-dev.yml"
+        ]
+      },
+      "required_secrets": [
+        {
+          "logical_name": "django_secret_key",
+          "purpose": "seeds the app secret bundle (Django SECRET_KEY) for the portal and workers",
+          "reference_grammar": "a Google Secret Manager resource name (projects/<project>/secrets/<name>/versions/<v>), a GitHub Actions secret name, an environment variable, or the literal 'prompt'",
+          "reference_pattern": "^(?:projects/[^/\\s]+/secrets/[^/\\s]+/versions/[^/\\s]+|[A-Za-z_][A-Za-z0-9_]*)$"
+        }
+      ],
+      "required_tools": [
+        {
+          "min_version": null,
+          "name": "uv",
+          "purpose": "run the Shifter installation tooling (shifter-config validate)"
+        },
+        {
+          "min_version": null,
+          "name": "terraform",
+          "purpose": "provision GCP infrastructure (platform/terraform/gcp)"
+        },
+        {
+          "min_version": null,
+          "name": "gcloud",
+          "purpose": "Google Cloud SDK: authentication, GKE credentials, Secret Manager"
+        },
+        {
+          "min_version": null,
+          "name": "helm",
+          "purpose": "render and install the platform chart (platform/charts/shifter)"
+        },
+        {
+          "min_version": null,
+          "name": "kubectl",
+          "purpose": "apply Kubernetes manifests under platform/k8s/gcp"
+        },
+        {
+          "min_version": null,
+          "name": "kube-linter",
+          "purpose": "lint the GCP Kubernetes manifests (platform/k8s/gcp) for security posture"
+        },
+        {
+          "min_version": null,
+          "name": "docker",
+          "purpose": "build the Shifter Platform container image"
+        }
+      ],
+      "settings_schema": {
+        "additionalProperties": false,
+        "description": "Closed operator-intent settings for the ``gcp`` backend bundle (PLAT-2003, #729).\n\nOnly genuine operator intent lives here (project and region). Terraform variables,\ngenerated runtime outputs, and provider SDK payloads are not settings — copying them in\nwould turn ``settings`` into a second provider schema. ``extra='forbid'`` fails unknown\nGCP settings closed. The shared cross-backend ``range_egress`` policy is deliberately not\ndeclared; the loader validates it separately for every backend (see the module docstring).",
+        "properties": {
+          "project_id": {
+            "description": "GCP project id: 6-30 characters, a lowercase letter followed by lowercase letters, digits, and hyphens, not ending in a hyphen.",
+            "maxLength": 30,
+            "minLength": 6,
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "region": {
+            "description": "Lowercase GCP region/location token (letters, digits, and internal hyphens), e.g. 'us-central1'.",
+            "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "region"
+        ],
+        "title": "GcpBackendSettings",
+        "type": "object"
+      },
+      "supported_profiles": [
+        "dev",
+        "prod"
+      ],
+      "title": "Google Cloud Platform",
+      "validation_checks": [
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "uv",
+              "run",
+              "--project",
+              "shifter/installation",
+              "shifter-config",
+              "validate",
+              "shifter.yaml"
+            ],
+            "description": "Validate the root installation config (shifter.yaml) shape."
+          },
+          "description": "Fail fast on a malformed shifter.yaml before any backend infrastructure runs.",
+          "name": "root-config"
+        },
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "terraform",
+              "fmt",
+              "-check",
+              "-recursive",
+              "platform/terraform/gcp"
+            ],
+            "description": "Check the GCP Terraform is canonically formatted."
+          },
+          "description": "Fail on unformatted GCP Terraform before planning or applying.",
+          "name": "terraform-fmt"
+        },
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "helm",
+              "template",
+              "platform/charts/shifter"
+            ],
+            "description": "Render the shared platform Helm chart to catch template errors."
+          },
+          "description": "Fail closed if the platform chart does not render.",
+          "name": "helm-template"
+        },
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "kubectl",
+              "kustomize",
+              "platform/k8s/gcp/overlays/gcp-dev"
+            ],
+            "description": "Render the GCP Kubernetes overlay to catch kustomize errors."
+          },
+          "description": "Fail closed if the GCP Kubernetes overlay does not render.",
+          "name": "kustomize-render"
+        },
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "kube-linter",
+              "lint",
+              "--config",
+              ".kube-linter.yaml",
+              "platform/k8s/gcp/"
+            ],
+            "description": "Lint the GCP Kubernetes manifests for workload security posture."
+          },
+          "description": "Enforce the Kubernetes workload security posture (PSS, capabilities, limits).",
+          "name": "kube-linter"
+        }
+      ]
+    }
+  },
+  "contract_version": 1,
+  "supported_contract_versions": [
+    1
+  ]
+}

@@ -61,11 +61,20 @@ on:
         required: false
       TF_VARS_PROOF_PORTAL:
         required: false
+      # Per-environment deployment shifter.yaml (full root installation config).
+      # The renderer-owned CLOUD_PROVIDER binding (PLAT-2005) is rendered from
+      # this config's settings.backend, so it is the single source for the
+      # deployed backend identity and must NOT also be carried in
+      # TF_VARS_*_PORTAL. Declared required: false for the same dispatch-time
+      # reason as TF_VARS_*; the render step fails loud for the active
+      # environment. Reuses the same secrets _range.yml already declares.
+      SHIFTER_CONFIG_DEV_RANGE:
+        required: false
+      SHIFTER_CONFIG_PROOF_RANGE:
+        required: false
+      SHIFTER_CONFIG_PROD_RANGE:
+        required: false
       SMOKE_TEST_USER_EMAIL:
-        required: false
-      SMOKE_LINUX_AGENT_ID:
-        required: false
-      SMOKE_WINDOWS_AGENT_ID:
         required: false
 
 jobs:
@@ -90,7 +99,24 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - name: Preflight - validate deploy prerequisites
+        # Shared fail-safe gate (scripts/bootstrap/preflight.py): reports every
+        # missing prerequisite up front before any Terraform apply. See docs/dev/deploy-secrets.md.
+        working-directory: scripts/bootstrap
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
+          TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
+        run: uv run python -m preflight --cloud aws --env "$ENVIRONMENT" --component portal --headless
       - name: Resolve AWS deploy role
         id: aws-role
         env:
@@ -122,11 +148,11 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
       - run: terraform fmt -check -recursive
@@ -197,6 +223,50 @@ jobs:
             exit 1
           }
           printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
+      - name: Render cloud_provider.auto.tfvars from shifter.yaml
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
+          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
+          SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
+        run: |
+          # Select strictly on inputs.environment in shell (same rule as the
+          # local.auto.tfvars step above): an empty active-environment config
+          # must fail loud, never fall through to the other environment's secret.
+          case "$ENVIRONMENT" in
+            dev)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_DEV_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_DEV_RANGE}"
+              ;;
+            proof)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROOF_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROOF_RANGE}"
+              ;;
+            prod)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROD_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROD_RANGE}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${ACTIVE_SHIFTER_CONFIG}" ]; then
+            echo "::error::Required secret ${CONFIG_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          # Write the deployment config to an ephemeral file outside the repo tree,
+          # then render its settings.backend into the renderer-owned CLOUD_PROVIDER
+          # tfvars (PLAT-2005), so the deployed backend identity comes from
+          # shifter.yaml, not a hardcoded Terraform literal. shifter.yaml holds
+          # secret *references*, not values, but is still treated as sensitive:
+          # written by redirection, never echoed, passed in argv, or uploaded as
+          # an artifact (#1015).
+          CONFIG_FILE="${RUNNER_TEMP}/shifter.yaml"
+          printf '%s\n' "${ACTIVE_SHIFTER_CONFIG}" > "${CONFIG_FILE}"
+          uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
+            shifter-config render-runtime "${CONFIG_FILE}" \
+            --output cloud_provider.auto.tfvars
       - name: Render Terraform backend configs
         working-directory: ${{ github.workspace }}
         env:
@@ -239,7 +309,7 @@ jobs:
       - run: terraform plan -no-color -lock-timeout=5m -var-file="${SHIFTER_PORTAL_REMOTE_STATE_TFVARS}" -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const fs = require('fs');
@@ -256,6 +326,7 @@ jobs:
       id-token: write
       contents: read
       pull-requests: write
+      attestations: write
     name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
     # Backstop only (see #1220); generous vs. real image-push times.
@@ -268,9 +339,18 @@ jobs:
     env:
       GUACD_REPO: ${{ inputs.environment == 'prod' && 'shifter-guacd' || format('shifter-{0}-guacd', inputs.environment) }}
       GUACAMOLE_CLIENT_REPO: ${{ inputs.environment == 'prod' && 'shifter-guacamole-client' || format('shifter-{0}-guacamole-client', inputs.environment) }}
+      # Upstream Apache Guacamole version (documentation / build-arg).
       GUACAMOLE_VERSION: "1.5.5"
+      # ECR image tag for both guac images. Bump the -rN provenance-rebuild suffix
+      # HERE and in every environment's terraform.tfvars (guacd_image_tag /
+      # guacamole_client_image_tag) together whenever the guac build context
+      # changes: immutable ECR then receives a fresh, attested push (ADR-037-R5),
+      # and the guac module resolves this tag to its @sha256 digest for a verified
+      # deploy (ADR-037-R6). A guac-only change reaches this job through the
+      # terraform.tfvars edit, which is inside the shifter_platform change filter.
+      GUAC_IMAGE_TAG: "1.5.5-r1"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Resolve AWS deploy role
         id: aws-role
         env:
@@ -302,53 +382,102 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Check guacd image tag
         id: guacd-image
         run: |
-          if aws ecr describe-images --repository-name "$GUACD_REPO" --image-ids imageTag="$GUACAMOLE_VERSION" >/dev/null 2>&1; then
+          if aws ecr describe-images --repository-name "$GUACD_REPO" --image-ids imageTag="$GUAC_IMAGE_TAG" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Build and push guacd image (with RDP file transfer support)
+        id: build-guacd
         if: steps.guacd-image.outputs.exists != 'true'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: ./shifter/engine/guacd
           push: true
           build-args: |
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUAC_IMAGE_TAG }}
           no-cache: true
+          # Build provenance (ADR-037-R5) for freshly built guacd images. Guac
+          # images are version-pinned upstream bases on immutable ECR tags, so a
+          # cached image is not re-pushed or re-attested here.
+          provenance: mode=max
+          sbom: true
+      - name: Attest guacd build provenance
+        if: steps.guacd-image.outputs.exists != 'true'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}
+          subject-digest: ${{ steps.build-guacd.outputs.digest }}
+          push-to-registry: false
       - name: Check guacamole-client image tag
         id: guacamole-client-image
         run: |
-          if aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPO" --image-ids imageTag="$GUACAMOLE_VERSION" >/dev/null 2>&1; then
+          if aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPO" --image-ids imageTag="$GUAC_IMAGE_TAG" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Build and push guacamole-client image (with OIDC extension)
+        id: build-guacamole-client
         if: steps.guacamole-client-image.outputs.exists != 'true'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: ./shifter/engine/guacamole
           push: true
           build-args: |
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUAC_IMAGE_TAG }}
           no-cache: true
+          # Build provenance (ADR-037-R5) for freshly built guacamole-client
+          # images. See the guacd note above re: cached immutable-tag images.
+          provenance: mode=max
+          sbom: true
+      - name: Attest guacamole-client build provenance
+        if: steps.guacamole-client-image.outputs.exists != 'true'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}
+          subject-digest: ${{ steps.build-guacamole-client.outputs.digest }}
+          push-to-registry: false
+      - name: Verify guac image provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          # ADR-037-R6: verify the OIDC-signed attestation for each guac
+          # image@digest (resolved from its pinned GUAC_IMAGE_TAG) before the
+          # apply job (which needs this one) deploys that same digest via the guac
+          # module's data.aws_ecr_image lookup. Covers both freshly built and
+          # cached-but-already-attested images. No bypass.
+          set -euo pipefail
+          verify() {
+            repo="$1"; tag="$2"; label="$3"
+            digest=$(aws ecr describe-images --repository-name "$repo" \
+              --image-ids imageTag="$tag" --query 'imageDetails[0].imageDigest' --output text)
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::could not resolve a valid digest for ${label} (${repo}:${tag})"
+              exit 1
+            fi
+            echo "Verifying provenance for ${label} (${repo}@${digest})"
+            gh attestation verify "oci://${REGISTRY}/${repo}@${digest}" --repo Brad-Edwards/shifter
+          }
+          verify "$GUACD_REPO" "$GUAC_IMAGE_TAG" "guacd"
+          verify "$GUACAMOLE_CLIENT_REPO" "$GUAC_IMAGE_TAG" "guacamole-client"
 
   apply:
     permissions:
@@ -372,7 +501,7 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Resolve AWS deploy role
         id: aws-role
         env:
@@ -404,13 +533,14 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Render local.auto.tfvars from deployment secret
         # The committed terraform.tfvars ships an example.com baseline that
         # fails-loud on apply. Each deployment provides its real values via the
@@ -477,6 +607,50 @@ jobs:
             exit 1
           }
           printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
+      - name: Render cloud_provider.auto.tfvars from shifter.yaml
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
+          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
+          SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
+        run: |
+          # Select strictly on inputs.environment in shell (same rule as the
+          # local.auto.tfvars step above): an empty active-environment config
+          # must fail loud, never fall through to the other environment's secret.
+          case "$ENVIRONMENT" in
+            dev)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_DEV_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_DEV_RANGE}"
+              ;;
+            proof)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROOF_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROOF_RANGE}"
+              ;;
+            prod)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROD_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROD_RANGE}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${ACTIVE_SHIFTER_CONFIG}" ]; then
+            echo "::error::Required secret ${CONFIG_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          # Write the deployment config to an ephemeral file outside the repo tree,
+          # then render its settings.backend into the renderer-owned CLOUD_PROVIDER
+          # tfvars (PLAT-2005), so the deployed backend identity comes from
+          # shifter.yaml, not a hardcoded Terraform literal. shifter.yaml holds
+          # secret *references*, not values, but is still treated as sensitive:
+          # written by redirection, never echoed, passed in argv, or uploaded as
+          # an artifact (#1015).
+          CONFIG_FILE="${RUNNER_TEMP}/shifter.yaml"
+          printf '%s\n' "${ACTIVE_SHIFTER_CONFIG}" > "${CONFIG_FILE}"
+          uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
+            shifter-config render-runtime "${CONFIG_FILE}" \
+            --output cloud_provider.auto.tfvars
       - name: Render Terraform backend configs
         working-directory: ${{ github.workspace }}
         env:
@@ -655,6 +829,7 @@ jobs:
       id-token: write
       contents: read
       pull-requests: write
+      attestations: write
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
     # Backstop only (see #1220); generous vs. real image-build times.
@@ -680,7 +855,7 @@ jobs:
     env:
       ECR_REPOSITORY: ${{ inputs.environment == 'prod' && 'shifter-portal' || format('shifter-{0}-portal', inputs.environment) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Resolve AWS deploy role
         id: aws-role
         env:
@@ -712,23 +887,23 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
       - name: Set image tag
         id: image
         run: |
           short_sha="$(echo "${GITHUB_SHA}" | cut -c1-12)"
           echo "tag=${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: ./shifter
           file: ./shifter/shifter_platform/Dockerfile
@@ -736,12 +911,23 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
           no-cache: true
+          # Build provenance (ADR-037-R5): embed an SBOM and max provenance,
+          # then attest below with a GitHub OIDC-signed statement.
+          provenance: mode=max
+          sbom: true
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
 
   deploy:
     permissions:
       id-token: write
       contents: read
       pull-requests: write
+      attestations: read
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
     # Backstop only (see #1220); generous vs. real deploy/stabilization times.
@@ -757,7 +943,7 @@ jobs:
       PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
@@ -795,10 +981,33 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Verify portal image build provenance
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+          ECR_REPOSITORY: ${{ inputs.environment == 'prod' && 'shifter-portal' || format('shifter-{0}-portal', inputs.environment) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # ADR-037-R6: verify the OIDC-signed provenance attestation for the
+          # exact portal image@digest and the fixed Brad-Edwards/shifter identity
+          # before the digest is promoted to Parameter Store and rolled out.
+          # No bypass mode.
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest to verify"
+            exit 1
+          fi
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE_REF="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          echo "Verifying provenance for ${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          gh attestation verify "oci://${IMAGE_REF}" --repo Brad-Edwards/shifter
 
       - name: Render Terraform backend configs
         working-directory: ${{ github.workspace }}
@@ -916,13 +1125,28 @@ jobs:
           ASG_NAME: ${{ steps.asg.outputs.asg_name }}
         run: |
           echo "Selecting one in-service ASG instance for deploy-owned migration: $ASG_NAME"
-          MIGRATION_INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
-            --auto-scaling-group-names "$ASG_NAME" \
-            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" \
-            --output text)
+          # On a first deploy to a fresh ASG there is no pre-existing in-service
+          # instance: the newly-applied instances must launch, pull the image by
+          # digest, bootstrap, and reach LifecycleState=InService. Poll for one
+          # to appear instead of a one-shot check, which races and fails on a
+          # cold ASG when run seconds after the image-digest param is updated.
+          MIGRATION_INSTANCE_WAIT_SECONDS=600
+          MIGRATION_INSTANCE_POLL_SECONDS=15
+          MIGRATION_INSTANCE_ID=""
+          for i in $(seq 1 $((MIGRATION_INSTANCE_WAIT_SECONDS / MIGRATION_INSTANCE_POLL_SECONDS))); do
+            MIGRATION_INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$ASG_NAME" \
+              --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" \
+              --output text)
+            if [ -n "$MIGRATION_INSTANCE_ID" ] && [ "$MIGRATION_INSTANCE_ID" != "None" ]; then
+              break
+            fi
+            echo "Attempt $i: No in-service instance yet in ASG $ASG_NAME; waiting..."
+            sleep "$MIGRATION_INSTANCE_POLL_SECONDS"
+          done
 
           if [ -z "$MIGRATION_INSTANCE_ID" ] || [ "$MIGRATION_INSTANCE_ID" = "None" ]; then
-            echo "::error::No healthy in-service instance found in ASG $ASG_NAME for database migration"
+            echo "::error::No healthy in-service instance found in ASG $ASG_NAME for database migration after ${MIGRATION_INSTANCE_WAIT_SECONDS}s"
             exit 1
           fi
 
@@ -1097,7 +1321,17 @@ jobs:
           echo "Platform deployment successful!"
 
       - name: Trigger ASG instance refresh
-        if: steps.config.outputs.enable_autoscaling == 'true'
+        # Only cycle the portal fleet when the portal actually changed (issue
+        # #1639): a new portal image (portal_image_changes) or a platform
+        # Terraform change that can alter the launch template / user_data
+        # (platform_changes). An engine-provisioner-only deploy does not change
+        # the portal host, so paying the ~40-minute rolling refresh on it is pure
+        # iteration-loop waste. New instances still read the current image digest
+        # from Parameter Store at boot, so a skipped refresh never serves a stale
+        # image for a portal that did not change.
+        if: >-
+          steps.config.outputs.enable_autoscaling == 'true' &&
+          (inputs.portal_image_changes || inputs.platform_changes)
         env:
           ASG_NAME: ${{ steps.asg.outputs.asg_name }}
         run: |
@@ -1315,8 +1549,6 @@ jobs:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}
       SMOKE_TEST_USER_EMAIL: ${{ secrets.SMOKE_TEST_USER_EMAIL }}
-      SMOKE_LINUX_AGENT_ID: ${{ secrets.SMOKE_LINUX_AGENT_ID }}
-      SMOKE_WINDOWS_AGENT_ID: ${{ secrets.SMOKE_WINDOWS_AGENT_ID }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -1363,7 +1595,7 @@ jobs:
 
       - name: Open smoke failure issue
         if: steps.smoke.outcome == 'failure'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const title = `[smoke-test][${process.env.ENV}][linux] ${context.sha.slice(0, 12)}`;

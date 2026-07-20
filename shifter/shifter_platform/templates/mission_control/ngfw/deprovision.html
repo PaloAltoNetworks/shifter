@@ -136,7 +136,7 @@ document.addEventListener('DOMContentLoaded', function() {
         deprovisionBtn.disabled = true;
         deprovisionBtn.textContent = 'Deprovisioning...';
 
-        fetch(`/mission-control/api/ngfw/${ngfwId}/destroy/`, {
+        fetch(`/api/v1/mission-control/ngfw/${ngfwId}/destroy/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

@@ -16,6 +16,7 @@ import pytest
 
 from risk_register.models import AuditLog
 from shared.aces.operations import AcesOperationRecordWrite, persist_aces_operation_record
+from shared.audit import AuditEntityType
 from shared.models import AcesOperationRecord
 from shared.schemas.aces_operation import canonical_aces_payload_digest
 
@@ -53,7 +54,7 @@ def test_audit_log_has_no_aces_operation_entity_type():
     # ACES operation records are not an AuditLog entity type; the sidecar (not
     # AuditLog) is their store. This guards against a future EntityType being
     # added that would invite ACES payloads into audit JSON.
-    entity_values = {choice.value for choice in AuditLog.EntityType}
+    entity_values = {choice.value for choice in AuditEntityType}
 
     assert not any("aces" in value.lower() for value in entity_values)
     assert "runtime_snapshot" not in entity_values

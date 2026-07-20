@@ -6,10 +6,12 @@ settings, so provisioning is a no-op and no cloud mock is needed), instead of
 patching ``RangeInstance.objects`` / the engine call / the scenario loader.
 """
 
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from cms import services
 from cms.exceptions import CMSError
@@ -40,8 +42,13 @@ class TestListRanges:
         assert services.list_ranges(user) == []
 
     def test_returns_the_users_ranges(self, user):
+        from shared.enums import RangeSource
+
+        # One active range per source is the invariant (#307); a user may still
+        # hold one Mission Control and one CTF range at once (#450), so list_ranges
+        # returns both.
         _range_instance(user, range_id=1)
-        _range_instance(user, range_id=2, scenario_id="ad_attack_lab")
+        _range_instance(user, range_id=2, scenario_id="ad_attack_lab", range_source=RangeSource.CTF.value)
         result = services.list_ranges(user)
         assert {r.range_id for r in result} == {1, 2}
 
@@ -164,6 +171,7 @@ class TestCreateRangeBehavior:
     def test_marks_owned_range_failed_when_engine_dispatch_fails(self, user, make_agent, hydratable_scenario, settings):
         from engine.models import Range as EngineRange
         from risk_register.models import AuditLog
+        from shared.audit import AuditAction, AuditEntityType
 
         settings.CLOUD_PROVIDER = "aws"
         settings.LOCAL_PROVISIONER = None
@@ -174,16 +182,17 @@ class TestCreateRangeBehavior:
         ecs_client = MagicMock()
         ecs_client.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:CPU"}]}
 
+        agent = make_agent(user)
         with patch("boto3.client", return_value=ecs_client), pytest.raises(CloudTaskError):
-            services.create_range(user, hydratable_scenario.scenario_id, {"windows": make_agent(user).id})
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
 
         range_instance = RangeInstance.all_objects.get(user_id=user.id)
         assert range_instance.status == ResourceStatus.FAILED.value
         assert range_instance.deleted_at is not None
         assert EngineRange.objects.get(user=user).status == EngineRange.Status.FAILED
         assert not AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.RANGE,
-            action=AuditLog.Action.PROVISION,
+            entity_type=AuditEntityType.RANGE,
+            action=AuditAction.PROVISION,
             actor_id=user.id,
         ).exists()
 
@@ -254,9 +263,11 @@ class TestHasReadyActiveRange:
         assert services.has_ready_active_range(user) is False
 
     def test_uses_most_recent_range(self, user):
-        # Older ready range, newer provisioning range -> mirrors get_active_range's
-        # "most recently created" selection, so the indicator is False.
-        _range_instance(user, range_id=1, status="ready")
+        # The one-active-range-per-source constraint (#307) makes two active
+        # same-source rows impossible, so the older range must be terminal
+        # (DESTROYED soft-deletes it) before a new one exists. The indicator then
+        # reflects the sole active (provisioning, not-ready) range -> False.
+        _range_instance(user, range_id=1, status="destroyed")
         _range_instance(user, range_id=2, status="provisioning")
         assert services.has_ready_active_range(user) is False
 
@@ -307,6 +318,7 @@ class TestRangeSourceAdmission:
             hydratable_scenario.scenario_id,
             {"windows": agent.id},
             range_source=RangeSource.CTF,
+            remote_access_teardown_at=timezone.now() + timedelta(days=1),
         )
         assert result is not None
 
@@ -327,13 +339,16 @@ class TestRangeSourceAdmission:
             hydratable_scenario.scenario_id,
             {"windows": agent.id},
             range_source=RangeSource.CTF,
+            remote_access_teardown_at=timezone.now() + timedelta(days=1),
         )
+        teardown_at = timezone.now() + timedelta(days=1)
         with pytest.raises(CMSError, match="already have an active range"):
             services.create_range(
                 user,
                 hydratable_scenario.scenario_id,
                 {"windows": agent.id},
                 range_source=RangeSource.CTF,
+                remote_access_teardown_at=teardown_at,
             )
 
     def test_get_active_range_bare_call_returns_mc_range(self, user):
@@ -391,15 +406,208 @@ class TestRangeSourceAdmission:
             hydratable_scenario.scenario_id,
             {"windows": agent.id},
             range_source=RangeSource.CTF,
+            remote_access_teardown_at=timezone.now() + timedelta(days=1),
         )
         ri = RangeInstance.objects.get(user_id=user.id)
         assert ri.range_source == RangeSource.CTF.value
 
     def test_create_range_default_persists_mc_source(self, user, make_agent, hydratable_scenario):
         """create_range() with no range_source persists 'mission_control' on the row."""
+        from engine.models import Range as EngineRange
         from shared.enums import RangeSource
+        from shared.remote_access import parse_openvpn_capability
 
         agent = make_agent(user)
         services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
         ri = RangeInstance.objects.get(user_id=user.id)
         assert ri.range_source == RangeSource.MISSION_CONTROL.value
+        capability = parse_openvpn_capability(
+            EngineRange.objects.get(request__request_id=ri.request.request_id).remote_access_capability
+        )
+        assert capability.target_ref
+        assert ri.maximum_expires_at <= capability.teardown_at
+        assert capability.teardown_at - ri.maximum_expires_at <= timedelta(seconds=1)
+
+    def test_mission_control_unsupported_backend_stays_capability_false(
+        self, user, make_agent, hydratable_scenario, settings, tmp_path
+    ):
+        """A unique Kali target does not authorize an unsupported backend."""
+        from engine.models import Range as EngineRange
+
+        provisioner_dir = tmp_path / "provisioner"
+        provisioner_dir.mkdir()
+        (provisioner_dir / "main.py").write_text("# test process boundary")
+        settings.CLOUD_PROVIDER = "aws"
+        settings.LOCAL_PROVISIONER = "subprocess"
+        settings.PROVISIONER_PATH = str(provisioner_dir)
+
+        process = MagicMock(pid=12345)
+        with patch("subprocess.Popen", return_value=process) as popen:
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": make_agent(user).id})
+
+        popen.assert_called_once()
+        engine_range = EngineRange.objects.get(user=user)
+        assert engine_range.remote_access_capability is None
+
+    def test_mission_control_scenario_without_unique_vpn_target_remains_launchable(self):
+        """An unsupported topology stays capability-false instead of breaking range launch."""
+        from types import SimpleNamespace
+
+        from cms.services._range_create import _build_remote_access_capability
+
+        range_spec = SimpleNamespace(participant_access=[], all_instances=[])
+
+        assert (
+            _build_remote_access_capability(
+                range_spec,
+                timezone.now() + timedelta(days=365),
+                required=False,
+            )
+            is None
+        )
+
+    def test_ctf_scenario_without_unique_vpn_target_fails_closed(self):
+        """CTF requires the participant VPN capability established by #1695."""
+        from types import SimpleNamespace
+
+        from cms.services._range_create import _build_remote_access_capability
+
+        range_spec = SimpleNamespace(participant_access=[], all_instances=[])
+        teardown_at = timezone.now() + timedelta(days=1)
+
+        with pytest.raises(CMSError, match="exactly one identified Kali"):
+            _build_remote_access_capability(
+                range_spec,
+                teardown_at,
+                required=True,
+            )
+
+
+class TestActiveRangeConstraintBackstop:
+    """The DB constraint is the race-proof backstop behind the friendly pre-check (#307).
+
+    ``_reserve_active_range_slot`` runs the atomic Request + RangeInstance
+    reservation and translates the partial-unique-constraint violation a losing
+    concurrent caller hits into the authored CMSError. Driven directly against
+    real rows (no first-party seam patched, per ADR-019); the
+    ``test_range_create_concurrency`` module proves the real threaded race on
+    PostgreSQL.
+    """
+
+    def test_reservation_translates_constraint_collision_without_orphan_request(self, user):
+        from cms.models import Request
+        from cms.services._range_create import _reserve_active_range_slot
+        from shared.enums import RangeSource
+
+        def _persist(cms_request):
+            return RangeInstance.objects.create(
+                request=cms_request,
+                scenario_id="basic",
+                user_id=user.id,
+                range_source=RangeSource.MISSION_CONTROL.value,
+            )
+
+        # First reservation takes the (user, MISSION_CONTROL) slot.
+        _reserve_active_range_slot(user, RangeSource.MISSION_CONTROL, _persist)
+        requests_before = Request.objects.filter(user=user).count()
+
+        # A second reservation collides on the active-range constraint; the named
+        # violation is translated to the authored CMSError and the whole atomic
+        # rolls back, so no orphan Request is left behind.
+        with pytest.raises(CMSError, match="already have an active range"):
+            _reserve_active_range_slot(user, RangeSource.MISSION_CONTROL, _persist)
+
+        assert Request.objects.filter(user=user).count() == requests_before
+        assert RangeInstance.objects.filter(user_id=user.id).count() == 1
+
+    def test_unrelated_integrity_error_is_not_swallowed(self):
+        """Only the named/active-range collision translates; other IntegrityErrors propagate."""
+        from django.db import IntegrityError
+
+        from cms.services._range_create import _is_active_range_conflict
+
+        assert _is_active_range_conflict(IntegrityError("NOT NULL constraint failed: cms_request.user_id")) is False
+
+
+class TestCreateRangeLiveFireGate:
+    """Issue #1348 / ADR-030: normal live-fire ranges may only use the approved
+    GCE VM range-cell backend. GDC VM Runtime is denied before reservation."""
+
+    def test_denies_gdc_backend_before_reservation(self, user, make_agent, hydratable_scenario, settings, monkeypatch):
+        from engine.models import Range as EngineRange
+        from shared.range_instantiation_policy import POLICY_DENIAL_CODE
+
+        settings.CLOUD_PROVIDER = "gcp"
+        monkeypatch.setenv("GCP_RANGE_BACKEND", "gdc")
+        agent = make_agent(user)
+
+        with pytest.raises(CMSError, match=r"not an approved live-fire|GCE VM range-cell") as exc:
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+
+        # The stable ADR-039 permanent-denial code rides on CMSError.details (#1348).
+        assert exc.value.details.get("code") == POLICY_DENIAL_CODE
+        # Fail-closed BEFORE reservation: no RangeInstance row, no engine Range.
+        assert not RangeInstance.all_objects.filter(user_id=user.id).exists()
+        assert not EngineRange.objects.filter(user=user).exists()
+
+    def test_denies_unknown_backend_with_prerequisite_code(
+        self, user, make_agent, hydratable_scenario, settings, monkeypatch
+    ):
+        # A malformed selector fails closed with the distinct prerequisite code, not
+        # the permanent policy code -- a config error is not permission to try GDC (#1348).
+        from shared.range_instantiation_policy import PREREQUISITE_DENIAL_CODE
+
+        settings.CLOUD_PROVIDER = "gcp"
+        monkeypatch.setenv("GCP_RANGE_BACKEND", "bogus")
+        agent = make_agent(user)
+
+        with pytest.raises(CMSError) as exc:
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+
+        assert exc.value.details.get("code") == PREREQUISITE_DENIAL_CODE
+        assert not RangeInstance.all_objects.filter(user_id=user.id).exists()
+
+    def test_denies_gdc_via_plane_alias(self, user, make_agent, hydratable_scenario, settings, monkeypatch):
+        settings.CLOUD_PROVIDER = "gcp"
+        monkeypatch.delenv("GCP_RANGE_BACKEND", raising=False)
+        monkeypatch.setenv("GCP_RANGE_PLANE", "gdc")
+        agent = make_agent(user)
+
+        with pytest.raises(CMSError, match=r"not an approved live-fire|GCE VM range-cell"):
+            services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+
+        assert not RangeInstance.all_objects.filter(user_id=user.id).exists()
+
+    def test_admits_gce_backend(self, user, make_agent, hydratable_scenario, settings, monkeypatch):
+        # gce is the approved live-fire backend; the gate admits and the create
+        # proceeds. Engine dispatch is a no-op in the test posture (no ENGINE_TASK_*
+        # config), so no first-party seam is mocked (ADR-019-R1).
+        settings.CLOUD_PROVIDER = "gcp"
+        monkeypatch.setenv("GCP_RANGE_BACKEND", "gce")
+        agent = make_agent(user)
+
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+
+        assert RangeInstance.objects.filter(user_id=user.id).exists()
+
+    def test_admits_gce_by_default_when_selector_unset(
+        self, user, make_agent, hydratable_scenario, settings, monkeypatch
+    ):
+        settings.CLOUD_PROVIDER = "gcp"
+        monkeypatch.delenv("GCP_RANGE_BACKEND", raising=False)
+        monkeypatch.delenv("GCP_RANGE_PLANE", raising=False)
+        agent = make_agent(user)
+
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+
+        assert RangeInstance.objects.filter(user_id=user.id).exists()
+
+    def test_no_op_for_non_gcp_provider(self, user, make_agent, hydratable_scenario, settings, monkeypatch):
+        # On AWS the GDC gate is a no-op even if a stale GCP selector lingers.
+        settings.CLOUD_PROVIDER = "aws"
+        monkeypatch.setenv("GCP_RANGE_BACKEND", "gdc")
+        agent = make_agent(user)
+
+        services.create_range(user, hydratable_scenario.scenario_id, {"windows": agent.id})
+
+        assert RangeInstance.objects.filter(user_id=user.id).exists()

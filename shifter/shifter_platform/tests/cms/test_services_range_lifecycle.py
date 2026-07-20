@@ -15,6 +15,10 @@ from cms import services
 from cms.exceptions import CMSError
 from cms.models import RangeInstance
 from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -77,51 +81,55 @@ class TestCancelRangeValidation:
 
 class TestDestroyRangeByRequestId:
     def test_raises_typeerror_for_none_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError):
-            services.destroy_range_by_request_id(None, str(uuid4()))
+            services.destroy_range_by_request_id(None, str_)
 
     def test_raises_typeerror_for_invalid_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError, match="User instance"):
-            services.destroy_range_by_request_id("not-user", str(uuid4()))
+            services.destroy_range_by_request_id("not-user", str_)
 
     def test_raises_cms_error_for_empty_request_id(self, user):
         with pytest.raises(CMSError, match="request_id is required"):
             services.destroy_range_by_request_id(user, "")
 
     def test_raises_cms_error_when_not_found(self, user):
+        str_ = str(uuid4())
         with pytest.raises(CMSError, match="not found"):
-            services.destroy_range_by_request_id(user, str(uuid4()))
+            services.destroy_range_by_request_id(user, str_)
 
     def test_happy_path_destroys_and_audits(self, user, provision_range):
         ri = provision_range(user, range_id=42)
         services.destroy_range_by_request_id(user, str(ri.request.request_id))
-        assert AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.RANGE, action=AuditLog.Action.DEPROVISION
-        ).exists()
+        assert AuditLog.objects.filter(entity_type=AuditEntityType.RANGE, action=AuditAction.DEPROVISION).exists()
         assert RangeInstance.all_objects.get(range_id=42).deleted_at is not None
 
 
 class TestCancelRangeByRequestId:
     def test_raises_typeerror_for_none_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError):
-            services.cancel_range_by_request_id(None, str(uuid4()))
+            services.cancel_range_by_request_id(None, str_)
 
     def test_raises_typeerror_for_invalid_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError, match="User instance"):
-            services.cancel_range_by_request_id("not-user", str(uuid4()))
+            services.cancel_range_by_request_id("not-user", str_)
 
     def test_raises_cms_error_for_empty_request_id(self, user):
         with pytest.raises(CMSError, match="request_id is required"):
             services.cancel_range_by_request_id(user, "")
 
     def test_raises_cms_error_when_not_found(self, user):
+        str_ = str(uuid4())
         with pytest.raises(CMSError, match="not found"):
-            services.cancel_range_by_request_id(user, str(uuid4()))
+            services.cancel_range_by_request_id(user, str_)
 
     def test_happy_path_cancels_and_audits(self, user, provision_range):
         ri = provision_range(user, range_id=42)
         services.cancel_range_by_request_id(user, str(ri.request.request_id))
-        assert AuditLog.objects.filter(entity_type=AuditLog.EntityType.RANGE, action=AuditLog.Action.CANCEL).exists()
+        assert AuditLog.objects.filter(entity_type=AuditEntityType.RANGE, action=AuditAction.CANCEL).exists()
 
 
 class TestPauseRangeValidation:
@@ -164,24 +172,28 @@ class TestResumeRangeValidation:
 
 class TestPauseResumeByRequestIdValidation:
     def test_pause_raises_typeerror_for_none_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError):
-            services.pause_range_by_request_id(None, str(uuid4()))
+            services.pause_range_by_request_id(None, str_)
 
     def test_pause_raises_typeerror_for_invalid_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError, match="User instance"):
-            services.pause_range_by_request_id("x", str(uuid4()))
+            services.pause_range_by_request_id("x", str_)
 
     def test_pause_raises_cms_error_for_empty_request_id(self, user):
         with pytest.raises(CMSError, match="request_id is required"):
             services.pause_range_by_request_id(user, "")
 
     def test_resume_raises_typeerror_for_none_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError):
-            services.resume_range_by_request_id(None, str(uuid4()))
+            services.resume_range_by_request_id(None, str_)
 
     def test_resume_raises_typeerror_for_invalid_user(self):
+        str_ = str(uuid4())
         with pytest.raises(TypeError, match="User instance"):
-            services.resume_range_by_request_id("x", str(uuid4()))
+            services.resume_range_by_request_id("x", str_)
 
     def test_resume_raises_cms_error_for_empty_request_id(self, user):
         with pytest.raises(CMSError, match="request_id is required"):

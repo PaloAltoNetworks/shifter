@@ -3,10 +3,13 @@
 import os
 from typing import Any
 
+from cloud.exceptions import CloudProviderNotImplementedError
+from config import resolve_cloud_provider
+
 
 def _build_provider_state(output_data: dict[str, Any]) -> dict[str, Any]:
     """Build provider-neutral NGFW state fields for the Terraform outputs."""
-    cloud_provider = output_data.get("cloud_provider") or os.environ.get("CLOUD_PROVIDER", "aws")
+    cloud_provider = output_data.get("cloud_provider") or resolve_cloud_provider()
     management_ip = output_data.get("management_ip", "")
     dataplane_ip = output_data.get("dataplane_ip", "")
     data_attachment_id = output_data.get("data_eni_id", "")
@@ -22,25 +25,28 @@ def _build_provider_state(output_data: dict[str, Any]) -> dict[str, Any]:
             "provider_metadata": output_data.get("provider_metadata", {}),
         }
 
-    provider_state = {
-        "management_ip": management_ip,
-        "dataplane_ip": dataplane_ip,
-        "route_next_hop_ip": dataplane_ip,
-        "attachment_mode": "aws-route-table-eni" if cloud_provider == "aws" else "",
-        "data_attachment_id": data_attachment_id,
-        "data_eni_id": data_attachment_id,
-        "ssh_key_secret_arn": ssh_key_secret_arn,
-    }
-    return {
-        "cloud_provider": cloud_provider,
-        "route_next_hop_ip": dataplane_ip,
-        "attachment_mode": provider_state["attachment_mode"],
-        "data_attachment_id": data_attachment_id,
-        "attached_ranges": [],
-        "provider_metadata": {
-            cloud_provider: provider_state,
-        },
-    }
+    if cloud_provider == "aws":
+        provider_state = {
+            "management_ip": management_ip,
+            "dataplane_ip": dataplane_ip,
+            "route_next_hop_ip": dataplane_ip,
+            "attachment_mode": "aws-route-table-eni",
+            "data_attachment_id": data_attachment_id,
+            "data_eni_id": data_attachment_id,
+            "ssh_key_secret_arn": ssh_key_secret_arn,
+        }
+        return {
+            "cloud_provider": "aws",
+            "route_next_hop_ip": dataplane_ip,
+            "attachment_mode": provider_state["attachment_mode"],
+            "data_attachment_id": data_attachment_id,
+            "attached_ranges": [],
+            "provider_metadata": {
+                "aws": provider_state,
+            },
+        }
+
+    raise CloudProviderNotImplementedError(cloud_provider)
 
 
 def _build_tf_variables(

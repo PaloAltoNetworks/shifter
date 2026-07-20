@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import re
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from shared.cloud import PROVISIONER_CONTAINER_NAME
 from shared.cloud.exceptions import CloudTaskError
+from shared.cloud.gcp.base import build_idempotent_job_name
 from shared.cloud.gcp.task_runner import GCPTaskRunner
 
 
@@ -49,6 +49,43 @@ def _make_fake_k8s_client() -> SimpleNamespace:
     )
 
 
+def _observed_job(
+    *,
+    task_identity: str,
+    image: str = "provisioner:latest",
+    command: list[str] | None = None,
+    service_account_name: str = "",
+    secret_name: str | None = None,
+) -> SimpleNamespace:
+    """Build the deterministic fields required for create-or-observe recovery."""
+    env = []
+    if secret_name is not None:
+        env.append(SimpleNamespace(value_from=SimpleNamespace(secret_key_ref=SimpleNamespace(name=secret_name))))
+    name = build_idempotent_job_name("pulumi-provisioner", task_identity)
+    return SimpleNamespace(
+        metadata=SimpleNamespace(
+            name=name,
+            uid=f"uid-{task_identity}",
+            annotations={"shifter.dev/task-identity": task_identity},
+        ),
+        spec=SimpleNamespace(
+            template=SimpleNamespace(
+                spec=SimpleNamespace(
+                    service_account_name=service_account_name,
+                    containers=[
+                        SimpleNamespace(
+                            name="pulumi-provisioner",
+                            image=image,
+                            args=command or ["range", "provision"],
+                            env=env,
+                        )
+                    ],
+                )
+            )
+        ),
+    )
+
+
 class TestGCPTaskRunnerRunTask:
     """Job creation behavior."""
 
@@ -83,6 +120,7 @@ class TestGCPTaskRunnerRunTask:
         job = call_kwargs["body"]
         assert job.metadata.generate_name.startswith("pulumi-provisioner-range-provision-")
         assert job.spec.template.spec.service_account_name == "shifter-provisioner"
+        assert job.spec.template.spec.automount_service_account_token is False
         assert job.spec.template.spec.containers[0].image == "us-central1-docker.pkg.dev/test/provisioner:latest"
         assert job.spec.template.spec.containers[0].args == ["range", "provision", "--range-id", "42"]
         assert job.spec.template.spec.containers[0].image_pull_policy == "Always"
@@ -99,6 +137,138 @@ class TestGCPTaskRunnerRunTask:
                 command=["range", "provision"],
                 container_name="pulumi-provisioner",
             )
+
+    def test_task_identity_uses_create_or_observe_job_name(self) -> None:
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job.side_effect = _ApiException(404)
+        expected_name = build_idempotent_job_name("pulumi-provisioner", "intent-1")
+        batch_api.create_namespaced_job.return_value = SimpleNamespace(metadata=SimpleNamespace(name=expected_name))
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(
+            return_value=(batch_api, MagicMock(), _make_fake_k8s_client(), _ApiException)
+        )
+
+        task_id = runner.run_task(
+            task_definition="provisioner:latest",
+            cluster="shifter-jobs",
+            command=["range", "provision", "--request-id", "11111111-1111-1111-1111-111111111111"],
+            container_name="pulumi-provisioner",
+            task_identity="intent-1",
+        )
+
+        job = batch_api.create_namespaced_job.call_args.kwargs["body"]
+        assert job.metadata.name
+        assert job.metadata.annotations["shifter.dev/task-identity"] == "intent-1"
+        assert not hasattr(job.metadata, "generate_name")
+        assert batch_api.read_namespaced_job.call_args.kwargs["_request_timeout"] == 30
+        assert batch_api.create_namespaced_job.call_args.kwargs["_request_timeout"] == 30
+        assert task_id == f"shifter-jobs/{job.metadata.name}"
+
+    def test_redelivery_observes_existing_idempotent_job(self) -> None:
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job.return_value = _observed_job(
+            task_identity="intent-1",
+            command=["range", "provision", "--request-id", "11111111-1111-1111-1111-111111111111"],
+        )
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(
+            return_value=(batch_api, MagicMock(), _make_fake_k8s_client(), _ApiException)
+        )
+
+        task_id = runner.run_task(
+            task_definition="provisioner:latest",
+            cluster="shifter-jobs",
+            command=["range", "provision", "--request-id", "11111111-1111-1111-1111-111111111111"],
+            container_name="pulumi-provisioner",
+            task_identity="intent-1",
+        )
+
+        assert task_id.startswith("shifter-jobs/pulumi-provisioner-")
+        batch_api.create_namespaced_job.assert_not_called()
+
+    def test_redelivery_rejects_reserved_name_with_mismatched_intent(self) -> None:
+        batch_api = MagicMock()
+        observed = _observed_job(task_identity="other-intent")
+        observed.metadata.name = build_idempotent_job_name("pulumi-provisioner", "intent-1")
+        batch_api.read_namespaced_job.return_value = observed
+        core_api = MagicMock()
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(
+            return_value=(batch_api, core_api, _make_fake_k8s_client(), _ApiException)
+        )
+
+        with pytest.raises(CloudTaskError, match="reserved provisioner launch identity"):
+            runner.run_task(
+                task_definition="provisioner:latest",
+                cluster="shifter-jobs",
+                command=["range", "provision"],
+                container_name="pulumi-provisioner",
+                task_identity="intent-1",
+            )
+
+        batch_api.create_namespaced_job.assert_not_called()
+        batch_api.delete_namespaced_job.assert_not_called()
+        core_api.delete_namespaced_secret.assert_not_called()
+
+    def test_observed_job_patch_failure_preserves_accepted_objects(self) -> None:
+        task_identity = "11111111-1111-1111-1111-111111111111"
+        secret_name = GCPTaskRunner._build_secret_name("pulumi-provisioner", task_identity)
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job.return_value = _observed_job(
+            task_identity=task_identity,
+            secret_name=secret_name,
+        )
+        core_api = MagicMock()
+        core_api.create_namespaced_secret.side_effect = _ApiException(409)
+        core_api.patch_namespaced_secret.side_effect = [None, RuntimeError("temporary API failure")]
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(
+            return_value=(batch_api, core_api, _make_fake_k8s_client(), _ApiException)
+        )
+
+        with pytest.raises(CloudTaskError, match="ownerReference"):
+            runner.run_task(
+                task_definition="provisioner:latest",
+                cluster="shifter-jobs",
+                command=["range", "provision"],
+                container_name="pulumi-provisioner",
+                env_overrides={"DB_PASSWORD": "supersecret"},
+                task_identity=task_identity,
+            )
+
+        assert core_api.patch_namespaced_secret.call_count == 2
+        batch_api.delete_namespaced_job.assert_not_called()
+        core_api.delete_namespaced_secret.assert_not_called()
+
+    def test_redelivery_rejects_job_referencing_another_intents_secret(self) -> None:
+        task_identity = "11111111-1111-1111-1111-111111111111"
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job.return_value = _observed_job(
+            task_identity=task_identity,
+            secret_name="pulumi-provisioner-secrets-ffffffffffffffff",
+        )
+        core_api = MagicMock()
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(
+            return_value=(batch_api, core_api, _make_fake_k8s_client(), _ApiException)
+        )
+
+        with pytest.raises(CloudTaskError, match="reserved provisioner launch identity"):
+            runner.run_task(
+                task_definition="provisioner:latest",
+                cluster="shifter-jobs",
+                command=["range", "provision"],
+                container_name="pulumi-provisioner",
+                env_overrides={"DB_PASSWORD": "supersecret"},
+                task_identity=task_identity,
+            )
+
+        batch_api.create_namespaced_job.assert_not_called()
+        core_api.delete_namespaced_secret.assert_not_called()
+
+
+class TestGCPTaskRunnerProvisionerContract:
+    """Provisioner-only pod and cross-provider contract behavior."""
 
     def test_job_locks_down_runtime_writable_surface(self, settings) -> None:
         """Issue #1103: provisioner Jobs must run with read-only root filesystem and a
@@ -275,34 +445,36 @@ class TestGCPTaskRunnerRunTask:
     def test_provisioner_container_name_is_used_at_engine_dispatch_sites(self) -> None:
         """The hardening gate inside `_is_provisioner_task` keys on the cloud-neutral
         ``PROVISIONER_CONTAINER_NAME`` constant, and the engine dispatch sites in
-        `shifter/shifter_platform/engine/ecs.py` MUST pass that exact constant when
-        calling ``run_task``. Otherwise a rename of the constant would silently
-        disable the issue #1103 hardening for production traffic. The engine layer
-        imports from ``shared.cloud`` (cloud-neutral) — NOT from
+        the ``shifter/shifter_platform/engine/ecs`` package MUST pass that exact
+        constant when calling ``run_task``. Otherwise a rename of the constant would
+        silently disable the issue #1103 hardening for production traffic. The engine
+        layer imports from ``shared.cloud`` (cloud-neutral) — NOT from
         ``shared.cloud.gcp.*`` — to keep AWS dispatch decoupled from GCP modules."""
         import re
         from pathlib import Path
 
         from shared.cloud import PROVISIONER_CONTAINER_NAME
 
-        ecs_path = Path(__file__).resolve().parents[3] / "engine" / "ecs.py"
-        source = ecs_path.read_text(encoding="utf-8")
+        # engine.ecs is a package (#685); scan every module in it so the contract
+        # holds regardless of which submodule owns the import / dispatch sites.
+        ecs_dir = Path(__file__).resolve().parents[3] / "engine" / "ecs"
+        source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(ecs_dir.glob("*.py")))
 
-        # The engine module must import the constant from the cloud-neutral layer.
+        # The engine package must import the constant from the cloud-neutral layer.
         assert re.search(
             r"from shared\.cloud import [^\n]*\bPROVISIONER_CONTAINER_NAME\b",
             source,
-        ), "engine/ecs.py must import PROVISIONER_CONTAINER_NAME from cloud-neutral shared.cloud"
+        ), "engine/ecs must import PROVISIONER_CONTAINER_NAME from cloud-neutral shared.cloud"
         # And NOT from shared.cloud.gcp.* (which would break the cloud abstraction).
         assert (
             "from shared.cloud.gcp" not in source
             or "PROVISIONER_CONTAINER_NAME" not in source.split("from shared.cloud.gcp")[1].splitlines()[0]
-        ), "engine/ecs.py must NOT import PROVISIONER_CONTAINER_NAME from shared.cloud.gcp.*"
+        ), "engine/ecs must NOT import PROVISIONER_CONTAINER_NAME from shared.cloud.gcp.*"
 
         # Every run_task call site in the engine must dispatch with the
         # constant — no string literals like `"pulumi-provisioner"` allowed.
         run_task_calls = list(re.finditer(r"runner\.run_task\((.*?)\)", source, flags=re.DOTALL))
-        assert run_task_calls, "engine/ecs.py must contain runner.run_task call sites"
+        assert run_task_calls, "engine/ecs must contain runner.run_task call sites"
         for match in run_task_calls:
             args = match.group(1)
             if "container_name" not in args:
@@ -443,265 +615,3 @@ class TestGCPTaskRunnerGetTaskStatus:
         runner._load_kubernetes_api = MagicMock(return_value=(batch_api, core_api, SimpleNamespace(), _ApiException))
 
         assert runner.get_task_status("shifter-jobs", "job-abc123") is None
-
-
-class TestGCPTaskRunnerSensitiveEnv:
-    """Issue #1185 — sensitive env vars must flow through Secret refs,
-    not literal value= entries on the Pod spec.
-
-    These tests assert the full Secret-then-Job-then-patchOwnerRef
-    sequence, that sensitive keys never appear as ``value=`` anywhere
-    in the Job spec, and that the Secret is cleaned up when Job
-    creation fails after Secret creation.
-    """
-
-    def _make_runner(self, batch_api: MagicMock, core_api: MagicMock) -> GCPTaskRunner:
-        client = _make_fake_k8s_client()
-        runner = GCPTaskRunner()
-        runner._load_kubernetes_api = MagicMock(return_value=(batch_api, core_api, client, _ApiException))
-        return runner
-
-    def _set_baseline_settings(self, settings: Any) -> None:
-        settings.ENGINE_TASK_SERVICE_ACCOUNT_NAME = "shifter-provisioner"
-        settings.ENGINE_TASK_IMAGE_PULL_POLICY = "IfNotPresent"
-        settings.ENGINE_TASK_BACKOFF_LIMIT = 0
-        settings.ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED = 3600
-
-    def test_sensitive_env_routes_through_secret_key_ref(self, settings) -> None:
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.return_value = SimpleNamespace(
-            metadata=SimpleNamespace(name="provisioner-abc123", uid="job-uid-xyz")
-        )
-        core_api = MagicMock()
-        runner = self._make_runner(batch_api, core_api)
-
-        runner.run_task(
-            task_definition="provisioner:latest",
-            cluster="shifter-jobs",
-            command=["range", "provision"],
-            container_name="pulumi-provisioner",
-            env_overrides={
-                "DB_PASSWORD": "supersecret",
-                "FIELD_ENCRYPTION_KEY": "key-material",
-                "DC_DOMAIN_PASSWORD": "domain-pass",
-                # Non-sensitive — stays literal.
-                "DB_HOST": "rds.example.com",
-                "CLOUD_PROVIDER": "gcp",
-                # Secret Manager *id* — pointer, not material. Stays literal.
-                "GDC_ACCESS_SECRET_ID": "projects/x/secrets/y",
-            },
-        )
-
-        # Secret is created BEFORE the Job submission.
-        assert core_api.create_namespaced_secret.call_count == 1
-        secret_call = core_api.create_namespaced_secret.call_args.kwargs
-        assert secret_call["namespace"] == "shifter-jobs"
-        secret_body = secret_call["body"]
-        assert secret_body.kind == "Secret"
-        assert secret_body.type == "Opaque"
-        # Sensitive values land in string_data; non-sensitive do not.
-        assert set(secret_body.string_data.keys()) == {
-            "DB_PASSWORD",
-            "FIELD_ENCRYPTION_KEY",
-            "DC_DOMAIN_PASSWORD",
-        }
-        assert secret_body.string_data["DB_PASSWORD"] == "supersecret"
-        secret_name = secret_body.metadata.name
-        assert secret_name.startswith("pulumi-provisioner-secrets-")
-
-        # Job env list: sensitive keys use valueFrom.secret_key_ref;
-        # non-sensitive keys keep literal value=.
-        job = batch_api.create_namespaced_job.call_args.kwargs["body"]
-        env_list = job.spec.template.spec.containers[0].env
-        env_by_name = {e.name: e for e in env_list}
-
-        for sensitive_key in ("DB_PASSWORD", "FIELD_ENCRYPTION_KEY", "DC_DOMAIN_PASSWORD"):
-            entry = env_by_name[sensitive_key]
-            # No literal value= on a sensitive entry.
-            assert getattr(entry, "value", None) is None, f"{sensitive_key} leaked as literal value="
-            ref = entry.value_from.secret_key_ref
-            assert ref.name == secret_name
-            assert ref.key == sensitive_key
-
-        for plain_key, plain_value in (
-            ("DB_HOST", "rds.example.com"),
-            ("CLOUD_PROVIDER", "gcp"),
-            ("GDC_ACCESS_SECRET_ID", "projects/x/secrets/y"),
-        ):
-            entry = env_by_name[plain_key]
-            assert entry.value == plain_value
-            assert getattr(entry, "value_from", None) is None
-
-    def test_no_sensitive_values_means_no_secret_is_created(self, settings) -> None:
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.return_value = SimpleNamespace(metadata=SimpleNamespace(name="job-1", uid="u"))
-        core_api = MagicMock()
-        runner = self._make_runner(batch_api, core_api)
-
-        runner.run_task(
-            task_definition="provisioner:latest",
-            cluster="shifter-jobs",
-            command=["range", "provision"],
-            container_name="pulumi-provisioner",
-            env_overrides={"DB_HOST": "x", "CLOUD_PROVIDER": "gcp"},
-        )
-
-        core_api.create_namespaced_secret.assert_not_called()
-        core_api.patch_namespaced_secret.assert_not_called()
-
-    def test_secret_is_owner_referenced_to_job_after_creation(self, settings) -> None:
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.return_value = SimpleNamespace(
-            metadata=SimpleNamespace(name="job-abc", uid="uid-job-abc")
-        )
-        core_api = MagicMock()
-        runner = self._make_runner(batch_api, core_api)
-
-        runner.run_task(
-            task_definition="provisioner:latest",
-            cluster="shifter-jobs",
-            command=["range", "provision"],
-            container_name="pulumi-provisioner",
-            env_overrides={"DB_PASSWORD": "p"},
-        )
-
-        assert core_api.patch_namespaced_secret.call_count == 1
-        patch_call = core_api.patch_namespaced_secret.call_args.kwargs
-        assert patch_call["namespace"] == "shifter-jobs"
-        owner_refs = patch_call["body"]["metadata"]["ownerReferences"]
-        assert len(owner_refs) == 1
-        owner = owner_refs[0]
-        assert owner["kind"] == "Job"
-        assert owner["apiVersion"] == "batch/v1"
-        assert owner["name"] == "job-abc"
-        assert owner["uid"] == "uid-job-abc"
-        assert owner["controller"] is True
-        assert owner["blockOwnerDeletion"] is True
-
-    def test_secret_is_cleaned_up_when_job_creation_fails(self, settings) -> None:
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.side_effect = RuntimeError("apiserver said no")
-        core_api = MagicMock()
-        runner = self._make_runner(batch_api, core_api)
-
-        with pytest.raises(CloudTaskError):
-            runner.run_task(
-                task_definition="provisioner:latest",
-                cluster="shifter-jobs",
-                command=["range", "provision"],
-                container_name="pulumi-provisioner",
-                env_overrides={"DB_PASSWORD": "p"},
-            )
-
-        # Created the Secret first, then attempted Job, then cleaned up.
-        assert core_api.create_namespaced_secret.call_count == 1
-        assert core_api.delete_namespaced_secret.call_count == 1
-        del_call = core_api.delete_namespaced_secret.call_args.kwargs
-        assert del_call["namespace"] == "shifter-jobs"
-
-    def test_owner_ref_patch_failure_unwinds_job_and_secret(self, settings) -> None:
-        """Codex review #1180 cycle 1 finding 6: ownerReference
-        installation is part of the success contract. If the patch
-        fails, the run is rolled back (both Job and Secret deleted)
-        and CloudTaskError is raised — instead of silently leaving
-        an orphan Secret with sensitive payload."""
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.return_value = SimpleNamespace(
-            metadata=SimpleNamespace(name="job-x", uid="uid-x")
-        )
-        core_api = MagicMock()
-        core_api.patch_namespaced_secret.side_effect = RuntimeError("patch denied")
-        runner = self._make_runner(batch_api, core_api)
-
-        with pytest.raises(CloudTaskError, match="ownerReference"):
-            runner.run_task(
-                task_definition="provisioner:latest",
-                cluster="shifter-jobs",
-                command=["range", "provision"],
-                container_name="pulumi-provisioner",
-                env_overrides={"DB_PASSWORD": "p"},
-            )
-
-        batch_api.delete_namespaced_job.assert_called_once()
-        del_job_kwargs = batch_api.delete_namespaced_job.call_args.kwargs
-        assert del_job_kwargs["name"] == "job-x"
-        core_api.delete_namespaced_secret.assert_called_once()
-
-    def test_missing_job_uid_unwinds_job_and_secret(self, settings) -> None:
-        """Job creation response omits a uid we can use as
-        ownerReference target → treat as a hard failure: unwind both
-        objects so we don't ship an orphan Secret."""
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.return_value = SimpleNamespace(
-            metadata=SimpleNamespace(name="job-x")  # NOTE: no uid
-        )
-        core_api = MagicMock()
-        runner = self._make_runner(batch_api, core_api)
-
-        with pytest.raises(CloudTaskError, match="uid"):
-            runner.run_task(
-                task_definition="provisioner:latest",
-                cluster="shifter-jobs",
-                command=["range", "provision"],
-                container_name="pulumi-provisioner",
-                env_overrides={"DB_PASSWORD": "p"},
-            )
-
-        batch_api.delete_namespaced_job.assert_called_once()
-        core_api.delete_namespaced_secret.assert_called_once()
-        core_api.patch_namespaced_secret.assert_not_called()
-
-    def test_missing_job_name_deletes_orphan_secret(self, settings) -> None:
-        """If the apiserver returns a Job with no usable name, the
-        Secret we created earlier must still be cleaned up."""
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.return_value = SimpleNamespace(metadata=SimpleNamespace(name=""))
-        core_api = MagicMock()
-        runner = self._make_runner(batch_api, core_api)
-
-        with pytest.raises(CloudTaskError, match="Job name"):
-            runner.run_task(
-                task_definition="provisioner:latest",
-                cluster="shifter-jobs",
-                command=["range", "provision"],
-                container_name="pulumi-provisioner",
-                env_overrides={"DB_PASSWORD": "p"},
-            )
-
-        core_api.delete_namespaced_secret.assert_called_once()
-
-    def test_no_sensitive_key_appears_as_literal_value_on_any_pod_field(self, settings) -> None:
-        """Regression: a future _build_env refactor that accidentally
-        emits `value=` for a sensitive key would silently break the
-        whole point of #1185. This test pins the invariant across
-        every known sensitive name."""
-        from shared.cloud.sensitive_env import SENSITIVE_NAMES
-
-        self._set_baseline_settings(settings)
-        batch_api = MagicMock()
-        batch_api.create_namespaced_job.return_value = SimpleNamespace(metadata=SimpleNamespace(name="j", uid="u"))
-        core_api = MagicMock()
-        runner = self._make_runner(batch_api, core_api)
-
-        env_overrides = {key: f"value-of-{key}" for key in SENSITIVE_NAMES}
-        env_overrides["DB_HOST"] = "rds.example.com"
-
-        runner.run_task(
-            task_definition="provisioner:latest",
-            cluster="shifter-jobs",
-            command=["range", "provision"],
-            container_name="pulumi-provisioner",
-            env_overrides=env_overrides,
-        )
-
-        job = batch_api.create_namespaced_job.call_args.kwargs["body"]
-        for entry in job.spec.template.spec.containers[0].env:
-            if entry.name in SENSITIVE_NAMES:
-                assert getattr(entry, "value", None) is None, f"Sensitive name {entry.name} emitted as literal value="

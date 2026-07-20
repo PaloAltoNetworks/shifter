@@ -468,7 +468,7 @@ def launch_range_via_api(make_agent, hydratable_scenario) -> Callable[..., tuple
         agent = make_agent(user)
         scenario = scenario_id or hydratable_scenario.scenario_id
         response = client.post(
-            reverse("mission_control:launch_range"),
+            reverse("v1:mission_control:range-launch"),
             data=json.dumps({"agent_id": agent.id, "scenario": scenario}),
             content_type="application/json",
         )

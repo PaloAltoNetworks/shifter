@@ -354,8 +354,14 @@ main() {
   local portal_worker_soft_concurrency
   local range_events_topic_id
   local environment
+  local cloud_provider
 
   environment=$(get_param "$PS_PREFIX/environment")
+  # Backend identity for config._cloud.resolve_cloud_provider (PLAT-2005). The
+  # deploy-time migrate + run containers must set the same CLOUD_PROVIDER the ASG
+  # boot path sets (portal/ec2 user_data.sh); required, so a missing parameter
+  # fails closed rather than silently defaulting to the wrong cloud.
+  cloud_provider=$(get_param "$PS_PREFIX/cloud-provider")
   image_digest=$(get_optional_param "$PS_PREFIX/image-digest")
   image_tag=$(get_param "$PS_PREFIX/image-tag")
   ecr_registry=$(get_param "$PS_PREFIX/ecr-registry")
@@ -429,6 +435,7 @@ main() {
 
   DOCKER_ENV=()
   append_env ENVIRONMENT "$environment"
+  append_env CLOUD_PROVIDER "$cloud_provider"
   append_env AWS_REGION "$AWS_REGION"
   append_env AWS_S3_BUCKET_NAME "$s3_bucket"
   append_env DB_SECRET_ARN "$db_secret_arn"

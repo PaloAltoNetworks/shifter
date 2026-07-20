@@ -198,6 +198,43 @@ def persist_operation_status_record(
     return persist_aces_operation_record(write)
 
 
+RUNTIME_SNAPSHOT_CONTRACT_VERSION = "runtime-snapshot-v1"
+
+
+def persist_runtime_snapshot_record(
+    *,
+    request_id: UUID | str,
+    operation_id: str,
+    source_timestamp: datetime,
+    payload: dict[str, Any],
+    range_id: UUID | str | None = None,
+    contract_version: str = RUNTIME_SNAPSHOT_CONTRACT_VERSION,
+    owner: str = AcesOperationRecord.Owner.ENGINE,
+) -> AcesOperationRecord:
+    """Persist one ``runtime_snapshot`` sidecar record idempotently.
+
+    Encapsulates the ``record_kind`` and idempotency-key convention for a
+    provisioned-state snapshot so callers outside ``shared`` do not touch the
+    ``AcesOperationRecord`` model. The idempotency key is deterministic in the
+    operation id and observation timestamp, so re-delivery of the same snapshot is
+    a no-op (or a conflict when the content drifts). The ``payload`` must carry the
+    required ``operation_id`` + ``resources`` keys and is bounded/redacted by the
+    write-boundary validator (ADR-031-R4) like every ACES operation record.
+    """
+    write = AcesOperationRecordWrite(
+        request_id=request_id,
+        operation_id=operation_id,
+        idempotency_key=f"runtime_snapshot:{operation_id}:{source_timestamp.isoformat()}",
+        record_kind=AcesOperationRecord.RecordKind.RUNTIME_SNAPSHOT,
+        contract_version=contract_version,
+        source_timestamp=source_timestamp,
+        payload=payload,
+        range_id=range_id,
+        owner=owner,
+    )
+    return persist_aces_operation_record(write)
+
+
 OPERATION_RECEIPT_CONTRACT_VERSION = "operation-receipt-v1"
 
 

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -19,13 +17,11 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from ctf.enums import (
+    ParticipantRole,
     ParticipantStatus,
 )
 
 from ._base import CTFBaseModel
-
-if TYPE_CHECKING:
-    from .event import CTFEvent
 
 logger = logging.getLogger(__name__)
 
@@ -233,8 +229,6 @@ class CTFParticipant(CTFBaseModel):
         status: Current participant lifecycle status.
         range_instance_id: Linked CMS RangeInstance ID.
         range_status: Cached range status for quick lookups.
-        invite_token: Secure token for registration link.
-        invite_token_expires: When the invite token expires.
         invited_at: When invitation was sent.
         registered_at: When user completed registration.
         last_active_at: Last activity timestamp.
@@ -255,8 +249,10 @@ class CTFParticipant(CTFBaseModel):
         help_text="Linked user account (null before registration)",
     )
     email = models.EmailField(
+        blank=True,
+        default="",
         db_index=True,
-        help_text="Participant email",
+        help_text="Optional credential-delivery email; never an identity key",
     )
     name = models.CharField(
         max_length=100,
@@ -300,6 +296,27 @@ class CTFParticipant(CTFBaseModel):
         db_index=True,
         help_text="Current participant lifecycle status",
     )
+    status_reason = models.TextField(
+        blank=True,
+        default="",
+        help_text="Organizer-recorded reason for a ban or disqualification (CTF-605/CTF-609)",
+    )
+    role = models.CharField(
+        max_length=16,
+        choices=ParticipantRole.choices(),
+        default=ParticipantRole.PLAYER.value,
+        help_text="Event-scoped participation role (CTF-604): players compete, observers watch",
+    )
+    hidden = models.BooleanField(
+        default=False,
+        help_text="Hidden participants (CTF-606) play normally but never appear in rankings",
+    )
+    affiliation = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        help_text="Optional organization or region shown on the event profile (CTF-610)",
+    )
     range_instance_id = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -310,15 +327,6 @@ class CTFParticipant(CTFBaseModel):
         blank=True,
         default="",
         help_text="Cached range status for quick lookups",
-    )
-    invite_token = models.CharField(
-        max_length=64,
-        unique=True,
-        db_index=True,
-        help_text="Secure token for registration link",
-    )
-    invite_token_expires = models.DateTimeField(
-        help_text="When the invite token expires",
     )
     invited_at = models.DateTimeField(
         null=True,
@@ -363,9 +371,16 @@ class CTFParticipant(CTFBaseModel):
         verbose_name_plural = "CTF Participants"
         constraints = [
             models.UniqueConstraint(
+                fields=["user"],
+                condition=Q(deleted_at__isnull=True, user__isnull=False),
+                name="unique_active_ctf_participant_user",
+            ),
+            # CTF-601: a delivery email may appear at most once per event.
+            # Blank emails (count-provisioned isolated accounts) are exempt.
+            models.UniqueConstraint(
                 fields=["event", "email"],
-                condition=Q(deleted_at__isnull=True),
-                name="unique_active_participant_email_per_event",
+                condition=Q(deleted_at__isnull=True) & ~Q(email=""),
+                name="unique_active_ctf_participant_event_email",
             ),
         ]
         indexes = [
@@ -377,29 +392,6 @@ class CTFParticipant(CTFBaseModel):
     def __str__(self) -> str:
         """Return participant name with email."""
         return f"{self.name} <{self.email}>"
-
-    def save(self, *args, **kwargs) -> None:
-        """Generate invite token on first save."""
-        if not self.invite_token:
-            self.invite_token = secrets.token_urlsafe(32)
-        if not self.invite_token_expires:
-            event = self.event if hasattr(self, "event") and self.event_id else None
-            self.invite_token_expires = self.default_invite_token_expiry(event)
-        super().save(*args, **kwargs)
-
-    @staticmethod
-    def default_invite_token_expiry(event: CTFEvent | None, *, now: datetime | None = None) -> datetime:
-        """Return the default expiry for a participant magic-link token."""
-        current_time = now or timezone.now()
-        if event and event.event_end:
-            event_max_hours = getattr(settings, "MAGIC_LINK_EVENT_MAX_EXPIRY_HOURS", None)
-            if event_max_hours is not None:
-                event_max_expiry = current_time + timedelta(hours=event_max_hours)
-                return min(event.event_end, event_max_expiry)
-            return event.event_end
-
-        hours = getattr(settings, "MAGIC_LINK_EXPIRY_HOURS", 24)
-        return current_time + timedelta(hours=hours)
 
     def clean(self) -> None:
         """Validate participant data."""
@@ -419,11 +411,6 @@ class CTFParticipant(CTFBaseModel):
     def is_registered(self) -> bool:
         """Return True if participant has completed registration."""
         return self.user is not None and self.registered_at is not None
-
-    @property
-    def is_invite_valid(self) -> bool:
-        """Return True if invite token is still valid."""
-        return self.invite_token_expires is not None and timezone.now() < self.invite_token_expires
 
     @property
     def total_score(self) -> int:

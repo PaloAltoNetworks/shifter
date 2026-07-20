@@ -55,13 +55,6 @@ _IN_MEMORY = "in_memory"
 _REDIS = "redis"
 _VALID_BACKENDS = (_IN_MEMORY, _REDIS)
 
-# REDIS_CA_MODE selects how the TLS server certificate is trusted (see module
-# docstring). `pem` is the default so the GCP fail-closed behaviour (#963) is
-# preserved for any environment that does not explicitly opt into system trust.
-_CA_MODE_PEM = "pem"
-_CA_MODE_SYSTEM = "system"
-_VALID_CA_MODES = (_CA_MODE_PEM, _CA_MODE_SYSTEM)
-
 
 def _resolve_backend(env: Mapping[str, str]) -> str:
     """Resolve the channel-layer backend (``in_memory`` or ``redis``).
@@ -98,72 +91,22 @@ def _build_redis_layer(env: Mapping[str, str]) -> dict[str, dict[str, object]]:
     """Build the ``channels_redis`` layer config from the env.
 
     The caller guarantees ``REDIS_HOST`` is present (via ``_resolve_backend``).
+    The AUTH/TLS/CA fail-closed posture is resolved by the shared
+    ``config._redis.resolve_redis_connection`` so this layer and the
+    launch-admission cache (#322) never drift into two different, independently
+    validated Redis security postures. The dict-form host entry is unpacked into
+    ``aioredis.ConnectionPool.from_url(address, **rest)`` (see
+    channels_redis/utils.py::create_pool), so redis-py's SSL kwargs flow
+    through; the channels layer uses logical DB 0.
     """
-    from django.core.exceptions import ImproperlyConfigured
+    from config._redis import redis_tls_ssl_kwargs, redis_tls_url, resolve_redis_connection
 
-    host = env.get("REDIS_HOST", "").strip()
-    port = int(env.get("REDIS_PORT", "6379"))
-    tls = env.get("REDIS_TLS", "").strip().lower() == "true"
-    if tls:
-        password = env.get("REDIS_PASSWORD", "").strip()
-        if not password:
-            raise ImproperlyConfigured(
-                "REDIS_TLS=true requires REDIS_PASSWORD (hydrated by entrypoint.sh "
-                "from Secret Manager); refusing to fall back to a plaintext connection"
-            )
-        ca_mode = env.get("REDIS_CA_MODE", "").strip().lower() or _CA_MODE_PEM
-        if ca_mode not in _VALID_CA_MODES:
-            raise ImproperlyConfigured(f"REDIS_CA_MODE must be one of {_VALID_CA_MODES}, got {ca_mode!r}")
-        # channels_redis (>= 4) accepts dict-form host entries; the dict is
-        # unpacked into `aioredis.ConnectionPool.from_url(address, **rest)`
-        # (see channels_redis/utils.py::create_pool), so redis-py's SSL
-        # kwargs flow through. `ssl_cert_reqs=required` is set in both trust
-        # modes, so the server certificate is always verified.
-        address = f"rediss://:{password}@{host}:{port}/0"
-        host_entry: dict[str, object] = {
-            "address": address,
-            "ssl_cert_reqs": "required",
-        }
-        if ca_mode == _CA_MODE_PEM:
-            # ADR-008-R6 fail-closed (#963): GCP Memorystore uses a private CA
-            # delivered alongside the AUTH token in Secret Manager, exported by
-            # entrypoint.sh as REDIS_CA_PEM. A missing CA is a misconfiguration
-            # — the system trust store could not validate a private CA anyway —
-            # so surface it at startup rather than as an opaque TLS handshake
-            # failure later. The CA is passed via `ssl_ca_data` so the cert is
-            # never written to disk or merged into the system trust store.
-            # The private CA is itself the trust anchor (it only signs the
-            # Memorystore instance cert), so chain validation already binds the
-            # session to that instance — no separate hostname check is needed,
-            # and Memorystore is reached by IP where a hostname check would not
-            # apply.
-            ca_pem = env.get("REDIS_CA_PEM", "")
-            if not ca_pem.strip():
-                raise ImproperlyConfigured(
-                    "REDIS_TLS with REDIS_CA_MODE=pem requires REDIS_CA_PEM (hydrated by "
-                    "entrypoint.sh from the Memorystore server_ca_cert in Secret Manager); "
-                    "refusing to fall back to the system trust store, which cannot validate "
-                    "the Memorystore private CA"
-                )
-            # Use the raw CA value (do not strip) — the PEM block's trailing
-            # newline matters for some TLS implementations and the canonical
-            # form ends with one.
-            host_entry["ssl_ca_data"] = ca_pem
-        else:
-            # ca_mode == system (AWS ElastiCache, #938): the server cert chains
-            # to a public Amazon CA already in the OS trust store, so no
-            # ssl_ca_data is supplied. Because the public trust store would
-            # validate the chain of ANY publicly-trusted cert, hostname
-            # verification is required to bind the session to the configured
-            # ElastiCache endpoint — without it a MITM could present a valid
-            # public cert issued for a different name, complete the TLS
-            # handshake, capture the AUTH exchange, and replay the token.
-            # REDIS_HOST must therefore be the ElastiCache DNS endpoint (it is:
-            # the module exports primary_endpoint_address), not an IP.
-            host_entry["ssl_check_hostname"] = True
+    conn = resolve_redis_connection(env)
+    if conn.tls:
+        host_entry: dict[str, object] = {"address": redis_tls_url(conn, 0), **redis_tls_ssl_kwargs(conn)}
         hosts: list[object] = [host_entry]
     else:
-        hosts = [(host, port)]
+        hosts = [(conn.host, conn.port)]
 
     return {
         "default": {

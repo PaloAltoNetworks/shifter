@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 
+from config._runtime_env import IS_TEST_RUN, resolve_cloud_provider
+
 __all__ = [
     "AWS_ENDPOINT_URL",
     "AWS_REGION",
@@ -45,8 +47,11 @@ __all__ = [
 # Cloud Provider Configuration
 # ------------------------------------------------------------------------------
 
-# Which cloud provider to use: "aws" (default) or "gcp" (future)
-CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
+# The active cloud backend, resolved once at the Django composition root and
+# validated against the installation registry (PLAT-2005). Fails closed on a
+# missing/unsupported value in a deployed process; the "aws" default applies
+# only under runtime_allows_dev_defaults (dev/test/build).
+CLOUD_PROVIDER = resolve_cloud_provider()
 GOOGLE_CLOUD_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID") or GOOGLE_CLOUD_PROJECT
 GCP_REGION = os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION", "")
@@ -113,7 +118,17 @@ ENGINE_ECS_SECURITY_GROUP_ID = ENGINE_TASK_NETWORK_SECURITY_GROUP_ID
 ENGINE_PRIVATE_SUBNET_IDS = ENGINE_TASK_NETWORK_SUBNET_IDS
 
 # Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
-LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
+# Under a test run, force it OFF regardless of a developer ``.env`` (#1529 / REV1
+# Q6): the range-lifecycle suites must never shell out to a real
+# ``python main.py`` provisioner via ``engine.ecs._run_local_provisioner`` -- that
+# leaks un-reaped subprocesses (and their stdout/stderr pipes), surfacing as a
+# flood of ``ResourceWarning: subprocess ... is still running``. CI has no
+# ``.env`` so it never dispatched locally; forcing off here keeps the suite
+# deterministic and warning-clean locally too. Tests that exercise the
+# local-provisioner path set ``settings.LOCAL_PROVISIONER`` via the pytest-django
+# ``settings`` fixture, which overrides this module default. Production
+# (``IS_TEST_RUN`` false) is unchanged.
+LOCAL_PROVISIONER = "" if IS_TEST_RUN else os.environ.get("LOCAL_PROVISIONER", "")
 PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
 
 # ------------------------------------------------------------------------------

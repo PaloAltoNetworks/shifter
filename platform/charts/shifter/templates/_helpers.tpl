@@ -66,7 +66,7 @@ volumes:
 {{- end }}
 
 {{- define "shifter.runtimeConfigChecksum" -}}
-{{ toJson .Values.runtimeEnv | sha256sum }}
+{{ toJson (dict "runtimeEnv" .Values.runtimeEnv "jobsNamespace" .Values.namespaces.jobs "provisionerServiceAccount" .Values.serviceAccounts.provisioner.name) | sha256sum }}
 {{- end }}
 
 {{- define "shifter.portalImage" -}}

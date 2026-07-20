@@ -391,10 +391,10 @@ document.addEventListener('DOMContentLoaded', function() {
     var CSRF_TOKEN = '{{ csrf_token }}';
     {% if is_edit %}
     var EVENT_ID = '{{ event_id }}';
-    var API_URL = '{% url "ctf:api_event_detail" event_id=event_id %}';
+    var API_URL = '{% url "v1:ctf:api_event_detail" event_id=event_id %}';
     var DETAIL_URL = '{% url "ctf:admin_event_detail" event_id=event_id %}';
     {% else %}
-    var API_URL = '{% url "ctf:api_event_list" %}';
+    var API_URL = '{% url "v1:ctf:api_event_list" %}';
     {% endif %}
 
     // --- DOM refs ---

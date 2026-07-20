@@ -76,6 +76,19 @@ def _get_guac_settings(service_name: str) -> tuple[str, str, str | None]:
     return guacamole_signing_secret, base_url, api_url
 
 
+def guacamole_identity(user: User) -> str:
+    """Return the Guacamole JSON-auth session identity for ``user``.
+
+    The Guacamole session username is an identity label, not an email. Platform
+    (OIDC) users carry an email and use it, but isolated temporary CTF accounts
+    (issue #1206) are created with a blank ``email`` and a unique ``range-<hex>``
+    username. Passing the blank email to Guacamole is rejected with
+    ``400 "The username must not be blank."``, so fall back to the account's
+    unique username, which is also a correct per-user-isolated session identity.
+    """
+    return user.email or user.get_username()
+
+
 def _wrap_bootstrap_error[BootstrapResultT](
     operation: str, callback: Callable[[], BootstrapResultT]
 ) -> BootstrapResultT:
@@ -124,7 +137,7 @@ def _resolve_and_build_rdp_url(
         file_transfer_available,
     )
     return _generate_rdp_url(
-        user_email=user.email,
+        username=guacamole_identity(user),
         conn_info=conn_info,
         guacamole_signing_secret=guacamole_signing_secret,
         guacamole_base_url=guacamole_base_url,
@@ -198,7 +211,7 @@ def _resolve_and_build_ngfw_ssh_url(
     ssh_conn = _resolve_ngfw_ssh(user, app_id)
     guacamole_signing_secret, guacamole_base_url, guacamole_api_url = guac_settings
     return _generate_ngfw_ssh_url(
-        user_email=user.email,
+        username=guacamole_identity(user),
         app_id=app_id,
         ssh_conn=ssh_conn,
         guacamole_signing_secret=guacamole_signing_secret,
@@ -290,7 +303,7 @@ def _resolve_and_build_range_ssh_url(
         safe_log_fingerprint(ssh_info.get("cloud_provider") or "unknown"),
     )
     return _generate_range_ssh_url(
-        user_email=user.email,
+        username=guacamole_identity(user),
         instance_uuid=instance_uuid,
         ssh_info=ssh_info,
         guacamole_signing_secret=guacamole_signing_secret,

@@ -117,7 +117,7 @@
                                             <button type="button"
                                                     class="btn btn-sm btn-outline-primary"
                                                     data-download-url="
-                                                        {% url 'ctf:api_file_download' file_id=file.pk %}">
+                                                        {% url 'v1:ctf:api_file_download' file_id=file.pk %}">
                                                 {% blocktrans with v1=file.display %}
                                                     &#128196; {{ v1 }}
                                                 {% endblocktrans %}
@@ -470,7 +470,7 @@ function submitFlag(e) {
     btn.disabled = true;
     btn.textContent = 'Submitting...';
 
-    fetch("{% url 'ctf:api_submit_flag' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_submit_flag' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -553,7 +553,7 @@ function useHint(hintId, hintPenalty) {
         return;
     }
 
-    fetch("{% url 'ctf:api_use_hint' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_use_hint' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -594,7 +594,7 @@ document.querySelectorAll('[data-download-url]').forEach(function(link) {
 function rateChallenge(value) {
     var resultDiv = document.getElementById('rating-result');
 
-    fetch("{% url 'ctf:api_rate_challenge' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_rate_challenge' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

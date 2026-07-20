@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -67,13 +67,26 @@ jobs:
 
   validate:
     name: Validate (${{ inputs.environment }})
-    # PR validation only needs a local Docker build and no cloud credentials.
-    # Keep it on GitHub-hosted runners so PRs do not queue behind the
-    # deployment runner pool; build/deploy remain self-hosted below.
+    # Engine image-shape validation (local `docker build`, no cloud credentials).
+    # This reusable workflow is only ever called by deploy.yml's PR-gated
+    # `shifter-engine` job, so `validate` runs on the trusted deploy path, never
+    # on pull_request. Run it on the same self-hosted runner class as
+    # build/deploy: on GitHub-hosted runners a runner-acquisition stall can
+    # cancel the job with zero steps started and skip the whole Platform stage
+    # (#1474), and GitHub Actions has no runner-class fallback to repair a job
+    # that never acquired a runner.
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    # Defense in depth: ADR-003-R5 (`deploy-workflow-runner-exposure`) requires
+    # every self-hosted job in a reusable deploy workflow to fail closed on
+    # pull_request, so the workflow stays safe if a future caller is added.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    # Backstop only (see #1220); generous vs. a single local --no-cache build.
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Build provisioner image locally
         run: docker build --no-cache -f shifter/engine/provisioner/Dockerfile -t shifter-engine-validate ./shifter
 
@@ -87,6 +100,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      attestations: write
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     outputs:
       image_tag: ${{ steps.image.outputs.tag }}
@@ -94,7 +108,7 @@ jobs:
     env:
       ECR_REPOSITORY: shifter-${{ inputs.environment }}-pulumi-provisioner
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Resolve AWS deploy role
         id: aws-role
@@ -127,14 +141,14 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
       - name: Set image tag
         id: image
@@ -143,11 +157,11 @@ jobs:
           echo "tag=${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: ./shifter
           file: ./shifter/engine/provisioner/Dockerfile
@@ -155,6 +169,18 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
           no-cache: true
+          # Build provenance (ADR-037-R5): embed an SBOM and max provenance in
+          # the pushed image, then attest it below with a GitHub OIDC-signed
+          # statement bound to the exact repository and digest.
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
 
   deploy:
     name: Deploy (${{ inputs.environment }})
@@ -164,6 +190,8 @@ jobs:
     environment: ${{ inputs.github_environment }}
     permissions:
       id-token: write
+      contents: read
+      attestations: read
     needs: [test, build]
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     env:
@@ -200,10 +228,32 @@ jobs:
             exit 1
           fi
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Verify image build provenance
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+          ECR_REPOSITORY: shifter-${{ inputs.environment }}-pulumi-provisioner
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # ADR-037-R6: verify the GitHub OIDC-signed provenance attestation for
+          # the exact image@digest and the fixed Brad-Edwards/shifter identity
+          # before it is registered into the ECS task definition. No bypass mode.
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest to verify"
+            exit 1
+          fi
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE_REF="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          echo "Verifying provenance for ${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          gh attestation verify "oci://${IMAGE_REF}" --repo Brad-Edwards/shifter
 
       - name: Update ECS task definition
         env:

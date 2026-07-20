@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 
 HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "aces-operation-record-prune-heartbeat"
 
+# Refresh the heartbeat this often (seconds) while idle between poll cycles. The
+# liveness probe treats a heartbeat older than ~2m as dead, and poll_interval is
+# typically an hour, so the sleep loop must keep the heartbeat warm or the probe
+# kills the worker on an empty backlog (nothing to prune -> no per-batch touch).
+_HEARTBEAT_REFRESH_SECONDS = 30
+
 _DEFAULT_POLL_INTERVAL = 3600
 _DEFAULT_BATCH_SIZE = 500
 # Upper bound on delete work per poll cycle: a cold deploy or a retention-policy
@@ -97,10 +103,15 @@ class Command(BaseCommand):
 
             self._touch_heartbeat()
 
-            # Sleep in short increments so we respond to signals quickly.
-            for _ in range(poll_interval):
+            # Sleep in short increments so we respond to signals quickly, and
+            # refresh the heartbeat periodically so the liveness probe does not
+            # kill the worker during a long idle poll interval (empty backlog,
+            # so _prune_cycle did no per-batch touch).
+            for elapsed in range(poll_interval):
                 if self.shutdown:
                     break
+                if elapsed % _HEARTBEAT_REFRESH_SECONDS == 0:
+                    self._touch_heartbeat()
                 time.sleep(1)
 
         self._cleanup_heartbeat()

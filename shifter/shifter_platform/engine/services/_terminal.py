@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING, Any
+
+from django.conf import settings
 
 from engine.secrets import SecretsError
 from shared.enums import ResourceStatus
@@ -19,6 +20,7 @@ from ._common import (
     _resolve_ngfw_management_ip,
     _resolve_ngfw_ssh_key_secret_ref,
     _resolve_rdp_credentials,
+    find_instance_by_uuid,
 )
 
 
@@ -59,7 +61,7 @@ def _require_rdp_password(instance: dict[str, Any], os_type: str, rdp_password: 
     role = _first_connection_value(instance.get("role"), "instance").lower()
     if os_type == "windows" and role == "dc":
         provider_label = _first_connection_value(instance.get("cloud_provider")).lower() or "aws"
-        portal_provider = os.environ.get("CLOUD_PROVIDER", "aws").lower()
+        portal_provider = settings.CLOUD_PROVIDER
         if provider_label != portal_provider:
             raise ValueError(
                 f"DC password unavailable: instance provider {provider_label!r} "
@@ -96,6 +98,23 @@ def _fetch_sftp_ssh_key(instance: dict[str, Any], os_type: str) -> str | None:
     return result
 
 
+def _require_declared_participant_channel(instance: dict[str, Any], channel: str) -> None:
+    """Enforce the closed realized participant-access binding (issue #1349).
+
+    When the range cell recorded scenario-declared participant access channels for
+    this instance, authorize only those channels: participant access is granted
+    from the declared target/channel binding, not from the mere presence of a
+    credential secret. ``None`` means no closed binding was recorded (e.g. the AWS
+    path, which exposes every provisioned instance), so the existing
+    ownership/READY/credential gate stands unchanged.
+    """
+    declared = instance.get("participant_access_channels")
+    if declared is None:
+        return
+    if channel not in declared:
+        raise ValueError(f"{channel} access is not a declared participant endpoint for this instance")
+
+
 def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     """Get connection info for RDP access to a range instance."""
     from engine.models import Range
@@ -121,13 +140,15 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if range_obj.status != Range.Status.READY:
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
-    instance = range_obj.get_instance_by_uuid(instance_uuid)
+    instance = find_instance_by_uuid(range_obj.provisioned_instances, instance_uuid)
     if not instance:
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
     if os_type not in ("kali", "ubuntu", "windows"):
         raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
+
+    _require_declared_participant_channel(instance, "rdp")
 
     host = _resolve_instance_host(instance)
     if not host:
@@ -182,10 +203,12 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         logger.error("Range not ready: range_id=%s status=%s", range_obj.id, range_obj.status)
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
-    instance = range_obj.get_instance_by_uuid(instance_uuid)
+    instance = find_instance_by_uuid(range_obj.provisioned_instances, instance_uuid)
     if instance is None:
         logger.error("Instance not found: range_id=%s instance_uuid=%s", range_obj.id, safe_log_value(instance_uuid))
         raise ValueError(f"Instance {instance_uuid} not found in range")
+
+    _require_declared_participant_channel(instance, "ssh")
 
     ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
     if not ssh_key_ref:

@@ -346,16 +346,16 @@ function rebuildScoreboardTable(rankings, teamMode) {
 }
     </script>
     {% if participant and not team_mode and not selected_bracket %}
-        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
-                integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
-                crossorigin="anonymous"></script>
-<script
-src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
-integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
-crossorigin="anonymous"></script>
+        {# Chart.js vendored + served same-origin with SRI (ADR-036: no public #}
+        {# CDN script authority). Same v4.5.1 bundle already used by the admin #}
+        {# participant detail page. #}
+        <script src="{% static 'js/vendor/chart.umd.min.js' %}"
+                integrity="sha384-NO4oBg7U+sYOLwaoslYLRIVIW0JTqdPuRFlbzi7loV/T3vzxf9sWDkEyMjdxbbzb"></script>
+        <script src="{% static 'js/vendor/chartjs-adapter-date-fns.bundle.min.js' %}"
+                integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"></script>
         <script src="{% static 'js/score-timeline.js' %}"></script>
         <script>
-initScoreTimeline('score-timeline-chart', "{% url 'ctf:api_score_timeline' participant_id=participant.pk %}");
+initScoreTimeline('score-timeline-chart', "{% url 'v1:ctf:api_score_timeline' participant_id=participant.pk %}");
         </script>
     {% endif %}
 {% endblock %}

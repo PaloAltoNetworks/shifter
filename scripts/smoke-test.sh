@@ -52,16 +52,14 @@ source "${TOPO_FILE}"
 RUN_ARGS=(run_post_deploy_smoke --variant "${VARIANT}")
 
 # The manage command runs inside the portal container via `docker exec`, which
-# does not inherit this job's environment. Forward every SMOKE_* value the
-# command reads (the user identity plus the per-variant agent IDs) explicitly
-# with --env; skip any that are unset so we never pass empty overrides.
+# does not inherit this job's environment. Forward the smoke user identity
+# explicitly with --env; skip it when unset so we never pass an empty override.
+# The smoke provisions ranges from base AMIs (no XDR agent), so there are no
+# per-variant agent IDs to forward.
 ENV_ARGS=()
-for smoke_var in SMOKE_TEST_USER_EMAIL SMOKE_LINUX_AGENT_ID SMOKE_WINDOWS_AGENT_ID; do
-  smoke_val="${!smoke_var:-}"
-  if [[ -n "${smoke_val}" ]]; then
-    ENV_ARGS+=(--env "${smoke_var}=${smoke_val}")
-  fi
-done
+if [[ -n "${SMOKE_TEST_USER_EMAIL:-}" ]]; then
+  ENV_ARGS+=(--env "SMOKE_TEST_USER_EMAIL=${SMOKE_TEST_USER_EMAIL}")
+fi
 
 if [[ -n "${instance_id:-}" ]]; then
   python3 "${REPO_ROOT}/scripts/portal_deploy/portal_deploy.py" run-manage-on-portal \

@@ -286,7 +286,7 @@ class TestApiCredentialCreateIntegration:
         }
 
         response = authenticated_client.post(
-            "/mission-control/api/credentials/",
+            "/api/v1/mission-control/credentials/",
             data=json.dumps(data),
             content_type="application/json",
         )
@@ -310,7 +310,7 @@ class TestApiCredentialCreateIntegration:
         }
 
         response = authenticated_client.post(
-            "/mission-control/api/credentials/",
+            "/api/v1/mission-control/credentials/",
             data=json.dumps(data),
             content_type="application/json",
         )
@@ -328,13 +328,13 @@ class TestApiCredentialCreateIntegration:
     def test_returns_400_for_invalid_json(self, authenticated_client):
         """api_credential_create returns 400 for invalid JSON."""
         response = authenticated_client.post(
-            "/mission-control/api/credentials/",
+            "/api/v1/mission-control/credentials/",
             data="not json",
             content_type="application/json",
         )
 
         assert response.status_code == 400
-        assert "Invalid JSON" in response.json()["error"]
+        assert response.json()["error"]["code"] == "parse_error"
 
     def test_returns_400_for_invalid_credential_type(self, authenticated_client):
         """api_credential_create returns 400 for unknown type."""
@@ -344,13 +344,13 @@ class TestApiCredentialCreateIntegration:
         }
 
         response = authenticated_client.post(
-            "/mission-control/api/credentials/",
+            "/api/v1/mission-control/credentials/",
             data=json.dumps(data),
             content_type="application/json",
         )
 
         assert response.status_code == 400
-        assert "Invalid credential type" in response.json()["error"]
+        assert "Invalid credential type" in json.dumps(response.json()["error"]["details"])
 
     def test_returns_400_for_missing_required_fields(self, authenticated_client, scm_credential_type):
         """api_credential_create returns 400 for missing fields."""
@@ -361,7 +361,7 @@ class TestApiCredentialCreateIntegration:
         }
 
         response = authenticated_client.post(
-            "/mission-control/api/credentials/",
+            "/api/v1/mission-control/credentials/",
             data=json.dumps(data),
             content_type="application/json",
         )
@@ -380,7 +380,7 @@ class TestApiCredentialCreateIntegration:
         }
 
         response = authenticated_client.post(
-            "/mission-control/api/credentials/",
+            "/api/v1/mission-control/credentials/",
             data=json.dumps(data),
             content_type="application/json",
         )
@@ -400,7 +400,7 @@ class TestApiCredentialDeleteIntegration:
 
     def test_soft_deletes_credential(self, authenticated_client, scm_credential):
         """api_credential_delete soft-deletes credential in database."""
-        response = authenticated_client.post(f"/mission-control/api/credentials/{scm_credential.id}/delete/")
+        response = authenticated_client.post(f"/api/v1/mission-control/credentials/{scm_credential.id}/delete/")
 
         assert response.status_code == 200
 
@@ -422,7 +422,7 @@ class TestApiCredentialDeleteIntegration:
             },
         )
 
-        response = authenticated_client.post(f"/mission-control/api/credentials/{other_cred.id}/delete/")
+        response = authenticated_client.post(f"/api/v1/mission-control/credentials/{other_cred.id}/delete/")
 
         assert response.status_code == 404
 
@@ -432,7 +432,7 @@ class TestApiCredentialDeleteIntegration:
 
     def test_returns_404_for_nonexistent_credential(self, authenticated_client):
         """api_credential_delete returns 404 for unknown ID."""
-        response = authenticated_client.post("/mission-control/api/credentials/99999/delete/")
+        response = authenticated_client.post("/api/v1/mission-control/credentials/99999/delete/")
 
         assert response.status_code == 404
 
@@ -453,7 +453,7 @@ class TestApiCredentialDeleteIntegration:
             },
         )
 
-        response = authenticated_client.post(f"/mission-control/api/credentials/{deleted_cred.id}/delete/")
+        response = authenticated_client.post(f"/api/v1/mission-control/credentials/{deleted_cred.id}/delete/")
 
         assert response.status_code == 404
 
@@ -480,7 +480,7 @@ class TestCredentialLifecycleIntegration:
         }
 
         create_response = authenticated_client.post(
-            "/mission-control/api/credentials/",
+            "/api/v1/mission-control/credentials/",
             data=json.dumps(create_data),
             content_type="application/json",
         )
@@ -501,7 +501,7 @@ class TestCredentialLifecycleIntegration:
         assert b"Lifecycle Test Cred" in detail_response.content
 
         # Step 4: Delete via API
-        delete_response = authenticated_client.post(f"/mission-control/api/credentials/{cred_id}/delete/")
+        delete_response = authenticated_client.post(f"/api/v1/mission-control/credentials/{cred_id}/delete/")
 
         assert delete_response.status_code == 200
 

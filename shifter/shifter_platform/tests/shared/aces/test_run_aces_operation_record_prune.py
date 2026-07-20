@@ -129,7 +129,10 @@ def test_prune_cycle_stops_immediately_on_shutdown():
     assert cmd._prune_cycle(batch_size=10) == 0
 
 
-@pytest.mark.django_db
+# transaction=True: the daemon's cycle calls close_old_connections(), which
+# corrupts pytest-django's rolled-back wrapping transaction on PostgreSQL. SQLite
+# tolerated it; a real backend does not (#1524).
+@pytest.mark.django_db(transaction=True)
 def test_handle_runs_one_cycle_then_shuts_down(monkeypatch):
     now = timezone.now()
     expired = _seed(now - timedelta(days=1))

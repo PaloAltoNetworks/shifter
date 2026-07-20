@@ -20,6 +20,7 @@ from ctf.enums import (
     ChallengeCategory,
     ChallengeDifficulty,
     ChallengeVisibility,
+    DecayFunction,
 )
 
 from ._base import CTFBaseModel
@@ -95,6 +96,23 @@ class CTFChallenge(CTFBaseModel):
     max_attempts = models.PositiveIntegerField(
         default=0,
         help_text="Maximum submission attempts (0 = unlimited)",
+    )
+    minimum_points = models.PositiveIntegerField(
+        default=0,
+        help_text="Floor value for dynamic scoring; the challenge never decays below this (CTF-202).",
+    )
+    decay_function = models.CharField(
+        max_length=20,
+        choices=DecayFunction.choices(),
+        default=DecayFunction.LINEAR.value,
+        help_text="Decay curve used when the event's scoring mode is dynamic.",
+    )
+    decay_solve_count = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "Number of solves over which the value decays to the minimum. "
+            "0 disables decay for this challenge even in dynamic events."
+        ),
     )
     release_time = models.DateTimeField(
         null=True,

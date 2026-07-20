@@ -297,6 +297,7 @@ def test_identity_backend_enforces_corporate_domain(db):
         backend.authenticate(
             request,
             identity_claims={
+                "iss": "https://securetoken.google.com/test-project",
                 "sub": "sub-123",
                 "email": "intruder@example.com",
                 "email_verified": True,
@@ -318,6 +319,7 @@ def test_identity_backend_bootstrap_admin_gets_staff_superuser(db):
     user = backend.authenticate(
         request,
         identity_claims={
+            "iss": "https://securetoken.google.com/test-project",
             "sub": "sub-456",
             "email": "admin@example.com",
             "email_verified": True,
@@ -358,6 +360,7 @@ def test_login_with_identity_token_requires_verified_email_and_enrolled_factor(m
         identity_platform_auth,
         "verify_identity_token",
         lambda token: {
+            "iss": "https://securetoken.google.com/test-project",
             "sub": "sub-123",
             "email": "analyst@paloaltonetworks.com",
             "email_verified": True,
@@ -412,3 +415,94 @@ def test_verify_identity_token_wraps_firebase_verification_errors(monkeypatch):
     monkeypatch.setattr(ip.firebase_auth, "verify_id_token", _raise)
     with pytest.raises(ip.IdentityPlatformAuthError):
         ip.verify_identity_token("token")
+
+
+# =============================================================================
+# IdentityPlatformBackend verified-identity gate (issue #1521)
+# =============================================================================
+
+_ISSUER = "https://securetoken.google.com/test-project"
+
+
+def _claims(**overrides):
+    base = {"iss": _ISSUER, "sub": "sub-1", "email": "user@example.com", "email_verified": True}
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.django_db
+class TestIdentityPlatformBackendVerifiedIdentityGate:
+    """Rejection occurs before any user lookup/creation/binding/elevation."""
+
+    def test_rejects_missing_issuer(self):
+        from config import identity_platform as identity_platform_auth
+
+        backend = identity_platform_auth.IdentityPlatformBackend()
+        claims = _claims()
+        del claims["iss"]
+
+        with pytest.raises(identity_platform_auth.IdentityPlatformAuthError):
+            backend.authenticate(None, identity_claims=claims)
+
+        assert not User.objects.filter(email="user@example.com").exists()
+
+    @pytest.mark.parametrize(
+        "email_verified",
+        [None, False, "false", "true", 0, 1],
+        ids=["missing", "false", "str-false", "str-true", "int-0", "int-1"],
+    )
+    def test_rejects_non_literal_true_email_verified(self, email_verified):
+        from config import identity_platform as identity_platform_auth
+
+        backend = identity_platform_auth.IdentityPlatformBackend()
+        claims = _claims(email_verified=email_verified)
+        if email_verified is None:
+            del claims["email_verified"]
+
+        with pytest.raises(identity_platform_auth.IdentityPlatformEmailVerificationRequired):
+            backend.authenticate(None, identity_claims=claims)
+
+        assert not User.objects.filter(email="user@example.com").exists()
+
+
+@pytest.mark.django_db
+class TestIdentityPlatformBackendSubjectFirstResolution:
+    """Subject-first account resolution, falling back to username/email only
+    when no stored profile is bound to the (issuer, subject) or a legacy
+    subject-only row (issue #1521)."""
+
+    @override_settings(IDENTITY_ALLOWED_EMAIL_DOMAIN="example.com")
+    def test_resolves_exact_bound_tuple_over_a_different_email(self):
+        from config import identity_platform as identity_platform_auth
+        from management.services import get_user_profile
+
+        backend = identity_platform_auth.IdentityPlatformBackend()
+        existing = User.objects.create_user(username="bound@example.com", email="bound@example.com")
+        profile = get_user_profile(existing)
+        profile.issuer = _ISSUER
+        profile.cognito_sub = "sub-bound"
+        profile.save(update_fields=["issuer", "cognito_sub"])
+
+        # A different email arrives, but the (issuer, subject) tuple resolves
+        # to the existing account rather than creating a second one.
+        result = backend.authenticate(None, identity_claims=_claims(sub="sub-bound", email="new-email@example.com"))
+
+        assert result.pk == existing.pk
+
+    @override_settings(IDENTITY_ALLOWED_EMAIL_DOMAIN="example.com")
+    def test_resolves_legacy_subject_only_row_and_acquires_issuer(self):
+        from config import identity_platform as identity_platform_auth
+        from management.services import get_user_profile
+
+        backend = identity_platform_auth.IdentityPlatformBackend()
+        existing = User.objects.create_user(username="legacy@example.com", email="legacy@example.com")
+        profile = get_user_profile(existing)
+        profile.cognito_sub = "sub-legacy"
+        profile.issuer = ""
+        profile.save(update_fields=["cognito_sub", "issuer"])
+
+        result = backend.authenticate(None, identity_claims=_claims(sub="sub-legacy", email="legacy@example.com"))
+
+        assert result.pk == existing.pk
+        profile.refresh_from_db()
+        assert profile.issuer == _ISSUER

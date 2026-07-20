@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.bridges import get_user_role
-from ctf.services.participant import is_active_participant
+from ctf.services.participant import is_viewing_participant
 from shared.api.errors import api_error_response
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
 from shared.api_tokens.models import ApiToken
@@ -46,6 +46,41 @@ def ctf_actor_user(request: Request) -> Any | None:
     return user if getattr(user, "is_active", False) else None
 
 
+class _CtfApiError(Exception):
+    """Internal control-flow error rendered as the shared CTF API error envelope.
+
+    Boundary helpers (ownership resolution, body validation, service-exception
+    mapping) raise this instead of returning ``(obj, error)`` tuples, so a
+    canonical CTF view method needs only a single ``except _CtfApiError`` to
+    render the exact legacy status code, error code, and message via
+    :func:`api_error_response`. ``headers`` replays any response headers (e.g.
+    ``Retry-After``) that the legacy path set on the error response.
+    """
+
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        status_code: int,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.headers = headers or {}
+
+    def to_response(self, request: Request) -> Response:
+        """Render this error as the shared API envelope, replaying any headers."""
+        response = api_error_response(
+            code=self.code, message=self.message, status_code=self.status_code, request=request
+        )
+        for header, value in self.headers.items():
+            response[header] = value
+        return response
+
+
 class HasActiveCTFActor(permissions.BasePermission):
     """Require a session user or an API token owned by an active user."""
 
@@ -66,13 +101,18 @@ class HasCTFOrganizer(permissions.BasePermission):
 
 
 class HasCTFParticipant(permissions.BasePermission):
-    """Require the resolved actor to be an active CTF participant."""
+    """Require the resolved actor to be a viewing-eligible CTF participant.
+
+    Uses the view predicate (CTF-609): disqualified participants keep read
+    access to the me-surface; every mutation service re-checks compete
+    eligibility, so widening this gate cannot let them act or rank.
+    """
 
     message = "Forbidden"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         user = ctf_actor_user(request)
-        return bool(user and is_active_participant(user))
+        return bool(user and is_viewing_participant(user))
 
 
 class HasCTFRole(permissions.BasePermission):

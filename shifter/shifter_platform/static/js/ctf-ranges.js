@@ -12,7 +12,7 @@
  */
 
 // SonarCloud S1192: extracted duplicated string literals.
-const API_PARTICIPANTS_BASE = '/ctf/api/participants/';
+const API_PARTICIPANTS_BASE = '/api/v1/ctf/participants/';
 
 class CTFRangeManager {
     constructor(options) {

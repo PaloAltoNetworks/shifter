@@ -39,8 +39,15 @@ def describe_auth_posture(env: Mapping[str, str]) -> dict[str, object]:
 
 
 def describe_database_posture(env: Mapping[str, str]) -> dict[str, object]:
-    """Summarize database engine/host posture without credentials."""
-    if env.get("TESTING") == "1":
+    """Summarize database engine/host posture without credentials.
+
+    Under ``TESTING=1`` the reported engine follows the explicit
+    ``TEST_DB_BACKEND`` selector (#1524): ``sqlite`` (the default) reports the
+    file backend, while ``postgres`` reports the real PostgreSQL host/port/name
+    so the CI production-semantics lane's posture is accurate. Credentials are
+    never included.
+    """
+    if env.get("TESTING") == "1" and env.get("TEST_DB_BACKEND", "").strip().lower() != "postgres":
         return {"engine": "sqlite", "host": None, "port": None, "name": None}
     return {
         "engine": "postgresql",

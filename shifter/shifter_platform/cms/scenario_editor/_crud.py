@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from cms.scenarios.registry import get_scenario_detail, is_default_scenario
-from risk_register.models import AuditLog
+from shared.audit import AuditAction
 from shared.log_sanitize import safe_log_value
 
 from ._common import ScenarioEditorError, audit_scenario_change, validate_user
@@ -114,7 +114,7 @@ def create_scenario(
         raise
 
     audit_scenario_change(
-        action=AuditLog.Action.CREATE,
+        action=AuditAction.CREATE,
         actor_id=user.id,
         state={"scenario_id": scenario_id, "name": name},
     )
@@ -179,7 +179,7 @@ def update_scenario(
         raise
 
     audit_scenario_change(
-        action=AuditLog.Action.UPDATE,
+        action=AuditAction.UPDATE,
         actor_id=user.id,
         state={"scenario_id": scenario_id, "name": scenario.name},
     )
@@ -211,7 +211,7 @@ def delete_scenario(user: User, scenario_id: str) -> None:
         raise
 
     audit_scenario_change(
-        action=AuditLog.Action.DELETE,
+        action=AuditAction.DELETE,
         actor_id=user.id,
         state={"scenario_id": scenario_id, "name": scenario.name},
         previous=True,

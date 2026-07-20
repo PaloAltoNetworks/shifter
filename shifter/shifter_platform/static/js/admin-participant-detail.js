@@ -7,7 +7,7 @@
 function resendInvite(participantId, csrfToken) {
     if (!globalThis.confirm('Resend invitation email to this participant?')) return;
 
-    return globalThis.fetch('/ctf/api/participants/' + participantId + '/resend-invite/', {
+    return globalThis.fetch('/api/v1/ctf/participants/' + participantId + '/resend-invite/', {
         method: 'POST',
         headers: {
             'X-CSRFToken': csrfToken,
@@ -35,7 +35,7 @@ function disqualifyParticipant(_participantId) {
 }
 
 function initParticipantTimeline(participantId) {
-    initScoreTimeline('score-timeline-chart', '/ctf/api/participants/' + participantId + '/score-timeline/');
+    initScoreTimeline('score-timeline-chart', '/api/v1/ctf/participants/' + participantId + '/score-timeline/');
 }
 
 globalThis.resendInvite = resendInvite;

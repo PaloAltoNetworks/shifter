@@ -40,6 +40,29 @@ def test_describe_database_posture_sqlite_in_tests():
     assert describe_database_posture({"TESTING": "1"})["engine"] == "sqlite"
 
 
+def test_describe_database_posture_sqlite_backend_explicit_in_tests():
+    posture = describe_database_posture({"TESTING": "1", "TEST_DB_BACKEND": "sqlite"})
+    assert posture == {"engine": "sqlite", "host": None, "port": None, "name": None}
+
+
+def test_describe_database_posture_postgres_test_lane():
+    env = {
+        "TESTING": "1",
+        "TEST_DB_BACKEND": "postgres",
+        "DB_HOST": "localhost",
+        "DB_PORT": "5432",
+        "DB_NAME": "shifter",
+        "DB_PASSWORD": "super-secret",
+    }
+    posture = describe_database_posture(env)
+    assert posture["engine"] == "postgresql"
+    assert posture["host"] == "localhost"
+    assert posture["port"] == "5432"
+    assert posture["name"] == "shifter"
+    assert "password" not in posture
+    assert "super-secret" not in str(posture.values())
+
+
 def test_describe_deploy_posture_remote_by_default():
     assert describe_deploy_posture({}) == {
         "cloud_provider": "aws",

@@ -10,10 +10,10 @@ They are gitignored and must not be committed:
 
 | File | Produced by |
 |---|---|
-| `provisioning_state.json` | `orchestrate_provisioning.py` — resumable machine-readable batch state |
-| `provisioning_status.md` | `orchestrate_provisioning.py` — human-readable batch log |
-| `health_report.md` | `check_range_health.py --output …` — per-range health sweep |
-| `postprovision_status.md` | post-provision supervisor scripts — splice/Bedrock follow-up status |
+| `provisioning_state.json` | `orchestrate_provisioning.py`—resumable machine-readable batch state |
+| `provisioning_status.md` | `orchestrate_provisioning.py`—human-readable batch log |
+| `health_report.md` | `check_range_health.py --output …`—per-range health sweep |
+| `postprovision_status.md` | post-provision supervisor scripts—splice/Bedrock follow-up status |
 
 Regenerate them by re-running the corresponding command during an operator
 session. `adr_guard`'s `no-tracked-generated-artifacts` check (ADR-004-R8)
@@ -119,14 +119,15 @@ must live in the account default VPC, not the Shifter range VPC or portal VPC.
    ```bash
    cd /opt/polaris/scenario-dev/polaris/tests
    bash run-all-smoketests.sh
-   python3 -m scenario_smoketest --only 1,2,3,4,5,6,31 \
-     --json-report /tmp/polaris-scenario-smoketest.json
    ```
 
    `run-all-smoketests.sh` is the full infrastructure and capture sweep. The
-   full `scenario_smoketest` command intentionally fails today because only the
-   registered adapters are executable; use `--only` for the covered challenge
-   ids until adapter coverage is complete.
+   scenario-content check is separate: from a least-privilege operator
+   environment, run an explicitly selected, version-pinned installed
+   verification distribution and retain its redacted versioned report. Core
+   ships the neutral framework but no scenario adapter, answer material,
+   topology binding, or plugin package dependency. See the
+   [scenario-verification technical guide](../../docs/technical/shifter_platform/scenario-verification.md).
 
 8. After validation passes, publish both standalone instances as the golden
    Polaris AMIs that the normal Shifter range provisioner consumes. The range
@@ -236,19 +237,20 @@ Shifter provisioner path before treating the AMIs as release candidates.
    should be active, and the splice link should remain gated until the scenario
    opens it.
 
-5. Run the participant smoke tests from the Kali host via SSM:
+5. Run the range smoke tests from the Kali host via SSM:
 
    ```bash
    cd /opt/polaris/scenario-dev/polaris
    sudo bash tests/run-all-smoketests.sh
-   python3 -m scenario_smoketest --only 1,2,3,4,5,6,31 \
-     --json-report /tmp/polaris-scenario-smoketest.json
    ```
 
    The full smoke script should pass before imaging or load-testing. The
-   scenario adapter subset proves the documented early path plus the
-   splice/bunker bridge behavior. Do not require bunker reachability on a
-   pristine participant range before the splice gate opens.
+   script proves infrastructure and capture behavior, not every participant
+   solution path. Run scenario verification separately with a reviewed,
+   version-pinned installed distribution selected by exact distribution
+   version and entry point. Do not require bunker reachability on a pristine
+   participant range before the splice gate opens, and do not add the external
+   adapter package to the core runtime or this repository.
 
 ## Native CTF API validation
 
@@ -268,9 +270,9 @@ through the public web UI.
 
 2. Create an active `CTFEvent` with `scenario_id="polaris"` and an organizer
    owner. Add fake participants with `ctf.services.participant.invite_participant`;
-   this creates the participant Django users. If you are not testing email or
-   magic-link delivery, do not call `resend_invite`, and do not print or store
-   invite tokens in evidence.
+   this creates isolated temporary participant users. If you are not testing
+   credential email delivery, do not call the reset/delivery action, and never
+   print or store bootstrap passwords in evidence.
 
 3. Trigger deployment through the same view the organizer UI calls:
    `ctf.views.api_provision_ranges`. A `RequestFactory` POST with the event

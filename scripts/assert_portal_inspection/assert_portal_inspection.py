@@ -22,7 +22,8 @@ live AWS state, that:
     the same-AZ healthy endpoint,
   * each private route table has a `0.0.0.0/0` default via the same-AZ firewall
     endpoint and NO direct `0.0.0.0/0 -> NAT` bypass, and
-  * each firewall route table sends `0.0.0.0/0` onward to the shared NAT.
+  * each firewall route table sends `0.0.0.0/0` onward to its same-AZ NAT
+    (a firewall endpoint is AZ-bound and cannot forward to a cross-AZ NAT).
 
 Any mismatch fails the deploy (non-zero exit + bounded `::error::` diagnostics)
 instead of letting a blackhole ship. When inspection is disabled the check is a
@@ -207,7 +208,7 @@ def _check_firewall_default(
     nat_gateway_id: str | None,
     failures: list[str],
 ) -> None:
-    """Firewall RT default must go onward to the shared NAT gateway."""
+    """Firewall RT default must go onward to that AZ's NAT gateway (same-AZ)."""
     default_routes = [r for r in routes if r.get("DestinationCidrBlock") == DEFAULT_ROUTE]
     if not default_routes:
         failures.append(f"route table {rt_id}: no {DEFAULT_ROUTE} default route to NAT")
@@ -239,6 +240,10 @@ def evaluate_inspection(
     public_cidrs: list[str] = list(contract.get("public_subnet_cidrs", []))
     private_cidrs: list[str] = list(contract.get("private_subnet_cidrs", []))
     nat_gateway_id = contract.get("nat_gateway_id")
+    # Per-AZ NAT ids (index i serves availability_zones[i]). One NAT per AZ when
+    # inspection is enabled; falls back to the single nat_gateway_id for an older
+    # single-NAT contract that predates the per-AZ output.
+    nat_gateway_ids = list(contract.get("nat_gateway_ids", []))
 
     for i, az in enumerate(azs):
         # Prefer the live endpoint; fall back to the declared one so a missing
@@ -272,7 +277,12 @@ def evaluate_inspection(
         if fw_rt is None:
             failures.append(f"AZ {az}: firewall route table {fw_rt_id} not found in live state")
             continue
-        _check_firewall_default(fw_rt_id, fw_rt.get("Routes", []), nat_gateway_id, failures)
+        # A Network Firewall endpoint is AZ-bound: the firewall subnet in AZ i
+        # must egress via the NAT in AZ i, never a cross-AZ NAT (which the
+        # endpoint cannot forward to, black-holing egress). Expect the same-AZ
+        # NAT; fall back to the single NAT id for an older single-NAT contract.
+        expected_nat = nat_gateway_ids[i] if i < len(nat_gateway_ids) else nat_gateway_id
+        _check_firewall_default(fw_rt_id, fw_rt.get("Routes", []), expected_nat, failures)
 
     return failures
 

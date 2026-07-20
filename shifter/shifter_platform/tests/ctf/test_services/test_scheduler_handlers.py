@@ -105,8 +105,10 @@ class TestHandleEventEnd:
     @patch("ctf.services.range.cleanup_event_ranges", return_value={"ok": True})
     @patch("ctf.services.notification.notify_organizer_event_end")
     @patch("ctf.services.event.complete_event", return_value=True)
-    def test_triggers_cleanup_when_enabled(self, mock_complete, mock_notify, mock_cleanup, ctf_event_active):
-        """Triggers range cleanup when auto_cleanup is enabled."""
+    def test_event_end_does_not_bypass_range_lease_cleanup(
+        self, mock_complete, mock_notify, mock_cleanup, ctf_event_active
+    ):
+        """Event completion leaves resource teardown to the shared lease reconciler."""
         from django.utils import timezone
 
         from ctf.enums import ScheduledTaskStatus, ScheduledTaskType
@@ -127,7 +129,56 @@ class TestHandleEventEnd:
 
         mock_complete.assert_called_once()
         mock_notify.assert_called_once_with(ctf_event_active.pk)
-        mock_cleanup.assert_called_once_with(ctf_event_active.pk)
+        mock_cleanup.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_legacy_cleanup_task_routes_through_shared_lease_reconciler(scheduled_task):
+    from django.contrib.auth import get_user_model
+    from django.utils import timezone
+
+    from cms.models import RangeInstance
+    from cms.models import Request as CMSRequest
+    from ctf.management.commands.run_ctf_scheduler import _handle_cleanup_ranges
+    from engine.models import Range as EngineRange
+    from engine.models import Request as EngineRequest
+    from shared.enums import RangeSource, RequestType, ResourceStatus
+
+    user = get_user_model().objects.create_user(username="legacy-lease-cleanup@example.com")
+    request_id = uuid4()
+    cms_request = CMSRequest.objects.create(
+        request_id=request_id,
+        request_type=RequestType.RANGE.value,
+        user=user,
+    )
+    engine_request = EngineRequest.objects.create(
+        request_id=request_id,
+        request_type=RequestType.RANGE.value,
+        user=user,
+    )
+    engine_range = EngineRange.objects.create(
+        request=engine_request,
+        user=user,
+        status=ResourceStatus.READY.value,
+    )
+    now = timezone.now()
+    instance = RangeInstance.objects.create(
+        user_id=user.id,
+        request=cms_request,
+        status=ResourceStatus.READY.value,
+        scenario_id="basic",
+        range_source=RangeSource.CTF.value,
+        expires_at=now - timedelta(minutes=1),
+        maximum_expires_at=now,
+    )
+
+    _handle_cleanup_ranges(scheduled_task)
+
+    instance = RangeInstance.all_objects.get(pk=instance.pk)
+    engine_range.refresh_from_db()
+    assert instance.status == ResourceStatus.DESTROYING.value
+    assert instance.deleted_at is not None
+    assert engine_range.status == ResourceStatus.DESTROYING.value
 
 
 class TestHandleSendReminder:
@@ -244,7 +295,8 @@ class TestExecuteTaskInterruption:
 
         task.mark_completed.assert_called_once()
 
-    def test_marks_failed_on_exception(self, monkeypatch):
+    def test_retries_or_fails_on_exception(self, monkeypatch):
+        """A crashing handler goes through the #526 retry path, not straight to failed."""
         from ctf.management.commands import run_ctf_scheduler as cmd
 
         task = self._make_task()
@@ -255,6 +307,6 @@ class TestExecuteTaskInterruption:
         monkeypatch.setitem(cmd.TASK_HANDLERS, "spin_up_ranges", handler)
         cmd.Command()._execute_task(task)
 
-        task.mark_failed.assert_called_once()
+        task.retry_or_fail.assert_called_once()
         task.mark_completed.assert_not_called()
         task.requeue_for_resume.assert_not_called()

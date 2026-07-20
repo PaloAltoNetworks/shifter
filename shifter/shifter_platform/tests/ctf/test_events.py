@@ -177,7 +177,7 @@ def _mock_auth_organizer(mock_user):
         patch("django.contrib.auth.middleware.get_user", return_value=mock_user),
         patch("ctf.context_processors.ctf_navigation", return_value=ctx_proc_defaults),
         patch("mission_control.context_processors.active_range", return_value=range_ctx_defaults),
-        patch("shared.context_processors.user_permissions", return_value={"can_access_threat_research": False}),
+        patch("config.context_processors.user_permissions", return_value={"can_access_threat_research": False}),
     ):
         yield
 
@@ -235,6 +235,7 @@ class TestCTFEventForm:
             "attempt_limit_cooldown_seconds": 300,
             "rating_visibility": "public",
             "scoring_mode": "standard",
+            "scoreboard_visibility": "public",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -259,6 +260,7 @@ class TestCTFEventForm:
             "attempt_limit_cooldown_seconds": 300,
             "rating_visibility": "public",
             "scoring_mode": "standard",
+            "scoreboard_visibility": "public",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -348,6 +350,7 @@ class TestCTFEventForm:
             "attempt_limit_cooldown_seconds": 600,
             "rating_visibility": "organizer",
             "scoring_mode": "standard",
+            "scoreboard_visibility": "public",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors

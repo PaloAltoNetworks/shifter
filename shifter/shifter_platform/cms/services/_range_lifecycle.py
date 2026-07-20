@@ -21,7 +21,11 @@ from uuid import UUID
 
 from cms.exceptions import CMSError
 from cms.models import RangeInstance
-from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+)
 from shared.constants import USER_CANNOT_BE_NONE
 from shared.enums import ResourceStatus
 
@@ -67,7 +71,7 @@ class _LifecycleOp:
     engine_call: Callable[[UUID], bool]
     target_status: str
     revert_status: str
-    audit_action: AuditLog.Action
+    audit_action: AuditAction
     failure_message: str
 
 
@@ -77,7 +81,7 @@ PAUSE_OP = _LifecycleOp(
     engine_call=_engine_pause_range_call,
     target_status=ResourceStatus.PAUSING.value,
     revert_status=ResourceStatus.READY.value,
-    audit_action=AuditLog.Action.PAUSE,
+    audit_action=AuditAction.PAUSE,
     failure_message="Range cannot be paused in current state",
 )
 
@@ -87,7 +91,7 @@ RESUME_OP = _LifecycleOp(
     engine_call=_engine_resume_range_call,
     target_status=ResourceStatus.RESUMING.value,
     revert_status=ResourceStatus.PAUSED.value,
-    audit_action=AuditLog.Action.RESUME,
+    audit_action=AuditAction.RESUME,
     failure_message="Range cannot be resumed in current state",
 )
 
@@ -113,10 +117,10 @@ def _attempt_transition(
         raise CMSError(op.failure_message)
 
     _audit_log_call(
-        entity_type=AuditLog.EntityType.RANGE,
+        entity_type=AuditEntityType.RANGE,
         entity_id=audit_entity_id,
         action=op.audit_action,
-        actor_type=AuditLog.ActorType.USER,
+        actor_type=AuditActorType.USER,
         actor_id=user.id,
         new_state={"status": op.target_status},
         request_id=str(request_id),

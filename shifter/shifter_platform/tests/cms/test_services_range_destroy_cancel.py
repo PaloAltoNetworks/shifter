@@ -16,6 +16,10 @@ from cms.exceptions import CMSError
 from cms.models import RangeInstance
 from engine.models import Range as EngineRange
 from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+)
 from shared.cloud.exceptions import CloudTaskError
 from shared.enums import ResourceStatus
 from tests.conftest import INVALID_RANGE_IDS, INVALID_USERS
@@ -64,7 +68,7 @@ class TestDestroyRange:
         ri = provision_range(user, range_id=42)
         services.destroy_range(user, ri.pk)
         assert AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.RANGE, entity_id=ri.pk, action=AuditLog.Action.DEPROVISION
+            entity_type=AuditEntityType.RANGE, entity_id=ri.pk, action=AuditAction.DEPROVISION
         ).exists()
 
     def test_reverts_when_engine_dispatch_fails(self, user, provision_range, settings):
@@ -120,7 +124,7 @@ class TestCancelRange:
         provision_range(user, range_id=42)
         services.cancel_range(user, 42)
         assert AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.RANGE, entity_id=42, action=AuditLog.Action.CANCEL
+            entity_type=AuditEntityType.RANGE, entity_id=42, action=AuditAction.CANCEL
         ).exists()
 
     def test_cancel_retry_is_idempotent_without_duplicate_audit(self, user, provision_range):
@@ -130,9 +134,9 @@ class TestCancelRange:
         assert _reload(42).status == ResourceStatus.DESTROYING.value
         assert (
             AuditLog.objects.filter(
-                entity_type=AuditLog.EntityType.RANGE,
+                entity_type=AuditEntityType.RANGE,
                 entity_id=42,
-                action=AuditLog.Action.CANCEL,
+                action=AuditAction.CANCEL,
             ).count()
             == 1
         )
@@ -145,9 +149,9 @@ class TestCancelRange:
 
         assert _reload(42).status == ResourceStatus.PROVISIONING.value
         assert not AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.RANGE,
+            entity_type=AuditEntityType.RANGE,
             entity_id=42,
-            action=AuditLog.Action.CANCEL,
+            action=AuditAction.CANCEL,
         ).exists()
 
     def test_raises_cms_error_when_range_not_found(self, user):
@@ -194,9 +198,9 @@ class TestCancelRangeByRequestId:
         assert _reload(42).status == ResourceStatus.DESTROYING.value
         assert (
             AuditLog.objects.filter(
-                entity_type=AuditLog.EntityType.RANGE,
+                entity_type=AuditEntityType.RANGE,
                 entity_id=ri.id,
-                action=AuditLog.Action.CANCEL,
+                action=AuditAction.CANCEL,
             ).count()
             == 1
         )
@@ -204,21 +208,23 @@ class TestCancelRangeByRequestId:
     def test_reverts_and_skips_audit_when_engine_rejects(self, user, provision_range):
         ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.READY)
 
+        request_id_of = _request_id_of(ri)
         with pytest.raises(CMSError, match="cannot be cancelled"):
-            services.cancel_range_by_request_id(user, _request_id_of(ri))
+            services.cancel_range_by_request_id(user, request_id_of)
 
         assert _reload(42).status == ResourceStatus.PROVISIONING.value
         assert not AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.RANGE,
+            entity_type=AuditEntityType.RANGE,
             entity_id=ri.id,
-            action=AuditLog.Action.CANCEL,
+            action=AuditAction.CANCEL,
         ).exists()
 
     def test_raises_cms_error_when_range_not_found(self, user):
         from uuid import uuid4
 
+        str_ = str(uuid4())
         with pytest.raises(CMSError):
-            services.cancel_range_by_request_id(user, str(uuid4()))
+            services.cancel_range_by_request_id(user, str_)
 
 
 class TestDestroyRangeByRequestId:
@@ -227,8 +233,9 @@ class TestDestroyRangeByRequestId:
         ri.status = ResourceStatus.READY.value
         ri.save(update_fields=["status"])
 
+        request_id = _request_id_of(ri)
         with patch("boto3.client", return_value=_configure_failing_ecs(settings)), pytest.raises(CloudTaskError):
-            services.destroy_range_by_request_id(user, _request_id_of(ri))
+            services.destroy_range_by_request_id(user, request_id)
 
         reloaded = RangeInstance.objects.get(pk=ri.pk)
         assert reloaded.status == ResourceStatus.READY.value

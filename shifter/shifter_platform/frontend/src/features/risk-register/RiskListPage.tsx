@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 
 import { useBootstrapContext } from "@/app/bootstrap-context";
+import { riskCreatePath, riskPath } from "@/features/risk-register/routes";
 import { useRestoreRisk, useRisks, type RiskFilters } from "@/api/risks";
 import { SEVERITIES, STATUSES, type Severity, type Status } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
@@ -17,7 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 
 import { SeverityBadge, StatusBadge } from "./badges";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { formatTimestamp, titleCase } from "./format";
 
 const ALL = "all";
@@ -77,7 +78,7 @@ export function RiskListPage() {
         description={description}
         actions={
           canWrite ? (
-            <Link to="/risks/create" className={cn(buttonVariants({ size: "sm" }))}>
+            <Link to={riskCreatePath()} className={cn(buttonVariants({ size: "sm" }))}>
               <Plus className="size-4" />
               New risk
             </Link>
@@ -231,7 +232,7 @@ function RiskListBody({
           <TableRow key={risk.id}>
             <TableCell className="font-medium">
               <div className="flex items-center gap-2">
-                <Link className="hover:underline" to={`/risks/${risk.id}`}>
+                <Link className="hover:underline" to={riskPath(risk.id)}>
                   {risk.title}
                 </Link>
                 {risk.is_deleted ? (

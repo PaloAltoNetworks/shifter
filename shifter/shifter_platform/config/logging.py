@@ -52,6 +52,12 @@ class ECSFormatter(logging.Formatter):
         "agent_config_id",
         "execution_arn",
         "worker_queue",
+        # Browser CSP violation dimensions (ADR-036-R3). Low-cardinality,
+        # sanitized origin/directive fields from the report collector.
+        "csp_directive",
+        "csp_disposition",
+        "csp_blocked_origin",
+        "csp_document_origin",
     )
 
     def __init__(self, environment: str = "unknown"):

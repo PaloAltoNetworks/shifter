@@ -11,8 +11,8 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from mission_control.utils import build_connection_urls
-from risk_register.models import AuditLog
 from shared.aces.presentation import build_range_aces_projection, build_range_participant_runtime_projection
+from shared.audit import AuditAction
 from shared.auth import block_ctf_participant_only
 from shared.errors import classify_user_message
 from shared.exceptions import CMSError
@@ -146,7 +146,7 @@ def launch_range(request: HttpRequest) -> JsonResponse:
     )
     _audit_range_lifecycle(
         request,
-        AuditLog.Action.PROVISION,
+        AuditAction.PROVISION,
         range_request_id=str(range_ctx.request_id),
         extra_state={"scenario": scenario, "agents": agents_by_os},
     )
@@ -238,7 +238,7 @@ def cancel_range(request: HttpRequest) -> JsonResponse:
     return _dispatch_range_lifecycle(
         request,
         log_verb="cancelled",
-        audit_action=AuditLog.Action.CANCEL,
+        audit_action=AuditAction.CANCEL,
         by_request_attr="cancel_range_by_request_id",
         by_id_attr="cancel_range",
     )
@@ -260,7 +260,7 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
     return _dispatch_range_lifecycle(
         request,
         log_verb="destroyed",
-        audit_action=AuditLog.Action.DEPROVISION,
+        audit_action=AuditAction.DEPROVISION,
         by_request_attr="destroy_range_by_request_id",
         by_id_attr="destroy_range",
     )
@@ -282,7 +282,7 @@ def pause_range(request: HttpRequest) -> JsonResponse:
     return _dispatch_range_lifecycle(
         request,
         log_verb="paused",
-        audit_action=AuditLog.Action.PAUSE,
+        audit_action=AuditAction.PAUSE,
         by_request_attr="pause_range_by_request_id",
         by_id_attr="pause_range",
     )
@@ -304,7 +304,7 @@ def resume_range(request: HttpRequest) -> JsonResponse:
     return _dispatch_range_lifecycle(
         request,
         log_verb="resumed",
-        audit_action=AuditLog.Action.RESUME,
+        audit_action=AuditAction.RESUME,
         by_request_attr="resume_range_by_request_id",
         by_id_attr="resume_range",
     )

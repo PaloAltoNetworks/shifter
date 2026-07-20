@@ -29,6 +29,16 @@ variable "environment" {
   type        = string
 }
 
+# Renderer-owned backend selection (PLAT-2005). Derived from shifter.yaml at
+# deploy time (shifter-config render-runtime) and received here as a plain
+# Terraform variable, not synthesized in this module. No default: a missing
+# cloud_provider.auto.tfvars must fail the plan loudly rather than silently
+# defaulting to "aws".
+variable "cloud_provider" {
+  description = "Backend identity injected into the portal/worker containers' CLOUD_PROVIDER env var. Rendered from shifter.yaml's settings.backend by shifter-config render-runtime; must not be hardcoded or defaulted here."
+  type        = string
+}
+
 variable "vpc_id" {
   description = "VPC ID"
   type        = string
@@ -89,6 +99,18 @@ variable "root_volume_size" {
 variable "s3_bucket_arn" {
   description = "ARN of the S3 bucket for user storage"
   type        = string
+}
+
+variable "aces_package_bucket_arn" {
+  description = "ARN of the S3 bucket holding object-backed ACES package archives (#1567). Grants the portal role read-only (GetObject + prefix-scoped ListBucket). Empty disables the grant."
+  type        = string
+  default     = ""
+}
+
+variable "aces_package_prefix" {
+  description = "Optional key prefix under the ACES package bucket the portal may read (least-privilege scoping)."
+  type        = string
+  default     = ""
 }
 
 variable "tags" {
@@ -268,6 +290,11 @@ variable "sqs_kms_key_arn" {
   type        = string
 }
 
+variable "range_events_topic_arn" {
+  description = "ARN of the range-events SNS topic. The outbox drainer and range-event reconciler run under the portal EC2 role and publish range status events here (needs sns:Publish + kms on sqs_kms_key_arn since the topic is CMK-encrypted)."
+  type        = string
+}
+
 variable "s3_kms_key_arn" {
   description = "ARN of the CMK encrypting the portal user-storage S3 bucket (SSE-KMS). The instance role needs kms:GenerateDataKey/Decrypt on it (via the s3 service) to read and write challenge file attachments."
   type        = string
@@ -342,6 +369,55 @@ variable "instance_refresh_min_healthy_percentage" {
   validation {
     condition     = var.instance_refresh_min_healthy_percentage >= 0 && var.instance_refresh_min_healthy_percentage <= 100
     error_message = "instance_refresh_min_healthy_percentage must be between 0 and 100."
+  }
+}
+
+variable "health_check_type" {
+  description = <<-EOT
+    ASG health-check type. "ELB" ties instance/refresh readiness to the ALB
+    target group (real app readiness), so an instance refresh converges when
+    the portal is actually serving. "EC2" only checks EC2 status checks and
+    leaves refreshes sitting on "insufficient data to evaluate its health with
+    Amazon EC2" for the transient warmup window (issue #1639). Kept variable so
+    a non-ALB deployment can fall back to "EC2".
+  EOT
+  type        = string
+  default     = "ELB"
+
+  validation {
+    condition     = contains(["EC2", "ELB"], var.health_check_type)
+    error_message = "health_check_type must be one of: EC2, ELB."
+  }
+}
+
+variable "health_check_grace_period" {
+  description = <<-EOT
+    Seconds the ASG waits after an instance launches before counting its health
+    checks. Long enough to cover docker install + portal container boot. Env-owned
+    (issue #1639) so dev/proof can shorten the iteration loop instead of paying the
+    production-sized grace on every redeploy.
+  EOT
+  type        = number
+  default     = 900
+
+  validation {
+    condition     = var.health_check_grace_period >= 0 && var.health_check_grace_period <= 3600
+    error_message = "health_check_grace_period must be between 0 and 3600 seconds."
+  }
+}
+
+variable "instance_refresh_instance_warmup" {
+  description = <<-EOT
+    Seconds an instance refresh waits for a replacement instance to warm up before
+    counting it toward the healthy percentage. Env-owned (issue #1639); defaults to
+    the health-check grace so behavior is unchanged unless an environment overrides it.
+  EOT
+  type        = number
+  default     = 900
+
+  validation {
+    condition     = var.instance_refresh_instance_warmup >= 0 && var.instance_refresh_instance_warmup <= 3600
+    error_message = "instance_refresh_instance_warmup must be between 0 and 3600 seconds."
   }
 }
 

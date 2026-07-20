@@ -14,6 +14,9 @@ serviceAccounts:
   ctfScheduler:
     name: ctf-scheduler
     annotations: {}
+  provisionerLauncher:
+    name: provisioner-launcher
+    annotations: {}
   provisioner:
     name: provisioner
     annotations: {}
@@ -131,6 +134,17 @@ workers:
         cpu: 500m
         memory: 512Mi
         ephemeral-storage: 256Mi
+  provisionerLauncher:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
   reconciler:
     replicas: 1
     resources:
@@ -154,7 +168,6 @@ guacd:
       cpu: 500m
       memory: 512Mi
       ephemeral-storage: 256Mi
-
 guacamoleClient:
   replicas: 1
   resources:
@@ -222,12 +235,27 @@ networkPolicy:
     - 199.36.153.4/30 # NOSONAR - restricted.googleapis.com VIP range.
     - 199.36.153.8/30 # NOSONAR - private.googleapis.com VIP range.
   privateServiceCidrs: []
+  # GKE service CIDR containing kubernetes.default.svc. Scoped only to the
+  # dedicated launcher pod so other platform workloads remain API-tokenless.
+  kubernetesApiCidrs: []
   # CIDR(s) covering the GDC range cluster's control-plane endpoint (the
   # internal TCP load balancer fronting the apiserver on the peered range
   # network). Empty on AWS; set by the GCP bootstrap so range-provisioning
   # Jobs can reach the range cluster apiserver. See deploy.py gdc-bootstrap.
   rangeClusterApiCidrs: []
   rangeClusterApiPort: 6444
+  # CIDR(s) covering the GCP range network's VM private IPs. Scoped to the
+  # portal (browser SSH terminal) and guacd (Guacamole SSH/RDP) workloads so
+  # they can dial range guests for participant/operator access. Empty on AWS
+  # (that path authorizes guacd egress via terraform security groups); set by
+  # the GCP bootstrap from the range network CIDR so GCP user range access
+  # reaches parity with AWS. The AWS analogue is the guacd egress rule in
+  # platform/terraform/modules/guacamole/security.tf.
+  rangeAccessCidrs: []
+  # Ports the portal/guacd dial for participant access (SSH 22, RDP 3389).
+  rangeAccessPorts:
+    - 22
+    - 3389
 
 ingress:
   enabled: true

@@ -22,6 +22,31 @@ from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
 
+#: Streaming chunk size for bounded full-object downloads.
+_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+def _stream_capped_to_file(stream: BinaryIO, dest_path: str, max_bytes: int) -> int:
+    """Stream ``stream`` to ``dest_path`` in chunks, aborting past ``max_bytes``.
+
+    Returns the number of bytes written. Raises ``CloudStorageError`` the moment
+    the running total would exceed ``max_bytes``. The stream is always closed.
+    """
+    written = 0
+    try:
+        with open(dest_path, "wb") as handle:
+            while True:
+                chunk = stream.read(_DOWNLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise CloudStorageError(f"S3 object exceeds max_bytes={max_bytes}")
+                handle.write(chunk)
+    finally:
+        stream.close()
+    return written
+
 
 class AWSObjectStorage:
     """S3 implementation of ObjectStorage protocol."""
@@ -230,6 +255,51 @@ class AWSObjectStorage:
             )
             raise CloudStorageError(f"Failed to read S3 object header: {e}") from e
         return body[:max_bytes]
+
+    def download_object(
+        self,
+        bucket: str,
+        key: str,
+        dest_path: str,
+        *,
+        max_bytes: int,
+        expected_identity: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Stream a full object to ``dest_path``, bounded by ``max_bytes``.
+
+        Binds the GET to ``expected_identity["etag"]`` via ``IfMatch`` when
+        supplied so an overwrite after validation fails closed (S3 returns
+        ``412`` -> ``ObjectPreconditionError``). The body is streamed in chunks
+        and aborts with ``CloudStorageError`` the moment the running total would
+        exceed ``max_bytes`` (defense in depth against a mis-sized head). The
+        streaming body is closed in a ``finally`` so a cap abort cannot leak a
+        botocore connection.
+        """
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        safe_key = safe_log_value(key)
+        logger.debug("download_object: bucket=%s key=%s max_bytes=%d", bucket, safe_key, max_bytes)
+        get_kwargs: dict[str, Any] = {"Bucket": bucket, "Key": key, **self._owner_kwargs()}
+        etag = (expected_identity or {}).get("etag")
+        if etag:
+            get_kwargs["IfMatch"] = etag
+        try:
+            client = self._get_client()
+            response = client.get_object(**get_kwargs)
+            written = _stream_capped_to_file(response["Body"], dest_path, max_bytes)
+        except ClientError as e:
+            code = (e.response.get("Error") or {}).get("Code")
+            status = (e.response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+            if code == "PreconditionFailed" or status == 412:
+                logger.warning("download_object: precondition failed bucket=%s key=%s", bucket, safe_key)
+                raise ObjectPreconditionError("S3 object changed since validation (IfMatch failed)") from e
+            logger.exception("download_object: failed bucket=%s key=%s", bucket, safe_key)
+            raise CloudStorageError(f"Failed to download S3 object: {e}") from e
+        except BotoCoreError as e:
+            logger.exception("download_object: failed bucket=%s key=%s", bucket, safe_key)
+            raise CloudStorageError(f"Failed to download S3 object: {e}") from e
+        logger.info("download_object: success bucket=%s key=%s bytes=%d", bucket, safe_key, written)
+        return {"content_length": written, "etag": response["ETag"].strip('"')}
 
     def object_exists(self, bucket: str, key: str) -> bool:
         """Return True iff the object exists.

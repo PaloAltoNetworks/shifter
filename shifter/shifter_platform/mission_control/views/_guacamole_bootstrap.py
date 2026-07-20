@@ -47,8 +47,8 @@ def _authenticated_user_id(user: User) -> int:
 def _bootstrap_urls(
     request_id: UUID,
     *,
-    status_url_name: str = "mission_control:guacamole_bootstrap_status",
-    open_url_name: str = "mission_control:guacamole_bootstrap_open",
+    status_url_name: str = "v1:mission_control:guacamole-bootstrap-status",
+    open_url_name: str = "v1:mission_control:guacamole-bootstrap-open",
 ) -> tuple[str, str]:
     """Return the polling URL and compatibility opener URL for a bootstrap."""
     kwargs = {"request_id": request_id}
@@ -63,8 +63,8 @@ def guacamole_bootstrap_response(
     protocol: str,
     target_id: str,
     build_url: Callable[[], str],
-    status_url_name: str = "mission_control:guacamole_bootstrap_status",
-    open_url_name: str = "mission_control:guacamole_bootstrap_open",
+    status_url_name: str = "v1:mission_control:guacamole-bootstrap-status",
+    open_url_name: str = "v1:mission_control:guacamole-bootstrap-open",
 ) -> JsonResponse:
     """Enqueue Guacamole bootstrap work and return a pollable response."""
     try:

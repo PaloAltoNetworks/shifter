@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -30,6 +31,7 @@ from cms.services import get_range_by_request_id
 from mission_control.api._base import MissionControlReadAPIView, _validated
 from mission_control.api.serializers import (
     AcesParticipantRecordQuerySerializer,
+    AcesParticipantRuntimeRecordListResponseSerializer,
     AcesParticipantRuntimeRecordSerializer,
 )
 from shared.aces.participant_runtime_projections import (
@@ -76,12 +78,24 @@ class _AcesParticipantRecordListView(MissionControlReadAPIView):
         )
 
 
+@extend_schema_view(
+    get=extend_schema(
+        responses=AcesParticipantRuntimeRecordListResponseSerializer,
+        operation_id="api_v1_mission_control_aces_participant_implementations_list",
+    )
+)
 class AcesParticipantImplementationListView(_AcesParticipantRecordListView):
     """``GET`` ACES participant-implementation records for a range."""
 
     record_kind = RECORD_KIND_PARTICIPANT_IMPLEMENTATION
 
 
+@extend_schema_view(
+    get=extend_schema(
+        responses=AcesParticipantRuntimeRecordListResponseSerializer,
+        operation_id="api_v1_mission_control_aces_participant_runtimes_list",
+    )
+)
 class AcesParticipantRuntimeListView(_AcesParticipantRecordListView):
     """``GET`` ACES participant-runtime records for a range."""
 

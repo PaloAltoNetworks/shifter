@@ -30,10 +30,12 @@ class TestKnownScopes:
             "mission_control:ngfw:read",
             "mission_control:ngfw:write",
             "mission_control:credentials:write",
+            "mission_control:vpn-profile:read",
             "ctf:event:read",
             "ctf:event:write",
             "ctf:play:read",
             "ctf:play:write",
+            "ctf:vpn-profile:read",
             "cms:authoring:read",
             "cms:authoring:write",
         ):

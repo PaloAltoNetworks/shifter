@@ -12,7 +12,8 @@ unauthenticated rejection, a missing route, or a dead channel layer all fail.
 
 Run via ``uv run --with 'websockets==12.0' python ws_handshake.py ...`` so the
 hosted runner needs no pre-installed websocket client. No secret value is
-printed: the session key is read from argv only and never echoed.
+printed or passed on argv: the session key is read from a file whose path (not
+value) is the argument (#988), and never echoed.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 
 import websockets
 
@@ -27,11 +29,17 @@ import websockets
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="ws:// URL of the routed consumer")
-    parser.add_argument("--session", required=True, help="Django session key (sessionid cookie value)")
+    # The session value is read from a file (its path is the argument) rather
+    # than passed on argv, so the key never appears in process listings (#988).
+    parser.add_argument("--session-file", required=True, help="path to a mode-0600 file holding the session key")
     parser.add_argument("--origin", default="http://localhost", help="Origin header (must be an ALLOWED_HOST)")
     parser.add_argument("--cookie-name", default="sessionid", help="Session cookie name")
     parser.add_argument("--timeout", type=float, default=15.0, help="Handshake/ping timeout in seconds")
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.session = Path(args.session_file).read_text(encoding="utf-8").strip()
+    if not args.session:
+        parser.error("session file is empty")
+    return args
 
 
 async def _handshake(args: argparse.Namespace) -> None:

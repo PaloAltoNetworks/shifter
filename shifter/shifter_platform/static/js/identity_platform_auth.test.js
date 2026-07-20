@@ -263,7 +263,31 @@ describe("authenticated-user handling (onAuthStateChanged)", () => {
         await fireAuthState(makeUser(), fbAuth);
         expect(visibleSections()).toEqual(["identity-totp-enrollment-section"]);
         expect(el("identity-totp-secret").textContent).toBe("SECRETKEY234567");
+        // No QR library loaded in jsdom, so it falls back to the otpauth URL text.
         expect(el("identity-totp-qr-url").textContent).toMatch(/^otpauth:/);
+    });
+
+    test("renders a scannable QR image when the QR library is loaded", async () => {
+        const { fbAuth } = await bootstrap();
+        fbAuth.multiFactor.mockReturnValue({
+            enrolledFactors: [],
+            getSession: jest.fn(async () => ({ session: "s" })),
+            enroll: jest.fn(async () => {}),
+        });
+        globalThis.qrcode = jest.fn(() => ({
+            addData: jest.fn(),
+            make: jest.fn(),
+            createDataURL: jest.fn(() => "data:image/gif;base64,QRDATA"),
+        }));
+        try {
+            await fireAuthState(makeUser(), fbAuth);
+            const img = el("identity-totp-qr-url").querySelector("img");
+            expect(img).not.toBeNull();
+            expect(img.getAttribute("src")).toBe("data:image/gif;base64,QRDATA");
+            expect(el("identity-totp-secret").textContent).toBe("SECRETKEY234567");
+        } finally {
+            delete globalThis.qrcode;
+        }
     });
 
     test("exchanges a session and redirects when a factor is enrolled", async () => {

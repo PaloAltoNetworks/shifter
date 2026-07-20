@@ -134,10 +134,12 @@ def _set_local_password_or_raise(
             )
         rdp_token = f"{{{{ssm-secure:{ssm_param_name}}}}}"
     else:
-        secret_ref = instance_data.get("rdp_password_secret_arn")
+        secret_ref = instance_data.get("gcp_bootstrap_rdp_password_secret_ref") or instance_data.get(
+            "rdp_password_secret_arn"
+        )
         if not secret_ref:
             raise SetupError(
-                f"{failure_prefix}: instance {instance_id} has no rdp_password_secret_arn "
+                f"{failure_prefix}: instance {instance_id} has no bootstrap RDP secret reference "
                 "in its provisioned state; provisioner did not record a per-instance secret reference"
             )
         fetched = _resolve_rdp_password_from_secret_ref(secret_ref)
@@ -451,21 +453,19 @@ def _dispatch_instance_setup_role(
     )
 
 
+# GDC ("range-pod-ssh") and GCE ("ssh") in-range guests run a full first-boot
+# cloud-init before SSH is ready (the heavy Polaris host does not finish within
+# the EC2/SSM-tuned default), so both get a larger budget; SSM stays default.
 _GDC_RANGE_TRANSPORT = "range-pod-ssh"
 _DEFAULT_SETUP_READY_TIMEOUT_SECONDS = 300
-_GDC_SETUP_READY_TIMEOUT_SECONDS = 600
+_INRANGE_SSH_SETUP_READY_TIMEOUT_SECONDS = 900
+_INRANGE_SSH_TRANSPORTS = frozenset({_GDC_RANGE_TRANSPORT, "ssh"})
 
 
 def _setup_ready_timeout(transport_name: str) -> int:
-    """SSH-ready budget for guest setup, by transport.
-
-    GDC VM Runtime guests boot on bare metal and run a full first-boot
-    cloud-init pass (datasource detection + host-key install + service restart)
-    before SSH is ready, which is materially slower than the EC2/SSM path the
-    300s default was tuned for, so the in-range transport gets a larger budget.
-    """
-    if transport_name == _GDC_RANGE_TRANSPORT:
-        return _GDC_SETUP_READY_TIMEOUT_SECONDS
+    """SSH-ready budget for guest setup, by transport (in-range SSH vs SSM)."""
+    if transport_name in _INRANGE_SSH_TRANSPORTS:
+        return _INRANGE_SSH_SETUP_READY_TIMEOUT_SECONDS
     return _DEFAULT_SETUP_READY_TIMEOUT_SECONDS
 
 

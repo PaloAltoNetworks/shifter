@@ -57,10 +57,18 @@ class TestRegistryResolution:
         assert profile.disk_size_gb == 50
         assert profile.disk_type == "pd-ssd"
 
-    def test_any_version_fallback(self):
-        node = _node(image=AcesPlanImage(name="kali", version="9.9"))
+    def test_unpinned_uses_any_version_default(self):
+        # No authored version -> the any-version (blank) registry row is the default.
+        node = _node(image=AcesPlanImage(name="kali"))
         profile = resolve_gce_image(node, [_candidate("", "projects/x/global/images/kali-latest")])
         assert profile.source_image == "projects/x/global/images/kali-latest"
+
+    def test_pinned_version_with_only_any_version_row_fails_loud(self):
+        # Author pinned 9.9; only an any-version row exists. Must NOT substitute it.
+        node = _node(image=AcesPlanImage(name="kali", version="9.9"))
+        arg = [_candidate("", "projects/x/global/images/kali-latest")]
+        with pytest.raises(AcesGceImageError):
+            resolve_gce_image(node, arg)
 
     def test_registry_without_machine_type_derives_custom_from_resources(self):
         node = _node(image=AcesPlanImage(name="kali"), ram_mib=2048, vcpus=2)
@@ -94,11 +102,19 @@ class TestPassthroughAndFailLoud:
         with pytest.raises(AcesGceImageError):
             resolve_gce_image(node, [])
 
-    def test_no_image_fails_loud(self):
-        with pytest.raises(AcesGceImageError):
-            resolve_gce_image(_node(image=None), [])
+    def test_source_less_node_uses_base_os_from_registry(self):
+        # A node with no source gets a base OS image resolved by os_family.
+        node = _node(image=None)  # os_family linux
+        profile = resolve_gce_image(node, [_candidate("", "projects/x/global/images/ubuntu-base")])
+        assert profile.source_image == "projects/x/global/images/ubuntu-base"
+
+    def test_source_less_node_without_base_os_fails_loud(self):
+        node_2 = _node(image=None)
+        with pytest.raises(AcesGceImageError, match="base-OS"):
+            resolve_gce_image(node_2, [])
 
     def test_wrong_version_no_fallback_fails_loud(self):
         node = _node(image=AcesPlanImage(name="kali", version="2024.1"))
+        arg = [_candidate("2023.1", "img")]
         with pytest.raises(AcesGceImageError):
-            resolve_gce_image(node, [_candidate("2023.1", "img")])
+            resolve_gce_image(node, arg)

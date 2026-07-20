@@ -1,6 +1,6 @@
 {
   "_comment": "GEN-001 documentation coverage manifest. Each major platform feature must declare at least one user doc and one technical doc; the documentation-coverage adr_guard check (ADR-022-R1) verifies every referenced doc exists under docs_root, is not under a _deprecated/hidden path, and is linked from an index.md. Paths are relative to docs_root. Parsed as JSON (like the other docs/adr/*.yaml files).",
-  "docs_root": "shifter/shifter_platform/documentation/docs",
+  "docs_root": "docs",
   "features": [
     {
       "id": "agents",

@@ -330,12 +330,17 @@ resource "aws_route" "private_default_via_firewall" {
   vpc_endpoint_id        = local.firewall_endpoint_ids_by_az[local.azs[count.index]]
 }
 
-# Per-AZ firewall-subnet egress default: from the firewall endpoint, send
-# onward Internet-bound traffic to the existing shared NAT gateway.
+# Per-AZ firewall-subnet egress default: from each AZ's firewall endpoint, send
+# onward Internet-bound traffic to that SAME AZ's NAT gateway. A Network
+# Firewall endpoint is AZ-bound and cannot forward inspected traffic to a NAT in
+# another AZ, so routing every firewall subnet to a single cross-AZ NAT
+# black-holes egress for every AZ except the NAT's own. local.nat_gateway_count
+# provisions one NAT per AZ whenever inspection is enabled, so this same-AZ
+# mapping (index count.index) always resolves to an existing NAT.
 resource "aws_route" "firewall_default_via_nat" {
   count = var.enable_portal_inspection && var.enable_nat_gateway ? var.az_count : 0
 
   route_table_id         = aws_route_table.firewall[count.index].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[0].id
+  nat_gateway_id         = aws_nat_gateway.this[count.index].id
 }

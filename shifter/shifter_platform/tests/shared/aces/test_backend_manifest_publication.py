@@ -27,8 +27,10 @@ manifest source, contract coverage, and profile inference only.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+from aces_backend_protocols.capabilities import BackendCapabilitySet
 from aces_conformance.conformance import (
     BackendCapabilityProfile,
     profile_for_manifest,
@@ -143,3 +145,65 @@ def test_builder_matches_checked_in_published_artifact():
     assert render_shifter_backend_manifest_payload() == checked_in, (
         "checked-in backend-manifest.json is stale; regenerate it from create_shifter_backend_manifest()"
     )
+
+
+def test_provisioner_capabilities_are_the_narrowed_ledger():
+    """#1563: the manifest declares only genuinely-realized provisioning terms."""
+    provisioner = create_shifter_backend_manifest().provisioner
+
+    assert provisioner.supported_account_features == frozenset(
+        {"groups", "shell", "home", "disabled", "auth_method", "spn"}
+    )
+    assert provisioner.supported_content_types == frozenset({"file", "directory"})
+    assert provisioner.supported_domain_profiles == frozenset({"active_directory"})
+    # Removed over-claims stay out until their sibling issue lands genuine realization
+    # (auth_method -> #1560, spn -> #1561). #1564 re-declares file + directory now
+    # that every admitted shape (inline text, empty dir, source-backed file/dir) has a
+    # genuine, digest-verified guest effect; dataset stays out (no deterministic
+    # materializer + readback for its item-only / generator shapes).
+    for dropped in ("mail",):
+        assert dropped not in provisioner.supported_account_features
+    for dropped in ("dataset",):
+        assert dropped not in provisioner.supported_content_types
+
+    checked_in = json.loads(PUBLISHED_MANIFEST_PATH.read_text())
+    assert checked_in["capabilities"]["provisioner"]["supported_domain_profiles"] == ["active_directory"]
+
+
+def test_provisioner_declares_ipv4_only_network_address_family(tmp_path):
+    """#1568: the provisioner honestly publishes IPv4-only networking as a constraint.
+
+    ``switch`` stays supported (Shifter realizes IPv4 networks), the constraint is
+    the opaque ``constraints`` disclosure surface (not a made-up capability enum or
+    realization-support kind), the profile is unchanged, and the rendered payload
+    carries the same constraint without leaking any provider/subnet/CIDR detail.
+    """
+    del tmp_path
+    manifest = create_shifter_backend_manifest()
+    provisioner = manifest.provisioner
+
+    assert provisioner.constraints["network-address-family"] == "ipv4-only"
+    # switch is required for any networked scenario and stays claimed; the limitation
+    # is the address family, not networking itself.
+    assert "switch" in provisioner.supported_node_types
+    assert profile_for_manifest(manifest) == BackendCapabilityProfile.PROVISIONING_ONLY
+
+    payload = render_shifter_backend_manifest_payload()
+    assert payload["capabilities"]["provisioner"]["constraints"]["network-address-family"] == "ipv4-only"
+
+
+def test_profile_inference_does_not_catch_a_term_level_overclaim():
+    """#1563: profile inference is blind to a term-level over-claim, so realizability is
+    guarded by exact-set assertions (above) and the apply-time evidence gate, not profile shape."""
+    honest = create_shifter_backend_manifest()
+    overclaimed_provisioner = replace(
+        honest.provisioner,
+        supported_account_features=honest.provisioner.supported_account_features | {"mail"},
+    )
+    overclaimed = replace(honest, capabilities=BackendCapabilitySet(provisioner=overclaimed_provisioner))
+
+    # Re-declaring a still-unrealized account term does not change the profile ...
+    assert profile_for_manifest(overclaimed) == BackendCapabilityProfile.PROVISIONING_ONLY
+    assert profile_for_manifest(overclaimed) == profile_for_manifest(honest)
+    # ... so a generic provisioning-only conformance pass is not realizability evidence.
+    assert "mail" not in honest.provisioner.supported_account_features

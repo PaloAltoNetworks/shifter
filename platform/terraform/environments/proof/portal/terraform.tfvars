@@ -48,13 +48,13 @@ db_apply_immediately     = true
 # ------------------------------------------------------------------------------
 
 # Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
-ec2_ami_id           = "ami-00e428798e77d38d9"
+ec2_ami_id           = "ami-xxxxxxxxxxxxxxxxx"
 ec2_instance_type    = "t3.xlarge"
 ec2_root_volume_size = 50
 
 # Standalone CTFd host in the portal VPC
 enable_ctfd                 = true
-ctfd_ami_id                 = "ami-0b0b78dcacbab728f"
+ctfd_ami_id                 = "ami-xxxxxxxxxxxxxxxxx"
 ctfd_instance_type          = "t3.xlarge"
 ctfd_root_volume_size       = 50
 ctfd_root_volume_type       = "gp3"
@@ -195,8 +195,8 @@ dc_domain_name = "internal.shifter"
 # Guacamole
 # ------------------------------------------------------------------------------
 
-guacd_image_tag            = "1.5.5"
-guacamole_client_image_tag = "1.5.5"
+guacd_image_tag            = "1.5.5-r1"
+guacamole_client_image_tag = "1.5.5-r1"
 guacd_cpu                  = 2048
 guacd_memory               = 4096
 guacamole_client_cpu       = 4096

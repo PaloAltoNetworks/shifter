@@ -32,8 +32,9 @@ from typing import Any
 from django.apps import apps
 from django.core.management.base import BaseCommand
 
-# All service layers
-ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control", "ctf"]
+# All service layers. Every first-party Django app is classified (ADR-001,
+# #1523); held to set-equality with layer_imports.yaml by tests.
+ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control", "ctf", "config", "risk_register"]
 
 # Apps that are allowed to be referenced from any layer
 ALLOWED_EXTERNAL_APPS = {"auth", "contenttypes", "sessions", "admin"}

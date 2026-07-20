@@ -48,7 +48,7 @@ db_apply_immediately     = false
 # ------------------------------------------------------------------------------
 
 # Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
-ec2_ami_id           = "ami-00e428798e77d38d9"
+ec2_ami_id           = "ami-xxxxxxxxxxxxxxxxx"
 ec2_instance_type    = "t3.xlarge"
 ec2_root_volume_size = 50
 
@@ -194,8 +194,8 @@ dc_domain_name = "internal.shifter"
 # Guacamole
 # ------------------------------------------------------------------------------
 
-guacd_image_tag            = "1.5.5"
-guacamole_client_image_tag = "1.5.5"
+guacd_image_tag            = "1.5.5-r1"
+guacamole_client_image_tag = "1.5.5-r1"
 guacd_cpu                  = 512
 guacd_memory               = 1024
 guacamole_client_cpu       = 512

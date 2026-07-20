@@ -15,7 +15,7 @@ from typing import Any, cast
 from django.contrib.auth.models import User
 from django.http import HttpRequest
 
-from risk_register.models import AuditLog
+from shared.audit import AuditEntityType
 
 GUAC_AUTH_NOT_CONFIGURED = "Guacamole JSON auth is not configured"
 GUACAMOLE_BASE_PATH = "/guacamole"
@@ -47,7 +47,7 @@ def _audit_range_lifecycle(
     """Record an HTTP-layer audit entry for a range lifecycle action.
 
     Captures source IP, user agent, and HTTP request ID from the request via
-    ``risk_register.services.audit_log_from_request``. Complements the CMS
+    ``shared.audit.audit_log_from_request``. Complements the CMS
     service-layer audit entries by attaching request context.
 
     range_id (legacy) or range_request_id (UUID) identifies the range.
@@ -62,7 +62,7 @@ def _audit_range_lifecycle(
     # Late-bind so tests can ``patch.object(views, "audit_log_from_request")``.
     _pkg().audit_log_from_request(
         request,
-        entity_type=AuditLog.EntityType.RANGE,
+        entity_type=AuditEntityType.RANGE,
         entity_id=range_id or 0,
         action=action,
         new_state=new_state or None,

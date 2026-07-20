@@ -370,7 +370,7 @@ class TestApiParticipantErrorPaths:
         cfile.file_size_display = "4 B"
         upload = SimpleUploadedFile("c.txt", b"data", content_type="text/plain")
         with patch("ctf.services.attachment.add_challenge_file", return_value=cfile):
-            url = reverse("ctf:api_challenge_files", kwargs={"challenge_id": ctf_challenge.id})
+            url = reverse("v1:ctf:api_challenge_files", kwargs={"challenge_id": ctf_challenge.id})
             resp = authenticated_organizer_client.post(url, data={"file": upload, "display_name": "c"})
         assert resp.status_code == 201
 
@@ -422,7 +422,7 @@ class TestApiParticipantErrorPaths:
 
         upload = SimpleUploadedFile("c.txt", b"data", content_type="text/plain")
         with patch("ctf.services.attachment.add_challenge_file", side_effect=exc):
-            url = reverse("ctf:api_challenge_files", kwargs={"challenge_id": ctf_challenge.id})
+            url = reverse("v1:ctf:api_challenge_files", kwargs={"challenge_id": ctf_challenge.id})
             resp = authenticated_organizer_client.post(url, data={"file": upload})
         assert resp.status_code in (403, 400)
 
@@ -570,7 +570,7 @@ class TestRecoverParticipantRangeErrorPaths:
             {"strategy": "rebuild"},
         )
         assert resp.status_code == 400
-        assert resp.json() == {"error": "Could not process range recovery request."}
+        assert resp.json()["error"]["message"] == "Could not process range recovery request."
         assert "assigned" not in resp.content.decode()
 
     def test_no_compatible_spare_maps_to_400_without_leaking_internals(
@@ -586,7 +586,7 @@ class TestRecoverParticipantRangeErrorPaths:
             {"strategy": "reassign_spare"},
         )
         assert resp.status_code == 400
-        assert resp.json() == {"error": "Could not process range recovery request."}
+        assert resp.json()["error"]["message"] == "Could not process range recovery request."
         assert "spare" not in resp.content.decode().lower()
 
 

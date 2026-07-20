@@ -34,6 +34,10 @@ Current mechanisms:
   `cms/experiments/orchestrator.py` into a package (#886) moved its test
   suites onto real-model / cloud-boundary assertions and dropped the
   associated `cms.experiments.orchestrator.*` baseline allowances.
+  Likewise, the CTF god-module decomposition (#683) converted the
+  notification and event lifecycle suites to behavioral coverage (real ORM
+  plus SMTP/template boundary patches only) and dropped their
+  `ctf.services.notification.*` / `ctf.services.event.*` allowances.
 - `.pre-commit-config.yaml`: local fast checks
   - The `Deploy` workflow's always-present `Pre-commit` job runs the
     file-hygiene and secret-scan subset (`trailing-whitespace`,
@@ -153,6 +157,22 @@ Current mechanisms:
   unbounded `parameter/shifter/<env>/range/*`). The provisioner
   orchestrator role's env-scoped grant is not inspected. Guards the #1178
   cross-tenant credential-access fix.
+- `scripts/check_tf_iam_bedrock_agent_scope/check_tf_iam_bedrock_agent_scope.py`:
+  ADR-004-R21 IAM hardening check for the per-range Polaris Bedrock agent
+  role. Rejects any inline policy action other than
+  `bedrock:InvokeModel`/`InvokeModelWithResponseStream`, any policy
+  Resource other than the four approved inference-profile/backing-model
+  variables, a backing-model statement missing its
+  `bedrock:InferenceProfileArn` condition, and a trust policy whose
+  Principal is not `var.range_instance_role_arn` or that is missing the
+  `ec2:SourceInstanceARN` condition. Guards the #1377 narrow-scope role.
+- `scripts/check_tf_iam_role_naming/check_tf_iam_role_naming.py` and
+  `scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py`: ADR-004-R25
+  request-owned VPN gateway hardening. The checks pin the exact gateway role
+  and instance-profile permissions-boundary carve-outs and tamper deny, keep
+  GWLB and `shifter-vpn-*` NLB action/resource namespaces separate, require
+  parent-NLB authorization and ownership resource tags for `CreateListener`,
+  and require the runtime VPN listener to send `local.common_tags` at creation.
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
   flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
   `child_process` (any shape: named, default, namespace, CommonJS
@@ -466,7 +486,7 @@ boundary). The corresponding 11 `ctf.views.*` entries were removed from
 
 1. Add or update the ADR in `index.yaml`.
 2. Implement or wire a check in `scripts/adr_guard/adr_guard.py`.
-3. Document the user-visible mechanism in `shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md`.
+3. Document the user-visible mechanism in `docs/technical/dev/adr-enforcement.md`.
 4. If the rule cannot be enforced yet, add a dated exception in `exceptions.yaml` instead of leaving it implicit.
 
 ## Exception Format

@@ -131,7 +131,7 @@ def _real_context_processors():
     Django caches the resolved context-processor callables on each template
     ``Engine`` (a ``cached_property``). Several ctf view suites patch the
     context processors by module path (``mission_control.context_processors
-    .active_range``, ``shared.context_processors.user_permissions``,
+    .active_range``, ``config.context_processors.user_permissions``,
     ``ctf.context_processors.ctf_navigation``) to isolate their view tests; if
     one of those patched renders is the first to warm a cold ``Engine`` on a
     pytest-xdist worker, the *mocked* processors get cached process-wide and

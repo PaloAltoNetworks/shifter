@@ -17,6 +17,10 @@ from risk_register.models import AuditLog
 from shared.api_tokens import audit, scopes
 from shared.api_tokens.authentication import ApiTokenAuthentication
 from shared.api_tokens.models import ApiToken
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -84,6 +88,31 @@ class TestBadTokenFailsClosed:
         with pytest.raises(exceptions.AuthenticationFailed):
             _auth(factory, f"Bearer {raw}")
 
+    def test_ctf_account_token_is_force_revoked_and_rejected(self, factory, django_user_model):
+        """A token owned by a CTF-participant account is force-revoked and rejected.
+
+        Fail-closed guard (shared/api_tokens/authentication.py): CTF/participant
+        accounts must never authenticate via API tokens, and the attempt revokes
+        the token as a side effect so a leaked token cannot be retried.
+        """
+        from management.services import get_user_profile
+
+        owner = django_user_model.objects.create_user(username="ctfowner", password="x")
+        profile = get_user_profile(owner)
+        profile.user_type = "ctf_participant"
+        profile.is_ctf_account = True
+        profile.save()
+
+        token, raw = ApiToken.create_token(name="ctf", created_by=owner, scopes=[scopes.RISK_READ])
+        assert token.is_active is True
+
+        with pytest.raises(exceptions.AuthenticationFailed):
+            _auth(factory, f"Bearer {raw}")
+
+        token.refresh_from_db()
+        assert token.revoked_at is not None
+        assert token.is_active is False
+
     def test_malformed_bearer_raises(self, factory):
         with pytest.raises(exceptions.AuthenticationFailed):
             _auth(factory, "Bearer")
@@ -101,9 +130,9 @@ class TestAuditSeam:
         before = AuditLog.objects.count()
         audit.record_token_event(audit.TokenEvent.AUTH_FAILED, request=request, context="bad token")
         assert AuditLog.objects.count() == before + 1
-        row = AuditLog.objects.filter(action=AuditLog.Action.LOGIN_FAILED).latest("timestamp")
+        row = AuditLog.objects.filter(action=AuditAction.LOGIN_FAILED).latest("timestamp")
         # A failed auth is the token principal's, not a user's.
-        assert row.actor_type == AuditLog.ActorType.APIKEY
+        assert row.actor_type == AuditActorType.APIKEY
         assert row.actor_id is None
 
     def test_create_and_revoke_rows_are_attributed_to_acting_user(self):
@@ -111,9 +140,9 @@ class TestAuditSeam:
         # as a USER action, not an API-key action.
         audit.record_token_event(audit.TokenEvent.CREATED, token_id="abc", token_pk=1, actor_id=7)
         audit.record_token_event(audit.TokenEvent.REVOKED, token_id="abc", token_pk=1, actor_id=7)
-        created = AuditLog.objects.get(action=AuditLog.Action.CREATE)
-        revoked = AuditLog.objects.get(action=AuditLog.Action.DELETE)
-        assert created.actor_type == AuditLog.ActorType.USER
+        created = AuditLog.objects.get(action=AuditAction.CREATE)
+        revoked = AuditLog.objects.get(action=AuditAction.DELETE)
+        assert created.actor_type == AuditActorType.USER
         assert created.actor_id == 7
-        assert revoked.actor_type == AuditLog.ActorType.USER
+        assert revoked.actor_type == AuditActorType.USER
         assert revoked.actor_id == 7

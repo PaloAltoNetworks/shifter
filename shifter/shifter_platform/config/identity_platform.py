@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import firebase_admin
@@ -11,15 +10,31 @@ import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import BaseBackend
+from django.db import transaction
 from django.http import HttpRequest
 from firebase_admin import auth as firebase_auth
 
 from config.bootstrap_admin import apply_bootstrap_admin_flags
 from config.cognito_groups import sync_cognito_groups_from_claims
+from config.organizer_authority import reconcile_provider_privileged_groups
 from config.user_type_sync import sync_user_type
-from management.services import update_cognito_sub
-from risk_register.models import AuditLog
-from risk_register.services import AuthPrincipal, audit_auth_event, get_client_ip
+from management.services import (
+    BindingConflictError,
+    BindOutcome,
+    bind_provider_identity,
+    resolve_user_by_provider_identity,
+)
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+    AuditEvent,
+    AuthPrincipal,
+    audit_auth_event,
+    audit_log,
+    get_client_ip,
+)
+from shared.verified_identity import VerifiedIdentity
 
 if TYPE_CHECKING:
     # Aliased to avoid clashing with the ``User = get_user_model()`` runtime
@@ -52,24 +67,36 @@ class IdentityPlatformMFAEnrollmentRequired(IdentityPlatformAuthError):
     code = "mfa_enrollment_required"
 
 
-@dataclass(frozen=True)
-class IdentityUserClaims:
-    """Normalized claims used by the Django backend."""
+def _build_verified_identity(claims: dict[str, Any], *, source: str) -> VerifiedIdentity:
+    """Build a strict VerifiedIdentity from a verified Identity Platform token payload.
 
-    sub: str
-    email: str
-    email_verified: bool
+    Translates the shared module's generic validation into Identity
+    Platform's established error codes (issue #1521): a missing/blank
+    issuer, subject, or email is a generic auth failure, while a missing or
+    non-literal-True ``email_verified`` is the specific, already-classified
+    :class:`IdentityPlatformEmailVerificationRequired` the client-facing view
+    maps to a 403. Rejects before any user lookup, creation, or binding.
 
-    @classmethod
-    def from_mapping(cls, claims: dict[str, Any]) -> IdentityUserClaims:
-        try:
-            sub = str(claims["sub"])
-            email = str(claims["email"])
-        except KeyError as exc:
-            raise IdentityPlatformAuthError("Identity token is missing required claims") from exc
+    ``bool(claims.get("email_verified"))`` is not valid here because the
+    string ``"false"`` becomes ``True``.
+    """
+    issuer = claims.get("iss")
+    subject = claims.get("sub")
+    email = claims.get("email")
+    if (
+        not isinstance(issuer, str)
+        or not issuer.strip()
+        or not isinstance(subject, str)
+        or not subject.strip()
+        or not isinstance(email, str)
+        or not email.strip()
+    ):
+        raise IdentityPlatformAuthError("Identity token is missing required claims")
 
-        email_verified = bool(claims.get("email_verified"))
-        return cls(sub=sub, email=email, email_verified=email_verified)
+    if claims.get("email_verified") is not True:
+        raise IdentityPlatformEmailVerificationRequired("Identity Platform user email is not verified")
+
+    return VerifiedIdentity(issuer=issuer, subject=subject, email=email, email_verified=True, source=source)
 
 
 def _ensure_firebase_app() -> firebase_admin.App:
@@ -173,13 +200,17 @@ def verify_identity_token(id_token: str) -> dict[str, Any]:
         raise IdentityPlatformAuthError("Unable to verify Identity Platform token") from exc
 
 
-def _assert_account_can_create_app_session(*, id_token: str, claims: IdentityUserClaims) -> None:
-    """Raise unless the account may start an app session (verified email + enrolled MFA)."""
-    if not claims.email_verified:
-        raise IdentityPlatformEmailVerificationRequired("Corporate login requires a verified email address.")
+def _assert_account_can_create_app_session(id_token: str) -> None:
+    """Raise unless the Identity Platform account may start an app session.
 
+    The caller's ``VerifiedIdentity`` already guarantees ``email_verified is
+    True`` from the token claims; this independently re-checks the account
+    record's ``emailVerified`` value via a fresh Identity Platform REST
+    lookup (a second, independent provider-state check, issue #1521) plus
+    enrolled MFA.
+    """
     account = _lookup_identity_account(id_token=id_token)
-    if not account.get("emailVerified"):
+    if account.get("emailVerified") is not True:
         raise IdentityPlatformEmailVerificationRequired("Corporate login requires a verified email address.")
     if not account.get("mfaInfo"):
         raise IdentityPlatformMFAEnrollmentRequired("Corporate login requires an enrolled multi-factor authenticator.")
@@ -209,6 +240,24 @@ def _request_audit_context(request: HttpRequest | None) -> tuple[str | None, str
     return source_ip, user_agent
 
 
+def _resolve_identity_platform_user(identity: VerifiedIdentity) -> DjangoUser | None:
+    """Resolve the Django user for a verified identity, subject-first (issue #1521).
+
+    Delegates the issuer/subject lookup to the canonical management persistence
+    seam (:func:`management.services.resolve_user_by_provider_identity`,
+    ADR-009-R6) so the resolution policy is not re-implemented per provider.
+    Falls back to the historical username-by-email lookup only when it finds no
+    bound/legacy match -- i.e. for an unbound/first-bootstrap account.
+    ``bind_provider_identity`` is the single place that enforces
+    bind-once/compare and never rebinds a drifted or colliding identity from
+    here.
+    """
+    matched = resolve_user_by_provider_identity(identity.issuer, identity.subject).first()
+    if matched is not None:
+        return matched
+    return User.objects.filter(username=identity.email, profile__is_ctf_account=False).first()
+
+
 class IdentityPlatformBackend(BaseBackend):
     """Authenticate Django users from verified Identity Platform claims."""
 
@@ -217,31 +266,37 @@ class IdentityPlatformBackend(BaseBackend):
         if identity_claims is None:
             return None
 
-        claims = IdentityUserClaims.from_mapping(identity_claims)
-        if not claims.email_verified:
-            raise IdentityPlatformEmailVerificationRequired("Identity Platform user email is not verified")
-        if not is_allowed_identity_email(claims.email):
+        identity = _build_verified_identity(identity_claims, source="identity_platform")
+        if not is_allowed_identity_email(identity.email):
             raise IdentityPlatformAuthError(
                 f"Only corporate users from @{_allowed_email_domain()} may log in through the portal"
             )
 
-        user, created = User.objects.get_or_create(
-            username=claims.email,
-            defaults={"email": claims.email, "is_active": True},
-        )
-        if not user.email:
-            user.email = claims.email
-            user.save(update_fields=["email"])
+        # Resolution, first-login user creation / email persistence, binding,
+        # elevation, and the strict audit are one atomic security mutation
+        # (issue #1521): a binding conflict or strict-audit failure rolls back
+        # the newly created user and any email write too, so no orphaned or
+        # partially-mutated account survives a rejected login. _bind_and_elevate
+        # translates BindingConflictError to IdentityPlatformAuthError, which
+        # propagates out of the block and triggers the rollback.
+        with transaction.atomic():
+            user = _resolve_identity_platform_user(identity)
+            created = user is None
+            if user is None:
+                user = User.objects.create_user(username=identity.email, email=identity.email, is_active=True)
+            elif not user.email:
+                user.email = identity.email
+                user.save(update_fields=["email"])
+            self._bind_and_elevate(user, identity)
 
-        apply_bootstrap_admin_flags(user, claims.email)
-        update_cognito_sub(user, claims.sub)
         _sync_user_type_from_claims(user, identity_claims, request)
         sync_cognito_groups_from_claims(user, identity_claims, request)
+        reconcile_provider_privileged_groups(user, identity_claims, request)
 
         source_ip, user_agent = _request_audit_context(request)
         audit_auth_event(
-            action=AuditLog.Action.CREATE if created else AuditLog.Action.LOGIN,
-            principal=AuthPrincipal(user_id=user.id, email=user.email, cognito_sub=claims.sub),
+            action=AuditAction.CREATE if created else AuditAction.LOGIN,
+            principal=AuthPrincipal(user_id=user.id, email=user.email, cognito_sub=identity.subject),
             source_ip=source_ip,
             user_agent=user_agent,
             context="Identity Platform login" if not created else "User created via Identity Platform first login",
@@ -249,9 +304,37 @@ class IdentityPlatformBackend(BaseBackend):
 
         return user
 
+    def _bind_and_elevate(self, user: DjangoUser, identity: VerifiedIdentity) -> None:
+        """Bind the verified identity and apply bootstrap flags as one security mutation.
+
+        Binding, elevation, and their audit record run inside one
+        ``transaction.atomic()`` so a failed audit/uniqueness check leaves no
+        partial privilege state (issue #1521). A binding conflict is
+        translated to :class:`IdentityPlatformAuthError` so the client sees
+        the same generic auth-failure envelope as any other rejection.
+        """
+        try:
+            with transaction.atomic():
+                bind_outcome = bind_provider_identity(user, identity.issuer, identity.subject)
+                updated_fields = apply_bootstrap_admin_flags(user, identity)
+                if bind_outcome != BindOutcome.UNCHANGED or updated_fields:
+                    audit_log(
+                        AuditEvent(
+                            entity_type=AuditEntityType.USER,
+                            entity_id=user.id,
+                            action=AuditAction.ROLE_SYNC,
+                            actor_type=AuditActorType.SYSTEM,
+                            new_state={"bind": bind_outcome.value, "updated_fields": updated_fields},
+                            context="identity_platform verified-identity bind/elevate",
+                        ),
+                        strict=True,
+                    )
+        except BindingConflictError as exc:
+            raise IdentityPlatformAuthError("Identity Platform identity binding conflict") from exc
+
     def get_user(self, user_id: int) -> DjangoUser | None:
         try:
-            return User.objects.get(pk=user_id)
+            return User.objects.select_related("profile").get(pk=user_id)
         except User.DoesNotExist:
             return None
 
@@ -259,8 +342,8 @@ class IdentityPlatformBackend(BaseBackend):
 def login_with_identity_token(request: HttpRequest | None, id_token: str) -> DjangoUser:
     """Verify the Identity Platform token, enforce session gates, and authenticate the Django user."""
     claims_payload = verify_identity_token(id_token)
-    claims = IdentityUserClaims.from_mapping(claims_payload)
-    _assert_account_can_create_app_session(id_token=id_token, claims=claims)
+    _build_verified_identity(claims_payload, source="identity_platform")
+    _assert_account_can_create_app_session(id_token)
 
     backend = IdentityPlatformBackend()
     user = backend.authenticate(request, identity_claims=claims_payload)

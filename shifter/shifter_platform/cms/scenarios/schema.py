@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Discriminator, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, field_validator, model_validator
 
 from shared.schemas import (
     AssetSpec,
@@ -95,6 +95,24 @@ class SubnetConfig(BaseModel):
         return v
 
 
+class ParticipantAccessConfig(BaseModel):
+    """Participant-facing channel explicitly authorized by a demo scenario."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    channel: Literal["ssh", "rdp"]
+
+    @field_validator("target")
+    @classmethod
+    def target_not_empty(cls, value: str) -> str:
+        """Require a non-empty scenario instance name."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("participant access target cannot be empty")
+        return normalized
+
+
 class ScenarioTemplate(BaseModel):
     """Complete scenario template definition.
 
@@ -107,6 +125,7 @@ class ScenarioTemplate(BaseModel):
         ngfw: Whether scenario requires NGFW provisioning.
         instances: List of instance configurations.
         subnets: List of subnet configurations (optional).
+        participant_access: Explicit participant-facing member channels.
     """
 
     id: str
@@ -117,6 +136,7 @@ class ScenarioTemplate(BaseModel):
     ngfw: bool = False
     instances: list[InstanceConfig]
     subnets: list[SubnetConfig] = []
+    participant_access: list[ParticipantAccessConfig] = []
 
     @field_validator("instances")
     @classmethod
@@ -145,6 +165,20 @@ class ScenarioTemplate(BaseModel):
             for inst in subnet.instances:
                 if inst not in instance_names:
                     raise ValueError(f"Subnet '{subnet.name}' references unknown instance '{inst}'")
+        return self
+
+    @model_validator(mode="after")
+    def validate_participant_access(self) -> ScenarioTemplate:
+        """Require access targets to exist and target/channel pairs to be unique."""
+        instance_names = {instance.name for instance in self.instances}
+        seen: set[tuple[str, str]] = set()
+        for binding in self.participant_access:
+            if binding.target not in instance_names:
+                raise ValueError(f"Participant access references unknown instance '{binding.target}'")
+            key = (binding.target, binding.channel)
+            if key in seen:
+                raise ValueError(f"Duplicate participant access target/channel '{binding.target}/{binding.channel}'")
+            seen.add(key)
         return self
 
     def requires_agent(self) -> bool:

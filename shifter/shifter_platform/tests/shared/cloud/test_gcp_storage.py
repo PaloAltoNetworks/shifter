@@ -210,3 +210,121 @@ class TestPresignedUrlIamSigning:
         kwargs = fake_blob.generate_signed_url.call_args.kwargs
         assert "service_account_email" not in kwargs
         assert "access_token" not in kwargs
+
+
+class TestDownloadObject:
+    @staticmethod
+    def _blob_writing(payload: bytes, *, size: int | None = None, generation: int = 777):
+        blob = MagicMock()
+        blob.etag = "e"
+        blob.generation = generation
+        # GCS reports the authoritative size; the resolver uses it (from the head
+        # identity or a reload) to bound the transfer before writing.
+        blob.size = len(payload) if size is None else size
+
+        def _download(fh, **kwargs):
+            fh.write(payload)
+
+        blob.download_to_file.side_effect = _download
+        return blob
+
+    def test_downloads_with_head_identity_without_reload(self, tmp_path):
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = self._blob_writing(b"packbytes")
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        dest = tmp_path / "pkg.tar"
+
+        with patch("google.cloud.storage.Client", return_value=fake_client):
+            identity = storage.download_object(
+                "b", "k", str(dest), max_bytes=1024, expected_identity={"generation": 777, "content_length": 9}
+            )
+
+        assert dest.read_bytes() == b"packbytes"
+        assert identity["content_length"] == 9
+        assert identity["generation"] == 777
+        # Head identity carried the size, so no extra metadata round-trip.
+        fake_blob.reload.assert_not_called()
+        # Bind the download to the validated generation (TOCTOU).
+        assert fake_blob.download_to_file.call_args.kwargs["if_generation_match"] == 777
+
+    def test_rejects_when_head_size_exceeds_max_bytes(self, tmp_path):
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = self._blob_writing(b"x" * 10)
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        dest = str(tmp_path / "big.tar")
+
+        with patch("google.cloud.storage.Client", return_value=fake_client), pytest.raises(CloudStorageError):
+            storage.download_object("b", "k", dest, max_bytes=1024, expected_identity={"content_length": 5000})
+        # Fail closed before touching the network.
+        fake_blob.download_to_file.assert_not_called()
+
+    def test_reloads_for_size_and_downloads_without_identity(self, tmp_path):
+        # No head identity: the resolver reloads to learn the authoritative size
+        # and generation, then downloads bound to that generation.
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = self._blob_writing(b"packbytes", size=9, generation=555)
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        dest = tmp_path / "pkg.tar"
+
+        with patch("google.cloud.storage.Client", return_value=fake_client):
+            storage.download_object("b", "k", str(dest), max_bytes=1024)
+
+        fake_blob.reload.assert_called_once()
+        assert dest.read_bytes() == b"packbytes"
+        assert fake_blob.download_to_file.call_args.kwargs["if_generation_match"] == 555
+
+    def test_rejects_oversize_before_transfer_without_identity(self, tmp_path):
+        # The core fix (codex #1567): with no supplied content_length the byte cap
+        # is still a real transfer bound — the reloaded size is checked and the
+        # download is aborted before any bytes are written.
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = self._blob_writing(b"x" * 5000, size=5000)
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        dest = tmp_path / "big.tar"
+        dest_arg = str(dest)
+
+        with patch("google.cloud.storage.Client", return_value=fake_client), pytest.raises(CloudStorageError):
+            storage.download_object("b", "k", dest_arg, max_bytes=1024)
+
+        fake_blob.reload.assert_called_once()
+        fake_blob.download_to_file.assert_not_called()
+        assert not dest.exists()
+
+    def test_precondition_failure_maps_to_object_precondition_error(self, tmp_path):
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = self._blob_writing(b"packbytes", size=9)
+        fake_blob.download_to_file.side_effect = PreconditionFailed("generation mismatch")
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        dest = str(tmp_path / "x.tar")
+
+        with (
+            patch("google.cloud.storage.Client", return_value=fake_client),
+            pytest.raises(ObjectPreconditionError),
+        ):
+            storage.download_object("b", "k", dest, max_bytes=1024, expected_identity={"generation": 777})
+
+    def test_other_failure_maps_to_cloud_storage_error(self, tmp_path):
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = self._blob_writing(b"packbytes", size=9)
+        fake_blob.download_to_file.side_effect = RuntimeError("transport error")
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        dest = str(tmp_path / "x.tar")
+
+        with (
+            patch("google.cloud.storage.Client", return_value=fake_client),
+            pytest.raises(CloudStorageError) as exc,
+        ):
+            storage.download_object("b", "k", dest, max_bytes=1024, expected_identity={"content_length": 9})
+        assert not isinstance(exc.value, ObjectPreconditionError)
+
+    def test_rejects_non_positive_max_bytes(self, tmp_path):
+        storage = GCPObjectStorage()
+        dest = str(tmp_path / "x")
+        with pytest.raises(ValueError):
+            storage.download_object("b", "k", dest, max_bytes=0)

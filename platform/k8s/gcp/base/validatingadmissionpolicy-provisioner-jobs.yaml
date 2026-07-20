@@ -17,11 +17,12 @@
 # The canonical builder this mirrors is GCPTaskRunner._build_job in
 # shifter/shifter_platform/shared/cloud/gcp/task_runner.py (image ENTRYPOINT
 # "python main.py" is fixed; the builder sets ARGS only, never command; args
-# always start with the "range" or "ngfw" resource family; four emptyDir
+# always match the validated range/aces-range/ngfw grammar; four emptyDir
 # volumes; the issue #1103 read-only/non-root/drop-ALL security context). It is
 # drift-guarded by tests/shared/cloud/test_gcp_task_runner.py +
-# tests/platform/test_gcp_job_launcher_manifests.py. Keep this file byte-identical
-# with platform/charts/shifter/templates/validatingadmissionpolicy-provisioner-jobs.yaml.
+# tests/platform/test_gcp_job_launcher_manifests.py. Keep the base resource
+# equivalent to the chart's default rendering; Helm identity/namespace fields
+# intentionally come from values.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -52,12 +53,24 @@ spec:
       expression: "has(variables.podSpec.containers) ? variables.podSpec.containers : []"
     - name: allowedImage
       expression: "(has(params.data) && 'ENGINE_TASK_IMAGE' in params.data) ? params.data['ENGINE_TASK_IMAGE'] : ''"
+    - name: allowedImagePullPolicy
+      expression: "(has(params.data) && 'ENGINE_TASK_IMAGE_PULL_POLICY' in params.data) ? params.data['ENGINE_TASK_IMAGE_PULL_POLICY'] : ''"
+    - name: allowedLiteralEnv
+      expression: >-
+        ['CLOUD_PROVIDER', 'ENVIRONMENT', 'CLOUD_REGION', 'AWS_REGION', 'GCP_REGION', 'GCP_PROJECT_ID', 'GOOGLE_CLOUD_PROJECT', 'CLOUD_PROJECT_ID', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'RANGE_EVENTS_TOPIC_ID', 'SNS_RANGE_EVENTS_ARN', 'STORAGE_BUCKET_NAME', 'AGENT_STORAGE_BUCKET', 'AGENT_S3_BUCKET', 'RANGE_NETWORK_ID', 'RANGE_NETWORK_CIDR', 'RANGE_NETWORK_REGION', 'RANGE_NETWORK_ZONE', 'PORTAL_NETWORK_CIDRS', 'GCP_RANGE_BACKEND', 'GCP_RANGE_PLANE', 'GCP_RANGE_CELL_NETWORK_MODE', 'GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL', 'GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES', 'GCP_RANGE_LINUX_IMAGE', 'GCP_RANGE_LINUX_MACHINE_TYPE', 'GCP_RANGE_LINUX_DISK_SIZE_GB', 'GCP_RANGE_LINUX_DISK_TYPE', 'GCP_RANGE_KALI_IMAGE', 'GCP_RANGE_KALI_MACHINE_TYPE', 'GCP_RANGE_KALI_DISK_SIZE_GB', 'GCP_RANGE_KALI_DISK_TYPE', 'GCP_RANGE_WINDOWS_IMAGE', 'GCP_RANGE_WINDOWS_MACHINE_TYPE', 'GCP_RANGE_WINDOWS_DISK_SIZE_GB', 'GCP_RANGE_WINDOWS_DISK_TYPE', 'GCP_RANGE_DC_IMAGE', 'GCP_RANGE_DC_MACHINE_TYPE', 'GCP_RANGE_DC_DISK_SIZE_GB', 'GCP_RANGE_DC_DISK_TYPE', 'GCP_RANGE_EGRESS_ALLOW_CIDRS', 'GCP_RANGE_PRIVATE_GOOGLE_ACCESS', 'GCP_RANGE_HOST_MGMT_SSH_PORT', 'GCP_RANGE_VERTEX_PROJECT_ID', 'GCP_RANGE_VERTEX_REGION', 'GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL', 'GCP_RANGE_KALI_ANTHROPIC_MODEL', 'GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL', 'POLARIS_TESTS_BUCKET', 'POLARIS_TESTS_KEY', 'GDC_ACCESS_SECRET_ID', 'GDC_RANGE_NAMESPACE_PREFIX', 'GDC_NETWORK_INTERFACE', 'GDC_NETWORK_DNS_NAMESERVERS', 'GDC_STATIC_IP_RESERVATION_COUNT', 'GDC_VM_STORAGE_CLASS', 'GDC_VM_IMAGE_GCS_SECRET_ID', 'GDC_VMSERIES_IMAGE_URL', 'GDC_VMSERIES_BOOTSTRAP_BUCKET', 'GDC_VMSERIES_STORAGE_CLASS', 'GDC_VMSERIES_IMAGE_GCS_SECRET_ID', 'GDC_VMSERIES_NAMESPACE_PREFIX', 'GDC_VMSERIES_MGMT_NETWORK_NAME', 'GDC_VMSERIES_MGMT_IP_CIDR', 'GDC_VMSERIES_DATA_NETWORK_NAME', 'GDC_VMSERIES_DATA_IP_CIDR', 'GDC_VMSERIES_ROUTE_NEXT_HOP_IP', 'GDC_VMSERIES_VCPUS', 'GDC_VMSERIES_MEMORY', 'GDC_VMSERIES_DISK_SIZE_GIB', 'GDC_VMSERIES_BOOTSTRAP_DISK_SIZE_GIB', 'GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID', 'GDC_KALI_IMAGE_URL', 'GDC_KALI_VCPUS', 'GDC_KALI_MEMORY', 'GDC_KALI_DISK_SIZE_GIB', 'GDC_UBUNTU_IMAGE_URL', 'GDC_UBUNTU_VCPUS', 'GDC_UBUNTU_MEMORY', 'GDC_UBUNTU_DISK_SIZE_GIB', 'GDC_WINDOWS_IMAGE_URL', 'GDC_WINDOWS_VCPUS', 'GDC_WINDOWS_MEMORY', 'GDC_WINDOWS_DISK_SIZE_GIB', 'GDC_DC_IMAGE_URL', 'GDC_DC_VCPUS', 'GDC_DC_MEMORY', 'GDC_DC_DISK_SIZE_GIB', 'GDC_SCENARIO_POD_IMAGE_PULL_POLICY', 'GDC_SCENARIO_POD_KALI_IMAGE', 'GDC_SCENARIO_POD_UBUNTU_IMAGE', 'GDC_SETUP_RUNNER_IMAGE', 'ENGINE_TASK_IMAGE', 'RANGE_VPC_ID', 'RANGE_VPC_CIDR', 'RANGE_AVAILABILITY_ZONE', 'AVAILABILITY_ZONE']
+    - name: allowedSecretEnv
+      expression: "['DB_PASSWORD', 'FIELD_ENCRYPTION_KEY', 'DC_DOMAIN_PASSWORD']"
+    - name: requiredLiteralEnv
+      expression: "['CLOUD_PROVIDER', 'ENVIRONMENT', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER']"
+    - name: requiredSecretEnv
+      expression: "['DB_PASSWORD', 'FIELD_ENCRYPTION_KEY']"
   validations:
-    # Only the canonical launcher (worker-engine, running as the workers KSA) may
-    # create provisioner Jobs. This blocks the portal and ctf-scheduler tokens
-    # outright, even though RBAC still lets them create their own non-provisioner Jobs.
-    - expression: "!variables.targetsProvisioner || request.userInfo.username == 'system:serviceaccount:shifter-platform:workers'"
-      message: "Jobs running as the provisioner service account may only be created by the workers service account."
+    # RBAC and admission name the same dedicated launcher identity.
+    - expression: "request.userInfo.username != 'system:serviceaccount:shifter-platform:provisioner-launcher' || variables.targetsProvisioner"
+      message: "The provisioner-launcher service account may only create provisioner Jobs."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || request.userInfo.username == 'system:serviceaccount:shifter-platform:provisioner-launcher'"
+      message: "Jobs running as the provisioner service account may only be created by the provisioner-launcher service account."
       reason: Forbidden
     - expression: "!variables.targetsProvisioner || size(variables.containers) == 1"
       message: "A provisioner Job must declare exactly one container."
@@ -71,6 +84,12 @@ spec:
     - expression: "!variables.targetsProvisioner || (variables.allowedImage != '' && variables.containers.all(c, c.image == variables.allowedImage))"
       message: "A provisioner Job must use the pinned ENGINE_TASK_IMAGE."
       reason: Forbidden
+    - expression: "!variables.targetsProvisioner || (variables.allowedImagePullPolicy != '' && variables.containers.all(c, has(c.imagePullPolicy) && c.imagePullPolicy == variables.allowedImagePullPolicy))"
+      message: "A provisioner Job must use the configured image pull policy."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || (has(object.metadata.annotations) && object.metadata.annotations['shifter.dev/task-image'] == variables.allowedImage && object.metadata.annotations['shifter.dev/task-identity'].matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))"
+      message: "A provisioner Job must carry its pinned image and canonical task identity annotations."
+      reason: Forbidden
     # Forbid overriding the image ENTRYPOINT (python main.py). Without this the
     # pinned image is meaningless: the caller could set command: [sh, -c, ...]
     # and execute arbitrary code as the provisioner identity. The builder sets
@@ -78,10 +97,33 @@ spec:
     - expression: "!variables.targetsProvisioner || variables.containers.all(c, !has(c.command))"
       message: "A provisioner Job must not override the container command (entrypoint)."
       reason: Forbidden
-    # Constrain the dispatch family. The provisioner CLI only accepts the range
-    # and ngfw resource families; this bounds what the fixed entrypoint can run.
-    - expression: "!variables.targetsProvisioner || variables.containers.all(c, has(c.args) && size(c.args) > 0 && (c.args[0] == 'range' || c.args[0] == 'ngfw'))"
-      message: "A provisioner Job command must be a range or ngfw operation."
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, !has(c.lifecycle) && !has(c.livenessProbe) && !has(c.readinessProbe) && !has(c.startupProbe))"
+      message: "A provisioner Job must not declare lifecycle hooks or container probes."
+      reason: Forbidden
+    # Mirror the canonical validated command grammar, not just its resource
+    # family. A compromised launcher token must not be able to invoke another
+    # provisioner subcommand or append arbitrary arguments.
+    - expression: >-
+        !variables.targetsProvisioner || variables.containers.all(c, has(c.args) && ((size(c.args) == 4 && c.args[2] == '--request-id' && c.args[3].matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') && (((c.args[0] == 'range' || c.args[0] == 'aces-range') && c.args[1] in ['provision', 'destroy', 'pause', 'resume']) || (c.args[0] == 'ngfw' && c.args[1] in ['provision', 'deprovision', 'start', 'stop']))) || (size(c.args) == 6 && c.args[0] == 'range' && c.args[1] in ['provision', 'destroy'] && c.args[2] == '--range-id' && c.args[3].matches('^[0-9]+$') && c.args[4] == '--user-id' && c.args[5].matches('^[0-9]+$'))))
+      message: "A provisioner Job command must match the canonical operation and identifier argument grammar."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || (has(object.metadata.labels) && object.metadata.labels['app.kubernetes.io/part-of'] == 'shifter' && object.metadata.labels['app.kubernetes.io/component'] == 'pulumi-provisioner' && object.metadata.labels['shifter.dev/task-runner'] == 'gcp' && has(object.spec.template.metadata.labels) && object.spec.template.metadata.labels['app.kubernetes.io/part-of'] == 'shifter' && object.spec.template.metadata.labels['app.kubernetes.io/component'] == 'pulumi-provisioner')"
+      message: "A provisioner Job must carry the canonical Shifter labels."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, !has(c.env) || (c.env.all(e, has(e.name) && c.env.filter(other, other.name == e.name).size() == 1) && c.env.all(e, ((e.name in variables.allowedLiteralEnv) && has(e.value) && !has(e.valueFrom) && has(params.data) && e.name in params.data && e.value == params.data[e.name]) || ((e.name in variables.allowedSecretEnv) && !has(e.value) && has(e.valueFrom) && has(e.valueFrom.secretKeyRef) && e.valueFrom.secretKeyRef.name.matches('^pulumi-provisioner-secrets-[0-9a-f]{16}$') && e.valueFrom.secretKeyRef.key == e.name && (!has(e.valueFrom.secretKeyRef.optional) || e.valueFrom.secretKeyRef.optional == false)))))"
+      message: "A provisioner Job environment must use the canonical literal and Secret-backed allowlists without duplicates."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, has(c.env) && variables.requiredLiteralEnv.all(name, c.env.exists(e, e.name == name && has(e.value))) && variables.requiredSecretEnv.all(name, c.env.exists(e, e.name == name && has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))"
+      message: "A provisioner Job must carry every required database and platform environment binding."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || (has(object.spec.backoffLimit) && object.spec.backoffLimit == 0)"
+      message: "A provisioner Job must disable retries with backoffLimit: 0."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || (has(object.spec.ttlSecondsAfterFinished) && object.spec.ttlSecondsAfterFinished == 3600)"
+      message: "A provisioner Job must use ttlSecondsAfterFinished: 3600."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || ((!has(object.spec.parallelism) || object.spec.parallelism == 1) && (!has(object.spec.completions) || object.spec.completions == 1) && (!has(object.spec.completionMode) || object.spec.completionMode == 'NonIndexed') && (!has(object.spec.suspend) || object.spec.suspend == false) && !has(object.spec.activeDeadlineSeconds) && !has(object.spec.podFailurePolicy) && !has(object.spec.successPolicy) && !has(object.spec.managedBy))"
+      message: "A provisioner Job must remain a single non-indexed execution without alternate completion controls."
       reason: Forbidden
     # The builder constructs an explicit env list; envFrom (bulk ConfigMap/Secret
     # import) is never used and would let a caller inject arbitrary configuration.
@@ -99,6 +141,15 @@ spec:
     # so an emptyDir-only check does not reject legitimate provisioner Jobs.
     - expression: "!variables.targetsProvisioner || !has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, has(v.emptyDir))"
       message: "A provisioner Job may only declare emptyDir volumes."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || (has(variables.podSpec.volumes) && size(variables.podSpec.volumes) == 4 && variables.podSpec.volumes.exists_one(v, v.name == 'provisioner-workspace' && has(v.emptyDir) && v.emptyDir.medium == 'Memory' && v.emptyDir.sizeLimit == '256Mi') && variables.podSpec.volumes.exists_one(v, v.name == 'tmp' && has(v.emptyDir) && !has(v.emptyDir.medium) && !has(v.emptyDir.sizeLimit)) && variables.podSpec.volumes.exists_one(v, v.name == 'tf-plugin-cache' && has(v.emptyDir) && !has(v.emptyDir.medium) && !has(v.emptyDir.sizeLimit)) && variables.podSpec.volumes.exists_one(v, v.name == 'pulumi-home' && has(v.emptyDir) && !has(v.emptyDir.medium) && !has(v.emptyDir.sizeLimit)))"
+      message: "A provisioner Job must use the four canonical bounded writable volumes."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || variables.containers.all(c, has(c.volumeMounts) && size(c.volumeMounts) == 4 && c.volumeMounts.exists_one(m, m.name == 'provisioner-workspace' && m.mountPath == '/var/run/provisioner/workspace' && !has(m.subPath) && !has(m.subPathExpr) && (!has(m.readOnly) || m.readOnly == false)) && c.volumeMounts.exists_one(m, m.name == 'tmp' && m.mountPath == '/tmp' && !has(m.subPath) && !has(m.subPathExpr) && (!has(m.readOnly) || m.readOnly == false)) && c.volumeMounts.exists_one(m, m.name == 'tf-plugin-cache' && m.mountPath == '/home/appuser/.terraform.d/plugin-cache' && !has(m.subPath) && !has(m.subPathExpr) && (!has(m.readOnly) || m.readOnly == false)) && c.volumeMounts.exists_one(m, m.name == 'pulumi-home' && m.mountPath == '/home/appuser/.pulumi' && !has(m.subPath) && !has(m.subPathExpr) && (!has(m.readOnly) || m.readOnly == false)))"
+      message: "A provisioner Job must use the canonical writable volume mounts without subpaths."
+      reason: Forbidden
+    - expression: "!variables.targetsProvisioner || (has(variables.podSpec.securityContext) && variables.podSpec.securityContext.fsGroup == 1000 && variables.podSpec.securityContext.fsGroupChangePolicy == 'OnRootMismatch' && has(variables.podSpec.securityContext.seccompProfile) && variables.podSpec.securityContext.seccompProfile.type == 'RuntimeDefault' && (!has(variables.podSpec.imagePullSecrets) || size(variables.podSpec.imagePullSecrets) == 0) && has(variables.podSpec.automountServiceAccountToken) && variables.podSpec.automountServiceAccountToken == false)"
+      message: "A provisioner Job must keep the canonical pod security and service-account token posture."
       reason: Forbidden
     # Mirror the issue #1103 container security posture so it cannot be relaxed.
     - expression: "!variables.targetsProvisioner || variables.containers.all(c, has(c.securityContext) && c.securityContext.readOnlyRootFilesystem == true && c.securityContext.allowPrivilegeEscalation == false && c.securityContext.runAsNonRoot == true && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && ('ALL' in c.securityContext.capabilities.drop) && (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0))"

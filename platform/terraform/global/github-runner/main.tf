@@ -67,13 +67,39 @@ data "aws_subnets" "default" {
   }
 }
 
+# Dedicated runner VPC (issue #1433). When var.create_runner_network is set the
+# bootstrap automation path provisions a self-contained, non-default runner VPC
+# (NAT-only egress, no private-DNS interface endpoints) instead of relying on an
+# operator-supplied network or the account default VPC. The created VPC is
+# non-default by construction, so the ADR-004-R20 fail-closed precondition below
+# still passes.
+module "runner_network" {
+  count  = var.create_runner_network ? 1 : 0
+  source = "../../modules/github-runner-network"
+
+  name_prefix = "shifter-github-runner"
+  vpc_cidr    = var.runner_network_cidr
+}
+
 locals {
-  # Resolve the runner network. Explicit vpc_id/subnet_id always win. Otherwise,
-  # when allow_default_vpc is set, fall back to the account default VPC and its
-  # first subnet. When neither is provided the values stay empty and the SG
-  # preconditions / resource creation fail closed.
-  runner_vpc_id    = var.vpc_id != "" ? var.vpc_id : (var.allow_default_vpc ? one(data.aws_vpcs.default.ids) : "")
-  runner_subnet_id = var.subnet_id != "" ? var.subnet_id : (var.allow_default_vpc ? data.aws_subnets.default[0].ids[0] : "")
+  # A created runner network wins over everything: it is the ADR-004-R20-compliant
+  # automated path. Otherwise explicit vpc_id/subnet_id win, then the
+  # allow_default_vpc fallback to the account default VPC and its first subnet.
+  # When none is provided the values stay empty and the SG preconditions /
+  # resource creation fail closed.
+  created_vpc_id    = var.create_runner_network ? module.runner_network[0].vpc_id : ""
+  created_subnet_id = var.create_runner_network ? module.runner_network[0].runner_subnet_id : ""
+
+  runner_vpc_id = (
+    local.created_vpc_id != "" ? local.created_vpc_id :
+    var.vpc_id != "" ? var.vpc_id :
+    var.allow_default_vpc ? one(data.aws_vpcs.default.ids) : ""
+  )
+  runner_subnet_id = (
+    local.created_subnet_id != "" ? local.created_subnet_id :
+    var.subnet_id != "" ? var.subnet_id :
+    var.allow_default_vpc ? data.aws_subnets.default[0].ids[0] : ""
+  )
 }
 
 data "aws_subnet" "runner" {
@@ -320,8 +346,19 @@ resource "aws_instance" "runner" {
     # but that script identifies AL2023 as bare "fedora" and bails out, so
     # we install them ourselves at boot to avoid a manual second pass.
     dnf update -y
+    # `expect` drives the Actions runner registration: config.sh reads its
+    # masked registration-token prompt from a console, so registration runs it
+    # under a PTY (see scripts/bootstrap/runner.py) rather than over redirected
+    # stdin.
     dnf install -y docker git jq tar unzip python3.12 python3.12-pip python3.12-devel nodejs npm \
-                   libicu krb5-libs zlib lttng-ust openssl-libs
+                   libicu krb5-libs zlib lttng-ust openssl-libs expect
+
+    # GitHub CLI (gh) is not in the AL2023 default repos, but deploy jobs that
+    # run on these runners invoke `gh` (e.g. _shifter-engine.yml Deploy), so
+    # install it from the official gh-cli repo at boot.
+    dnf install -y 'dnf-command(config-manager)'
+    dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+    dnf install -y gh
 
     # Start Docker
     systemctl enable --now docker

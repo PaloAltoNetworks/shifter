@@ -8,17 +8,20 @@ boundary exists so a future mode (dynamic, etc. — CTF-002) is one added enum
 value plus one strategy, with no change to the submission service, event views,
 templates, scoreboards, or leaderboard maintenance.
 
-The strategy is deterministic and side-effect free: ``submit_flag`` computes the
-solve value under the participant ``select_for_update`` lock, so a strategy must
-not perform I/O or unbounded work.
+Standard scoring is deterministic and side-effect free. Dynamic scoring's
+authoritative value depends on the solve count, which only exists reliably
+under the submission locks — so its strategy returns the provisional full
+value here, and :func:`ctf.services.scoring.apply_dynamic_decay` re-prices
+every correct solve inside the locked submission transaction (CTF-202).
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Protocol
 
-from ctf.enums import ScoringMode
+from ctf.enums import DecayFunction, ScoringMode
 
 if TYPE_CHECKING:
     from ctf.models import CTFChallenge, CTFEvent
@@ -47,8 +50,50 @@ class StandardScoringStrategy:
         return challenge.calculate_points_with_penalty(total_hint_penalty)
 
 
+def dynamic_challenge_value(challenge: CTFChallenge, solve_count: int) -> int:
+    """Current base value of a dynamic-mode challenge after ``solve_count`` solves.
+
+    ``decay_solve_count == 0`` disables decay (full value). The value never
+    rises above the initial points nor falls below the configured minimum.
+    Curves follow CTF-202: linear steps, or the CTFd-style quadratic
+    ("logarithmic") curve that drops fastest on early solves.
+    """
+    initial = challenge.points
+    minimum = min(challenge.minimum_points, initial)
+    decay = challenge.decay_solve_count
+    if decay <= 0 or solve_count <= 0:
+        return initial
+    if challenge.decay_function == DecayFunction.LOGARITHMIC.value:
+        value = math.ceil(((minimum - initial) / (decay**2)) * (solve_count**2) + initial)
+    else:
+        value = math.ceil(initial - (initial - minimum) * (solve_count / decay))
+    return max(minimum, min(initial, value))
+
+
+def dynamic_points_with_penalty(value: int, total_hint_penalty: int) -> int:
+    """Apply the CTF-203 percentage hint penalty to a decayed base value."""
+    if total_hint_penalty <= 0:
+        return value
+    capped = min(total_hint_penalty, 100)
+    return max(0, value - (value * capped) // 100)
+
+
+class DynamicScoringStrategy:
+    """CTF-202 dynamic scoring: provisional full value at submit time.
+
+    The definitive decayed value (and the retroactive re-pricing of earlier
+    solves) is applied by ``apply_dynamic_decay`` inside the locked submission
+    transaction, where the solve count is authoritative.
+    """
+
+    @staticmethod
+    def points_for_solve(challenge: CTFChallenge, total_hint_penalty: int) -> int:
+        return challenge.calculate_points_with_penalty(total_hint_penalty)
+
+
 _STRATEGIES: dict[ScoringMode, ScoringStrategy] = {
     ScoringMode.STANDARD: StandardScoringStrategy(),
+    ScoringMode.DYNAMIC: DynamicScoringStrategy(),
 }
 
 

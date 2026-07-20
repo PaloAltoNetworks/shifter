@@ -86,8 +86,8 @@ def terminal(request: HttpRequest) -> HttpResponse:
         "page_title": "Terminal",
         "active_nav": "terminal",
         "terminal_guacamole_config": {
-            "rdpUrl": reverse("mission_control:guacamole_rdp_url"),
-            "sshUrl": reverse("mission_control:guacamole_ssh_url"),
+            "rdpUrl": reverse("v1:mission_control:guacamole-rdp-url"),
+            "sshUrl": reverse("v1:mission_control:guacamole-ssh-url"),
             "csrfToken": get_token(request),
         },
     }

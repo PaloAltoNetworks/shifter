@@ -3,7 +3,12 @@
 from django.contrib import admin
 from django.http import HttpRequest
 
-from risk_register.models import APIKey, AuditLog, Comment, Risk
+from risk_register.models import (
+    APIKey,
+    AuditLog,
+    Comment,
+    Risk,
+)
 
 
 @admin.register(Risk)

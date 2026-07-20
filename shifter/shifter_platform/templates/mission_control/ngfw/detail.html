@@ -231,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.disabled = true;
 
             try {
-                await fetch('{% url "mission_control:api_ngfw_list" %}');
+                await fetch('{% url "v1:mission_control:ngfw-list" %}');
                 // Reload page to show updated status
                 globalThis.location.reload();
             } catch (err) {
@@ -257,7 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btnText.textContent = 'Opening CLI...';
 
             try {
-                const response = await fetch(`{% url 'mission_control:api_ngfw_ssh_url' ngfw.instance_id %}`, {
+                const response = await fetch(`{% url 'v1:mission_control:ngfw-ssh-url' ngfw.instance_id %}`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCookie('csrftoken'),

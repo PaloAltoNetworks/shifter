@@ -60,6 +60,12 @@ class TestProtocolStructuralTyping:
             def delete_object(self, bucket, key):
                 pass
 
+            def head_object(self, bucket, key):
+                return {"content_length": 0, "etag": ""}
+
+            def download_object(self, bucket, key, dest_path, *, max_bytes, expected_identity=None):
+                return {"content_length": 0, "etag": ""}
+
         assert isinstance(FakeStorage(), ObjectStorage)
 
     def test_secrets_store_satisfied_by_conforming_class(self):

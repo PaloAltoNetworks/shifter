@@ -1,0 +1,17 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{{ event.name }}: final results
+
+Hi {{ participant.name }},
+
+The event has ended. Your final standing:
+
+  Rank:   {{ final_rank }}
+  Score:  {{ final_score }}
+  Solves: {{ solve_count }}
+
+Top of the board: {{ top_summary }}
+
+Thanks for playing!
+
+-- {{ event.name }} Organizers

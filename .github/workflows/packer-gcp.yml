@@ -63,6 +63,8 @@ jobs:
       # arbitrary caller-supplied branch (#505 codex security review).
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -111,8 +113,14 @@ jobs:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           # GCS bucket holding the polaris compose-stack tarball (polaris-vm build
           # only). host-setup.sh fetches gs://<bucket>/<POLARIS_STACK_KEY> and
-          # bakes the stack in; empty leaves the host range-ready without it.
+          # bakes the stack in. The stack is MANDATORY for a promotable polaris-vm
+          # image and is verified against GCP_POLARIS_STACK_SHA256.
           GCP_POLARIS_STACK_BUCKET: ${{ vars.GCP_POLARIS_STACK_BUCKET }}
+          # Required content digest of the compose-stack tarball; the build fails
+          # on mismatch so a mutable GCS key cannot change what is baked.
+          GCP_POLARIS_STACK_SHA256: ${{ vars.GCP_POLARIS_STACK_SHA256 }}
+          # Optional immutable GCS object generation to pin the exact tarball.
+          GCP_POLARIS_STACK_GENERATION: ${{ vars.GCP_POLARIS_STACK_GENERATION }}
         run: |
           if [ -z "${GCP_PROJECT_ID}" ]; then
             echo "::error::Required secret GCP_PROJECT_ID is not set. See docs/dev/deploy-secrets.md."
@@ -134,6 +142,8 @@ jobs:
             echo "PKR_VAR_machine_type=${GCP_PACKER_MACHINE_TYPE}"
             echo "PKR_VAR_use_internal_ip=${GCP_PACKER_USE_INTERNAL_IP}"
             echo "PKR_VAR_polaris_stack_bucket=${GCP_POLARIS_STACK_BUCKET}"
+            echo "PKR_VAR_polaris_stack_sha256=${GCP_POLARIS_STACK_SHA256}"
+            echo "PKR_VAR_polaris_stack_generation=${GCP_POLARIS_STACK_GENERATION}"
           } >> "$GITHUB_ENV"
           # Kali has no public GCP image; the kali builder instead converts the
           # debian-12 GCE base into Kali Rolling in its first provisioning script
@@ -142,12 +152,26 @@ jobs:
       - name: Generate WinRM bootstrap secret (Windows/DC only)
         if: inputs.image_type == 'windows' || inputs.image_type == 'dc' || inputs.image_type == 'dc-prebaked'
         run: |
-          # Throwaway local-admin password for the build VM only; the VM is
-          # sysprepped and discarded so it never reaches the published image.
+          # Throwaway local-admin password for the build-time WinRM connection.
+          # For the sysprepped windows/dc images the sysprep discards it; the
+          # un-sysprepped dc-prebaked image overwrites it (a2_setup resets the
+          # domain Administrator, then plans/dc_setup.py rotates it per range).
           # Masked in logs and written via $GITHUB_ENV, never echoed or on argv.
           WINRM_PW="$(openssl rand -base64 24)"
           echo "::add-mask::${WINRM_PW}"
           echo "PKR_VAR_winrm_bootstrap_password=${WINRM_PW}" >> "$GITHUB_ENV"
+
+      - name: Generate DSRM secret (pre-promoted DC only)
+        if: inputs.image_type == 'dc-prebaked'
+        run: |
+          # Build-only DSRM (Directory Services Restore Mode) password for the
+          # baked forest. Generated per build so no shared, source-controlled
+          # DSRM secret ships in the image; promote-bake.ps1 requires it and
+          # cleanup.ps1 strips the build transcript before capture. Masked and
+          # passed via $GITHUB_ENV as a sensitive PKR var, never echoed or argv.
+          DSRM_PW="$(openssl rand -base64 24)"
+          echo "::add-mask::${DSRM_PW}"
+          echo "PKR_VAR_dc_dsrm_password=${DSRM_PW}" >> "$GITHUB_ENV"
 
       - name: Initialize Packer
         working-directory: shifter/packer/gcp
@@ -245,7 +269,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload manifest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.image_type }}-gce-manifest
           path: shifter/packer/gcp/${{ inputs.image_type }}-manifest.json

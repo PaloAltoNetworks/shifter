@@ -68,8 +68,7 @@
                 </button>
                 <p class="help">
                     {% blocktrans trimmed %}
-                        CTF participant access still uses range invitation magic links and does not go through
-                        this page.
+                        CTF participants use the dedicated username/password CTF login and cannot use this page.
                     {% endblocktrans %}
                 </p>
             </section>
@@ -140,6 +139,10 @@
             </section>
         </main>
         {{ identity_platform_config_json|json_script:"identity-platform-config" }}
+        {# Vendored QR generator (MIT, kazuhikoarase/qrcode-generator). Classic #}
+        {# script so window.qrcode is set before the deferred auth module runs; #}
+        {# renders the TOTP otpauth URL as a scannable QR entirely client-side. #}
+        <script src="{% static 'js/vendor/qrcode.js' %}"></script>
         {# The auth module imports the Firebase modular SDK (version-pinned) from #}
         {# gstatic; TOTP MFA is only available through the modular API, not compat. #}
         <script type="module" src="{% static 'js/identity_platform_auth.js' %}"></script>

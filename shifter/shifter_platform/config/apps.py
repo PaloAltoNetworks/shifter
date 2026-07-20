@@ -15,6 +15,13 @@ class PortalConfig(AppConfig):
             register_audit_log_degraded_health_check,
             register_channel_layer_redis_health_check,
         )
+        from config.organizer_authority import register_organizer_authority_signals
+        from risk_register.services import audit_log_writer
+        from shared.audit import bind_audit_writer
 
+        # Bind the one concrete audit writer to the neutral port. A missing or
+        # conflicting binding is a startup configuration error (#1523).
+        bind_audit_writer(audit_log_writer)
         register_audit_log_degraded_health_check()
         register_channel_layer_redis_health_check()
+        register_organizer_authority_signals()

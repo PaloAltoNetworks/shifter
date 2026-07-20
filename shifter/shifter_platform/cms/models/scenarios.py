@@ -5,7 +5,8 @@ Scenarios are staff-authored range templates stored in the database. The
 DB-stored Scenarios and YAML default scenarios shipped under
 ``cms/scenarios/templates/``.
 
-Has no internal CMS dependencies; only depends on ``settings.AUTH_USER_MODEL``.
+The legacy ``Scenario`` save boundary also calls the shared catalog-namespace
+guard so create, update, and restore paths cannot shadow an ACES package source.
 """
 
 from __future__ import annotations
@@ -93,8 +94,13 @@ class Scenario(SoftDeleteMixin, models.Model):
         return f"{self.name} ({self.scenario_id})"
 
     def save(self, *args, **kwargs):
-        """Save with definition validation."""
+        """Save with definition and cross-store catalog-namespace validation."""
         if not self.is_deleted:
+            # Local import avoids a model-import cycle: the namespace guard reads
+            # AcesPackageSource only when an active legacy row is being saved.
+            from cms.scenarios.legacy_ids import ensure_scenario_id_available
+
+            ensure_scenario_id_available(self.scenario_id, registering="legacy")
             self.validate_definition()
         super().save(*args, **kwargs)
 

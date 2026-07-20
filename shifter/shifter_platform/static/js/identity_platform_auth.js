@@ -221,10 +221,24 @@ if (configScript) {
         const multiFactorSession = await multiFactor(user).getSession();
         pendingTotpSecret = await TotpMultiFactorGenerator.generateSecret(multiFactorSession);
 
-        document.getElementById("identity-totp-qr-url").textContent = pendingTotpSecret.generateQrCodeUrl(
-            user.email,
-            config.issuer
-        );
+        const otpauthUrl = pendingTotpSecret.generateQrCodeUrl(user.email, config.issuer);
+        const qrEl = document.getElementById("identity-totp-qr-url");
+        qrEl.textContent = "";
+        // Render the otpauth URL as a scannable QR image (client-side; the TOTP
+        // secret never leaves the browser). Falls back to the raw URL if the
+        // vendored QR library failed to load.
+        try {
+            const qr = globalThis.qrcode(0, "M");
+            qr.addData(otpauthUrl);
+            qr.make();
+            const img = document.createElement("img");
+            img.src = qr.createDataURL(5, 8);
+            img.alt = "Authenticator setup QR code";
+            qrEl.appendChild(img);
+        } catch (err) {
+            console.warn("TOTP QR render failed; showing the otpauth URL instead", err);
+            qrEl.textContent = otpauthUrl;
+        }
         document.getElementById("identity-totp-secret").textContent = pendingTotpSecret.secretKey;
         document.getElementById("identity-totp-enrollment-code").value = "";
         if (message) {

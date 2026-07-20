@@ -35,10 +35,11 @@ from cms.models.provisioning import (
     Request,
     Subnet,
 )
-from cms.models.range import RangeInstance
+from cms.models.range import ACTIVE_RANGE_UNIQUE_CONSTRAINT, RangeInstance
 from cms.models.scenarios import AcesPackageSource, Scenario, ScenarioMetadata
 
 __all__ = [
+    "ACTIVE_RANGE_UNIQUE_CONSTRAINT",
     "AcesPackageSource",
     "AgentConfig",
     "AgentType",

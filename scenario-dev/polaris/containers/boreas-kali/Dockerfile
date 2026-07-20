@@ -1,4 +1,5 @@
-FROM kalilinux/kali-rolling
+# base image: kali-rolling
+FROM kalilinux/kali-rolling@sha256:776d57c9d607faafef9957073b0b5a05b0d1115e5728777a8fc5588827cfd249
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \

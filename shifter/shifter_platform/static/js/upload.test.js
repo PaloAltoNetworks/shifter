@@ -209,7 +209,7 @@ describe('DirectUploader', () => {
             expect(uploader._boundBeforeUnload).not.toBeNull();
         });
 
-        test('handler calls sendBeacon with correct JSON when token exists and not cancelled', () => {
+        test('handler calls sendBeacon with form-encoded token and csrf when available', () => {
             uploader.uploadToken = 'test-token-123';
             uploader.cancelled = false;
             uploader._registerBeforeUnload();
@@ -219,21 +219,13 @@ describe('DirectUploader', () => {
 
             expect(navigator.sendBeacon).toHaveBeenCalledWith(
                 '/api/upload/cancel/',
-                expect.any(Blob)
+                expect.any(URLSearchParams)
             );
 
-            // Verify the blob properties
-            const blobArg = navigator.sendBeacon.mock.calls[0][1];
-            expect(blobArg.type).toBe('application/json');
-
-            // Verify blob size matches expected JSON exactly
-            // This catches bugs where the token is wrong/missing/malformed
-            const expectedJson = JSON.stringify({ upload_token: 'test-token-123' });
-            expect(blobArg.size).toBe(expectedJson.length);
-
-            // Verify with a different token to ensure size check is meaningful
-            const wrongJson = JSON.stringify({ upload_token: 'wrong' });
-            expect(blobArg.size).not.toBe(wrongJson.length);
+            const bodyArg = navigator.sendBeacon.mock.calls[0][1];
+            expect(bodyArg).toBeInstanceOf(URLSearchParams);
+            expect(bodyArg.get('upload_token')).toBe('test-token-123');
+            expect(bodyArg.get('csrfmiddlewaretoken')).toBe('test-csrf-token');
         });
 
         test('handler does nothing when cancelled is true', () => {
@@ -248,6 +240,32 @@ describe('DirectUploader', () => {
 
         test('handler does nothing when uploadToken is null', () => {
             uploader.uploadToken = null;
+            uploader.cancelled = false;
+            uploader._registerBeforeUnload();
+
+            windowEventHandlers.beforeunload();
+
+            expect(navigator.sendBeacon).not.toHaveBeenCalled();
+        });
+
+        test('handler does nothing when csrfToken is missing', () => {
+            uploader.uploadToken = 'test-token-123';
+            uploader.csrfToken = null;
+            uploader.cancelled = false;
+            uploader._registerBeforeUnload();
+
+            windowEventHandlers.beforeunload();
+
+            expect(navigator.sendBeacon).not.toHaveBeenCalled();
+        });
+
+        test('handler does nothing when unload cancel is disabled', () => {
+            uploader = new globalThis.DirectUploader({
+                ...defaultOptions,
+                ...mockCallbacks,
+                cancelOnUnload: false,
+            });
+            uploader.uploadToken = 'test-token-123';
             uploader.cancelled = false;
             uploader._registerBeforeUnload();
 
@@ -744,7 +762,7 @@ describe('DirectUploader', () => {
             expect(throwingCallbacks.onError).toHaveBeenCalledWith('Success callback exploded!');
         });
 
-        test('onProgress callback throwing does not abort upload', async () => {
+        test('onProgress callback throwing aborts before initiate and reports error', async () => {
             let progressCallCount = 0;
             const throwingCallbacks = {
                 ...mockCallbacks,
@@ -774,19 +792,12 @@ describe('DirectUploader', () => {
 
             const uploadPromise = throwingUploader.upload(createMockFile(), 'Test Agent');
 
-            // First onProgress call throws, but upload should continue
-            await new Promise((resolve) => setTimeout(resolve, 0));
-            triggerXhrLoad(200);
+            await expect(uploadPromise).resolves.toBeUndefined();
 
-            // The promise may reject due to the callback throwing
-            try {
-                await uploadPromise;
-            } catch (e) {
-                // Expected - callback threw
-            }
-
-            // Progress was called
             expect(throwingCallbacks.onProgress).toHaveBeenCalled();
+            expect(throwingCallbacks.onError).toHaveBeenCalledWith('Progress callback exploded!');
+            expect(throwingCallbacks.onSuccess).not.toHaveBeenCalled();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
         });
     });
 
@@ -1224,6 +1235,15 @@ describe('DirectUploader', () => {
     describe('_cancelUpload()', () => {
         test('does nothing when uploadToken is null', async () => {
             uploader.uploadToken = null;
+
+            await uploader._cancelUpload();
+
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+        });
+
+        test('does nothing when cancelUrl is null', async () => {
+            uploader.uploadToken = 'token-to-cancel';
+            uploader.cancelUrl = null;
 
             await uploader._cancelUpload();
 

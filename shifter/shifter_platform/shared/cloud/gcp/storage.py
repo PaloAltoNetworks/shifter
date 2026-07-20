@@ -3,55 +3,113 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
-from shared.cloud.exceptions import CloudStorageError
+from shared.cloud.exceptions import CloudStorageError, ObjectPreconditionError
 from shared.cloud.gcp.base import import_google_module
+from shared.log_sanitize import safe_log_value
+
+if TYPE_CHECKING:
+    from google.cloud.storage import Blob as GCSBlob
+    from google.cloud.storage import Client as GCSClient
+else:
+    GCSClient = Any
+    GCSBlob = Any
 
 logger = logging.getLogger(__name__)
+
+
+def _authoritative_size_and_generation(blob: GCSBlob, identity: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Return (size, generation) for ``blob``, reloading metadata when needed.
+
+    Prefers the caller-supplied head identity; when it lacks ``content_length`` a
+    single metadata reload provides the authoritative size (and the generation to
+    bind the download to).
+    """
+    expected_len = identity.get("content_length")
+    generation = identity.get("generation")
+    if expected_len is None:
+        blob.reload()
+        expected_len = blob.size
+        if generation is None:
+            generation = blob.generation
+    return expected_len, generation
 
 
 class GCPObjectStorage:
     """GCS implementation of ObjectStorage protocol."""
 
-    def _get_client(self) -> Any:
+    @staticmethod
+    def _get_client() -> GCSClient:
         try:
             storage = import_google_module("google.cloud.storage")
             return storage.Client()
         except ImportError as e:
             raise CloudStorageError("GCP storage support requires google-cloud-storage") from e
 
+    @staticmethod
+    def _iam_signing_kwargs() -> dict[str, str]:
+        """Return ``generate_signed_url`` kwargs for IAM-based V4 signing.
+
+        Under Workload Identity the active credentials are compute-metadata
+        credentials that carry only an access token and have no private key, so
+        the client cannot sign a URL locally (it raises "you need a private key
+        to sign credentials"). Passing ``service_account_email`` +
+        ``access_token`` makes the client sign via the IAM credentials
+        ``signBlob`` API instead, which only needs the service account to hold
+        ``roles/iam.serviceAccountTokenCreator`` on itself.
+
+        Credentials that can sign locally (a service-account JSON key, e.g. some
+        dev setups) expose a ``signer`` and return an empty dict so the library
+        keeps signing with the key.
+        """
+        google_auth = import_google_module("google.auth")
+        auth_requests = import_google_module("google.auth.transport.requests")
+        credentials, _ = google_auth.default()
+        if getattr(credentials, "signer", None) is not None and getattr(credentials, "signer_email", None):
+            return {}
+        credentials.refresh(auth_requests.Request())
+        return {
+            "service_account_email": credentials.service_account_email,
+            "access_token": credentials.token,
+        }
+
     def upload_file(
         self,
-        file_obj: Any,
+        file_obj: BinaryIO,
         bucket: str,
         key: str,
         content_type: str = "",
     ) -> None:
-        logger.debug("upload_file: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("upload_file: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             blob = client.bucket(bucket).blob(key)
             blob.upload_from_file(file_obj, content_type=content_type or None, rewind=True)
         except Exception as e:
-            logger.error("upload_file: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("upload_file: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to upload to GCS: {e}") from e
-        logger.info("upload_file: success bucket=%s key=%s", bucket, key)
+        logger.info("upload_file: success bucket=%s key=%s", bucket, safe_key)
 
     def delete_object(self, bucket: str, key: str) -> None:
-        logger.debug("delete_object: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("delete_object: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             client.bucket(bucket).blob(key).delete()
         except Exception as e:
-            logger.error("delete_object: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("delete_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to delete GCS object: {e}") from e
-        logger.info("delete_object: success bucket=%s key=%s", bucket, key)
+        logger.info("delete_object: success bucket=%s key=%s", bucket, safe_key)
 
     def copy_object(self, bucket: str, src_key: str, dst_key: str) -> None:
         """Copy a blob within the same bucket using GCS rewrite."""
-        logger.debug("copy_object: bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+        safe_src = safe_log_value(src_key)
+        safe_dst = safe_log_value(dst_key)
+        logger.debug("copy_object: bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
         try:
             client = self._get_client()
             source_bucket = client.bucket(bucket)
@@ -61,11 +119,112 @@ class GCPObjectStorage:
             logger.exception(
                 "copy_object: failed bucket=%s src=%s dst=%s",
                 bucket,
-                src_key,
-                dst_key,
+                safe_src,
+                safe_dst,
             )
             raise CloudStorageError(f"Failed to copy GCS object: {e}") from e
-        logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+        logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+
+    def copy_object_conditional(
+        self,
+        bucket: str,
+        src_key: str,
+        dst_key: str,
+        *,
+        expected_identity: dict[str, Any],
+    ) -> None:
+        """Copy a blob gated on the source generation and destination absence.
+
+        ``if_source_generation_match`` binds the copy to the exact validated
+        object generation, so an overwrite after validation (which mints a new
+        generation) makes the copy fail. ``if_generation_match=0`` refuses the
+        copy if the destination already exists. Both surface as
+        ``ObjectPreconditionError`` (fail closed).
+        """
+        generation = expected_identity.get("generation")
+        if not generation:
+            raise CloudStorageError("conditional copy requires a source generation")
+        safe_src = safe_log_value(src_key)
+        safe_dst = safe_log_value(dst_key)
+        logger.debug("copy_object_conditional: bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+        api_exceptions = import_google_module("google.api_core.exceptions")
+        try:
+            client = self._get_client()
+            source_bucket = client.bucket(bucket)
+            source_blob = source_bucket.blob(src_key)
+            source_bucket.copy_blob(
+                source_blob,
+                source_bucket,
+                dst_key,
+                if_source_generation_match=int(generation),
+                if_generation_match=0,
+            )
+        except api_exceptions.PreconditionFailed as e:
+            logger.warning(
+                "copy_object_conditional: precondition failed bucket=%s src=%s dst=%s",
+                bucket,
+                safe_src,
+                safe_dst,
+            )
+            raise ObjectPreconditionError(
+                "GCS conditional copy precondition failed (source changed or destination exists)"
+            ) from e
+        except Exception as e:
+            logger.exception("copy_object_conditional: failed bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+            raise CloudStorageError(f"Failed to conditionally copy GCS object: {e}") from e
+        logger.info("copy_object_conditional: success bucket=%s src=%s dst=%s", bucket, safe_src, safe_dst)
+
+    def download_object(
+        self,
+        bucket: str,
+        key: str,
+        dest_path: str,
+        *,
+        max_bytes: int,
+        expected_identity: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Download a full blob to ``dest_path``, bounded by ``max_bytes``.
+
+        Makes ``max_bytes`` a real transfer bound regardless of caller input: the
+        authoritative object size is established BEFORE any bytes are written,
+        from the head identity's ``content_length`` when supplied, otherwise via a
+        single metadata ``reload``. An object larger than ``max_bytes`` is
+        rejected before the transfer starts. The download is bound to the object
+        generation (from the head identity or the reload) via
+        ``if_generation_match`` so a replacement mid-flight fails closed
+        (``PreconditionFailed`` -> ``ObjectPreconditionError``); the realized file
+        size is re-checked afterward as defense in depth.
+        """
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        safe_key = safe_log_value(key)
+        logger.debug("download_object: bucket=%s key=%s max_bytes=%d", bucket, safe_key, max_bytes)
+        api_exceptions = import_google_module("google.api_core.exceptions")
+        try:
+            client = self._get_client()
+            blob = client.bucket(bucket).blob(key)
+            # Establish the authoritative size (and generation) before any
+            # transfer so the byte cap is enforced up front even when the caller
+            # supplied no content_length.
+            expected_len, generation = _authoritative_size_and_generation(blob, expected_identity or {})
+            if expected_len is None or int(expected_len) > max_bytes:
+                raise CloudStorageError(f"GCS object exceeds max_bytes={max_bytes}")
+            download_kwargs = {"if_generation_match": int(generation)} if generation else {}
+            with open(dest_path, "wb") as handle:
+                blob.download_to_file(handle, **download_kwargs)
+            written = os.path.getsize(dest_path)
+            if written > max_bytes:
+                raise CloudStorageError(f"GCS object exceeds max_bytes={max_bytes}")
+        except api_exceptions.PreconditionFailed as e:
+            logger.warning("download_object: precondition failed bucket=%s key=%s", bucket, safe_key)
+            raise ObjectPreconditionError("GCS object changed since validation (generation mismatch)") from e
+        except CloudStorageError:
+            raise
+        except Exception as e:
+            logger.exception("download_object: failed bucket=%s key=%s", bucket, safe_key)
+            raise CloudStorageError(f"Failed to download GCS object: {e}") from e
+        logger.info("download_object: success bucket=%s key=%s bytes=%d", bucket, safe_key, written)
+        return {"content_length": written, "etag": str(blob.etag or ""), "generation": int(blob.generation or 0)}
 
     def object_exists(self, bucket: str, key: str) -> bool:
         """Return True iff the blob exists.
@@ -75,17 +234,19 @@ class GCPObjectStorage:
         Other errors (auth, network) raise `CloudStorageError` so the caller
         fails closed.
         """
-        logger.debug("object_exists: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("object_exists: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             blob = client.bucket(bucket).get_blob(key)
             return blob is not None
         except Exception as e:
-            logger.exception("object_exists: failed bucket=%s key=%s", bucket, key)
+            logger.exception("object_exists: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to test GCS object existence: {e}") from e
 
     def head_object(self, bucket: str, key: str) -> dict[str, Any]:
-        logger.debug("head_object: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("head_object: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             blob = client.bucket(bucket).get_blob(key)
@@ -94,11 +255,15 @@ class GCPObjectStorage:
             return {
                 "content_length": int(blob.size or 0),
                 "etag": str(blob.etag or ""),
+                # Generation is GCS's strongest object identity — monotonic and
+                # never reused — so it is the precondition of choice for
+                # ``copy_object_conditional``.
+                "generation": int(blob.generation or 0),
             }
         except CloudStorageError:
             raise
         except Exception as e:
-            logger.error("head_object: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("head_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to head GCS object: {e}") from e
 
     def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes:
@@ -109,7 +274,8 @@ class GCPObjectStorage:
         """
         if max_bytes <= 0:
             raise ValueError("max_bytes must be positive")
-        logger.debug("read_object_header: bucket=%s key=%s max_bytes=%d", bucket, key, max_bytes)
+        safe_key = safe_log_value(key)
+        logger.debug("read_object_header: bucket=%s key=%s max_bytes=%d", bucket, safe_key, max_bytes)
         try:
             client = self._get_client()
             blob = client.bucket(bucket).blob(key)
@@ -118,8 +284,8 @@ class GCPObjectStorage:
             logger.exception(
                 "read_object_header: failed bucket=%s key=%s error=%s",
                 bucket,
-                key,
-                e,
+                safe_key,
+                safe_log_value(e),
             )
             raise CloudStorageError(f"Failed to read GCS object header: {e}") from e
         return body[:max_bytes]
@@ -131,7 +297,8 @@ class GCPObjectStorage:
         content_type: str,
         expires_in: int,
     ) -> str:
-        logger.debug("generate_presigned_upload_url: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("generate_presigned_upload_url: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             blob = client.bucket(bucket).blob(key)
@@ -140,9 +307,14 @@ class GCPObjectStorage:
                 expiration=timedelta(seconds=expires_in),
                 method="PUT",
                 content_type=content_type,
+                **self._iam_signing_kwargs(),
             )
         except Exception as e:
-            logger.error("generate_presigned_upload_url: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception(
+                "generate_presigned_upload_url: failed bucket=%s key=%s",
+                bucket,
+                safe_key,
+            )
             raise CloudStorageError(f"Failed to generate GCS upload URL: {e}") from e
 
     def generate_presigned_download_url(
@@ -151,7 +323,8 @@ class GCPObjectStorage:
         key: str,
         expires_in: int,
     ) -> str:
-        logger.debug("generate_presigned_download_url: bucket=%s key=%s", bucket, key)
+        safe_key = safe_log_value(key)
+        logger.debug("generate_presigned_download_url: bucket=%s key=%s", bucket, safe_key)
         try:
             client = self._get_client()
             blob = client.bucket(bucket).blob(key)
@@ -159,13 +332,19 @@ class GCPObjectStorage:
                 version="v4",
                 expiration=timedelta(seconds=expires_in),
                 method="GET",
+                **self._iam_signing_kwargs(),
             )
         except Exception as e:
-            logger.error("generate_presigned_download_url: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception(
+                "generate_presigned_download_url: failed bucket=%s key=%s",
+                bucket,
+                safe_key,
+            )
             raise CloudStorageError(f"Failed to generate GCS download URL: {e}") from e
 
     def tag_object(self, bucket: str, key: str, tags: dict[str, str]) -> None:
-        logger.debug("tag_object: bucket=%s key=%s tags=%s", bucket, key, tags)
+        safe_key = safe_log_value(key)
+        logger.debug("tag_object: bucket=%s key=%s tags=%s", bucket, safe_key, tags)
         try:
             client = self._get_client()
             blob = client.bucket(bucket).get_blob(key)
@@ -178,6 +357,6 @@ class GCPObjectStorage:
         except CloudStorageError:
             raise
         except Exception as e:
-            logger.error("tag_object: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("tag_object: failed bucket=%s key=%s", bucket, safe_key)
             raise CloudStorageError(f"Failed to tag GCS object: {e}") from e
-        logger.debug("tag_object: success bucket=%s key=%s", bucket, key)
+        logger.debug("tag_object: success bucket=%s key=%s", bucket, safe_key)

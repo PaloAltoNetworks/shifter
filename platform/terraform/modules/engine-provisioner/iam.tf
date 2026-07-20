@@ -4,7 +4,8 @@
 # Used by ECS to pull container images and write logs
 
 resource "aws_iam_role" "ecs_execution" {
-  name = "${var.name_prefix}-pulumi-ecs-execution"
+  name                 = "${local.iam_name_prefix}-pulumi-ecs-execution"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -65,13 +66,45 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
   })
 }
 
+# Allow the ECS execution role to decrypt secrets encrypted with the portal
+# Secrets Manager CMK. ECS resolves task-definition `secrets = [...]` before
+# container start using the execution role, so a missing kms:Decrypt grant on
+# the CMK aborts the task with `ResourceInitializationError: Access to KMS is
+# not allowed` and the container never runs. Mirrors `SecretsManagerKMSAccess`
+# on the task role below, but pinned to the concrete CMK ARN (preflight
+# guidance: prefer the concrete CMK ARN when the role only needs the portal
+# CMK). See issue #52.
+resource "aws_iam_role_policy" "ecs_execution_kms" {
+  name = "kms-secrets-decrypt"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SecretsManagerKMSAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey"
+      ]
+      Resource = var.secrets_manager_kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "secretsmanager.${local.region}.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role
 # ------------------------------------------------------------------------------
 # Used by the engine provisioner container for AWS operations
 
 resource "aws_iam_role" "ecs_task" {
-  name = "${var.name_prefix}-pulumi-ecs-task"
+  name                 = "${local.iam_name_prefix}-pulumi-ecs-task"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -128,9 +161,15 @@ resource "aws_iam_role_policy" "engine_state" {
 # Task Role Policy - EC2 Provisioning
 # ------------------------------------------------------------------------------
 
-resource "aws_iam_role_policy" "ec2_provisioning" {
-  name = "ec2-provisioning"
-  role = aws_iam_role.ecs_task.id
+# Moved off an inline role policy to a customer-managed policy (issue #1749):
+# the task role's aggregate inline-policy size exceeded AWS's 10,240-byte
+# ceiling once the GWLB and OpenVPN-gateway policies were added, failing the
+# portal Terraform apply. Managed policies attached to the role do not count
+# toward the inline aggregate. Permissions are unchanged from the prior inline
+# policy.
+resource "aws_iam_policy" "ec2_provisioning" {
+  name        = "${var.name_prefix}-pulumi-ec2-provisioning-managed"
+  description = "Shifter provisioner EC2 lifecycle and networking permissions (moved off inline to stay under the role inline-policy size limit)."
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -138,58 +177,25 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # EC2 read and key-pair operations. Describe APIs require
         # Resource=*; key-pair names are generated per range/NGFW run.
-        Sid    = "EC2DescribeAndKeyPairOperations"
         Effect = "Allow"
         Action = [
-          "ec2:Describe*",
+          "ec2:Describe*"
+        ]
+        Resource = "*"
+      },
+      {
+        # Key-pair names are generated per range/NGFW run.
+        Effect = "Allow"
+        Action = [
           "ec2:ImportKeyPair",
           "ec2:DeleteKeyPair"
         ]
-        Resource = [
-          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:volume/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*",
-          "arn:aws:ec2:${local.region}::image/*"
-        ]
-      },
-      {
-        # Instance creation is restricted by the runtime Terraform tags that
-        # the provisioner applies to every managed range/NGFW instance.
-        Sid    = "EC2TaggedInstanceCreate"
-        Effect = "Allow"
-        Action = [
-          "ec2:RunInstances"
-        ]
-        Resource = [
-          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:volume/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:route-table/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:internet-gateway/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:elastic-ip/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:natgateway/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint-service/*",
-          "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
-        ]
-        Condition = {
-          StringEquals = {
-            "aws:RequestTag/shifter:system"      = "shifter"
-            "aws:RequestTag/shifter:environment" = var.environment
-            "aws:RequestTag/ManagedBy"           = "terraform"
-          }
-        }
+        Resource = "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
       },
       {
         # Tagging at create time is needed for the EC2 resources provisioner
         # Terraform creates and is bound to create APIs so it cannot retag
         # arbitrary EC2 resources.
-        Sid    = "EC2TagOnCreate"
         Effect = "Allow"
         Action = [
           "ec2:CreateTags"
@@ -222,19 +228,20 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - StopInstances, StartInstances for power management
         # - ModifyInstanceAttribute for runtime changes
         # - DeleteTags for cleanup
-        Sid    = "EC2TaggedInstanceLifecycle"
+        #
+        # ModifyInstanceMetadataOptions was removed (#1377): it backed the
+        # HttpPutResponseHopLimit=2 IMDS hop-limit raise, which exposed the
+        # shared range-host role's SSM/S3/Bedrock credentials to any
+        # container that could reach IMDS. The Polaris agent no longer
+        # needs IMDS access; it receives short-lived STS credentials for
+        # the per-range Bedrock agent role instead (see
+        # docs/architecture/polaris-aws-agent-credentials-preflight-1377.md).
         Effect = "Allow"
         Action = [
           "ec2:TerminateInstances",
           "ec2:StopInstances",
           "ec2:StartInstances",
           "ec2:ModifyInstanceAttribute",
-          # ModifyInstanceMetadataOptions is required so the polaris
-          # range bootstrap can set HttpPutResponseHopLimit=2 on the
-          # polaris-vm — without that the a14-kali docker container
-          # can't reach IMDS for instance-profile credentials and the
-          # claude/Bedrock smoke test fails.
-          "ec2:ModifyInstanceMetadataOptions",
           "ec2:DeleteTags"
         ]
         Resource = "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
@@ -251,7 +258,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - CreateNetworkInterface for mgmt and data ENIs
         # - ModifyNetworkInterfaceAttribute for source_dest_check=False on data ENI
         # - DeleteNetworkInterface for cleanup
-        Sid    = "EC2NetworkInterfaceOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateNetworkInterface",
@@ -267,7 +273,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - ModifySubnetAttribute for map_public_ip_on_launch, etc.
         # - DescribeSubnets for state queries
         # Note: tag-on-create support is in EC2TagOnCreate.
-        Sid    = "EC2SubnetOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateSubnet",
@@ -283,7 +288,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - CreateRoute, DeleteRoute, ReplaceRoute for route entries
         # - AssociateRouteTable, DisassociateRouteTable for subnet associations
         # - DescribeRouteTables for state queries
-        Sid    = "EC2RouteTableOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateRouteTable",
@@ -303,7 +307,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - AuthorizeSecurityGroupIngress/Egress for inbound/outbound rules
         # - RevokeSecurityGroupIngress/Egress for rule removal
         # Note: DescribeSecurityGroups covered by Describe* in EC2InstanceOperations
-        Sid    = "EC2SecurityGroupOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateSecurityGroup",
@@ -318,7 +321,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # Internet Gateway lifecycle management
         # Required for routing traffic to/from the internet
-        Sid    = "EC2InternetGatewayOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateInternetGateway",
@@ -332,7 +334,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # Elastic IP lifecycle management
         # Required for static public IPs on instances/NAT gateways
-        Sid    = "EC2ElasticIPOperations"
         Effect = "Allow"
         Action = [
           "ec2:AllocateAddress",
@@ -346,7 +347,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # NAT Gateway lifecycle management
         # Required for private subnet outbound internet access
-        Sid    = "EC2NATGatewayOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateNatGateway",
@@ -358,7 +358,6 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       {
         # PassRole for range instances and NGFW instances
         # compact() filters out empty strings when NGFW is not enabled
-        Sid    = "PassRoleToInstances"
         Effect = "Allow"
         Action = "iam:PassRole"
         Resource = compact([
@@ -368,6 +367,123 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
       }
     ]
   })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "ec2_provisioning" {
+  role       = aws_iam_role.ecs_task.name
+  policy_arn = aws_iam_policy.ec2_provisioning.arn
+}
+
+# Keep EC2 launch authorization in a customer-managed policy rather than an
+# inline role policy. The EC2 lifecycle inline policy is already close to AWS's
+# role inline-policy size ceiling, and RunInstances needs separate statements
+# because EC2 evaluates images, implicit ENIs, root volumes, and instances with
+# different condition-key contexts.
+resource "aws_iam_policy" "ec2_run_instances" {
+  name        = "${var.name_prefix}-pulumi-ec2-run-instances-managed"
+  description = "Allows the Shifter provisioner to launch range and NGFW instances with scoped dependent resources."
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # Instance creation is restricted by the runtime Terraform tags that
+        # the provisioner applies to every managed range/NGFW instance.
+        Effect = "Allow"
+        Action = [
+          "ec2:RunInstances"
+        ]
+        Resource = [
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # Root EBS volumes created by RunInstances do not expose the
+        # aws:RequestTag context during EC2 authorization. Limit them to the
+        # configured range AZ and require encrypted, newly-created volumes.
+        Effect = "Allow"
+        Action = [
+          "ec2:RunInstances"
+        ]
+        Resource = "arn:aws:ec2:${local.region}:${local.account_id}:volume/*"
+        Condition = {
+          StringEquals = {
+            "ec2:AvailabilityZone" = var.range_availability_zone
+          }
+          Bool = {
+            "aws:ResourceBeingCreated" = "true"
+            "ec2:Encrypted"            = "true"
+          }
+        }
+      },
+      {
+        # AMIs used by the range provisioner are published into this account
+        # (including the Polaris golden AMIs). Scope RunInstances image use to
+        # account-owned images rather than allowing arbitrary public AMIs.
+        Effect = "Allow"
+        Action = [
+          "ec2:RunInstances"
+        ]
+        Resource = "arn:aws:ec2:${local.region}::image/*"
+        Condition = {
+          StringEquals = {
+            "ec2:Owner" = local.account_id
+          }
+        }
+      },
+      {
+        # Dependent network resources for RunInstances. AWS evaluates implicit
+        # instance ENIs separately from the tagged instance/volume resources,
+        # so request-tag conditions do not match them. Constrain these
+        # dependent authorizations to the configured Range VPC instead.
+        Effect = "Allow"
+        Action = [
+          "ec2:RunInstances"
+        ]
+        Resource = [
+          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*"
+        ]
+        Condition = {
+          ArnEquals = {
+            "ec2:Vpc" = "arn:aws:ec2:${local.region}:${local.account_id}:vpc/${var.range_vpc_id}"
+          }
+        }
+      },
+      {
+        # NGFW launches use a provisioner-created, Shifter-tagged key pair.
+        Effect = "Allow"
+        Action = [
+          "ec2:RunInstances"
+        ]
+        Resource = "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/shifter:system"      = "shifter"
+            "ec2:ResourceTag/shifter:environment" = var.environment
+            "ec2:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "ec2_run_instances" {
+  role       = aws_iam_role.ecs_task.name
+  policy_arn = aws_iam_policy.ec2_run_instances.arn
 }
 
 # ------------------------------------------------------------------------------
@@ -401,6 +517,7 @@ resource "aws_iam_role_policy" "secrets_manager" {
       ]
       Resource = [
         "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/range/*",
+        "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/vpn-issuer/*",
         "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/ngfw/*"
       ]
     }]
@@ -457,43 +574,216 @@ resource "aws_iam_role_policy" "s3_agent" {
 # - Target groups with GENEVE protocol
 # - Listeners
 
-resource "aws_iam_role_policy" "gwlb" {
-  name = "gwlb-provisioning"
-  role = aws_iam_role.ecs_task.id
+# Moved off an inline role policy to a customer-managed policy (issue #1749) for
+# the same aggregate inline-policy-size reason as ec2_provisioning above.
+# Permissions are unchanged from the prior inline policy.
+resource "aws_iam_policy" "gwlb" {
+  name        = "${var.name_prefix}-pulumi-gwlb-provisioning-managed"
+  description = "Shifter provisioner Gateway Load Balancer permissions (moved off inline to stay under the role inline-policy size limit)."
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "GWLBOperations"
+        # ELBv2 Describe APIs require Resource = "*" per the AWS service
+        # authorization reference. Actions are enumerated so the wildcard
+        # statement cannot grow silently to additional read APIs.
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetHealth",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeTags"
+        ]
+        Resource = "*"
+      },
+      {
+        # GWLB resource creation. Scoped to Gateway Load Balancer
+        # resource types and gated on Shifter ownership request tags so
+        # this statement cannot create ALB/NLB resources or untagged
+        # resources.
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:DeleteLoadBalancer",
           "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:CreateListener"
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # Existing-resource mutations. Restricted to Shifter-owned GWLB
+        # resources via ELBv2 resource tags so the runtime cannot delete
+        # or reconfigure load balancers it does not own.
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DeleteLoadBalancer",
           "elasticloadbalancing:DeleteTargetGroup",
-          "elasticloadbalancing:CreateListener",
           "elasticloadbalancing:DeleteListener",
           "elasticloadbalancing:RegisterTargets",
           "elasticloadbalancing:DeregisterTargets",
           "elasticloadbalancing:ModifyLoadBalancerAttributes",
           "elasticloadbalancing:ModifyTargetGroup",
           "elasticloadbalancing:ModifyTargetGroupAttributes",
-          "elasticloadbalancing:AddTags",
+          "elasticloadbalancing:SetSecurityGroups",
           "elasticloadbalancing:RemoveTags"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:ResourceTag/shifter:system"      = "shifter"
+            "elasticloadbalancing:ResourceTag/shifter:environment" = var.environment
+            "elasticloadbalancing:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
       },
       {
-        Sid    = "GWLBDescribe"
+        # Tagging at create time. Bound to the GWLB create APIs and the
+        # Shifter ownership request tags so this statement cannot tag
+        # arbitrary ELBv2 resources or strip ownership tags later.
         Effect = "Allow"
         Action = [
-          "elasticloadbalancing:Describe*"
+          "elasticloadbalancing:AddTags"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/gwy/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/gwy/*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:CreateAction" = [
+              "CreateLoadBalancer",
+              "CreateTargetGroup",
+              "CreateListener"
+            ]
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = "elasticloadbalancing:CreateLoadBalancer"
+        Resource = "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # CreateListener is authorized against the parent NLB, not the future
+        # listener ARN. Require both the listener request tags and the parent
+        # NLB's ownership tags so a same-account NLB outside this Shifter
+        # environment cannot be used as the parent.
+        Effect   = "Allow"
+        Action   = "elasticloadbalancing:CreateListener"
+        Resource = "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"                        = "shifter"
+            "aws:RequestTag/shifter:environment"                   = var.environment
+            "aws:RequestTag/ManagedBy"                             = "terraform"
+            "elasticloadbalancing:ResourceTag/shifter:system"      = "shifter"
+            "elasticloadbalancing:ResourceTag/shifter:environment" = var.environment
+            "elasticloadbalancing:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = "elasticloadbalancing:CreateTargetGroup"
+        Resource = "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/shifter-vpn-*/*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # Existing request-owned VPN resources remain mutable only while their
+        # ownership tags identify this Shifter environment.
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:RegisterTargets",
+          "elasticloadbalancing:DeregisterTargets",
+          "elasticloadbalancing:ModifyLoadBalancerAttributes",
+          "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroupAttributes",
+          "elasticloadbalancing:SetSecurityGroups",
+          "elasticloadbalancing:RemoveTags"
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/net/shifter-vpn-*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/shifter-vpn-*/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:ResourceTag/shifter:system"      = "shifter"
+            "elasticloadbalancing:ResourceTag/shifter:environment" = var.environment
+            "elasticloadbalancing:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # Terraform sends tags with each create request. AddTags is a dependent
+        # permission and cannot be used here outside those create APIs.
+        Effect = "Allow"
+        Action = "elasticloadbalancing:AddTags"
+        Resource = [
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:loadbalancer/net/shifter-vpn-*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:listener/net/shifter-vpn-*/*/*",
+          "arn:aws:elasticloadbalancing:${local.region}:${local.account_id}:targetgroup/shifter-vpn-*/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:CreateAction" = [
+              "CreateLoadBalancer",
+              "CreateTargetGroup",
+              "CreateListener"
+            ]
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
       }
     ]
   })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "gwlb" {
+  role       = aws_iam_role.ecs_task.name
+  policy_arn = aws_iam_policy.gwlb.arn
 }
 
 # ------------------------------------------------------------------------------
@@ -512,7 +802,6 @@ resource "aws_iam_role_policy" "vpc_endpoints" {
     Statement = [
       {
         # VPC Endpoint Service operations (for GWLB service exposure)
-        Sid    = "VPCEndpointServiceOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateVpcEndpointServiceConfiguration",
@@ -528,7 +817,6 @@ resource "aws_iam_role_policy" "vpc_endpoints" {
       },
       {
         # VPC Endpoint operations (for GWLB endpoints in range subnets)
-        Sid    = "VPCEndpointOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateVpcEndpoint",
@@ -543,10 +831,12 @@ resource "aws_iam_role_policy" "vpc_endpoints" {
 }
 
 # ------------------------------------------------------------------------------
-# Task Role Policy - S3 Bootstrap Write
+# Task Role Policy - Runtime Writes
 # ------------------------------------------------------------------------------
 # Provisioner needs write access to bootstrap/* prefix for NGFW init-cfg.txt,
-# authcodes, and other bootstrap configuration files.
+# authcodes, and other bootstrap configuration files. It also publishes range
+# lifecycle events to SNS. Keep these together so SCP-constrained accounts that
+# require inline policies stay under IAM's aggregate inline-role policy limit.
 
 resource "aws_iam_role_policy" "s3_bootstrap" {
   name = "s3-bootstrap-write"
@@ -554,15 +844,40 @@ resource "aws_iam_role_policy" "s3_bootstrap" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:GetObjectTagging"
-      ]
-      Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:GetObjectTagging"
+        ]
+        Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "sns:Publish"
+        Resource = var.sns_topic_arn
+      },
+      {
+        # The range-events topic is encrypted with the portal messaging CMK.
+        # SNS Publish calls fail unless the publishing task role can use that
+        # CMK through the SNS service path.
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:GenerateDataKey"
+        ]
+        Resource = var.sns_kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = local.account_id
+            "kms:ViaService"    = "sns.${local.region}.amazonaws.com"
+          }
+        }
+      }
+    ]
   })
 }
 
@@ -582,7 +897,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SSMParameterOperations"
         Effect = "Allow"
         Action = [
           # Create/Update
@@ -602,7 +916,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
       },
       {
         # Read-only access to AMI parameters (set by Packer builds)
-        Sid    = "SSMReadAMIParameters"
         Effect = "Allow"
         Action = [
           "ssm:GetParameter",
@@ -613,7 +926,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
       {
         # DescribeParameters required by Terraform for metadata lookup
         # Must be * resource per AWS API requirements
-        Sid      = "SSMDescribeParameters"
         Effect   = "Allow"
         Action   = "ssm:DescribeParameters"
         Resource = "*"
@@ -621,7 +933,6 @@ resource "aws_iam_role_policy" "ssm_parameters" {
       {
         # KMS permissions for SecureString parameters
         # Uses AWS managed key for SSM via service condition
-        Sid    = "KMSForSecureStringParameters"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -656,19 +967,51 @@ resource "aws_iam_role_policy" "ssm_run_command" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SSMSendCommand"
+        # SendCommand instance authorization. Scoped to Shifter range guest
+        # instances via SSM resource-tag conditions so a provisioner compromise
+        # cannot run commands on portal, GitHub-runner, or other EC2 instances.
+        # Range guests carry shifter:system / shifter:environment plus the
+        # range-specific shifter:range_id tag (see the range Terraform module);
+        # portal and runner instances do not, so they are denied. The generic
+        # ownership tags alone are insufficient because non-range infrastructure
+        # can share them, hence the required shifter:range_id presence.
         Effect = "Allow"
         Action = [
           "ssm:SendCommand"
         ]
         Resource = [
-          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "ssm:resourceTag/shifter:system"      = "shifter"
+            "ssm:resourceTag/shifter:environment" = var.environment
+          }
+          Null = {
+            # The range-id tag must be present on the target instance.
+            "ssm:resourceTag/shifter:range_id" = "false"
+          }
+        }
+      },
+      {
+        # SendCommand document authorization. A SendCommand call must be
+        # authorized for both the instance resource(s) AND the document
+        # resource, so this unconditioned document statement cannot re-broaden
+        # instance targeting. Pinned to the two AWS-managed documents already in
+        # use; do not widen.
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand"
+        ]
+        Resource = [
           "arn:aws:ssm:${local.region}::document/AWS-RunPowerShellScript",
           "arn:aws:ssm:${local.region}::document/AWS-RunShellScript"
         ]
       },
       {
-        Sid    = "SSMGetCommandInvocation"
+        # Result polling is a distinct permission from command execution. AWS
+        # requires Resource=* for these read APIs; keep them separate and
+        # enumerated rather than folding them into the SendCommand statement.
         Effect = "Allow"
         Action = [
           "ssm:GetCommandInvocation",
@@ -677,7 +1020,6 @@ resource "aws_iam_role_policy" "ssm_run_command" {
         Resource = "*"
       },
       {
-        Sid    = "SSMDescribeInstances"
         Effect = "Allow"
         Action = [
           "ssm:DescribeInstanceInformation"
@@ -685,12 +1027,21 @@ resource "aws_iam_role_policy" "ssm_run_command" {
         Resource = "*"
       },
       {
-        Sid    = "EC2RebootInstances"
+        # Reboot is EC2, not SSM command execution. Scope it with the same
+        # ownership tag conditions as the EC2 instance lifecycle statement so it
+        # cannot reboot instances the provisioner does not own.
         Effect = "Allow"
         Action = [
           "ec2:RebootInstances"
         ]
         Resource = "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/shifter:system"      = "shifter"
+            "ec2:ResourceTag/shifter:environment" = var.environment
+            "ec2:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
       }
     ]
   })
@@ -710,7 +1061,6 @@ resource "aws_iam_role_policy" "kms" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "EngineSecretsEncryption"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -722,7 +1072,6 @@ resource "aws_iam_role_policy" "kms" {
         Resource = var.engine_secrets_kms_key_arn
       },
       {
-        Sid    = "SecretsManagerKMSAccess"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -741,24 +1090,148 @@ resource "aws_iam_role_policy" "kms" {
 }
 
 # ------------------------------------------------------------------------------
-# Task Role Policy - SNS (for range event publishing)
+# Task Role Policy - Polaris Agent Role Management (#1377)
 # ------------------------------------------------------------------------------
-# Provisioner publishes range lifecycle events to SNS for fan-out to
-# Django services (CMS, Engine, Mission Control).
+# The engine provisioner owns the per-range Polaris Bedrock agent role
+# (shifter/engine/provisioner/terraform/modules/range/iam.tf) through the
+# same ECS task role that applies the rest of the per-range Terraform.
+# Scoped to the shifter-${environment}-*-polaris-agent namespace only; the
+# target role is never attached to EC2 (no instance profile), so
+# iam:PassRole is intentionally not granted here.
 
-resource "aws_iam_role_policy" "sns_publish" {
-  name = "sns-publish"
+resource "aws_iam_role_policy" "polaris_agent_role_management" {
+  name = "polaris-agent-role-management"
   role = aws_iam_role.ecs_task.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "SNSPublishRangeEvents"
-      Effect = "Allow"
-      Action = [
-        "sns:Publish"
-      ]
-      Resource = var.sns_topic_arn
-    }]
+    Statement = [
+      {
+        # iam:PermissionsBoundary is only present in the request context
+        # for IAM calls that set a boundary (CreateRole,
+        # PutRolePermissionsBoundary, ...); it does not exist for
+        # PutRolePolicy. Bundling a StringEquals condition on this key
+        # into a statement that also grants PutRolePolicy would deny
+        # every PutRolePolicy call outright, because a StringEquals
+        # condition on an absent context key evaluates to false. Scoping
+        # the condition to CreateRole alone still forces every role
+        # created in this namespace to carry the boundary: the task role
+        # below has no iam:PutRolePermissionsBoundary /
+        # iam:DeleteRolePermissionsBoundary grant, so the boundary set at
+        # creation can never be changed or removed through this role.
+        Sid      = "CreatePolarisAgentRoleWithBoundary"
+        Effect   = "Allow"
+        Action   = "iam:CreateRole"
+        Resource = "arn:aws:iam::${local.account_id}:role/shifter-${var.environment}-*-polaris-agent"
+        Condition = {
+          StringEquals = {
+            "iam:PermissionsBoundary" = var.permissions_boundary_arn
+          }
+        }
+      },
+      {
+        Sid    = "ManagePolarisAgentRole"
+        Effect = "Allow"
+        Action = [
+          "iam:DeleteRole",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:GetRole",
+          "iam:GetRolePolicy",
+          "iam:ListRolePolicies",
+          # The AWS provider's read-after-create and read-before-destroy of
+          # aws_iam_role always call ListAttachedRolePolicies and
+          # ListInstanceProfilesForRole (even though the agent role uses only an
+          # inline policy and no instance profile), so terraform apply/destroy
+          # fails without them. Read-only; scoped to the agent role namespace.
+          "iam:ListAttachedRolePolicies",
+          "iam:ListInstanceProfilesForRole",
+          "iam:ListRoleTags"
+        ]
+        Resource = "arn:aws:iam::${local.account_id}:role/shifter-${var.environment}-*-polaris-agent"
+      }
+    ]
+  })
+}
+
+# Request-owned OpenVPN gateway roles are separate from participant hosts and
+# can read exactly one generation-specific server identity. The provisioner may
+# create them only with the installation permissions boundary and may pass them
+# only to EC2.
+resource "aws_iam_role_policy" "vpn_gateway_role_management" {
+  name = "vpn-gateway-role-management"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "CreateVpnGatewayRoleWithBoundary"
+        Effect   = "Allow"
+        Action   = "iam:CreateRole"
+        Resource = "arn:aws:iam::${local.account_id}:role/shifter-${var.environment}-*-vpn-gateway"
+        Condition = {
+          StringEquals = {
+            "iam:PermissionsBoundary" = var.permissions_boundary_arn
+          }
+        }
+      },
+      {
+        Sid    = "ManageVpnGatewayRole"
+        Effect = "Allow"
+        Action = [
+          "iam:DeleteRole",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:GetRole",
+          "iam:GetRolePolicy",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListInstanceProfilesForRole",
+          "iam:ListRoleTags"
+        ]
+        Resource = "arn:aws:iam::${local.account_id}:role/shifter-${var.environment}-*-vpn-gateway"
+      },
+      {
+        Sid      = "UseOnlySsmCorePolicy"
+        Effect   = "Allow"
+        Action   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+        Resource = "arn:aws:iam::${local.account_id}:role/shifter-${var.environment}-*-vpn-gateway"
+        Condition = {
+          ArnEquals = {
+            "iam:PolicyARN" = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+          }
+        }
+      },
+      {
+        Sid    = "ManageVpnGatewayInstanceProfile"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateInstanceProfile",
+          "iam:DeleteInstanceProfile",
+          "iam:AddRoleToInstanceProfile",
+          "iam:RemoveRoleFromInstanceProfile",
+          "iam:GetInstanceProfile",
+          "iam:TagInstanceProfile",
+          "iam:UntagInstanceProfile"
+        ]
+        Resource = "arn:aws:iam::${local.account_id}:instance-profile/shifter-${var.environment}-*-vpn-gateway"
+      },
+      {
+        Sid      = "PassVpnGatewayRoleOnlyToEc2"
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = "arn:aws:iam::${local.account_id}:role/shifter-${var.environment}-*-vpn-gateway"
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "ec2.amazonaws.com"
+          }
+        }
+      }
+    ]
   })
 }

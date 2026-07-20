@@ -13,6 +13,7 @@ if str(SHIFTER_DIR) not in sys.path:
 
 # Set testing flag before Django loads settings
 os.environ["TESTING"] = "1"
+os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DJANGO_SECRET_KEY", "shifter-platform-tests-secret-key")
 
 from unittest.mock import MagicMock, Mock  # noqa: E402
@@ -67,6 +68,22 @@ def mock_queryset():
 
 
 @pytest.fixture(autouse=True)
+def _reset_secret_cache():
+    """Reset the in-process credential cache around every test.
+
+    ``engine.secrets`` keeps a module-global TTL cache of resolved secret values
+    (#929). Clearing it before and after each test keeps the global state from
+    leaking across tests, so suites that assert on Secrets Manager call counts
+    start from a cold cache.
+    """
+    from engine.secrets import clear_secret_cache
+
+    clear_secret_cache()
+    yield
+    clear_secret_cache()
+
+
+@pytest.fixture(autouse=True)
 def enable_log_propagation():
     """Enable log propagation for caplog to work with our configured loggers.
 
@@ -74,7 +91,7 @@ def enable_log_propagation():
     which prevents pytest's caplog from capturing log records. This fixture
     temporarily enables propagation for all tests.
     """
-    loggers = ["engine", "cms", "mission_control", "engine.handlers"]
+    loggers = ["engine", "cms", "mission_control", "engine.handlers", "management"]
     original_propagate = {}
 
     for name in loggers:

@@ -7,8 +7,24 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "iam_name_prefix" {
+  description = "Prefix for IAM role and instance profile names (defaults to name_prefix)"
+  type        = string
+  default     = null
+}
+
 variable "environment" {
   description = "Environment name (dev, prod)"
+  type        = string
+}
+
+# Renderer-owned backend selection (PLAT-2005). Derived from shifter.yaml at
+# deploy time (shifter-config render-runtime) and received here as a plain
+# Terraform variable, not synthesized in this module. No default: a missing
+# cloud_provider.auto.tfvars must fail the plan loudly rather than silently
+# defaulting to "aws".
+variable "cloud_provider" {
+  description = "Backend identity injected into the provisioner's CLOUD_PROVIDER env var. Rendered from shifter.yaml's settings.backend by shifter-config render-runtime; must not be hardcoded or defaulted here."
   type        = string
 }
 
@@ -34,9 +50,15 @@ variable "ecr_repository_url" {
 }
 
 variable "container_image_tag" {
-  description = "Docker image tag to deploy"
+  description = "Bootstrap Docker image tag for the engine provisioner container when no digest is supplied"
   type        = string
   default     = "latest"
+}
+
+variable "container_image_digest" {
+  description = "Immutable Docker image digest for the engine provisioner container"
+  type        = string
+  default     = ""
 }
 
 variable "task_cpu" {
@@ -158,6 +180,18 @@ variable "range_availability_zone" {
   type        = string
 }
 
+variable "range_vpn_edge_subnet_id" {
+  description = "Public Range VPC subnet used by per-range OpenVPN NLBs"
+  type        = string
+  default     = ""
+}
+
+variable "range_vpn_provider_endpoint_security_group_id" {
+  description = "Destination security group for Range VPC private provider API endpoints"
+  type        = string
+  default     = ""
+}
+
 variable "range_instance_profile_arn" {
   description = "IAM instance profile ARN for range instances"
   type        = string
@@ -251,6 +285,17 @@ variable "firewall_endpoint_id" {
   description = "AWS Network Firewall endpoint ID for internet egress from range subnets"
   type        = string
   default     = ""
+}
+
+variable "range_egress_mode" {
+  description = "Runtime route-table egress posture for participant subnets (bridge for shifter.yaml settings.range_egress.mode)"
+  type        = string
+  default     = "allowlist"
+
+  validation {
+    condition     = contains(["allowlist", "none"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: allowlist, none."
+  }
 }
 
 variable "ssm_endpoints_subnet_cidr" {
@@ -350,4 +395,79 @@ variable "alarm_email" {
 variable "sns_topic_arn" {
   description = "ARN of the SNS topic for range event publishing"
   type        = string
+}
+
+variable "sns_kms_key_arn" {
+  description = "ARN of the CMK used by the encrypted SNS range-events topic"
+  type        = string
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary ARN required on CI-created shifter-* roles"
+  type        = string
+}
+
+# ------------------------------------------------------------------------------
+# Polaris Bedrock Agent Config (#1377)
+# ------------------------------------------------------------------------------
+# Threaded into the ECS task container as AWS_POLARIS_AGENT_* env vars,
+# consumed by shifter/engine/provisioner/config.py's
+# load_aws_polaris_agent_config(). All default to empty/zero so the
+# feature stays off until populated per-environment via the deploy
+# secrets mechanism; enablement is signaled by
+# aws_polaris_agent_main_inference_profile_arn being non-empty. Do not
+# hardcode account-specific ARNs here.
+
+variable "aws_polaris_agent_region" {
+  description = "AWS region for Bedrock Polaris agent invocation"
+  type        = string
+  default     = ""
+}
+
+variable "aws_polaris_agent_main_model_id" {
+  description = "Bedrock model ID for the Polaris agent's main model"
+  type        = string
+  default     = ""
+}
+
+variable "aws_polaris_agent_small_model_id" {
+  description = "Bedrock model ID for the Polaris agent's small/fast model"
+  type        = string
+  default     = ""
+}
+
+variable "aws_polaris_agent_main_inference_profile_arn" {
+  description = "Approved Bedrock inference-profile ARN for the main model. Non-empty is the Polaris agent feature's enablement signal."
+  type        = string
+  default     = ""
+}
+
+variable "aws_polaris_agent_small_inference_profile_arn" {
+  description = "Approved Bedrock inference-profile ARN for the small/fast model"
+  type        = string
+  default     = ""
+}
+
+variable "aws_polaris_agent_main_backing_model_arns" {
+  description = "Backing Bedrock foundation-model ARNs for the main inference profile"
+  type        = list(string)
+  default     = []
+}
+
+variable "aws_polaris_agent_small_backing_model_arns" {
+  description = "Backing Bedrock foundation-model ARNs for the small/fast inference profile"
+  type        = list(string)
+  default     = []
+}
+
+variable "aws_polaris_agent_sts_session_duration_seconds" {
+  description = "STS AssumeRole session duration for the Polaris agent role, in seconds (AWS minimum is 900)"
+  type        = number
+  default     = 0
+}
+
+variable "aws_polaris_agent_refresh_window_seconds" {
+  description = "Seconds before STS session expiry at which the range host refreshes Polaris agent credentials"
+  type        = number
+  default     = 0
 }

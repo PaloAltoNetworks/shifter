@@ -17,7 +17,7 @@ The ALERT_PROFILE_GROUP is attached to those rules for threat detection.
 Commands are executed via SSHExecutor to the NGFW management interface.
 All PAN-OS CLI commands have been validated against PAN-OS 11.x.
 
-Note: SSH wait and serial number polling are handled by main.py.
+Note: SSH wait and serial number polling are handled by ngfw_terraform.py.
 Serial polling happens AFTER this plan completes, giving the device
 time to complete license registration with the Palo Alto CSP.
 """
@@ -194,8 +194,8 @@ class NGFWProvisionPlan:
     attach ALERT_PROFILE_GROUP for threat detection without blocking.
 
     All commands are executed via SSHExecutor to the NGFW management interface.
-    SSH wait is handled by main.py before this plan runs.
-    Serial number polling happens after this plan completes (in main.py).
+    SSH wait is handled by ngfw_terraform.py before this plan runs.
+    Serial number polling happens after this plan completes in ngfw_terraform.py.
     """
 
     name = "ngfw_provision"
@@ -264,7 +264,7 @@ class NGFWProvisionPlan:
             ),
         ]
         # No verify_step - verification is handled by poll_for_serial_and_cert()
-        # in main.py which polls for both serial AND device certificate
+        # in ngfw_terraform.py which polls for both serial AND device certificate
         self.verify_step: SetupStep | None = None
 
     def get_context(self, instance: Any) -> dict[str, Any]:

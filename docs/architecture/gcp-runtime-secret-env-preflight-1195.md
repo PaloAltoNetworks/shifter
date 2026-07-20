@@ -27,7 +27,7 @@ a deployment path that documents where real values come from.
 | GCP runtime generation | `scripts/gcp/render_runtime_env.py`, `scripts/gcp/tests/test_render_runtime_env.py` | Generated runtime files carry non-secret configuration and secret references only. Do not add secret values to `platform-runtime.generated.env`. |
 | Bootstrap deployment | `.github/workflows/_gcp-dev.yml`, `scripts/bootstrap/deploy.py`, `platform/k8s/gcp/README.md` | CI/bootstrap should hydrate or create Kubernetes Secrets from GitHub Secrets, Terraform outputs, or GCP Secret Manager payloads before `kubectl apply -k`; keep the contract documented. |
 | Runtime secret store | `platform/terraform/gcp/modules/platform-core/*`, `runtime_secret_ids`, `shifter/shifter_platform/entrypoint.sh`, `shifter/shifter_platform/documentation/docs/technical/dev/secrets.md` | Prefer GCP Secret Manager bundle IDs and existing entrypoint hydration for app/database/cache secrets. Kubernetes Secrets are a runtime binding layer, not a source-of-truth vault. |
-| Kustomize overlay shape | `platform/k8s/gcp/overlays/gcp-dev/kustomization.yaml`, `patch-runtime-secretref.yaml` | If the overlay keeps `secretGenerator`, its input must be local/gitignored or synthetic-only. Preserve `envFrom.secretRef` shape for workloads unless the Helm/bootstrap path intentionally supersedes it. |
+| Kustomize overlay shape | `platform/k8s/gcp/overlays/gcp-dev/kustomization.yaml`, `patch-runtime-secretref.patch` | If the overlay keeps `secretGenerator`, its input must be local/gitignored or synthetic-only. Preserve `envFrom.secretRef` shape for workloads unless the Helm/bootstrap path intentionally supersedes it. |
 | Secret scanning | `.gitleaks.toml`, `.pre-commit-config.yaml`, `scripts/adr_guard/adr_guard.py`, `docs/adr/index.yaml` | Add the repo-specific low-entropy guardrail to `adr_guard`; do not rely on entropy scanning alone for `*-secrets.env` files. Guardrail-file changes must update ADR docs. |
 | Kubernetes validation | ADR-004-R5, ADR-006, `.kube-linter.yaml`, kubeconform, `_quality.yml` rendered-kustomize checks | Placeholder/example secret inputs must still let `kustomize build`, kube-linter, and kubeconform validate the rendered deployment shape. |
 | Deploy secret inventory | `docs/dev/deploy-secrets.md` | Document any new GitHub secret, local generated file, or Secret Manager bootstrap prerequisite there instead of scattering setup instructions. |
@@ -95,7 +95,7 @@ In scope for the future implementation:
 - `platform/k8s/gcp/overlays/gcp-dev/platform-runtime-secrets.env` and any
   replacement example or gitignored local filename.
 - `platform/k8s/gcp/overlays/gcp-dev/kustomization.yaml` and
-  `patch-runtime-secretref.yaml` if the secret binding changes.
+  `patch-runtime-secretref.patch` if the secret binding changes.
 - `.gitignore` if a generated local secret env file is introduced.
 - `scripts/adr_guard/adr_guard.py`, `scripts/adr_guard/tests/test_adr_guard.py`,
   `docs/adr/index.yaml`, and ADR enforcement docs if adding the required

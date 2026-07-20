@@ -59,11 +59,48 @@ def mock_deploy(monkeypatch):
     mock.wait_for_user = MagicMock()
     mock.warn = MagicMock()
 
-    # Patch
+    # Patch both the legacy facade module and the new shared helper module.
     monkeypatch.setitem(sys.modules, "deploy", mock)
+    monkeypatch.setitem(sys.modules, "bootstrap_core", mock)
 
     yield mock
 
     # Cleanup: remove runner module so it can be reimported fresh
     if "runner" in sys.modules:
         del sys.modules["runner"]
+    if "bootstrap_core" in sys.modules:
+        del sys.modules["bootstrap_core"]
+
+
+@pytest.fixture
+def mock_gcp_deploy(monkeypatch):
+    """Mock bootstrap_core for gcp_runner.py tests (issue #1546).
+
+    gcp_runner imports the shared bootstrap_core helpers (including the
+    secret-stdin ``run_cmd_secret_stdin`` and the cloud-agnostic
+    ``mint_registration_token`` reused from runner.py). Mock the boundary
+    (bootstrap_core) rather than first-party gcp_runner seams (ADR-019) and
+    clean up the freshly imported modules afterward.
+    """
+    mock = MagicMock()
+    for attr in ("BOLD", "END", "GREEN", "YELLOW", "CYAN", "RED", "BLUE"):
+        setattr(mock.Colors, attr, "")
+    mock.code_block = MagicMock()
+    mock.confirm = MagicMock(return_value=True)
+    mock.error = MagicMock()
+    mock.header = MagicMock()
+    mock.info = MagicMock()
+    mock.run_cmd = MagicMock()
+    mock.run_cmd_secret_stdin = MagicMock(return_value=0)
+    mock.subheader = MagicMock()
+    mock.success = MagicMock()
+    mock.warn = MagicMock()
+
+    monkeypatch.setitem(sys.modules, "deploy", mock)
+    monkeypatch.setitem(sys.modules, "bootstrap_core", mock)
+
+    yield mock
+
+    for name in ("gcp_runner", "runner", "bootstrap_core"):
+        if name in sys.modules:
+            del sys.modules[name]

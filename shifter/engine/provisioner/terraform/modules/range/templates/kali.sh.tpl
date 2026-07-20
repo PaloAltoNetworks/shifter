@@ -5,6 +5,9 @@ set -euo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting Kali headless setup..."
 
+# Pin DNS so the SSM agent can register (issue #1632). Injected from the
+# range module's linux_range_dns_pin local so the logic lives in one place.
+${dns_pin}
 # Set hostname for XDR console visibility
 echo "Setting hostname to ${hostname}..."
 hostnamectl set-hostname ${hostname}

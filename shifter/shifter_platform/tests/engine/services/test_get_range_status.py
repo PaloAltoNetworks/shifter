@@ -1,186 +1,82 @@
-"""Tests for get_range_status() in engine/services.py."""
+"""Behavior tests for get_range_status() in engine/services.
+
+Reads real ``Range`` rows and returns a status dict (status, error_message,
+instances from ``provisioned_instances``, created_at, ready_at) or None when the
+range is missing. No ORM mocking.
+"""
 
 import logging
-from datetime import UTC, datetime
-from unittest.mock import Mock, patch
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+
+from engine import get_range_status
+from engine.models import Range
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
 
 
-class TestGetResourceStatus:
-    """Tests for get_range_status() in engine/services.py.
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(username="engine-status@example.com", email="engine-status@example.com")
 
-    Tests the service contract:
-    - Inputs: range_id (required int)
-    - Outputs: dict with status info or None if not found
-    - Side effects: none (read-only)
-    - Errors: none raised (returns None for not found)
-    - Logging: DEBUG on entry, WARNING if not found
-    """
 
-    # -------------------------------------------------------------------------
-    # Outputs - returns dict with status info
-    # -------------------------------------------------------------------------
-
-    def test_returns_complete_status_dict(self):
-        """Service returns dict with all required fields."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
-        created = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-        ready = datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC)
-        instances = [
-            {"uuid": "abc-123", "role": "attacker", "private_ip": "10.1.1.10"},
-            {"uuid": "def-456", "role": "victim", "private_ip": "10.1.1.20"},
-        ]
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.READY,
-            error_message="Provisioning failed: subnet exhausted",
-            provisioned_instances=instances,
-            created_at=created,
-            ready_at=ready,
+class TestGetRangeStatus:
+    def test_returns_complete_status_dict(self, user):
+        instances = [{"uuid": "i-1", "role": "attacker", "private_ip": "10.1.1.10"}]
+        range_obj = Range.objects.create(
+            user=user, status=Range.Status.READY, error_message="", provisioned_instances=instances
         )
+        Range.objects.filter(pk=range_obj.pk).update(ready_at=timezone.now())
 
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = get_range_status(42)
-
-            assert result is not None
-            assert result["status"] == Range.Status.READY
-            assert result["error_message"] == "Provisioning failed: subnet exhausted"
-            assert result["instances"] == instances
-            assert result["created_at"] == created.isoformat()
-            assert result["ready_at"] == ready.isoformat()
-
-    def test_handles_null_fields(self):
-        """Service handles None values for optional fields."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.PROVISIONING,
-            error_message="",
-            provisioned_instances=None,
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=None,
-        )
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = get_range_status(42)
-
-            assert result["instances"] == []  # None becomes empty list
-            assert result["ready_at"] is None  # None timestamp stays None
-
-    def test_preserves_provider_metadata_in_instances(self):
-        """Service returns richer provider metadata without stripping legacy fields."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
-        instances = [
-            {
-                "uuid": "gcp-123",
-                "role": "victim",
-                "private_ip": "10.200.0.110",
-                "instance_id": "vmrt-vm-1",
-                "cloud_provider": "gcp",
-                "provider_metadata": {
-                    "gcp": {
-                        "vm_name": "vmrt-vm-1",
-                        "namespace": "range-42",
-                    }
-                },
-            }
-        ]
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.READY,
-            error_message="",
-            provisioned_instances=instances,
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=None,
-        )
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = get_range_status(42)
-
+        result = get_range_status(range_obj.id)
+        assert result["status"] == Range.Status.READY
+        assert result["error_message"] == ""
         assert result["instances"] == instances
-        assert result["instances"][0]["provider_metadata"]["gcp"]["namespace"] == "range-42"
+        assert result["created_at"] is not None
+        assert result["ready_at"] is not None
 
-    def test_returns_none_when_range_not_found(self):
-        """Service returns None when range doesn't exist."""
-        from engine.models import Range
-        from engine.services import get_range_status
+    def test_handles_null_fields(self, user):
+        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING, provisioned_instances=None)
+        result = get_range_status(range_obj.id)
+        assert result["instances"] == []
+        assert result["ready_at"] is None
 
-        with patch.object(Range.objects, "get", side_effect=Range.DoesNotExist):
-            result = get_range_status(999)
-            assert result is None
+    def test_preserves_provider_metadata_in_instances(self, user):
+        instances = [{"uuid": "i-1", "provider_metadata": {"private_ip": "10.9.9.9", "zone": "us-east-2a"}}]
+        range_obj = Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=instances)
+        assert get_range_status(range_obj.id)["instances"] == instances
 
-    # -------------------------------------------------------------------------
-    # Side effects - none (read-only)
-    # -------------------------------------------------------------------------
+    def test_returns_none_when_not_found(self):
+        assert get_range_status(999999) is None
 
-    def test_does_not_modify_range(self):
-        """Service does not modify the Range object."""
-        from engine.models import Range
-        from engine.services import get_range_status
+    def test_does_not_modify_range(self, user):
+        range_obj = Range.objects.create(user=user, status=Range.Status.READY, error_message="orig")
+        get_range_status(range_obj.id)
+        range_obj.refresh_from_db()
+        assert range_obj.status == Range.Status.READY
+        assert range_obj.error_message == "orig"
 
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.READY,
-            error_message="",
-            provisioned_instances=[],
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
-        )
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            get_range_status(42)
-
-            mock_range.save.assert_not_called()
-
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG on entry
-    # -------------------------------------------------------------------------
-
-    def test_logs_debug_on_entry(self, caplog):
-        """Service logs debug on entry with range_id."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.READY,
-            error_message="",
-            provisioned_instances=[],
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
-        )
-
-        with (
-            patch.object(Range.objects, "get", return_value=mock_range),
-            caplog.at_level(logging.DEBUG, logger="engine"),
-        ):
-            get_range_status(42)
-
-        assert "42" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - WARNING when not found
-    # -------------------------------------------------------------------------
+    def test_logs_debug_on_entry(self, user, caplog):
+        range_obj = Range.objects.create(user=user, status=Range.Status.READY)
+        with caplog.at_level(logging.DEBUG, logger="engine"):
+            get_range_status(range_obj.id)
+        assert str(range_obj.id) in caplog.text
 
     def test_logs_warning_when_not_found(self, caplog):
-        """Service logs warning when range not found."""
-        from engine.models import Range
-        from engine.services import get_range_status
+        with caplog.at_level(logging.WARNING, logger="engine"):
+            get_range_status(999999)
+        assert "not found" in caplog.text.lower()
 
-        with (
-            patch.object(Range.objects, "get", side_effect=Range.DoesNotExist),
-            caplog.at_level(logging.WARNING, logger="engine"),
-        ):
-            get_range_status(999)
+    def test_created_at_is_iso_string(self, user):
+        from datetime import datetime
 
-        assert "not found" in caplog.text.lower() or "999" in caplog.text
+        range_obj = Range.objects.create(user=user, status=Range.Status.READY)
+        # created_at is auto-set and serialised to an ISO-8601 string that
+        # round-trips through fromisoformat.
+        created = get_range_status(range_obj.id)["created_at"]
+        assert isinstance(created, str)
+        assert isinstance(datetime.fromisoformat(created), datetime)

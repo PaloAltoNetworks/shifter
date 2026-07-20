@@ -185,14 +185,18 @@ _UTF8_BOM = b"\xef\xbb\xbf"
 def get_file_extension(filename: str) -> str:
     """Return the file extension including the leading dot, lowercased.
 
-    Recognizes the compound extension ``.tar.gz`` as a single unit.
+    Recognizes compound extensions ``.tar.gz`` and ``.tgz`` as single units.
     """
     lower = filename.lower()
     if lower.endswith(".tar.gz"):
-        return ".tar.gz"
-    if "." in filename:
-        return "." + lower.rsplit(".", 1)[-1]
-    return ""
+        extension = ".tar.gz"
+    elif lower.endswith(".tgz"):
+        extension = ".tgz"
+    elif "." in filename:
+        extension = "." + lower.rsplit(".", 1)[-1]
+    else:
+        extension = ""
+    return extension
 
 
 def validate_magic_bytes(header: bytes, fmt: FileFormat) -> None:

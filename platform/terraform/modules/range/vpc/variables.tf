@@ -5,6 +5,12 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "iam_name_prefix" {
+  description = "Prefix for IAM role and instance profile names (defaults to name_prefix)"
+  type        = string
+  default     = null
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for the VPC (e.g., 10.1.0.0/16)"
   type        = string
@@ -30,10 +36,16 @@ variable "enable_network_firewall" {
   default     = true
 }
 
+variable "network_firewall_delete_protection" {
+  description = "Enable AWS Network Firewall delete protection. Mirrors the `enable_deletion_protection` (ALB) / `db_deletion_protection` (RDS) convention: secure default is `true` in prod; dev environments that need intentional teardown set this to `false` and re-apply before destroying. This is a Terraform lifecycle setting only — it governs whether Terraform may delete the firewall and does not change egress filtering, routing, or logging."
+  type        = bool
+  default     = true
+}
+
 variable "firewall_log_retention_days" {
-  description = "CloudWatch log retention for firewall logs"
+  description = "CloudWatch log retention for firewall logs (minimum 365 per ADR-004-R11 / Checkov CKV_AWS_338)"
   type        = number
-  default     = 30
+  default     = 365
 }
 
 variable "kali_allowed_domains" {
@@ -53,10 +65,45 @@ variable "victim_allowed_domains" {
   ]
 }
 
+variable "range_dns_allowed_domains" {
+  description = "Additional domain suffixes the in-VPC Route 53 Resolver DNS Firewall may answer beyond victim_allowed_domains (bootstrap/service names only)."
+  type        = list(string)
+  default = [
+    ".amazonaws.com",
+  ]
+}
+
 variable "victim_allowed_cidrs" {
-  description = "IP CIDR allowlist for Victim egress (PANW-published IPs for Cortex XSIAM/XDR)"
+  # Implementation detail for the platform-level PLAT-220 range egress allowlist.
+  # The public surface is `settings.range_egress.allowed_cidrs` in shifter.yaml
+  # (validated by shifter/installation); this AWS module variable is the
+  # internal bridge into AWS Network Firewall rule groups. See
+  # docs/architecture/range-egress-ip-allowlist.md.
+  description = "IP CIDR allowlist for Victim egress (bridge for shifter.yaml settings.range_egress.allowed_cidrs)."
   type        = list(string)
   default     = []
+
+  # Mirrors the public RangeEgressPolicy contract in
+  # shifter/installation/range_egress.py: well-formed CIDR (IPv4 or IPv6),
+  # parsed prefix length > 0 (rejects 0.0.0.0/0, ::/0, AND alternate spellings
+  # like 0.0.0.0/00 that would slip past a literal-string check and otherwise
+  # parse as the default route), no host bits set in the network address, no
+  # duplicates. `can(cidrhost(...))` accepts both IPv4 and IPv6 (`cidrnetmask`
+  # is IPv4-only and would reject IPv6 the public validator accepts).
+  validation {
+    condition = (
+      length(distinct(var.victim_allowed_cidrs)) == length(var.victim_allowed_cidrs)
+      && alltrue([
+        for c in var.victim_allowed_cidrs : (
+          can(cidrhost(c, 0))
+          && can(tonumber(split("/", c)[1]))
+          && tonumber(split("/", c)[1]) > 0
+          && cidrhost(c, 0) == split("/", c)[0]
+        )
+      ])
+    )
+    error_message = "victim_allowed_cidrs must be a list of canonical CIDR network addresses (IPv4 or IPv6) with no duplicates; default-route prefixes (parsed prefix length 0, e.g. 0.0.0.0/0, ::/0, 0.0.0.0/00) and host-bits-set inputs are rejected (the platform contract; see docs/architecture/range-egress-ip-allowlist.md)."
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -75,6 +122,11 @@ variable "enable_flow_logs" {
 
 variable "agent_s3_bucket" {
   description = "S3 bucket name for agent installers (for range instance S3 read access)"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name (dev, prod, proof). Scopes the range-instance role's sts:AssumeRole grant to this environment's Polaris agent-role namespace (shifter-$${environment}-*-polaris-agent); see docs/architecture/polaris-aws-agent-credentials-preflight-1377.md."
   type        = string
 }
 
@@ -102,4 +154,9 @@ variable "enable_ngfw_infrastructure" {
   description = "Enable persistent NGFW infrastructure (subnet, security groups, IAM role)"
   type        = bool
   default     = false
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary ARN required on CI-created shifter-* roles"
+  type        = string
 }

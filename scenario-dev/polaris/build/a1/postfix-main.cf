@@ -1,7 +1,0 @@
-myhostname = mail.boreas.local
-mydomain = boreas.local
-myorigin = $mydomain
-mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain
-mynetworks = 127.0.0.0/8, 172.20.0.0/16
-home_mailbox = Maildir/
-smtpd_banner = $myhostname ESMTP Boreas Mail

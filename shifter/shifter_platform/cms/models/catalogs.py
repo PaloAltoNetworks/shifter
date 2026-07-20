@@ -26,8 +26,8 @@ class CatalogBase(models.Model):
     Catalog entities are reference data that define available types,
     not user-owned instances. Examples: CredentialType, ScenarioType.
 
-    The ``spec_class`` field declares the dotted path to the Pydantic spec
-    class used to validate per-row payloads; it is owned by the abstract
+    The ``spec_slug`` field declares the stable registry slug for the Pydantic
+    spec class used to validate per-row payloads; it is owned by the abstract
     base because every concrete catalog needs it (and ``get_spec_class`` /
     ``validate_data`` here read it).
 
@@ -35,15 +35,15 @@ class CatalogBase(models.Model):
         name: Human-readable name for display.
         slug: URL-safe identifier for lookups.
         created_at: When this catalog entry was created.
-        spec_class: Dotted path to the Pydantic spec class for validation.
+        spec_slug: Stable slug resolved through ``shared.schemas.registry``.
     """
 
     name = models.CharField(max_length=100, help_text="Display name")
     slug = models.SlugField(max_length=50, unique=True, help_text="URL-safe identifier")
     created_at = models.DateTimeField(auto_now_add=True)
-    spec_class = models.CharField(
+    spec_slug = models.CharField(
         max_length=255,
-        help_text="Dotted path to Pydantic spec class",
+        help_text="Stable slug for Pydantic spec class (shared.schemas.registry)",
     )
 
     class Meta:
@@ -53,22 +53,22 @@ class CatalogBase(models.Model):
         return self.name
 
     def get_spec_class(self):
-        """Load and return the Pydantic spec class.
+        """Load and return the Pydantic spec class via the schema registry.
 
-        Requires subclass to define a `spec_class` CharField.
+        Requires subclass to define a ``spec_slug`` CharField.
 
         Returns:
             The Pydantic model class for validating data.
 
         Raises:
-            AttributeError: If subclass doesn't define spec_class.
-            ImportError: If the spec_class path is invalid.
+            AttributeError: If subclass doesn't define spec_slug.
+            LookupError: If spec_slug is unknown to the registry.
         """
-        from importlib import import_module
+        from shared.schemas.registry import get_model_for_slug
 
-        module_path, class_name = self.spec_class.rsplit(".", 1)
-        module = import_module(module_path)
-        return getattr(module, class_name)
+        if not getattr(self, "spec_slug", None):
+            raise AttributeError(f"{self.__class__.__name__} does not define spec_slug")
+        return get_model_for_slug(self.spec_slug)
 
     def validate_data(self, data: dict) -> dict:
         """Validate data against this type's spec.
@@ -165,9 +165,9 @@ class CredentialType(CatalogBase):
     """Catalog of credential types.
 
     Type Object pattern: types are data rows, not code enums. Each row
-    defines a credential type; ``spec_class`` (inherited from
+    defines a credential type; ``spec_slug`` (inherited from
     :class:`CatalogBase`) points at the Pydantic spec for per-credential
-    data validation, e.g. ``'shared.schemas.SCMCredentialSpec'``.
+    data validation via the schema registry.
     """
 
     class Meta:
@@ -178,9 +178,9 @@ class CredentialType(CatalogBase):
 class InstanceType(CatalogBase):
     """Catalog of instance types (container, vm, etc).
 
-    Type Object pattern: types are data rows, not code enums. ``spec_class``
+    Type Object pattern: types are data rows, not code enums. ``spec_slug``
     (inherited from :class:`CatalogBase`) points at the Pydantic spec for
-    per-instance data validation.
+    per-instance data validation via the schema registry.
     """
 
     class Meta:
@@ -191,9 +191,9 @@ class InstanceType(CatalogBase):
 class AppType(CatalogBase):
     """Catalog of app types (os, ngfw, agent, other).
 
-    Type Object pattern: types are data rows, not code enums. ``spec_class``
+    Type Object pattern: types are data rows, not code enums. ``spec_slug``
     (inherited from :class:`CatalogBase`) points at the Pydantic spec for
-    per-app data validation.
+    per-app data validation via the schema registry.
     """
 
     class Meta:

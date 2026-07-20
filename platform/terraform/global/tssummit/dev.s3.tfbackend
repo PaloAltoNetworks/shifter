@@ -1,5 +1,0 @@
-bucket         = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
-key            = "global/tssummit/terraform.tfstate"
-region         = "us-east-2"
-use_lockfile   = true
-encrypt        = true

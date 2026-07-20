@@ -1,0 +1,9 @@
+name: shifter-aces-validation
+title: Shifter ACES Validation
+version: 0.1.0
+status: draft
+description: Minimal provisioning-only pack for the Shifter ACES-native cutover evidence gate.
+authors:
+  - Shifter maintainers
+provenance_ledger: docs/provenance-ledger.yaml
+associated_artifact_manifest: associated-artifacts.json

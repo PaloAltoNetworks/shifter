@@ -1,82 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.breadcrumb {
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb .separator {
-    margin: 0 6px;
-    color: var(--theme-text-secondary);
-}
-
-.detail-layout {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 16px;
-}
-
-.schedule-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-}
-
-.schedule-item strong {
-    display: block;
-    margin-bottom: 4px;
-}
-
-.mgmt-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-}
-
-.mgmt-grid .btn {
-    width: 100%;
-    min-width: auto;
-}
-
-.stat-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 0;
-}
-
-.stat-row + .stat-row {
-    margin-top: 4px;
-}
-
-.stat-divider {
-    border: none;
-    border-top: 1px solid var(--theme-border);
-    margin: 8px 0;
-}
-
-.status-form select {
-    width: 100%;
-    min-width: 0;
-}
-
-.status-form .btn {
-    width: 100%;
-    margin-top: 12px;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-event_detail.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -305,20 +235,15 @@
                 </div>
             </div>
             <!-- Danger Zone -->
-            <div class="card" style="border: 1px solid #dc3545;">
-                <div class="card-title" style="color: #dc3545;">
+            <div class="card danger-card">
+                <div class="card-title danger-title">
                     {% trans "Danger Zone" %}
                 </div>
-                <p style="font-size: 13px;
-                          color: var(--theme-text-secondary);
-                          margin-bottom: 12px">
+                <p class="danger-text">
                     {% trans "Permanently delete this event and all associated data. This action cannot be undone." %}
                 </p>
                 <a href="{% url 'ctf:admin_event_force_delete' event_id=event.pk %}"
-                   class="btn"
-                   style="background: #dc3545;
-                          color: #fff;
-                          width: 100%">{% trans "Force Delete Event" %}</a>
+                   class="btn btn-force-delete">{% trans "Force Delete Event" %}</a>
             </div>
         </div>
     </div>

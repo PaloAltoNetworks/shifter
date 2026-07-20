@@ -94,3 +94,36 @@ class TestFactoryDefaultProvider:
         # Should not raise
         storage = get_object_storage()
         assert isinstance(storage, ObjectStorage)
+
+
+class TestFactoryCapabilityValidation:
+    """Factories validate the (backend, capability) pair against the registry (PLAT-2005)."""
+
+    def test_fails_closed_when_backend_lacks_capability(self, settings, monkeypatch):
+        """A registered backend that does not declare the capability fails closed."""
+        from types import SimpleNamespace
+
+        import shared.cloud as cloud
+
+        settings.CLOUD_PROVIDER = "aws"
+        monkeypatch.setattr(cloud, "get_backend_bundle", lambda name: SimpleNamespace(capabilities=frozenset()))
+        with pytest.raises(CloudProviderNotImplementedError):
+            cloud.get_object_storage()
+
+    def test_raises_for_registered_backend_without_adapter(self, settings, monkeypatch):
+        """A backend the registry knows but this factory has no adapter for fails closed
+        (never falls through to AWS)."""
+        from types import SimpleNamespace
+
+        from installation.contract import BackendCapability
+
+        import shared.cloud as cloud
+
+        settings.CLOUD_PROVIDER = "local"
+        monkeypatch.setattr(
+            cloud,
+            "get_backend_bundle",
+            lambda name: SimpleNamespace(capabilities=frozenset({BackendCapability.STORAGE})),
+        )
+        with pytest.raises(CloudProviderNotImplementedError, match="local"):
+            cloud.get_object_storage()

@@ -1,0 +1,51 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load static i18n %}
+<!DOCTYPE html>
+<html lang="en" class="theme-dark">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1.0">
+        <title>{% trans "Privacy Notice" %} {% trans "- Shifter" %}</title>
+        <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+        <link rel="icon"
+              type="image/svg+xml"
+              href="{% static 'images/favicon.svg' %}">
+        <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--theme-bg, #1f1f1f);
+            color: var(--theme-text, #eaebeb);
+            font-family: Lato, "Assistant", sans-serif;
+        }
+
+        .privacy-page {
+            max-width: 48rem;
+            margin: 0 auto;
+            padding: 2.5rem 1.5rem 6rem;
+        }
+
+        .privacy-page h1 {
+            font-size: 1.75rem;
+            margin: 0 0 1rem;
+        }
+
+        .privacy-page p {
+            line-height: 1.6;
+            color: var(--theme-text-secondary, #b8b8b8);
+        }
+
+        .privacy-page p + p {
+            margin-top: 1rem;
+        }
+        </style>
+    </head>
+    <body class="theme-dark">
+        <main class="privacy-page">
+            {% include "privacy/notice_content.html" %}
+        </main>
+        {% include "partials/cookie_notice.html" %}
+    </body>
+</html>

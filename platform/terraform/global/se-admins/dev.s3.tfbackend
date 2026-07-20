@@ -1,4 +1,4 @@
-bucket         = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
+bucket         = "REPLACE_AT_BOOTSTRAP"
 key            = "global/se-admins/terraform.tfstate"
 region         = "us-east-2"
 use_lockfile   = true

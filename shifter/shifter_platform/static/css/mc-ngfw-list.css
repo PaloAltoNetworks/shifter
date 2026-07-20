@@ -1,0 +1,117 @@
+/* Mission Control NGFW list page.
+   Extracted from templates/mission_control/ngfw/list.html (issue #414). */
+
+/* NGFW Status badges */
+.status {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+/* Status colors */
+.status-ready .status-dot,
+.status-active .status-dot { background: #22c55e; }
+
+.status-provisioning .status-dot,
+.status-starting .status-dot,
+.status-stopping .status-dot,
+.status-deprovisioning .status-dot { background: #faad14; animation: pulse 1.5s infinite; }
+
+.status-stopped .status-dot { background: #707070; }
+.status-failed .status-dot { background: #ff4d4f; }
+.status-not_provisioned .status-dot { background: #484848; }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* NGFW cards grid */
+.ngfw-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.ngfw-card {
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    padding: 16px;
+    transition: border-color 0.2s ease;
+}
+
+.ngfw-card:hover {
+    border-color: #484848;
+}
+
+.ngfw-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.ngfw-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--theme-text);
+    margin: 0;
+}
+
+.ngfw-card-meta {
+    font-size: 12px;
+    color: var(--theme-text-secondary);
+    margin-top: 4px;
+}
+
+.ngfw-card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Page header with action button */
+.page-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+}
+
+.page-header-content {
+    flex: 1;
+}
+
+.page-subtitle {
+    font-size: 14px;
+    color: var(--theme-text-secondary);
+    margin: 4px 0 0;
+}
+
+/* Refresh button styling */
+.ngfw-refresh-btn {
+    padding: 4px;
+    background: transparent !important;
+    border: none !important;
+    cursor: pointer;
+    color: var(--theme-text-secondary);
+    transition: color 0.2s ease;
+}
+
+.ngfw-refresh-btn:hover {
+    color: var(--theme-text);
+}
+
+.ngfw-refresh-btn svg {
+    display: block;
+    fill: currentcolor;
+    stroke: currentcolor;
+}

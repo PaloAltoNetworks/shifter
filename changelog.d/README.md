@@ -73,6 +73,18 @@ uvx towncrier build --draft --version <X.Y.Z>
 
 prints the rendered block to stdout without modifying any files.
 
+## When a fragment is required
+
+Add a fragment for any user-visible change **and** for CI/CD or deploy
+pipeline changes (`.github/workflows/**`, `.github/actions/**`, and other
+build/deploy/test automation). Use `changed` when behaviour shifts; use
+`fixed` when correcting broken pipeline or deploy logic. Pipeline changes
+are not "invisible" — when a deploy breaks, the changelog is often the
+fastest way to see what changed.
+
+Pure refactors (no behaviour change) and docs-only changes may ship
+without a fragment.
+
 ## Check that a PR has a fragment
 
 ```sh
@@ -80,7 +92,6 @@ uvx towncrier check --compare-with origin/dev
 ```
 
 returns non-zero if the PR has no fragment under `changelog.d/`. Useful
-locally; can also be wired into CI as a soft check (some PRs — pure
-refactors, CI-only changes — legitimately have nothing user-visible to
-say, in which case mark the PR `[no changelog]` or land an empty
-fragment with the rationale).
+locally before opening a PR; wire into CI as a soft check if desired.
+When the diff is a pure refactor or docs-only change, `[no changelog]` in
+the PR title or an empty fragment with rationale is acceptable.

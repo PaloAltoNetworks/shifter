@@ -115,7 +115,7 @@ class SSMExecutor:
                 TimeoutSeconds=min(timeout_seconds, 3600),  # SSM max is 1 hour
             )
             command_id = response["Command"]["CommandId"]
-            logger.info(f"Sent SSM command {command_id} to {instance_id}")
+            logger.info("Sent SSM command %s to %s", command_id, instance_id)
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code == "InvalidInstanceId":
@@ -137,14 +137,18 @@ class SSMExecutor:
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "")
                 logger.warning(
-                    f"get_command_invocation failed: {error_code} - {e} "
-                    f"(command={command_id}, instance={instance_id}, elapsed={elapsed:.1f}s)"
+                    "get_command_invocation failed: %s - %s (command=%s, instance=%s, elapsed=%.1fs)",
+                    error_code,
+                    e,
+                    command_id,
+                    instance_id,
+                    elapsed,
                 )
                 time.sleep(self._poll_interval)
                 continue
 
             status = result.get("Status", "")
-            logger.info(f"Command {command_id} status: {status} (elapsed={elapsed:.1f}s)")
+            logger.info("Command %s status: %s (elapsed=%.1fs)", command_id, status, elapsed)
 
             if status in self.TERMINAL_STATUSES:
                 return self._build_terminal_result(instance_id, result, start_time)
@@ -171,7 +175,7 @@ class SSMExecutor:
 
         if status == "Success":
             elapsed = time.time() - start_time
-            logger.info(f"SSM command completed in {elapsed:.1f}s on {instance_id}")
+            logger.info("SSM command completed in %.1fs on %s", elapsed, instance_id)
             return CommandResult(
                 success=True,
                 exit_code=exit_code,
@@ -229,37 +233,46 @@ class SSMExecutor:
             if elapsed > timeout_seconds:
                 raise TimeoutError(f"SSM agent on {instance_id} did not come online within {timeout_seconds}s")
 
-            # Check instance state first
-            if self._ec2_client:
-                try:
-                    ec2_response = self._ec2_client.describe_instance_status(
-                        InstanceIds=[instance_id],
-                        IncludeAllInstances=True,
-                    )
-                    statuses = ec2_response.get("InstanceStatuses", [])
-                    if statuses:
-                        state = statuses[0].get("InstanceState", {}).get("Name", "")
-                        if state == "terminated":
-                            raise InstanceTerminatedError(f"Instance {instance_id} is terminated")
-                except ClientError:
-                    pass  # Instance might not exist yet
-
-            # Check SSM agent status
-            try:
-                response = self._ssm_client.describe_instance_information(
-                    Filters=[
-                        {"Key": "InstanceIds", "Values": [instance_id]},
-                    ]
-                )
-                instances = response.get("InstanceInformationList", [])
-                if instances:
-                    ping_status = instances[0].get("PingStatus", "")
-                    if ping_status == "Online":
-                        return True
-            except ClientError:
-                pass  # May fail if instance not registered yet
+            self._raise_if_instance_terminated(instance_id)
+            if self._agent_ping_online(instance_id):
+                return True
 
             time.sleep(self._poll_interval)
+
+    def _raise_if_instance_terminated(self, instance_id: str) -> None:
+        """Raise InstanceTerminatedError if the EC2 instance has terminated."""
+        if not self._ec2_client:
+            return
+        try:
+            ec2_response = self._ec2_client.describe_instance_status(
+                InstanceIds=[instance_id],
+                IncludeAllInstances=True,
+            )
+        except ClientError:
+            # Instance might not exist yet
+            return
+        statuses = ec2_response.get("InstanceStatuses", [])
+        if not statuses:
+            return
+        state = statuses[0].get("InstanceState", {}).get("Name", "")
+        if state == "terminated":
+            raise InstanceTerminatedError(f"Instance {instance_id} is terminated")
+
+    def _agent_ping_online(self, instance_id: str) -> bool:
+        """Return True if the SSM agent reports PingStatus 'Online'."""
+        try:
+            response = self._ssm_client.describe_instance_information(
+                Filters=[
+                    {"Key": "InstanceIds", "Values": [instance_id]},
+                ]
+            )
+        except ClientError:
+            # May fail if instance not registered yet
+            return False
+        instances = response.get("InstanceInformationList", [])
+        if not instances:
+            return False
+        return instances[0].get("PingStatus", "") == "Online"
 
     def verify_agent_ready(
         self,

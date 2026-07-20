@@ -10,14 +10,14 @@ terraform {
 }
 
 provider "aws" {
-  profile = "panw-shifter-dev-workstation"
-  region  = "us-east-2"
+  profile = var.aws_profile
+  region  = var.aws_region
 
   default_tags {
     tags = {
       Project   = "polaris"
       ManagedBy = "terraform"
-      Purpose   = "golden-range-bake"
+      Purpose   = var.deployment_purpose
     }
   }
 }

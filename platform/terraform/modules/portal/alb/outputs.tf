@@ -23,6 +23,16 @@ output "target_group_arn" {
   value       = aws_lb_target_group.this.arn
 }
 
+output "alb_arn_suffix" {
+  description = "ALB ARN suffix (app/<name>/<id>) for CloudWatch dimensions and the ASG ALBRequestCountPerTarget resource label (#940)"
+  value       = aws_lb.this.arn_suffix
+}
+
+output "target_group_arn_suffix" {
+  description = "Target group ARN suffix (targetgroup/<name>/<id>) for CloudWatch dimensions and the ASG ALBRequestCountPerTarget resource label (#940)"
+  value       = aws_lb_target_group.this.arn_suffix
+}
+
 output "acm_certificate_arn" {
   description = "ARN of the ACM certificate"
   value       = aws_acm_certificate.this.arn

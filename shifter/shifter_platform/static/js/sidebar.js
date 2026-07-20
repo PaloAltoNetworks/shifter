@@ -2,6 +2,11 @@
  * Cortex XDR Left Navigation - Direct port behavior
  */
 
+// SonarCloud S1192: extracted duplicated string literals.
+const NAV_LOCK_CLASS = 'nav-lock';
+const ARIA_EXPANDED_ATTR = 'aria-expanded';
+const SUBMENU_OPEN_CLASS = 'is-open';
+
 document.addEventListener('DOMContentLoaded', function() {
     const leftNav = document.getElementById('leftNav');
     const lockBtn = document.getElementById('lockBtn');
@@ -36,8 +41,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             // Mark this trigger as active/open
-            submenuTriggers.forEach(t => t.classList.remove('is-open'));
-            trigger.classList.add('is-open');
+            submenuTriggers.forEach(t => t.classList.remove(SUBMENU_OPEN_CLASS));
+            trigger.classList.add(SUBMENU_OPEN_CLASS);
 
             // Open the submenu panel
             leftNav.classList.add('submenu-open');
@@ -48,17 +53,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // Helper to close submenu panel (visual only, keeps activeSubmenuId if on submenu page)
     function closeSubmenuPanel() {
         leftNav.classList.remove('submenu-open');
-        submenuTriggers.forEach(t => t.classList.remove('is-open'));
+        submenuTriggers.forEach(t => t.classList.remove(SUBMENU_OPEN_CLASS));
     }
 
     // Check localStorage for lock state
-    const isLocked = localStorage.getItem('nav-lock') === 'true';
+    const isLocked = localStorage.getItem(NAV_LOCK_CLASS) === 'true';
 
     if (isLocked) {
-        document.body.classList.add('nav-lock');
+        document.body.classList.add(NAV_LOCK_CLASS);
         leftNav.classList.remove('minimized');
         lockBtn.classList.add('active');
-        lockBtn.setAttribute('aria-expanded', 'true');
+        lockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'true');
     }
 
     // Auto-open submenu if we're on a submenu page
@@ -69,7 +74,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Expand on hover (if not locked)
     leftNav.addEventListener('mouseenter', function() {
         document.body.classList.remove('nav-mouse-leave');
-        if (!document.body.classList.contains('nav-lock')) {
+        if (!document.body.classList.contains(NAV_LOCK_CLASS)) {
             leftNav.classList.remove('minimized');
             // Re-open submenu if we have an active one
             if (activeSubmenuId) {
@@ -81,7 +86,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Collapse on mouse leave (if not locked)
     leftNav.addEventListener('mouseleave', function() {
         document.body.classList.add('nav-mouse-leave');
-        if (!document.body.classList.contains('nav-lock')) {
+        if (!document.body.classList.contains(NAV_LOCK_CLASS)) {
             leftNav.classList.add('minimized');
             closeSubmenuPanel();
         }
@@ -92,24 +97,24 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         e.stopPropagation();
 
-        const willBeLocked = !document.body.classList.contains('nav-lock');
+        const willBeLocked = !document.body.classList.contains(NAV_LOCK_CLASS);
 
         if (willBeLocked) {
-            document.body.classList.add('nav-lock');
+            document.body.classList.add(NAV_LOCK_CLASS);
             document.body.classList.remove('nav-mouse-leave');
             leftNav.classList.remove('minimized');
             lockBtn.classList.add('active');
-            lockBtn.setAttribute('aria-expanded', 'true');
-            localStorage.setItem('nav-lock', 'true');
+            lockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'true');
+            localStorage.setItem(NAV_LOCK_CLASS, 'true');
             // Re-open submenu if we have an active one
             if (activeSubmenuId) {
                 openSubmenu(activeSubmenuId);
             }
         } else {
-            document.body.classList.remove('nav-lock');
+            document.body.classList.remove(NAV_LOCK_CLASS);
             lockBtn.classList.remove('active');
-            lockBtn.setAttribute('aria-expanded', 'false');
-            localStorage.setItem('nav-lock', 'false');
+            lockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'false');
+            localStorage.setItem(NAV_LOCK_CLASS, 'false');
         }
     });
 
@@ -145,31 +150,31 @@ document.addEventListener('DOMContentLoaded', function() {
         // Sync initial state
         if (isLocked) {
             submenuLockBtn.classList.add('active');
-            submenuLockBtn.setAttribute('aria-expanded', 'true');
+            submenuLockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'true');
         }
 
         submenuLockBtn.addEventListener('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
 
-            const willBeLocked = !document.body.classList.contains('nav-lock');
+            const willBeLocked = !document.body.classList.contains(NAV_LOCK_CLASS);
 
             if (willBeLocked) {
-                document.body.classList.add('nav-lock');
+                document.body.classList.add(NAV_LOCK_CLASS);
                 document.body.classList.remove('nav-mouse-leave');
                 leftNav.classList.remove('minimized');
                 lockBtn.classList.add('active');
                 submenuLockBtn.classList.add('active');
-                lockBtn.setAttribute('aria-expanded', 'true');
-                submenuLockBtn.setAttribute('aria-expanded', 'true');
-                localStorage.setItem('nav-lock', 'true');
+                lockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'true');
+                submenuLockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'true');
+                localStorage.setItem(NAV_LOCK_CLASS, 'true');
             } else {
-                document.body.classList.remove('nav-lock');
+                document.body.classList.remove(NAV_LOCK_CLASS);
                 lockBtn.classList.remove('active');
                 submenuLockBtn.classList.remove('active');
-                lockBtn.setAttribute('aria-expanded', 'false');
-                submenuLockBtn.setAttribute('aria-expanded', 'false');
-                localStorage.setItem('nav-lock', 'false');
+                lockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'false');
+                submenuLockBtn.setAttribute(ARIA_EXPANDED_ATTR, 'false');
+                localStorage.setItem(NAV_LOCK_CLASS, 'false');
             }
         });
     }
@@ -186,14 +191,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const isOpen = userMenuContainer.classList.contains('open');
             userMenuContainer.classList.toggle('open');
-            userMenuBtn.setAttribute('aria-expanded', !isOpen);
+            userMenuBtn.setAttribute(ARIA_EXPANDED_ATTR, !isOpen);
         });
 
         // Close menu when clicking outside
         document.addEventListener('click', function(e) {
             if (!userMenuContainer.contains(e.target)) {
                 userMenuContainer.classList.remove('open');
-                userMenuBtn.setAttribute('aria-expanded', 'false');
+                userMenuBtn.setAttribute(ARIA_EXPANDED_ATTR, 'false');
             }
         });
 
@@ -201,7 +206,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape' && userMenuContainer.classList.contains('open')) {
                 userMenuContainer.classList.remove('open');
-                userMenuBtn.setAttribute('aria-expanded', 'false');
+                userMenuBtn.setAttribute(ARIA_EXPANDED_ATTR, 'false');
                 userMenuBtn.focus();
             }
         });

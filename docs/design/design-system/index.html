@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shifter Design System — Living Style Guide (#1299)</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="components.css" />
+    <link rel="stylesheet" href="styleguide.css" />
+    <script src="styleguide.js" defer></script>
+  </head>
+  <body class="ds-root">
+    <a class="ds-skip-link" href="#sg-main">Skip to content</a>
+
+    <header class="sg-header">
+      <span class="sg-header__title">Shifter Design System</span>
+      <span class="sg-header__tag">Living style guide · foundation #1299</span>
+      <span class="sg-header__spacer"></span>
+      <button
+        id="sg-theme-toggle"
+        type="button"
+        class="ds-btn ds-btn--secondary ds-btn--sm"
+        aria-pressed="false"
+      >
+        Light theme
+      </button>
+    </header>
+
+    <main id="sg-main" class="sg-container">
+      <p class="sg-note">
+        This page renders the design tokens and component primitives from
+        <span class="ds-code">tokens.css</span> and
+        <span class="ds-code">components.css</span>. It is framework-neutral and
+        opens directly in a browser (no build step). Use the toggle to preview
+        light and dark themes. Hover, focus (Tab), and press controls to see
+        interactive states; the full state matrix is documented in
+        <span class="ds-code"
+          >docs/design/spa-design-system-foundation-1299.md</span
+        >.
+      </p>
+
+      <nav class="sg-toc" aria-label="Sections">
+        <a class="ds-link" href="#colors">Colors</a>
+        <a class="ds-link" href="#type">Typography</a>
+        <a class="ds-link" href="#space">Spacing</a>
+        <a class="ds-link" href="#radius">Radius</a>
+        <a class="ds-link" href="#elevation">Elevation</a>
+        <a class="ds-link" href="#buttons">Buttons</a>
+        <a class="ds-link" href="#forms">Forms</a>
+        <a class="ds-link" href="#status">Badges &amp; status</a>
+        <a class="ds-link" href="#feedback">Alerts &amp; toasts</a>
+        <a class="ds-link" href="#data">Cards, detail &amp; tables</a>
+        <a class="ds-link" href="#nav">Tabs &amp; breadcrumbs</a>
+        <a class="ds-link" href="#overlays">Overlays</a>
+        <a class="ds-link" href="#states">Empty &amp; loading</a>
+        <a class="ds-link" href="#shell">App shell</a>
+      </nav>
+
+      <!-- COLORS ----------------------------------------------------------->
+      <section class="sg-section" id="colors">
+        <h2 class="sg-section__title">Colors</h2>
+        <p class="sg-section__desc">
+          Semantic tokens only. Every text/background pair below meets WCAG 2.1
+          AA. Domain statuses (range health, risk severity, event readiness) map
+          onto these generic intents rather than defining their own colors.
+        </p>
+
+        <p class="sg-caption">Surfaces</p>
+        <div class="sg-swatches">
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-bg)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-bg</div>
+              <div class="sg-swatch__role">app canvas</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-bg-subtle)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-bg-subtle</div>
+              <div class="sg-swatch__role">secondary canvas</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-surface)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-surface</div>
+              <div class="sg-swatch__role">panel / card</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-surface-raised)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-surface-raised</div>
+              <div class="sg-swatch__role">menu / popover</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-surface-sunken)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-surface-sunken</div>
+              <div class="sg-swatch__role">input / code well</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-surface-selected)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-surface-selected</div>
+              <div class="sg-swatch__role">selected row</div>
+            </div>
+          </div>
+        </div>
+
+        <p class="sg-caption">Text on surface</p>
+        <div class="sg-specimen sg-specimen--stack">
+          <p style="margin: 0">Primary text — <span class="ds-code">--ds-color-fg</span></p>
+          <p class="ds-text-muted" style="margin: 0">
+            Muted / secondary text — <span class="ds-code">--ds-color-fg-muted</span>
+          </p>
+          <p class="ds-text-subtle" style="margin: 0">
+            Subtle / tertiary text — <span class="ds-code">--ds-color-fg-subtle</span>
+          </p>
+          <p style="margin: 0">
+            <a class="ds-link" href="#colors">Link text</a> —
+            <span class="ds-code">--ds-color-fg-link</span>
+          </p>
+        </div>
+
+        <p class="sg-caption">Accent &amp; status</p>
+        <div class="sg-swatches">
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-accent)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-accent</div>
+              <div class="sg-swatch__role">primary action</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-success-solid)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-success-solid</div>
+              <div class="sg-swatch__role">success</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-warning-solid)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-warning-solid</div>
+              <div class="sg-swatch__role">warning</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-danger-solid)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-danger-solid</div>
+              <div class="sg-swatch__role">danger</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-info-solid)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-info-solid</div>
+              <div class="sg-swatch__role">info</div>
+            </div>
+          </div>
+          <div class="sg-swatch">
+            <div class="sg-swatch__chip" style="background: var(--ds-color-neutral-solid)"></div>
+            <div class="sg-swatch__meta">
+              <div class="sg-swatch__name">--ds-color-neutral-solid</div>
+              <div class="sg-swatch__role">inactive</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TYPOGRAPHY ------------------------------------------------------->
+      <section class="sg-section" id="type">
+        <h2 class="sg-section__title">Typography</h2>
+        <p class="sg-section__desc">
+          System font stacks (no web-font dependency). Dense, operational scale;
+          <span class="ds-code">--ds-font-mono</span> is used for IDs, code,
+          terminal output, and technical values.
+        </p>
+        <div class="sg-specimen sg-specimen--stack">
+          <div class="sg-type-row">
+            <span class="sg-type-row__token">xl / title</span>
+            <span class="ds-page-title">Range operations overview</span>
+          </div>
+          <div class="sg-type-row">
+            <span class="sg-type-row__token">lg / section</span>
+            <span class="ds-section-title">Active ranges</span>
+          </div>
+          <div class="sg-type-row">
+            <span class="sg-type-row__token">sm / body</span>
+            <span>Default body text at 14px for comfortable reading.</span>
+          </div>
+          <div class="sg-type-row">
+            <span class="sg-type-row__token">xs / dense</span>
+            <span style="font-size: var(--ds-font-size-xs)"
+              >Dense 13px body for tables and data-heavy panels.</span
+            >
+          </div>
+          <div class="sg-type-row">
+            <span class="sg-type-row__token">3xs / eyebrow</span>
+            <span class="ds-eyebrow">Section label</span>
+          </div>
+          <div class="sg-type-row">
+            <span class="sg-type-row__token">mono</span>
+            <span class="ds-code">range-42.core / 10.0.4.17</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- SPACING ---------------------------------------------------------->
+      <section class="sg-section" id="space">
+        <h2 class="sg-section__title">Spacing</h2>
+        <p class="sg-section__desc">4px base grid.</p>
+        <div class="sg-specimen sg-specimen--stack">
+          <div class="sg-scale">
+            <div class="sg-scale-row">
+              <span style="inline-size: 8ch">space-1</span>
+              <span class="sg-scale-row__bar" style="inline-size: var(--ds-space-1)"></span>
+            </div>
+            <div class="sg-scale-row">
+              <span style="inline-size: 8ch">space-2</span>
+              <span class="sg-scale-row__bar" style="inline-size: var(--ds-space-2)"></span>
+            </div>
+            <div class="sg-scale-row">
+              <span style="inline-size: 8ch">space-3</span>
+              <span class="sg-scale-row__bar" style="inline-size: var(--ds-space-3)"></span>
+            </div>
+            <div class="sg-scale-row">
+              <span style="inline-size: 8ch">space-4</span>
+              <span class="sg-scale-row__bar" style="inline-size: var(--ds-space-4)"></span>
+            </div>
+            <div class="sg-scale-row">
+              <span style="inline-size: 8ch">space-6</span>
+              <span class="sg-scale-row__bar" style="inline-size: var(--ds-space-6)"></span>
+            </div>
+            <div class="sg-scale-row">
+              <span style="inline-size: 8ch">space-8</span>
+              <span class="sg-scale-row__bar" style="inline-size: var(--ds-space-8)"></span>
+            </div>
+            <div class="sg-scale-row">
+              <span style="inline-size: 8ch">space-12</span>
+              <span class="sg-scale-row__bar" style="inline-size: var(--ds-space-12)"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RADIUS / ELEVATION ---------------------------------------------->
+      <section class="sg-section" id="radius">
+        <h2 class="sg-section__title">Radius</h2>
+        <div class="sg-specimen">
+          <div class="sg-radius-box" style="border-radius: var(--ds-radius-sm)"></div>
+          <div class="sg-radius-box" style="border-radius: var(--ds-radius-md)"></div>
+          <div class="sg-radius-box" style="border-radius: var(--ds-radius-lg)"></div>
+          <div class="sg-radius-box" style="border-radius: var(--ds-radius-xl)"></div>
+          <div class="sg-radius-box" style="border-radius: var(--ds-radius-pill)"></div>
+        </div>
+      </section>
+
+      <section class="sg-section" id="elevation">
+        <h2 class="sg-section__title">Elevation</h2>
+        <p class="sg-section__desc">
+          Shadows are tuned per theme (deeper in dark, softer in light).
+        </p>
+        <div class="sg-specimen sg-specimen--pad">
+          <div class="sg-elevation-box" style="box-shadow: var(--ds-shadow-xs)"></div>
+          <div class="sg-elevation-box" style="box-shadow: var(--ds-shadow-sm)"></div>
+          <div class="sg-elevation-box" style="box-shadow: var(--ds-shadow-md)"></div>
+          <div class="sg-elevation-box" style="box-shadow: var(--ds-shadow-lg)"></div>
+          <div class="sg-elevation-box" style="box-shadow: var(--ds-shadow-xl)"></div>
+        </div>
+        <p class="sg-note">
+          Motion: <span class="ds-code">--ds-duration-fast|base|slow</span> with
+          <span class="ds-code">--ds-ease-standard</span>; all collapse to 0ms
+          under <span class="ds-code">prefers-reduced-motion</span>. Z-index is a
+          named scale (<span class="ds-code">dropdown → modal → toast → tooltip</span
+          >).
+        </p>
+      </section>
+
+      <!-- BUTTONS ---------------------------------------------------------->
+      <section class="sg-section" id="buttons">
+        <h2 class="sg-section__title">Buttons</h2>
+        <p class="sg-caption">Variants</p>
+        <div class="sg-specimen">
+          <button type="button" class="ds-btn ds-btn--primary">Primary</button>
+          <button type="button" class="ds-btn ds-btn--secondary">Secondary</button>
+          <button type="button" class="ds-btn ds-btn--tertiary">Tertiary</button>
+          <button type="button" class="ds-btn ds-btn--destructive">Delete range</button>
+        </div>
+        <p class="sg-caption">Sizes &amp; icon-only</p>
+        <div class="sg-specimen">
+          <button type="button" class="ds-btn ds-btn--primary ds-btn--sm">Small</button>
+          <button type="button" class="ds-btn ds-btn--primary">Medium</button>
+          <button type="button" class="ds-btn ds-btn--secondary ds-btn--icon" aria-label="Refresh">
+            <span aria-hidden="true">⟳</span>
+          </button>
+          <div class="ds-btn-group">
+            <button type="button" class="ds-btn ds-btn--secondary ds-btn--sm">Prev</button>
+            <button type="button" class="ds-btn ds-btn--secondary ds-btn--sm">Next</button>
+          </div>
+        </div>
+        <p class="sg-caption">States</p>
+        <div class="sg-specimen">
+          <button type="button" class="ds-btn ds-btn--primary" disabled>Disabled</button>
+          <button type="button" class="ds-btn ds-btn--primary ds-btn--loading" aria-busy="true">
+            <span class="ds-spinner" aria-hidden="true"></span> Provisioning…
+          </button>
+          <button type="button" class="ds-btn ds-btn--secondary" disabled aria-disabled="true">
+            Permission denied
+          </button>
+        </div>
+      </section>
+
+      <!-- FORMS ------------------------------------------------------------>
+      <section class="sg-section" id="forms">
+        <h2 class="sg-section__title">Forms</h2>
+        <div class="sg-grid sg-grid--wide">
+          <div class="ds-field">
+            <label class="ds-label" for="f-name"
+              >Range name<span class="ds-label__required" aria-hidden="true">*</span></label
+            >
+            <input class="ds-input" id="f-name" type="text" placeholder="e.g. polaris-demo" />
+            <span class="ds-help">Lowercase, hyphen-separated.</span>
+          </div>
+          <div class="ds-field">
+            <label class="ds-label" for="f-scn">Scenario</label>
+            <select class="ds-select" id="f-scn">
+              <option>Polaris — full</option>
+              <option>Polaris — minimal</option>
+            </select>
+          </div>
+          <div class="ds-field">
+            <label class="ds-label" for="f-err">Team size</label>
+            <input class="ds-input" id="f-err" type="text" value="99" aria-invalid="true"
+              aria-describedby="f-err-msg" />
+            <span class="ds-error" id="f-err-msg">Maximum team size is 12.</span>
+          </div>
+          <div class="ds-field">
+            <label class="ds-label" for="f-dis">Locked field</label>
+            <input class="ds-input" id="f-dis" type="text" value="read-only" disabled />
+          </div>
+        </div>
+        <div class="ds-field" style="margin-block-start: var(--ds-space-4)">
+          <label class="ds-label" for="f-notes">Notes</label>
+          <textarea class="ds-textarea" id="f-notes" placeholder="Operational notes…"></textarea>
+        </div>
+        <div class="sg-specimen" style="margin-block-start: var(--ds-space-4)">
+          <label class="ds-choice">
+            <input class="ds-checkbox__control" type="checkbox" checked /> Auto-destroy on idle
+          </label>
+          <label class="ds-choice">
+            <input class="ds-radio__control" type="radio" name="r" checked /> Shared
+          </label>
+          <label class="ds-choice">
+            <input class="ds-radio__control" type="radio" name="r" /> Isolated
+          </label>
+          <label class="ds-switch">
+            <input class="ds-switch__control" type="checkbox" checked role="switch" /> NGFW enabled
+          </label>
+        </div>
+      </section>
+
+      <!-- BADGES / STATUS -------------------------------------------------->
+      <section class="sg-section" id="status">
+        <h2 class="sg-section__title">Badges &amp; status</h2>
+        <p class="sg-caption">Subtle badges</p>
+        <div class="sg-specimen">
+          <span class="ds-badge ds-badge--success">Ready</span>
+          <span class="ds-badge ds-badge--info">Provisioning</span>
+          <span class="ds-badge ds-badge--warning">Degraded</span>
+          <span class="ds-badge ds-badge--danger">Failed</span>
+          <span class="ds-badge ds-badge--neutral">Destroyed</span>
+        </div>
+        <p class="sg-caption">Solid badges &amp; tags</p>
+        <div class="sg-specimen">
+          <span class="ds-badge ds-badge--solid ds-badge--danger">Critical</span>
+          <span class="ds-badge ds-badge--solid ds-badge--warning">High</span>
+          <span class="ds-badge ds-badge--solid ds-badge--info">Medium</span>
+          <span class="ds-badge ds-badge--solid ds-badge--neutral">Low</span>
+          <span class="ds-tag">linux <button class="ds-tag__remove" type="button"
+            aria-label="Remove linux">×</button></span>
+        </div>
+        <p class="sg-caption">Status indicators (dot + label, never color-only)</p>
+        <div class="sg-specimen">
+          <span class="ds-status ds-status--success"><span class="ds-status__dot"></span> Range ready</span>
+          <span class="ds-status ds-status--info"><span class="ds-status__dot"></span> Provisioning</span>
+          <span class="ds-status ds-status--warning"><span class="ds-status__dot"></span> Draining</span>
+          <span class="ds-status ds-status--danger"><span class="ds-status__dot"></span> Failed</span>
+        </div>
+      </section>
+
+      <!-- FEEDBACK --------------------------------------------------------->
+      <section class="sg-section" id="feedback">
+        <h2 class="sg-section__title">Alerts &amp; toasts</h2>
+        <div class="sg-specimen sg-specimen--stack">
+          <div class="ds-alert ds-alert--info" role="status">
+            <div>
+              <p class="ds-alert__title">Migration in progress</p>
+              <p class="ds-alert__body">Three of five surfaces are on the new shell.</p>
+            </div>
+          </div>
+          <div class="ds-alert ds-alert--warning" role="status">
+            <div>
+              <p class="ds-alert__body">Range idle for 40 minutes; auto-destroy in 20.</p>
+            </div>
+          </div>
+          <div class="ds-alert ds-alert--danger" role="alert">
+            <div>
+              <p class="ds-alert__title">Provisioning failed</p>
+              <p class="ds-alert__body">Subnet allocation exhausted in us-east-2a.</p>
+            </div>
+          </div>
+        </div>
+        <p class="sg-caption">Toast</p>
+        <div class="sg-specimen">
+          <div class="ds-toast ds-toast--success" role="status">
+            <span class="ds-toast__accent" aria-hidden="true"></span>
+            <div>
+              <strong>Range destroyed</strong>
+              <div class="ds-text-muted">range-42 cleaned up successfully.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DATA ------------------------------------------------------------->
+      <section class="sg-section" id="data">
+        <h2 class="sg-section__title">Cards, detail &amp; tables</h2>
+        <div class="sg-grid sg-grid--wide">
+          <div class="ds-card">
+            <div class="ds-card__header">
+              <span class="ds-section-title">range-42</span>
+              <span class="ds-badge ds-badge--success">Ready</span>
+            </div>
+            <div class="ds-card__body">
+              <dl class="ds-kv">
+                <dt class="ds-kv__key">Scenario</dt>
+                <dd class="ds-kv__value">Polaris — full</dd>
+                <dt class="ds-kv__key">Owner</dt>
+                <dd class="ds-kv__value">bedwards</dd>
+                <dt class="ds-kv__key">Address</dt>
+                <dd class="ds-kv__value"><span class="ds-code">10.0.4.17</span></dd>
+              </dl>
+            </div>
+            <div class="ds-card__footer">
+              <button type="button" class="ds-btn ds-btn--tertiary ds-btn--sm">Open</button>
+              <button type="button" class="ds-btn ds-btn--destructive ds-btn--sm">Destroy</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="sg-caption">Table</p>
+        <div class="ds-card">
+          <table class="ds-table ds-table--zebra">
+            <thead>
+              <tr>
+                <th class="ds-table__sort" scope="col">Range</th>
+                <th scope="col">Scenario</th>
+                <th scope="col">Owner</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr aria-selected="true">
+                <td><span class="ds-code">range-42</span></td>
+                <td>Polaris — full</td>
+                <td>bedwards</td>
+                <td><span class="ds-status ds-status--success"><span class="ds-status__dot"></span> Ready</span></td>
+              </tr>
+              <tr>
+                <td><span class="ds-code">range-43</span></td>
+                <td>Polaris — minimal</td>
+                <td>atomik</td>
+                <td><span class="ds-status ds-status--info"><span class="ds-status__dot"></span> Provisioning</span></td>
+              </tr>
+              <tr>
+                <td><span class="ds-code">range-44</span></td>
+                <td>CTF — workshop</td>
+                <td>trainer</td>
+                <td><span class="ds-status ds-status--danger"><span class="ds-status__dot"></span> Failed</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- NAV -------------------------------------------------------------->
+      <section class="sg-section" id="nav">
+        <h2 class="sg-section__title">Tabs &amp; breadcrumbs</h2>
+        <nav aria-label="Breadcrumb">
+          <ol class="ds-breadcrumb">
+            <li><a class="ds-link" href="#nav">Operate</a></li>
+            <li class="ds-breadcrumb__sep" aria-hidden="true">/</li>
+            <li><a class="ds-link" href="#nav">CTF Events</a></li>
+            <li class="ds-breadcrumb__sep" aria-hidden="true">/</li>
+            <li class="ds-breadcrumb__current" aria-current="page">Summer Workshop</li>
+          </ol>
+        </nav>
+        <div class="sg-specimen sg-specimen--stack" style="margin-block-start: var(--ds-space-3)">
+          <div class="ds-tabs" role="tablist">
+            <button class="ds-tab" role="tab" aria-selected="true">Overview</button>
+            <button class="ds-tab" role="tab" aria-selected="false">Participants</button>
+            <button class="ds-tab" role="tab" aria-selected="false">Challenges</button>
+            <button class="ds-tab" role="tab" aria-selected="false" disabled>Analytics</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- OVERLAYS --------------------------------------------------------->
+      <section class="sg-section" id="overlays">
+        <h2 class="sg-section__title">Overlays</h2>
+        <p class="sg-section__desc">
+          Rendered inline for preview. In product these mount above a scrim
+          (<span class="ds-code">.ds-overlay</span>) with focus trapped and
+          returned on close.
+        </p>
+        <div class="sg-grid sg-grid--wide">
+          <div class="ds-dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+            <div class="ds-dialog__header">
+              <h3 class="ds-dialog__title" id="dlg-t">Destroy range-42?</h3>
+            </div>
+            <div class="ds-dialog__body">
+              <p style="margin: 0">
+                This permanently tears down all instances. This cannot be undone.
+              </p>
+            </div>
+            <div class="ds-dialog__footer">
+              <button type="button" class="ds-btn ds-btn--secondary">Cancel</button>
+              <button type="button" class="ds-btn ds-btn--destructive">Destroy</button>
+            </div>
+          </div>
+
+          <div class="ds-menu" role="menu">
+            <button class="ds-menu__item" role="menuitem" type="button">Open terminal</button>
+            <button class="ds-menu__item" role="menuitem" type="button">Copy address</button>
+            <hr class="ds-menu__separator" />
+            <button class="ds-menu__item ds-menu__item--danger" role="menuitem" type="button">
+              Destroy range
+            </button>
+          </div>
+
+          <div>
+            <div class="ds-popover">
+              <p class="ds-eyebrow">Access</p>
+              <p style="margin: var(--ds-space-1) 0 0">SSH via bastion at 10.0.0.4.</p>
+            </div>
+            <div style="margin-block-start: var(--ds-space-3)">
+              <span class="ds-tooltip" role="tooltip">Requires organizer role</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STATES ----------------------------------------------------------->
+      <section class="sg-section" id="states">
+        <h2 class="sg-section__title">Empty &amp; loading</h2>
+        <div class="sg-grid sg-grid--wide">
+          <div class="ds-card">
+            <div class="ds-empty">
+              <p class="ds-empty__title">No active ranges</p>
+              <p style="margin: 0">Launch a scenario to provision your first range.</p>
+              <button type="button" class="ds-btn ds-btn--primary ds-btn--sm">Launch range</button>
+            </div>
+          </div>
+          <div class="ds-card">
+            <div class="ds-card__body">
+              <div class="sg-specimen sg-specimen--stack" style="border: 0; padding: 0">
+                <span class="ds-spinner" aria-label="Loading"></span>
+                <div class="ds-skeleton" style="inline-size: 80%"></div>
+                <div class="ds-skeleton" style="inline-size: 60%"></div>
+                <div class="ds-progress" aria-label="Provisioning" role="progressbar"
+                  aria-valuenow="65" aria-valuemin="0" aria-valuemax="100">
+                  <div class="ds-progress__bar" style="inline-size: 65%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- APP SHELL -------------------------------------------------------->
+      <section class="sg-section" id="shell">
+        <h2 class="sg-section__title">App shell</h2>
+        <p class="sg-section__desc">
+          The role-aware frame from the IA (ux-003): brand, global top bar,
+          side nav with a group label and current item, and a page header with
+          primary actions.
+        </p>
+        <div class="ds-card" style="block-size: 460px">
+          <div class="ds-appshell">
+            <div class="ds-appshell__brand">Shifter</div>
+            <div class="ds-topbar">
+              <span class="ds-badge ds-badge--neutral">Operate</span>
+              <span class="ds-text-muted">Summer Workshop</span>
+              <span class="ds-topbar__spacer"></span>
+              <button type="button" class="ds-btn ds-btn--tertiary ds-btn--sm">Account</button>
+            </div>
+            <nav class="ds-sidenav" aria-label="Primary">
+              <span class="ds-navgroup__label">Operate</span>
+              <a class="ds-navitem" href="#shell" aria-current="page">Overview</a>
+              <a class="ds-navitem" href="#shell">Ranges</a>
+              <a class="ds-navitem" href="#shell">CTF Events</a>
+              <a class="ds-navitem" href="#shell">Assets</a>
+              <a class="ds-navitem" href="#shell">Terminal</a>
+              <span class="ds-navgroup__label">Govern</span>
+              <a class="ds-navitem" href="#shell">Risks</a>
+            </nav>
+            <div class="ds-main">
+              <div class="ds-page-header">
+                <div>
+                  <h1 class="ds-page-title">Ranges</h1>
+                  <p class="ds-text-muted" style="margin: var(--ds-space-1) 0 0">
+                    3 active · 1 provisioning
+                  </p>
+                </div>
+                <div class="ds-page-header__actions">
+                  <button type="button" class="ds-btn ds-btn--secondary ds-btn--sm">Filter</button>
+                  <button type="button" class="ds-btn ds-btn--primary ds-btn--sm">Launch range</button>
+                </div>
+              </div>
+              <div class="ds-card">
+                <div class="ds-card__body ds-text-muted">Range table would render here.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

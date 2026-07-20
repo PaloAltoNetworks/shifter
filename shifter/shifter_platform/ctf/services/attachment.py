@@ -12,6 +12,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.core.files.base import File
+from django.db import transaction
 from django.db.models import QuerySet
 
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
@@ -31,6 +32,7 @@ from ctf.s3 import (
     generate_download_url,
     upload_challenge_file,
 )
+from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
     pass
@@ -176,45 +178,52 @@ def add_challenge_file(
     if is_text_extension(ext):
         _run_text_stream_validation(file_obj, ext, challenge_id, actor_id, filename)
 
-    # Check file count limit
-    current_count = CTFChallengeFile.objects.filter(challenge=challenge).count()
-    if current_count >= MAX_FILES_PER_CHALLENGE:
-        raise CTFValidationError(
-            f"Maximum files per challenge ({MAX_FILES_PER_CHALLENGE}) reached",
-            details={"current_count": current_count, "max_files": MAX_FILES_PER_CHALLENGE},
+    # Serialize per challenge and enforce the file cap + order assignment under
+    # the row lock so concurrent uploads cannot exceed MAX_FILES_PER_CHALLENGE or
+    # collide on `order` (#1147). The S3 upload runs inside the lock: this is a
+    # low-frequency, small-file admin path, and checking the cap before uploading
+    # avoids leaving an orphaned S3 object behind on a rejected over-cap upload.
+    with transaction.atomic():
+        CTFChallenge.objects.select_for_update().get(pk=challenge.pk)
+
+        current_count = CTFChallengeFile.objects.filter(challenge=challenge).count()
+        if current_count >= MAX_FILES_PER_CHALLENGE:
+            raise CTFValidationError(
+                f"Maximum files per challenge ({MAX_FILES_PER_CHALLENGE}) reached",
+                details={"current_count": current_count, "max_files": MAX_FILES_PER_CHALLENGE},
+            )
+
+        max_order = (
+            CTFChallengeFile.objects.filter(challenge=challenge)
+            .order_by("-order")
+            .values_list("order", flat=True)
+            .first()
         )
+        next_order = (max_order or 0) + 1
 
-    # Determine next order value
-    max_order = (
-        CTFChallengeFile.objects.filter(challenge=challenge).order_by("-order").values_list("order", flat=True).first()
-    )
-    next_order = (max_order or 0) + 1
+        try:
+            s3_key, sha256_hash, actual_size = upload_challenge_file(
+                file_obj,
+                str(challenge.event_id),
+                str(challenge_id),
+                filename,
+            )
+        except CTFFileError as e:
+            raise CTFValidationError(
+                f"File upload failed: {e}",
+                details={"filename": filename},
+            ) from e
 
-    # Upload to S3
-    try:
-        s3_key, sha256_hash, actual_size = upload_challenge_file(
-            file_obj,
-            str(challenge.event_id),
-            str(challenge_id),
-            filename,
+        challenge_file = CTFChallengeFile.objects.create(
+            challenge=challenge,
+            filename=os.path.basename(filename),
+            s3_key=s3_key,
+            file_size_bytes=actual_size,
+            content_type=content_type,
+            sha256_hash=sha256_hash,
+            display_name=display_name,
+            order=next_order,
         )
-    except CTFFileError as e:
-        raise CTFValidationError(
-            f"File upload failed: {e}",
-            details={"filename": filename},
-        ) from e
-
-    # Create record
-    challenge_file = CTFChallengeFile.objects.create(
-        challenge=challenge,
-        filename=os.path.basename(filename),
-        s3_key=s3_key,
-        file_size_bytes=actual_size,
-        content_type=content_type,
-        sha256_hash=sha256_hash,
-        display_name=display_name,
-        order=next_order,
-    )
 
     logger.info("Added file %s to challenge %s", challenge_file.id, challenge_id)
     return challenge_file
@@ -256,7 +265,9 @@ def remove_challenge_file(file_id: UUID, *, actor_id: int) -> None:
     try:
         delete_challenge_file(challenge_file.s3_key)
     except CTFFileError:
-        logger.warning("Failed to delete S3 object %s, proceeding with soft delete", challenge_file.s3_key)
+        logger.warning(
+            "Failed to delete S3 object %s, proceeding with soft delete", safe_log_value(challenge_file.s3_key)
+        )
 
     challenge_file.delete(soft=True)
     logger.info("Removed file %s", file_id)

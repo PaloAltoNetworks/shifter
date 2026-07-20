@@ -1,0 +1,5 @@
+# Build dependencies for the Shifter documentation site (mkdocs + Material).
+# Installed by .github/workflows/docs.yml. Greenfield: nothing else depends on
+# these. mkdocs-material pulls a compatible mkdocs (>=1.6, for exclude_docs).
+mkdocs-material>=9.5,<10
+pymdown-extensions>=10.7,<11

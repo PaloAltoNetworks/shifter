@@ -1,0 +1,137 @@
+/* Scenario editor shared form/editor styles.
+   Extracted from templates/scenario_editor/base.html (issue #414). */
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--theme-text);
+}
+
+.form-group .help-text {
+    font-size: 12px;
+    color: var(--theme-text-secondary);
+    margin-top: 2px;
+}
+
+.form-input,
+.form-textarea,
+.form-select {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    color: var(--theme-text);
+    font-size: 14px;
+    font-family: "Lato", sans-serif;
+}
+
+.form-textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.form-input:focus,
+.form-textarea:focus,
+.form-select:focus {
+    outline: none;
+    border-color: #58c;
+}
+
+.form-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.form-checkbox input {
+    width: 16px;
+    height: 16px;
+}
+
+.error-list {
+    background: #301919;
+    border: 1px solid rgb(200, 50, 50, 0.3);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    list-style: none;
+}
+
+.error-list li {
+    color: #c88;
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.yaml-editor {
+    width: 100%;
+    min-height: 500px;
+    padding: 16px;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    color: var(--theme-text);
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: vertical;
+    tab-size: 2;
+}
+
+.yaml-editor:focus {
+    outline: none;
+    border-color: #58c;
+}
+
+.validation-result {
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    display: none;
+}
+
+.validation-valid {
+    background: #213021;
+    border: 1px solid rgb(100, 200, 100, 0.3);
+    color: #8c8;
+}
+
+.validation-invalid {
+    background: #301919;
+    border: 1px solid rgb(200, 50, 50, 0.3);
+    color: #c88;
+}
+
+.instance-card,
+.subnet-card {
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 8px;
+}
+
+.inline-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.btn-danger {
+    background: #391b1b;
+    color: #e08787;
+    border: 1px solid rgb(200, 50, 50, 0.3);
+}
+
+.btn-add {
+    background: #213021;
+    color: #8c8;
+    border: 1px solid rgb(100, 200, 100, 0.25);
+}

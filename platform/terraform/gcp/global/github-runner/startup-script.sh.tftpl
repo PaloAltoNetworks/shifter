@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Startup script for the GCP-native GitHub Actions runner (issue #1546).
+#
+# Installs a pinned, checksum-verified Actions runner + host toolchain under a
+# dedicated unprivileged user. It deliberately does NOT register the runner: a
+# single-use registration token is delivered out-of-band over IAP SSH stdin
+# (scripts/bootstrap/gcp_runner.py), so no token ever lands in instance
+# metadata, this script, serial-port output, or logs.
+#
+# Terraform template vars: ${runner_user} ${runner_version} ${runner_checksum}
+# Shell expansions are escaped as $${...} so Terraform leaves them intact.
+set -euo pipefail
+
+RUNNER_USER="${runner_user}"
+RUNNER_VERSION="${runner_version}"
+RUNNER_CHECKSUM="${runner_checksum}"
+RUNNER_HOME="/home/$${RUNNER_USER}/actions-runner"
+TARBALL="actions-runner-linux-x64-$${RUNNER_VERSION}.tar.gz"
+
+# Idempotent: a re-run (e.g. instance reset) must not fail on an existing user.
+if ! id -u "$${RUNNER_USER}" >/dev/null 2>&1; then
+  useradd -m -s /bin/bash "$${RUNNER_USER}"
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y --no-install-recommends git curl jq ca-certificates tar
+
+mkdir -p "$${RUNNER_HOME}"
+cd "$${RUNNER_HOME}"
+
+# Download + verify the pinned runner. `sha256sum -c` fails closed on mismatch,
+# so a wrong/compromised tarball aborts the startup rather than installing it.
+curl -fsSL -o "$${TARBALL}" \
+  "https://github.com/actions/runner/releases/download/v$${RUNNER_VERSION}/$${TARBALL}"
+echo "$${RUNNER_CHECKSUM}  $${TARBALL}" | sha256sum -c -
+
+tar xzf "$${TARBALL}"
+rm -f "$${TARBALL}"
+chown -R "$${RUNNER_USER}:$${RUNNER_USER}" "$${RUNNER_HOME}"
+
+# Runner-bundled dependency installer (libicu, etc.).
+./bin/installdependencies.sh
+
+# Completion marker: the out-of-band registration handoff waits for this so it
+# never runs config.sh before the runner is fully installed (SSH is reachable
+# well before the startup script finishes). Written last to a root-owned,
+# world-readable path OUTSIDE the runner user's home: the readiness probe runs as
+# the operator's OS Login identity (not root, not the runner user) and cannot
+# traverse the runner's home, so a marker in ~runner would be unreadable. This
+# path MUST match _RUNNER_READY_MARKER in scripts/bootstrap/gcp_runner.py.
+touch /var/lib/shifter-gcp-runner-ready
+chmod 0644 /var/lib/shifter-gcp-runner-ready
+
+# NB: no ./config.sh here. Registration is performed over IAP SSH with a
+# per-runner token piped over stdin (scripts/bootstrap/gcp_runner.py).

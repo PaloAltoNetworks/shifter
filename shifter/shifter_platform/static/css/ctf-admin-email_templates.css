@@ -1,0 +1,72 @@
+/* CTF admin: email templates page.
+   Extracted from templates/ctf/admin/email_templates.html (issue #414). */
+
+.breadcrumb {
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #94a3b8;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--theme-text-secondary);
+}
+
+.template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}
+
+.template-card {
+    border: 1px solid var(--theme-border);
+    border-radius: 6px;
+    padding: 16px;
+    background: var(--theme-bg-secondary);
+}
+
+.template-card .type-label {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 8px;
+}
+
+.template-card .status {
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.badge-default {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: var(--theme-bg-tertiary);
+    color: var(--theme-text-secondary);
+    font-size: 12px;
+}
+
+.badge-custom {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: #182b1c;
+    color: #22c55e;
+    font-size: 12px;
+}
+
+/* Extracted inline styles (issue #414) */
+.email-templates-subtitle {
+    color: var(--theme-text-secondary);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.email-templates-custom-subject {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+}

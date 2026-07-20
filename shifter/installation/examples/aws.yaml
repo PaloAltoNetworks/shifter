@@ -16,7 +16,7 @@ deployment:
   name: shifter
   # Public hostname users reach this deployment at. Must be a real DNS name.
   domain: shifter.example.com
-  # Deployment tier. One of: prod, dev.
+  # Deployment tier. One of: prod, dev (proof is an internal readiness tier).
   profile: prod
 
 # References to the secrets this deployment needs. The names on the right are
@@ -26,7 +26,21 @@ secrets:
   django_secret_key: shifter/prod/django-secret-key
   db_password: shifter/prod/db-password
 
-# Backend-specific settings. The root schema checks that this is a mapping.
-# Deployment tooling validates the values it consumes.
+# Backend-specific settings. The AWS backend validates these against a closed model,
+# so unknown keys are rejected. `region` is required.
 settings:
+  # AWS region to deploy into, e.g. us-east-2.
   region: us-east-2
+
+  # PLAT-220: range network egress policy. Same shape on AWS and GCP. Omit the
+  # block entirely (or set mode: status-quo) to preserve the backend's existing
+  # posture. CIDRs are operator configuration, not secrets — but the actual list
+  # for *your* deployment should live in a gitignored local override (see
+  # docs/dev/deploy-secrets.md and docs/architecture/range-egress-ip-allowlist.md),
+  # not in this committed example.
+  range_egress:
+    mode: status-quo
+    # When mode: allowlist, list CIDRs here. Default-route entries (0.0.0.0/0, ::/0)
+    # are rejected — allow-all is a separate mode (not yet defined).
+    # allowed_cidrs:
+    #   - 203.0.113.0/24

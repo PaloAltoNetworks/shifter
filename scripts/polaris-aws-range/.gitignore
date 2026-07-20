@@ -3,3 +3,9 @@ terraform.tfstate
 terraform.tfstate.backup
 tfplan
 *.tfplan
+
+# Operator run outputs from live provisioning/health-check events.
+provisioning_state.json
+provisioning_status.md
+health_report.md
+postprovision_status.md

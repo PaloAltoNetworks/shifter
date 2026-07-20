@@ -10,12 +10,28 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest>=9.0.2",
     "pytest-mock>=3.15.1",
-    "ruff>=0.14.10",
+    "ruff>=0.15.13",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+# Production-only coverage (#1529 / REV1 Q6): omit the test tree so tests do not
+# cover themselves. CI measures this package via ``pytest --cov`` from this root.
+source = ["."]
+omit = [
+    "tests/*",
+    "*/tests/*",
+    "conftest.py",
+    "*/conftest.py",
+]
+
+[tool.coverage.report]
+# Non-regression floor (#1529 / REV1 Q6). Measured production-only baseline is
+# 86%; the floor sits one point under it and ratchets up. See docs/dev/testing.md.
+fail_under = 85
 
 [tool.ruff]
 target-version = "py312"

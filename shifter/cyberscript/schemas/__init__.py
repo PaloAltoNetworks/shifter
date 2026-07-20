@@ -35,6 +35,20 @@ from .credentials import (
     SCMCredentialContext,
     SCMCredentialSpec,
 )
+from .ctf import (
+    CYBERSCRIPT_VERSION_V1,
+    AssetSpec,
+    CTFRangeSpec,
+    DataSeedSpec,
+    DetectionStackSpec,
+    FlagSpec,
+    ForestSpec,
+    NetworkSpec,
+    ParticipantAccessSpec,
+    ScenarioOverlaySpec,
+    ServiceSpec,
+    ZoneSpec,
+)
 from .range import (
     AgentDetails,
     DCConfig,
@@ -42,13 +56,14 @@ from .range import (
     InstanceContextBase,
     InstanceRef,
     InstanceSpec,
+    RangeAccessBinding,
     RangeContext,
     RangeContextBase,
     RangeRef,
     RangeSpec,
     RangeSpecBase,
 )
-from .request import RequestSpec
+from .request import AnyRangeSpec, RequestSpec
 from .subnet import SubnetContext, SubnetRef, SubnetSpec
 
 
@@ -69,31 +84,40 @@ def _rebuild_all_models() -> None:
     # RangeSpecBase and RangeSpec need SubnetSpec resolved
     RangeSpecBase.model_rebuild(_types_namespace=_types_namespace)
     RangeSpec.model_rebuild(_types_namespace=_types_namespace)
+    CTFRangeSpec.model_rebuild(_types_namespace=_types_namespace)
 
 
 _rebuild_all_models()
 
 __all__ = [
+    "CYBERSCRIPT_VERSION_V1",
     "AgentAppContext",
     "AgentAppSpec",
     "AgentDetails",
+    "AnyRangeSpec",
     "AppContext",
     "AppContextBase",
     "AppRef",
     "AppSpecBase",
+    "AssetSpec",
     "AttackBehaviourContext",
     "AttackBehaviourSpec",
     "BehaviourContext",
     "BehaviourContextBase",
     "BehaviourRef",
     "BehaviourSpecBase",
+    "CTFRangeSpec",
     "CredentialContext",
     "CredentialContextBase",
     "CredentialRef",
     "CredentialSpecBase",
     "DCConfig",
+    "DataSeedSpec",
     "DeploymentProfileContext",
     "DeploymentProfileSpec",
+    "DetectionStackSpec",
+    "FlagSpec",
+    "ForestSpec",
     "InstanceContext",
     "InstanceContextBase",
     "InstanceRef",
@@ -102,10 +126,13 @@ __all__ = [
     "NGFWAppContext",
     "NGFWAppRef",
     "NGFWAppSpec",
+    "NetworkSpec",
     "OSAppContext",
     "OSAppSpec",
     "OtherAppContext",
     "OtherAppSpec",
+    "ParticipantAccessSpec",
+    "RangeAccessBinding",
     "RangeContext",
     "RangeContextBase",
     "RangeRef",
@@ -114,8 +141,11 @@ __all__ = [
     "RequestSpec",
     "SCMCredentialContext",
     "SCMCredentialSpec",
+    "ScenarioOverlaySpec",
+    "ServiceSpec",
     "SpecBase",
     "SubnetContext",
     "SubnetRef",
     "SubnetSpec",
+    "ZoneSpec",
 ]

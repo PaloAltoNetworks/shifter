@@ -1298,7 +1298,14 @@ content:
     source: polaris/brain-protocol-seed
     sensitive: true
 
-  # Kali participant welcome
+  # Kali participant onboarding
+  kali-start-here:
+    type: file
+    format: txt
+    target: a14-kali
+    path: /home/kali/START_HERE.txt
+    source: polaris/kali-start-here
+
   kali-welcome:
     type: file
     format: txt

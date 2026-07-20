@@ -6,9 +6,21 @@ cms/scenarios/templates/. They provide type validation and default values.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, field_validator, model_validator
+
+from shared.schemas import (
+    AssetSpec,
+    DataSeedSpec,
+    DetectionStackSpec,
+    FlagSpec,
+    ForestSpec,
+    NetworkSpec,
+    ParticipantAccessSpec,
+    ServiceSpec,
+    ZoneSpec,
+)
 
 
 class DCConfig(BaseModel):
@@ -83,6 +95,24 @@ class SubnetConfig(BaseModel):
         return v
 
 
+class ParticipantAccessConfig(BaseModel):
+    """Participant-facing channel explicitly authorized by a demo scenario."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    channel: Literal["ssh", "rdp"]
+
+    @field_validator("target")
+    @classmethod
+    def target_not_empty(cls, value: str) -> str:
+        """Require a non-empty scenario instance name."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("participant access target cannot be empty")
+        return normalized
+
+
 class ScenarioTemplate(BaseModel):
     """Complete scenario template definition.
 
@@ -91,18 +121,22 @@ class ScenarioTemplate(BaseModel):
         name: Human-readable display name.
         description: User-facing description of the scenario.
         enabled: Whether scenario is visible in the UI (default True).
+        scenario_type: Discriminator — always 'demo' for legacy templates.
         ngfw: Whether scenario requires NGFW provisioning.
         instances: List of instance configurations.
         subnets: List of subnet configurations (optional).
+        participant_access: Explicit participant-facing member channels.
     """
 
     id: str
     name: str
     description: str
     enabled: bool = True
+    scenario_type: Literal["demo"] = "demo"
     ngfw: bool = False
     instances: list[InstanceConfig]
     subnets: list[SubnetConfig] = []
+    participant_access: list[ParticipantAccessConfig] = []
 
     @field_validator("instances")
     @classmethod
@@ -133,6 +167,20 @@ class ScenarioTemplate(BaseModel):
                     raise ValueError(f"Subnet '{subnet.name}' references unknown instance '{inst}'")
         return self
 
+    @model_validator(mode="after")
+    def validate_participant_access(self) -> ScenarioTemplate:
+        """Require access targets to exist and target/channel pairs to be unique."""
+        instance_names = {instance.name for instance in self.instances}
+        seen: set[tuple[str, str]] = set()
+        for binding in self.participant_access:
+            if binding.target not in instance_names:
+                raise ValueError(f"Participant access references unknown instance '{binding.target}'")
+            key = (binding.target, binding.channel)
+            if key in seen:
+                raise ValueError(f"Duplicate participant access target/channel '{binding.target}/{binding.channel}'")
+            seen.add(key)
+        return self
+
     def requires_agent(self) -> bool:
         """Return True if any instance needs XDR agent."""
         return any(i.xdr_agent for i in self.instances)
@@ -153,11 +201,42 @@ class ScenarioTemplate(BaseModel):
             "has_from_agent": False,
         }
         for inst in self.instances:
-            if inst.xdr_agent:
-                if inst.os_type == "from_agent":
-                    result["has_from_agent"] = True
-                elif inst.os_type == "windows":
+            # `from_agent` derives the OS from the user-provided agent, so it
+            # always requires an agent regardless of `xdr_agent` (which gates
+            # fixed-OS agent installs). The dashboard relies on this to prompt
+            # for an agent on scenarios like `basic` whose victim is
+            # `from_agent` with `xdr_agent: false`.
+            if inst.os_type == "from_agent":
+                result["has_from_agent"] = True
+            elif inst.xdr_agent:
+                if inst.os_type == "windows":
                     result["requires_windows"] = True
                 elif inst.os_type in ("ubuntu", "kali"):
                     result["requires_linux"] = True
         return result
+
+
+class CTFScenarioTemplate(BaseModel):
+    """CTF-class scenario template validated against the CyberScript CTF surface."""
+
+    id: str
+    name: str
+    description: str
+    enabled: bool = True
+    scenario_type: Literal["ctf"] = "ctf"
+    cyberscript_version: Literal["v1"] = "v1"
+    zones: list[ZoneSpec]
+    networks: list[NetworkSpec]
+    forests: list[ForestSpec] = []
+    services: list[ServiceSpec] = []
+    assets: list[AssetSpec]
+    flags: list[FlagSpec] = []
+    data_seeds: list[DataSeedSpec] = []
+    detection: DetectionStackSpec | None = None
+    participant_access: ParticipantAccessSpec
+
+
+AnyScenarioTemplate = Annotated[
+    ScenarioTemplate | CTFScenarioTemplate,
+    Discriminator("scenario_type"),
+]

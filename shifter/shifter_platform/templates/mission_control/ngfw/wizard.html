@@ -54,7 +54,7 @@
                     <p class="form-hint">
                         {% trans "A friendly name to identify this NGFW" %}
                     </p>
-                    <p class="form-error" id="name-error" style="display: none;">
+                    <p class="form-error d-none" id="name-error">
                     </p>
                 </div>
                 <div class="form-group">
@@ -96,9 +96,7 @@
                             {% trans "first." %}
                         {% endif %}
                     </p>
-                    <p class="form-error"
-                       id="profile-error"
-                       style="display: none">
+                    <p class="form-error d-none" id="profile-error">
                     </p>
                 </div>
                 <div class="wizard-nav">
@@ -123,9 +121,7 @@
                 <div class="card-title">
                     {% trans "Registration Method" %}
                 </div>
-                <p style="color: var(--theme-text-secondary);
-                          margin: 0 0 20px;
-                          font-size: 13px">
+                <p class="wizard-intro">
                     {% blocktrans trimmed %}
                         Choose how to register this NGFW with Strata Cloud Manager for device certificate and
                         XDR integration.
@@ -215,9 +211,7 @@
                 <div class="card-title">
                     {% trans "Confirm Setup" %}
                 </div>
-                <p style="color: var(--theme-text-secondary);
-                          margin: 0 0 20px;
-                          font-size: 13px">
+                <p class="wizard-intro">
                     {% trans "Review your configuration before provisioning." %}
                 </p>
                 <div class="summary-section">
@@ -314,9 +308,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="success-state"
-                     id="success-state"
-                     style="display: none">
+                <div class="success-state d-none" id="success-state">
                     <div class="success-icon">
                         &#10003;
                     </div>
@@ -326,10 +318,14 @@
                     <p class="success-subtitle">
                         {% trans "Your NGFW is ready. Add it as a data source in your XDR/XSIAM tenant." %}
                     </p>
-                    <div style="display: flex; gap: 12px; justify-content: center;">
+                    <div class="success-actions">
                         <a href="{% url 'mission_control:ngfw_list' %}"
                            class="btn btn-secondary">{% trans "Back to NGFWs" %}</a>
-                        <a href="#" class="btn btn-primary" id="view-ngfw-btn">{% trans "View NGFW Details" %}</a>
+                        <button type="button"
+                                class="btn btn-primary"
+                                id="view-ngfw-btn">
+                            {% trans "View NGFW Details" %}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -342,8 +338,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     const wizard = new NGFWWizardManager({
         csrfToken: '{{ csrf_token }}',
-        provisionUrl: '/mission-control/api/ngfw/',
-        statusUrlTemplate: '/mission-control/api/ngfw/{id}/status/',
+        provisionUrl: '/api/v1/mission-control/ngfw/',
         detailUrlTemplate: '/mission-control/ngfw/{id}/'
     });
     wizard.init();

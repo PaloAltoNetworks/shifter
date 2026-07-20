@@ -4,42 +4,14 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 # Fetch secrets from the active cloud secret manager (prod only)
 # ------------------------------------------------------------------------------
+# The fetch helper lives in entrypoint-lib.sh so tests in
+# `tests/test_entrypoint_lib.sh` can exercise it without running the
+# whole entrypoint. Sourcing it must succeed (`set -e` aborts the
+# container otherwise) before any caller uses fetch_runtime_secret.
 
-fetch_runtime_secret() {
-    local secret_name="$1"
-    python - "$secret_name" <<'PY'
-import os
-import sys
-
-provider = os.environ.get("CLOUD_PROVIDER", "aws")
-secret_id = sys.argv[1]
-
-if provider == "gcp":
-    from google.cloud import secretmanager
-
-    name = secret_id
-    if "/versions/" not in name:
-        if name.startswith("projects/"):
-            name = f"{name}/versions/latest"
-        else:
-            project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-            if not project_id:
-                raise RuntimeError("GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT is required for Secret Manager access")
-            name = f"projects/{project_id}/secrets/{name}/versions/latest"
-
-    client = secretmanager.SecretManagerServiceClient()
-    response = client.access_secret_version(request={"name": name})
-    print(response.payload.data.decode("utf-8"))
-else:
-    import boto3
-
-    region = os.environ.get("AWS_REGION") or os.environ.get("CLOUD_REGION") or "us-east-2"
-    client = boto3.client("secretsmanager", region_name=region)
-    response = client.get_secret_value(SecretId=secret_id)
-    print(response["SecretString"])
-PY
-    return 0
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./entrypoint-lib.sh
+source "$SCRIPT_DIR/entrypoint-lib.sh"
 
 DB_SECRET_ID="${DB_SECRET_ID:-${DB_SECRET_ARN:-}}"
 APP_SECRET_ID="${APP_SECRET_ID:-${APP_SECRET_ARN:-}}"
@@ -47,49 +19,84 @@ OIDC_SECRET_ID="${OIDC_SECRET_ID:-${OIDC_SECRET_ARN:-${COGNITO_SECRET_ARN:-}}}"
 GUACAMOLE_SECRET_ID="${GUACAMOLE_SECRET_ID:-${GUACAMOLE_SECRET_ARN:-}}"
 DC_DOMAIN_PASSWORD_SECRET_ID="${DC_DOMAIN_PASSWORD_SECRET_ID:-${DC_DOMAIN_PASSWORD_SECRET_ARN:-}}"
 
+# NOTE: every secret-hydration line below uses the
+#   VAR=...
+#   export VAR
+# pattern instead of `export VAR=...` so a non-zero exit inside the
+# command substitution propagates through `set -e` and aborts the
+# entrypoint. `export VAR=$(failing_cmd)` always returns 0 because
+# `export` itself succeeds, which is what produced the silent
+# DC_DOMAIN_PASSWORD=empty regression on the dev portal CMK (issue #52).
+# The same hazard applies to the JSON-parsing python subshells: a
+# missing field or malformed payload now fails the container start
+# rather than exporting an empty required secret.
+
 if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
     echo "Fetching runtime secrets from ${CLOUD_PROVIDER:-aws} secret manager..."
 
     # Fetch DB secret
     DB_SECRET=$(fetch_runtime_secret "$DB_SECRET_ID")
 
-    # Export DB credentials
-    # DB_HOST can be overridden via env var
-    export DB_HOST=${DB_HOST:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")}
-    export DB_PORT=${DB_PORT:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")}
-    export DB_NAME=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['dbname'])")
-    export DB_USER=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['username'])")
-    export DB_PASSWORD=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
+    # Export DB credentials. DB_HOST / DB_PORT can be overridden via env var;
+    # the `${X:-...}` default still runs the command substitution when X is
+    # empty, and its exit code now propagates because the assignment isn't
+    # wrapped in `export`.
+    DB_HOST=${DB_HOST:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")}
+    export DB_HOST
+    DB_PORT=${DB_PORT:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")}
+    export DB_PORT
+    DB_NAME=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['dbname'])")
+    export DB_NAME
+    DB_USER=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['username'])")
+    export DB_USER
+    DB_PASSWORD=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
+    export DB_PASSWORD
 
     # Fetch App secret
     APP_SECRET=$(fetch_runtime_secret "$APP_SECRET_ID")
 
     # Export Django secret key
-    export DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
+    DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
+    export DJANGO_SECRET_KEY
+
+    # Optional previous signing keys for a zero-downtime SECRET_KEY rotation
+    # (config.settings.SECRET_KEY_FALLBACKS). Absent in steady state; the app
+    # secret bundle carries `django_secret_key_fallbacks` (a JSON array) only
+    # while a rotation is in flight. `.get(..., [])` keeps a bundle without the
+    # field valid, and re-serialising to JSON preserves any comma in an old key
+    # through the env var.
+    DJANGO_SECRET_KEY_FALLBACKS=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.dumps(json.load(sys.stdin).get('django_secret_key_fallbacks', [])))")
+    export DJANGO_SECRET_KEY_FALLBACKS
 
     # Export field encryption key with proper base64 padding (Fernet requires it)
-    export FIELD_ENCRYPTION_KEY=$(echo "$APP_SECRET" | python -c "
+    FIELD_ENCRYPTION_KEY=$(echo "$APP_SECRET" | python -c "
 import sys, json
 key = json.load(sys.stdin)['field_encryption_key']
 # Add padding if missing (base64 requires length % 4 == 0)
 padding = (4 - len(key) % 4) % 4
 print(key + '=' * padding)
 ")
+    export FIELD_ENCRYPTION_KEY
 
     # Fetch OIDC secret if provided
     if [[ -n "${OIDC_SECRET_ID:-}" ]]; then
         OIDC_SECRET=$(fetch_runtime_secret "$OIDC_SECRET_ID")
 
         # Export OIDC credentials
-        export OIDC_RP_CLIENT_ID=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_id'])")
-        export OIDC_RP_CLIENT_SECRET=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_secret'])")
-        export OIDC_ISSUER_URL=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['issuer_url'])")
-        export OIDC_AUTH_DOMAIN=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin).get('domain', ''))")
+        OIDC_RP_CLIENT_ID=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_id'])")
+        export OIDC_RP_CLIENT_ID
+        OIDC_RP_CLIENT_SECRET=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_secret'])")
+        export OIDC_RP_CLIENT_SECRET
+        OIDC_ISSUER_URL=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['issuer_url'])")
+        export OIDC_ISSUER_URL
+        OIDC_AUTH_DOMAIN=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin).get('domain', ''))")
+        export OIDC_AUTH_DOMAIN
     fi
 
     # Fetch Guacamole JSON auth secret if provided (for RDP integration)
     if [[ -n "${GUACAMOLE_SECRET_ID:-}" ]]; then
-        export GUACAMOLE_JSON_AUTH_SECRET=$(fetch_runtime_secret "$GUACAMOLE_SECRET_ID")
+        GUACAMOLE_JSON_AUTH_SECRET=$(fetch_runtime_secret "$GUACAMOLE_SECRET_ID")
+        export GUACAMOLE_JSON_AUTH_SECRET
     fi
 
     echo "Secrets loaded successfully"
@@ -102,7 +109,8 @@ fi
 # still hydrate the value. The Windows-DC RDP credential lookup in
 # engine.services depends on this env var being exported.
 if [[ -n "${DC_DOMAIN_PASSWORD_SECRET_ID:-}" ]]; then
-    export DC_DOMAIN_PASSWORD=$(fetch_runtime_secret "$DC_DOMAIN_PASSWORD_SECRET_ID")
+    DC_DOMAIN_PASSWORD=$(fetch_runtime_secret "$DC_DOMAIN_PASSWORD_SECRET_ID")
+    export DC_DOMAIN_PASSWORD
 fi
 
 # Hydrate the Redis AUTH token and Memorystore server CA from Secret
@@ -117,9 +125,27 @@ fi
 # connection would fail certificate verification.
 if [[ -n "${REDIS_SECRET_ID:-}" ]]; then
     REDIS_SECRET=$(fetch_runtime_secret "$REDIS_SECRET_ID")
-    export REDIS_PASSWORD=$(echo "$REDIS_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
-    export REDIS_CA_PEM=$(echo "$REDIS_SECRET" | python -c "import sys, json; print(json.load(sys.stdin).get('server_ca_cert', ''))")
+    REDIS_PASSWORD=$(echo "$REDIS_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
+    export REDIS_PASSWORD
+    REDIS_CA_PEM=$(echo "$REDIS_SECRET" | python -c "import sys, json; print(json.load(sys.stdin).get('server_ca_cert', ''))")
+    export REDIS_CA_PEM
     unset REDIS_SECRET
+fi
+
+# Hydrate the transactional-email ESP (SendGrid/Mailgun) API key from Secret
+# Manager when the GCP runtime advertises it (PLAT-002, #671).
+# EMAIL_API_KEY_SECRET_ID is rendered into the pod env by
+# scripts/gcp/render_runtime_env.py; the API key itself never travels via the
+# runtime ConfigMap or generated env file. The payload is JSON ({"api_key":
+# "..."}) and flows through stdin into `python -c` so the secret value is not
+# exposed in process argv. Email is optional: this block is skipped (console
+# backend) when no secret is configured, so AWS (django-ses, IAM) and
+# unconfigured deployments are unaffected.
+if [[ -n "${EMAIL_API_KEY_SECRET_ID:-}" ]]; then
+    EMAIL_SECRET=$(fetch_runtime_secret "$EMAIL_API_KEY_SECRET_ID")
+    EMAIL_API_KEY=$(echo "$EMAIL_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['api_key'])")
+    export EMAIL_API_KEY
+    unset EMAIL_SECRET
 fi
 
 # ------------------------------------------------------------------------------
@@ -160,22 +186,55 @@ else
     echo "Skipping migrations (SKIP_MIGRATIONS is set)"
 fi
 
-# Collect static files
-echo "Compiling message catalogs..."
-python manage.py compilemessages
+# ------------------------------------------------------------------------------
+# Switch the long-running connection to RDS IAM authentication (AWS only)
+# ------------------------------------------------------------------------------
+# The DB wait and migrations above ran as the password-authenticated master
+# user (schema owner / migrator). The long-running app and workers instead
+# connect as a dedicated rds_iam runtime user with a short-lived token
+# (config.db_backends.rds_iam via DB_IAM_AUTH), so the runtime process holds no
+# database password. Gated to the AWS deployed path: CLOUD_PROVIDER aws AND a
+# DB secret was hydrated from Secrets Manager, so local docker-compose (direct
+# DB_PASSWORD, no DB_SECRET_ID) and GCP stay on their existing auth.
+# DB_IAM_AUTH_RUNTIME=false is the break-glass escape hatch (keep password auth
+# for a one-off privileged manage.py command run as the master user).
+if [[ "${CLOUD_PROVIDER:-aws}" == "aws" && -n "${DB_SECRET_ID:-}" && "${DB_IAM_AUTH_RUNTIME:-true}" == "true" ]]; then
+    echo "Switching runtime database connection to RDS IAM authentication (user ${DB_IAM_USER:-portal_runtime})..."
+    export DB_IAM_AUTH=true
+    export DB_USER="${DB_IAM_USER:-portal_runtime}"
+    unset DB_PASSWORD
+fi
 
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
-
-# Run command passed as arguments, or default to daphne
+# Run command passed as arguments, or default to gunicorn + uvicorn workers.
+#
+# The production portal web process runs Gunicorn managing a pool of Uvicorn
+# ASGI workers (issue #174). An unhandled exception in any WebSocket consumer
+# only crashes one worker (which Gunicorn restarts) instead of taking down the
+# whole single-process Daphne server. The worker-count, bind address, and
+# timeouts are env-owned so AWS instance sizes and GCP pod limits can tune the
+# pool without rebuilding the image. Defaults are conservative: 4 workers and
+# a 90s timeout (Gunicorn's 30s default would kill long-lived WebSocket and
+# SSH terminal connections that are the portal's main workload). The worker
+# class is `config.asgi_worker.ShifterUvicornWorker`, a subclass of the
+# supported standalone `uvicorn-worker` package's `UvicornWorker`
+# (`uvicorn.workers.UvicornWorker` is deprecated upstream). The subclass pins
+# an explicit WebSocket keepalive (`ws_ping_interval`/`ws_ping_timeout`) sized
+# below the ALB idle_timeout so long-lived terminal/notification/RDP sockets
+# are not silently reaped (issue #931); the bare worker would leave the ping
+# settings to Uvicorn's defaults. `tests/test_asgi_worker_smoke.py` pins both
+# the import contract and the keepalive in CI.
 if [[ $# -gt 0 ]]; then
     echo "Running: $@"
     exec "$@"
 else
-    echo "Starting daphne..."
-    exec daphne config.asgi:application \
-        --bind 0.0.0.0 \
-        --port 8000 \
-        --access-log - \
-        --verbosity 1
+    echo "Starting gunicorn (uvicorn workers)..."
+    exec gunicorn config.asgi:application \
+        --worker-class config.asgi_worker.ShifterUvicornWorker \
+        --bind "${PORTAL_WEB_BIND:-0.0.0.0:8000}" \
+        --workers "${PORTAL_WEB_WORKERS:-4}" \
+        --timeout "${PORTAL_WEB_TIMEOUT:-90}" \
+        --graceful-timeout "${PORTAL_WEB_GRACEFUL_TIMEOUT:-30}" \
+        --access-logfile - \
+        --error-logfile - \
+        --log-level info
 fi

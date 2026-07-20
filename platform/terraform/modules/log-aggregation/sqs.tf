@@ -13,8 +13,10 @@
 resource "aws_sqs_queue" "log_notifications_dlq" {
   count = var.enable_log_aggregation && var.enable_sqs_notifications ? 1 : 0
 
-  name                      = "${var.name_prefix}-log-notifications-dlq-${var.environment}"
-  message_retention_seconds = 1209600 # 14 days
+  name                              = "${var.name_prefix}-log-notifications-dlq-${var.environment}"
+  message_retention_seconds         = 1209600 # 14 days
+  kms_master_key_id                 = aws_kms_key.log_aggregation[0].arn
+  kms_data_key_reuse_period_seconds = 300
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-log-notifications-dlq-${var.environment}"
@@ -28,9 +30,11 @@ resource "aws_sqs_queue" "log_notifications_dlq" {
 resource "aws_sqs_queue" "log_notifications" {
   count = var.enable_log_aggregation && var.enable_sqs_notifications ? 1 : 0
 
-  name                       = "${var.name_prefix}-log-notifications-${var.environment}"
-  visibility_timeout_seconds = 300
-  message_retention_seconds  = 345600 # 4 days
+  name                              = "${var.name_prefix}-log-notifications-${var.environment}"
+  visibility_timeout_seconds        = 300
+  message_retention_seconds         = 345600 # 4 days
+  kms_master_key_id                 = aws_kms_key.log_aggregation[0].arn
+  kms_data_key_reuse_period_seconds = 300
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.log_notifications_dlq[0].arn

@@ -10,6 +10,21 @@ output "logs_bucket_arn" {
   value       = var.enable_log_aggregation ? aws_s3_bucket.logs[0].arn : ""
 }
 
+output "logs_bucket_policy_id" {
+  description = "ID of the logs bucket policy; use as a readiness dependency before enabling service log delivery"
+  value       = var.enable_log_aggregation ? aws_s3_bucket_policy.logs[0].id : ""
+}
+
+output "alb_logs_bucket_name" {
+  description = "Name of the S3 bucket for ALB access logs"
+  value       = var.enable_alb_access_logs ? aws_s3_bucket.alb_access_logs[0].id : ""
+}
+
+output "alb_logs_bucket_policy_id" {
+  description = "ID of the ALB logs bucket policy; use as a readiness dependency before enabling ALB access logs"
+  value       = var.enable_alb_access_logs ? aws_s3_bucket_policy.alb_access_logs[0].id : ""
+}
+
 output "sqs_queue_url" {
   description = "URL of the SQS queue for log notifications"
   value       = var.enable_log_aggregation && var.enable_sqs_notifications ? aws_sqs_queue.log_notifications[0].url : ""

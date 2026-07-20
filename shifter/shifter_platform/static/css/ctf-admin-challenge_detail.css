@@ -1,0 +1,139 @@
+/* CTF admin: challenge detail page.
+   Extracted from templates/ctf/admin/challenge_detail.html (issue #414). */
+
+.detail-layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 16px;
+    align-items: start;
+}
+
+.breadcrumb {
+    display: flex;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+    margin-bottom: 8px;
+    list-style: none;
+    padding: 0;
+    margin-top: 0;
+}
+
+.breadcrumb a {
+    color: #94a3b8;
+}
+
+.breadcrumb li + li::before {
+    content: "/";
+    margin-right: 4px;
+    color: var(--theme-text-secondary);
+}
+
+.challenge-badges {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-category {
+    background: #282a2d;
+    color: #94a3b8;
+}
+
+.badge-easy {
+    background: #172f20;
+    color: #22c55e;
+}
+
+.badge-medium {
+    background: #372c15;
+    color: #faad14;
+}
+
+.badge-hard {
+    background: #381d1e;
+    color: #ff4d4f;
+}
+
+.badge-expert {
+    background: #2d2d2d;
+    color: #b8b8b8;
+}
+
+.badge-points {
+    background: #2d2d2d;
+    color: #b8b8b8;
+}
+
+.badge-correct {
+    background: #172f20;
+    color: #22c55e;
+}
+
+.badge-incorrect {
+    background: #381d1e;
+    color: #ff4d4f;
+}
+
+.badge-secondary {
+    background: #2d2d2d;
+    color: #b8b8b8;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+}
+
+.detail-row + .detail-row {
+    border-top: 1px solid var(--theme-border);
+}
+
+.detail-label {
+    color: var(--theme-text-secondary);
+}
+
+.detail-value {
+    font-weight: 600;
+    color: var(--theme-text);
+}
+
+.challenge-description {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--theme-text);
+}
+
+.challenge-description p {
+    margin: 0 0 8px;
+}
+
+.empty-message {
+    padding: 24px;
+    text-align: center;
+    color: var(--theme-text-secondary);
+    font-size: 13px;
+}
+
+.hint-empty-note {
+    font-size: 13px;
+    margin: 0;
+}
+
+@media (max-width: 960px) {
+    .detail-layout {
+        grid-template-columns: 1fr;
+    }
+}

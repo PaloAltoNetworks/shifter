@@ -1,0 +1,109 @@
+/* Mission Control ranges dashboard.
+   Extracted from templates/mission_control/dashboard.html (issue #414). */
+
+/* Ranges tile grid - 2x2 layout */
+.ranges-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    max-width: 1200px;
+}
+
+.range-tile {
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    padding: 16px;
+    min-height: 200px;
+}
+
+.range-tile.launch-tile {
+    /* Launch tile has two-column layout */
+}
+
+.range-tile.empty-tile {
+    border-style: dashed;
+    opacity: 0.5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.range-tile .tile-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--theme-text);
+    margin: 0 0 12px;
+}
+
+/* Two-column layout for launch tile */
+.launch-tile-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+
+.launch-tile-form {
+    /* Form controls column */
+}
+
+.launch-tile-info {
+    /* Scenario info column */
+    border-left: 1px solid var(--theme-border);
+    padding-left: 24px;
+}
+
+.scenario-info-panel {
+    display: none;
+}
+
+.scenario-info-panel.visible {
+    display: block;
+}
+
+.scenario-info-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--theme-text);
+    margin: 0 0 8px;
+}
+
+.scenario-info-description {
+    font-size: 12px;
+    color: var(--theme-text-muted);
+    line-height: 1.5;
+}
+
+/* Active range tile styles */
+.range-tile.active-tile .status {
+    margin-bottom: 12px;
+}
+
+.range-tile.provisioning-tile .status {
+    margin-bottom: 12px;
+}
+
+/* Secondary, read-only ACES operation projection (#1276). */
+.range-tile .aces-projection {
+    border-top: 1px solid var(--theme-border);
+    padding-top: 10px;
+}
+
+.range-tile .aces-projection-title {
+    font-weight: 600;
+    color: var(--theme-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+}
+
+.range-tile .aces-projection-status {
+    font-size: 13px;
+    color: var(--theme-text);
+}
+
+.range-tile .aces-projection-meta {
+    display: flex;
+    gap: 12px;
+    margin-top: 2px;
+}

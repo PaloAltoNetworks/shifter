@@ -3,6 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { installToolSchemaDialectNormalizer } from "../shared/tool-schema-dialect.js";
 import {
   PLAN_ID_PATTERN,
   createPlan,
@@ -24,6 +25,9 @@ import {
   searchPlans,
 } from "./lib.js";
 
+// SonarCloud S1192: extracted duplicated string literals.
+const DESC_PLAN_ID = "Plan ID (defaults to current plan)";
+
 function ok(text) {
   return { content: [{ type: "text", text }] };
 }
@@ -38,6 +42,7 @@ const PLAN_ID_SCHEMA = z
   .regex(PLAN_ID_PATTERN, "Plan ID must be 8 lowercase hex characters");
 
 const server = new McpServer({ name: "shifter-planner", version: "1.0.0" });
+installToolSchemaDialectNormalizer(server);
 
 // ==========================================================================
 // Plan tools
@@ -78,7 +83,7 @@ server.tool(
   "get_plan",
   "Get full plan details including all phases, steps, and progress. Uses current plan if no plan_id specified.",
   {
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ plan_id }) => {
     try {
@@ -129,7 +134,7 @@ server.tool(
   {
     name: z.string().describe("Phase name"),
     description: z.string().optional().describe("Phase description"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ name, description, plan_id }) => {
     try {
@@ -147,7 +152,7 @@ server.tool(
     phase_id: z.string().describe("Phase ID"),
     name: z.string().optional().describe("New phase name"),
     description: z.string().optional().describe("New phase description"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ phase_id, name, description, plan_id }) => {
     try {
@@ -166,7 +171,7 @@ server.tool(
   "Remove a phase and all its steps from a plan.",
   {
     phase_id: z.string().describe("Phase ID to remove"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ phase_id, plan_id }) => {
     try {
@@ -182,7 +187,7 @@ server.tool(
   "Get a single phase with all its steps.",
   {
     phase_id: z.string().describe("Phase ID"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ phase_id, plan_id }) => {
     try {
@@ -212,7 +217,7 @@ server.tool(
       .array(z.object({ label: z.string(), url: z.string() }))
       .optional()
       .describe("External references (e.g. GH issues, PRs, docs)"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ phase_id, name, description, acceptance_criteria, references, plan_id }) => {
     try {
@@ -240,7 +245,7 @@ server.tool(
         }),
       )
       .describe("Array of steps to create"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ phase_id, steps, plan_id }) => {
     try {
@@ -265,7 +270,7 @@ server.tool(
     notes: z.string().optional().describe("Implementation notes or context"),
     acceptance_criteria: z.array(z.string()).optional().describe("Updated acceptance criteria"),
     references: z.array(z.object({ label: z.string(), url: z.string() })).optional().describe("External references"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ step_id, name, description, status, notes, acceptance_criteria, references, plan_id }) => {
     try {
@@ -288,7 +293,7 @@ server.tool(
   "Remove a step. Step is found by ID across all phases.",
   {
     step_id: z.string().describe("Step ID to remove"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ step_id, plan_id }) => {
     try {
@@ -304,7 +309,7 @@ server.tool(
   "Get detailed info for a single step including its plan and phase context.",
   {
     step_id: z.string().describe("Step ID"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ step_id, plan_id }) => {
     try {
@@ -321,7 +326,7 @@ server.tool(
   {
     step_id: z.string().describe("Step ID to complete"),
     notes: z.string().optional().describe("Completion notes"),
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ step_id, notes, plan_id }) => {
     try {
@@ -340,7 +345,7 @@ server.tool(
   "next_step",
   "Get the next actionable step. Prioritises in_progress steps, then first pending. Uses current plan if no plan_id specified.",
   {
-    plan_id: PLAN_ID_SCHEMA.optional().describe("Plan ID (defaults to current plan)"),
+    plan_id: PLAN_ID_SCHEMA.optional().describe(DESC_PLAN_ID),
   },
   async ({ plan_id }) => {
     try {

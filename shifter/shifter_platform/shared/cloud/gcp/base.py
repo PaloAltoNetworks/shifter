@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import re
+from hashlib import sha256
 from typing import Any
 
 from django.conf import settings
@@ -85,6 +86,13 @@ def build_job_generate_name(container_name: str, command: list[str]) -> str:
     prefix = "-".join(part for part in name_parts if part).strip("-") or "task"
     prefix = prefix[:52].rstrip("-") or "task"
     return f"{prefix}-"
+
+
+def build_idempotent_job_name(container_name: str, task_identity: str) -> str:
+    """Build the stable Job name used for create-or-observe task dispatch."""
+    prefix = sanitize_k8s_name(container_name)[:40].rstrip("-") or "task"
+    digest = sha256(task_identity.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}-{digest}"
 
 
 def parse_job_task_id(task_id: str, default_namespace: str) -> tuple[str, str]:

@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the Shifter runner host-health monitor on a fixed interval (#292)
+
+[Timer]
+# Give the host time to finish boot/runner install before the first probe.
+OnBootSec=120s
+# Publish the liveness heartbeat once a minute so a stopped service (or a hung
+# host that stops publishing) is caught well within the 10-minute acceptance
+# window for the alarm's two 60s evaluation periods.
+OnUnitActiveSec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

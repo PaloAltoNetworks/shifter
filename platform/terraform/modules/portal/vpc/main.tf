@@ -5,7 +5,7 @@
 # - Public subnets (for ALB, NAT Gateway)
 # - Private subnets (for RDS, ECS tasks)
 # - Internet Gateway
-# - NAT Gateway (single, cost-optimized)
+# - NAT Gateway (per-AZ when portal inspection is on, else single cost-optimized)
 # - Route tables
 
 data "aws_availability_zones" "available" {
@@ -14,6 +14,19 @@ data "aws_availability_zones" "available" {
 
 locals {
   azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
+
+  # NAT gateway count. When portal inspection is enabled each AZ's private
+  # tier egresses through its OWN-AZ firewall endpoint (inspection.tf), and an
+  # AWS Network Firewall endpoint is AZ-bound: it cannot forward inspected
+  # traffic to a NAT gateway in another AZ, so a single shared NAT black-holes
+  # every AZ except the NAT's own (issue: proof us-east-2b login 504s). A NAT
+  # per AZ (each firewall subnet -> same-AZ NAT) is therefore required whenever
+  # inspection is on. With inspection off, private subnets route straight to the
+  # NAT and cross-AZ NAT routing works normally, so a single NAT stays the
+  # cost-optimized default.
+  nat_gateway_count = var.enable_portal_inspection ? var.az_count : 1
+
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
 
   common_tags = merge(var.tags, {
     Module = "vpc"
@@ -82,15 +95,19 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_route_table" "public" {
+  count = var.az_count
+
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-public-rt"
+    Name = "${var.name_prefix}-public-rt-${local.azs[count.index]}"
   })
 }
 
 resource "aws_route" "public_internet" {
-  route_table_id         = aws_route_table.public.id
+  count = var.az_count
+
+  route_table_id         = aws_route_table.public[count.index].id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.this.id
 }
@@ -99,33 +116,35 @@ resource "aws_route_table_association" "public" {
   count = var.az_count
 
   subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
+  route_table_id = aws_route_table.public[count.index].id
 }
 
 # ------------------------------------------------------------------------------
-# NAT Gateway (single for cost optimization, can be per-AZ for HA)
+# NAT Gateway (per-AZ when inspection is on, else single cost-optimized)
 # ------------------------------------------------------------------------------
+# See local.nat_gateway_count: inspection forces one NAT per AZ so each AZ's
+# firewall endpoint egresses via a same-AZ NAT.
 
 # checkov:skip=CKV2_AWS_19:EIP attached to NAT Gateway, not EC2 - see #222
 resource "aws_eip" "nat" {
-  count  = var.enable_nat_gateway ? 1 : 0
+  count  = var.enable_nat_gateway ? local.nat_gateway_count : 0
   domain = "vpc"
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-nat-eip"
+    Name = "${var.name_prefix}-nat-eip-${local.azs[count.index]}"
   })
 
   depends_on = [aws_internet_gateway.this]
 }
 
 resource "aws_nat_gateway" "this" {
-  count = var.enable_nat_gateway ? 1 : 0
+  count = var.enable_nat_gateway ? local.nat_gateway_count : 0
 
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public[0].id
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-nat"
+    Name = "${var.name_prefix}-nat-${local.azs[count.index]}"
   })
 
   depends_on = [aws_internet_gateway.this]
@@ -149,17 +168,27 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_route_table" "private" {
+  count = var.az_count
+
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-private-rt"
+    Name = "${var.name_prefix}-private-rt-${local.azs[count.index]}"
   })
 }
 
 resource "aws_route" "private_nat" {
-  count = var.enable_nat_gateway ? 1 : 0
+  # When portal inspection is enabled, each private route table's default
+  # route is owned by inspection.tf (private 0/0 -> same-AZ firewall
+  # endpoint -> NAT) so private egress traverses the same firewall
+  # endpoint as the NAT return path. Keeping a direct private->NAT
+  # default here would make the inspection path asymmetric: NAT return
+  # packets would enter the firewall via the public route table while
+  # the initiating leg bypassed it, breaking stateful inspection for
+  # unrelated private egress flows.
+  count = var.enable_nat_gateway && !var.enable_portal_inspection ? var.az_count : 0
 
-  route_table_id         = aws_route_table.private.id
+  route_table_id         = aws_route_table.private[count.index].id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.this[0].id
 }
@@ -168,7 +197,57 @@ resource "aws_route_table_association" "private" {
   count = var.az_count
 
   subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
+  route_table_id = aws_route_table.private[count.index].id
+}
+
+# ------------------------------------------------------------------------------
+# Public-workload subnets (for CTFd and future standalone public EC2)
+# ------------------------------------------------------------------------------
+# A public tier kept SEPARATE from the ALB ingress (`public`) tier so the
+# portal target-service security groups (Django:8000, Guacamole client:8080)
+# can admit an ALB-only source CIDR without also admitting these workloads
+# (#911 NET-2 / #933). Standalone internet-facing instances (CTFd has its own
+# EIP, public IP, and ACME/HTTPS) live here; they reach the internet directly
+# via the IGW. They are NOT routed through the portal inspection boundary —
+# that boundary inspects the ALB<->private service path, and segmentation from
+# these workloads is enforced by the target-service SGs, not by routing.
+resource "aws_subnet" "public_workload" {
+  count = var.az_count
+
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index + 2 * var.az_count)
+  availability_zone       = local.azs[count.index]
+  map_public_ip_on_launch = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-public-workload-${local.azs[count.index]}"
+    Tier = "public-workload"
+  })
+}
+
+resource "aws_route_table" "public_workload" {
+  count = var.az_count
+
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-public-workload-rt-${local.azs[count.index]}"
+  })
+}
+
+resource "aws_route" "public_workload_internet" {
+  count = var.az_count
+
+  route_table_id         = aws_route_table.public_workload[count.index].id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.this.id
+}
+
+resource "aws_route_table_association" "public_workload" {
+  count = var.az_count
+
+  subnet_id      = aws_subnet.public_workload[count.index].id
+  route_table_id = aws_route_table.public_workload[count.index].id
 }
 
 # ------------------------------------------------------------------------------
@@ -180,6 +259,7 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 
   name              = "/vpc/${var.name_prefix}-flow-logs"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-flow-logs"
@@ -189,7 +269,9 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 resource "aws_iam_role" "flow_logs" {
   count = var.enable_flow_logs ? 1 : 0
 
-  name = "${var.name_prefix}-flow-logs-role"
+  name = "${local.iam_name_prefix}-flow-logs-role"
+
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

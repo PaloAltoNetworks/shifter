@@ -11,16 +11,24 @@ serviceAccounts:
   workers:
     name: workers
     annotations: {}
+  ctfScheduler:
+    name: ctf-scheduler
+    annotations: {}
+  provisionerLauncher:
+    name: provisioner-launcher
+    annotations: {}
   provisioner:
     name: provisioner
     annotations: {}
 
 runtimeEnv: {}
 
+# The guacamole-runtime Kubernetes Secret is created out of band by the deploy
+# bootstrap (kubectl apply from the provider secret store), not by this chart.
+# The chart references it by name only; Guacamole DB and JSON-auth values must
+# never be placed in chart values or Helm release history. See issue #1180.
 guacamoleRuntimeSecret:
-  enabled: true
   name: guacamole-runtime
-  stringData: {}
 
 images:
   portal:
@@ -93,6 +101,61 @@ workers:
         cpu: 500m
         memory: 512Mi
         ephemeral-storage: 256Mi
+  guacamolePrune:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+        ephemeral-storage: 256Mi
+  acesOperationRecordPrune:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+        ephemeral-storage: 256Mi
+  outboxDrainer:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+  provisionerLauncher:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+  reconciler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
 
 guacd:
   replicas: 1
@@ -105,7 +168,6 @@ guacd:
       cpu: 500m
       memory: 512Mi
       ephemeral-storage: 256Mi
-
 guacamoleClient:
   replicas: 1
   resources:
@@ -133,6 +195,12 @@ security:
 
 tmpVolume:
   sizeLimit: 256Mi
+
+# Writable media volume for the portal (Django MEDIA_ROOT=/app/media) under
+# readOnlyRootFilesystem. FileSystemStorage is per-pod; this satisfies the app's
+# storage backend and the storage health check.
+mediaVolume:
+  sizeLimit: 1Gi
 
 services:
   portal:
@@ -167,6 +235,27 @@ networkPolicy:
     - 199.36.153.4/30 # NOSONAR - restricted.googleapis.com VIP range.
     - 199.36.153.8/30 # NOSONAR - private.googleapis.com VIP range.
   privateServiceCidrs: []
+  # GKE service CIDR containing kubernetes.default.svc. Scoped only to the
+  # dedicated launcher pod so other platform workloads remain API-tokenless.
+  kubernetesApiCidrs: []
+  # CIDR(s) covering the GDC range cluster's control-plane endpoint (the
+  # internal TCP load balancer fronting the apiserver on the peered range
+  # network). Empty on AWS; set by the GCP bootstrap so range-provisioning
+  # Jobs can reach the range cluster apiserver. See deploy.py gdc-bootstrap.
+  rangeClusterApiCidrs: []
+  rangeClusterApiPort: 6444
+  # CIDR(s) covering the GCP range network's VM private IPs. Scoped to the
+  # portal (browser SSH terminal) and guacd (Guacamole SSH/RDP) workloads so
+  # they can dial range guests for participant/operator access. Empty on AWS
+  # (that path authorizes guacd egress via terraform security groups); set by
+  # the GCP bootstrap from the range network CIDR so GCP user range access
+  # reaches parity with AWS. The AWS analogue is the guacd egress rule in
+  # platform/terraform/modules/guacamole/security.tf.
+  rangeAccessCidrs: []
+  # Ports the portal/guacd dial for participant access (SSH 22, RDP 3389).
+  rangeAccessPorts:
+    - 22
+    - 3389
 
 ingress:
   enabled: true

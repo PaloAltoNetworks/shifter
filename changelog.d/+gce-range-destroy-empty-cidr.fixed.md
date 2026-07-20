@@ -1,0 +1,1 @@
+Fixed GCE range auto-cleanup failing when a provision errored before subnet-CIDR allocation. The destroy plan (`require_images=False`) now tolerates a subnet with an empty CIDR (subnets are deleted by resource name), instead of raising and leaving auto-cleanup unable to run.

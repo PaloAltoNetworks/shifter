@@ -43,9 +43,29 @@ build {
   provisioner "shell" {
     scripts = [
       "scripts/ubuntu/base.sh",
+      "scripts/aws/linux-resolved-dns.sh",
       "scripts/ubuntu/services.sh",
       "scripts/ubuntu/tools.sh",
-      "scripts/ubuntu/desktop.sh",
+    ]
+    execute_command = "sudo -S bash -c '{{ .Vars }} {{ .Path }}'"
+  }
+
+  provisioner "shell" {
+    script           = "scripts/ubuntu/desktop.sh"
+    valid_exit_codes = [0, 123]
+    execute_command  = "sudo -S bash -c '{{ .Vars }} {{ .Path }}'"
+  }
+
+  provisioner "shell" {
+    inline = [
+      "test -f /var/tmp/shifter-desktop-ready",
+    ]
+    execute_command = "sudo -S bash -c '{{ .Vars }} {{ .Path }}'"
+  }
+
+  provisioner "shell" {
+    scripts = [
+      "scripts/common/claude-autostart-install.sh",
       "scripts/ubuntu/claude-code.sh",
       "scripts/common/cleanup.sh"
     ]

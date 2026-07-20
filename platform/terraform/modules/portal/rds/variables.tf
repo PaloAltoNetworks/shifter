@@ -5,6 +5,12 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "iam_name_prefix" {
+  description = "Prefix for IAM role and instance profile names (defaults to name_prefix)"
+  type        = string
+  default     = null
+}
+
 variable "vpc_id" {
   description = "ID of the VPC"
   type        = string
@@ -16,8 +22,15 @@ variable "subnet_ids" {
 }
 
 variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access the database"
+  description = "CIDR blocks allowed to access the database. Prefer allowed_security_group_ids; CIDRs are kept for callers that genuinely cannot pass an SG."
   type        = list(string)
+  default     = []
+}
+
+variable "allowed_security_group_ids" {
+  description = "Security group IDs allowed to access the database. Preferred over allowed_cidr_blocks for microsegmentation. At least one of allowed_cidr_blocks or allowed_security_group_ids must be non-empty (enforced by a precondition on the RDS instance)."
+  type        = list(string)
+  default     = []
 }
 
 variable "db_name" {
@@ -33,6 +46,16 @@ variable "db_username" {
 variable "engine_version" {
   description = "PostgreSQL engine version"
   type        = string
+}
+
+variable "ca_cert_identifier" {
+  description = "RDS CA certificate identifier for the DB server certificate."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.ca_cert_identifier)) > 0
+    error_message = "ca_cert_identifier must be a non-empty RDS CA certificate identifier."
+  }
 }
 
 variable "instance_class" {
@@ -103,4 +126,9 @@ variable "enable_log_exports" {
 variable "log_retention_days" {
   description = "CloudWatch log retention in days for RDS logs"
   type        = number
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary ARN required on CI-created shifter-* roles"
+  type        = string
 }

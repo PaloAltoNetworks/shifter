@@ -106,6 +106,21 @@ resource "aws_vpc_endpoint" "ec2messages" {
   })
 }
 
+# The request-owned VPN gateway reads only its generation-specific server
+# identity through this private endpoint; it has no general internet egress.
+resource "aws_vpc_endpoint" "secretsmanager" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.secretsmanager"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.ssm_endpoints.id]
+  security_group_ids  = [aws_security_group.ssm_endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-secretsmanager-endpoint"
+  })
+}
+
 # ------------------------------------------------------------------------------
 # Bedrock VPC Endpoints (for Claude Code)
 # ------------------------------------------------------------------------------

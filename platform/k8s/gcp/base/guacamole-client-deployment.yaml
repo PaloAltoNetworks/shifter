@@ -39,7 +39,17 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # The upstream guacamole start.sh rebuilds GUACAMOLE_HOME ($HOME/.guacamole)
+            # on every boot (rm -Rf + mkdir), which fails under readOnlyRootFilesystem.
+            # Back the whole home with an ephemeral writable volume so it can rebuild.
+            - name: guac-home
+              mountPath: /home/guacamole
           env:
+            # start.sh copies from the initial GUACAMOLE_HOME as a template; the base
+            # image sets it to $HOME/.guacamole, which makes the copy self-referential
+            # and busy-fails. Empty it so start.sh just builds a fresh home from env.
+            - name: GUACAMOLE_HOME
+              value: ""
             - name: GUACD_HOSTNAME
               value: guacd
             - name: GUACD_PORT
@@ -96,4 +106,6 @@ spec:
               memory: 1Gi
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: guac-home
           emptyDir: {}

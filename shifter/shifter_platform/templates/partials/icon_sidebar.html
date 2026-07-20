@@ -6,7 +6,7 @@
      id="leftNav"
      data-active-submenu="{% if active_nav == 'agents' or active_nav == 'ngfw' %}
                               assets
-                          {% elif active_nav == 'credentials' or active_nav == 'files' %}
+                          {% elif active_nav == 'credentials' %}
                               assets
                           {% endif %}">
     <div class="left-nav-body">
@@ -130,14 +130,14 @@
                 <div class="tw-mx-3 tw-mb-2
                             {% if active_nav == 'agents' or active_nav == 'ngfw' %}
                                 active-top-item
-                            {% elif active_nav == 'credentials' or active_nav == 'files' %}
+                            {% elif active_nav == 'credentials' %}
                                 active-top-item
                             {% endif %}">
                     <button type="button"
                             class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger
                                    {% if active_nav == 'agents' or active_nav == 'ngfw' %}
                                        active-link
-                                   {% elif active_nav == 'credentials' or active_nav == 'files' %}
+                                   {% elif active_nav == 'credentials' %}
                                        active-link
                                    {% endif %}"
                             data-submenu="assets"
@@ -221,7 +221,7 @@
                 </div>
             {% endif %}
             {# Risk Register - Staff only #}
-            {% if user.is_staff %}
+            {% if can_access_risk_register %}
                 <div class="tw-mx-3 tw-mb-2
                             {% if active_nav == 'risks' %}
                                 active-top-item
@@ -318,35 +318,6 @@
 </span>
                     </a>
                 </div>
-                {# Experiments - Staff or Threat Research group #}
-                <div class="tw-mx-3 tw-mb-2
-                            {% if active_nav == 'experiments' %}
-                                active-top-item
-                            {% endif %}">
-                    <a href="{% url 'experiments:experiment_list' %}"
-                       class="nav-menu-item nav-menu-item-level-0
-                              {% if active_nav == 'experiments' %}
-                                  active-link
-                              {% endif %}">
-                        <span class="nav-icon">
-                            <svg width="24"
-                                 height="24"
-                                 viewBox="0 0 24 24"
-                                 fill="none"
-                                 xmlns="http://www.w3.org/2000/svg">
-                                <path fill="currentColor" d="M13 2V5H11V2H13ZM15 7V14.07C16.77 14.57 18 16.13 18 18C18 20.21 16.21 22 14
-                                    22H10C7.79 22 6 20.21 6 18C6 16.13 7.23 14.57 9 14.07V7H15ZM11 9V15.17L10.17
-                                    15.58C9.18 16.08 8 16.92 8 18C8 19.1 8.9 20 10 20H14C15.1 20 16 19.1 16 18C16
-                                    16.92 14.82 16.08 13.83 15.58L13 15.17V9H11Z" />
-                            </svg>
-                        </span>
-<span class="hide-when-minimized hide-when-submenu nav-menu-item-content">
-    {% blocktrans trimmed %}
-        Experiments
-    {% endblocktrans %}
-</span>
-                    </a>
-                </div>
             {% endif %}
             {# Documentation (hidden for CTF-only participants) #}
             {% if not is_ctf_participant_only %}
@@ -354,7 +325,7 @@
                             {% if active_nav == 'docs' %}
                                 active-top-item
                             {% endif %}">
-                    <a href="{% url 'documentation:index' %}"
+                    <a href="{{ DOCS_SITE_URL }}" target="_blank" rel="noopener"
                        class="nav-menu-item nav-menu-item-level-0
                               {% if active_nav == 'docs' %}
                                   active-link
@@ -383,7 +354,7 @@
             {% if not is_ctf_participant_only %}
                 {# Settings #}
                 <div>
-                    <a href="#" class="nav-menu-item nav-menu-item-level-0">
+                    <a href="{% url 'mission_control:settings' %}" class="nav-menu-item nav-menu-item-level-0">
                         <span class="nav-icon">
                             <svg width="24"
                                  height="24"
@@ -428,7 +399,7 @@
                 </div>
                 {# Help #}
                 <div>
-                    <a href="#" class="nav-menu-item nav-menu-item-level-0">
+                    <a href="{% url 'mission_control:help' %}" class="nav-menu-item nav-menu-item-level-0">
                         <span class="nav-icon">
                             <svg width="24"
                                  height="24"
@@ -484,7 +455,7 @@
                     </div>
                 </button>
                 <div class="nav-user-menu" id="userMenu">
-                    <form method="post" action="{% url 'logout' %}" style="margin:0">
+                    <form method="post" action="{% url 'logout' %}" class="m-0">
                         {% csrf_token %}
                         <button type="submit" class="nav-user-menu-item">
                             <svg width="20"
@@ -524,13 +495,6 @@
                       active-link
                   {% endif %}">
             {% trans "Credentials" %}
-        </a>
-        <a href="{% url 'mission_control:files' %}"
-           class="nav-menu-item nav-menu-item-level-1
-                  {% if active_nav == 'files' %}
-                      active-link
-                  {% endif %}">
-            {% trans "Files" %}
         </a>
     </template>
 </nav>

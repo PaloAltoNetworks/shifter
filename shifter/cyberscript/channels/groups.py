@@ -6,6 +6,8 @@ WebSocket layer (Mission Control browser connections).
 
 from __future__ import annotations
 
+import hashlib
+
 
 def range_event_group(request_id: str | int) -> str:
     """Get the channel group name for a specific range.
@@ -62,3 +64,15 @@ def ngfw_event_group(app_id: str) -> str:
         'ngfw_status_abc-123-def'
     """
     return f"ngfw_status_{app_id}"
+
+
+def notification_user_topic_group(user_id: int, topic: str) -> str:
+    """Get the channel group name for one user's logical notification topic.
+
+    Logical notification topics are user-facing contracts and may contain
+    separators such as ``:``. Channels group names are transport details with
+    stricter character and length limits, so this helper keeps the raw topic out
+    of the group name and uses a stable digest instead.
+    """
+    digest = hashlib.sha256(str(topic).encode("utf-8")).hexdigest()[:32]
+    return f"notify_u{int(user_id)}_{digest}"

@@ -1,0 +1,33 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <link rel="icon" href="data:,">
+        <style>
+            .email-body {
+                font-family: Arial, sans-serif;
+                max-width: 600px;
+                margin: 0 auto;
+            }
+        </style>
+        <title>{% trans "Your range is ready" %}</title>
+    </head>
+    <body class="email-body">
+        <h2>
+            {% blocktrans with v1=event.name %}{{ v1 }}: your range is ready{% endblocktrans %}
+        </h2>
+        <p>
+            {% blocktrans with v1=participant.name %}Hi {{ v1 }},{% endblocktrans %}
+        </p>
+        <p>
+            {% trans "Your range is provisioned and ready. Log in and open the Range page to connect:" %}
+            <a href="{{ access_url }}">{{ access_url }}</a>
+        </p>
+        <p>
+            <em>{% blocktrans with v1=event.name %}— {{ v1 }} Organizers{% endblocktrans %}</em>
+        </p>
+    </body>
+</html>

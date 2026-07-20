@@ -4,7 +4,6 @@ All tests use in-memory model construction and mocked ORM operations.
 No database access required.
 """
 
-from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -53,6 +52,24 @@ def _make_subnet(**overrides):
         subnet.__dict__[key] = value
 
     return subnet
+
+
+def _make_real_subnet(status=ResourceStatus.PENDING.value):
+    """Create a persisted Subnet (with its owning Request) and valid SubnetSpec data."""
+    from django.contrib.auth import get_user_model
+
+    from cms.models import Request, Subnet
+    from shared.enums import RequestType
+
+    uid = uuid4().hex[:8]
+    user = get_user_model().objects.create_user(username=f"subnet-{uid}@e.com", email=f"subnet-{uid}@e.com")
+    request = Request.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
+    return Subnet.objects.create(
+        request=request,
+        name="test_network",
+        data={"instances": [make_instance("server1"), make_instance("server2")], "connected_to": []},
+        status=status,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -120,31 +137,27 @@ class TestSubnetEntityBase:
 
         assert subnet.is_deleted is True
 
-    @patch("cms.models.Subnet.validate_data")
-    def test_terminal_status_auto_sets_deleted_at(self, mock_validate):
+    @pytest.mark.django_db
+    def test_terminal_status_auto_sets_deleted_at(self):
         """Terminal status automatically sets deleted_at via EntityBase.save()."""
-        subnet = _make_subnet(status=ResourceStatus.PENDING.value, deleted_at=None)
+        subnet = _make_real_subnet(status=ResourceStatus.PENDING.value)
 
-        # Transition to terminal status
         subnet.status = ResourceStatus.DESTROYED.value
+        subnet.save()
 
-        # Call save with the real EntityBase logic but mock the DB write
-        with patch("django.db.models.Model.save"):
-            subnet.save()
-
+        subnet.refresh_from_db()
         assert subnet.deleted_at is not None
         assert subnet.is_deleted is True
 
-    @patch("cms.models.Subnet.validate_data")
-    def test_failed_status_auto_sets_deleted_at(self, mock_validate):
+    @pytest.mark.django_db
+    def test_failed_status_auto_sets_deleted_at(self):
         """FAILED status automatically sets deleted_at."""
-        subnet = _make_subnet(status=ResourceStatus.PENDING.value, deleted_at=None)
+        subnet = _make_real_subnet(status=ResourceStatus.PENDING.value)
 
         subnet.status = ResourceStatus.FAILED.value
+        subnet.save()
 
-        with patch("django.db.models.Model.save"):
-            subnet.save()
-
+        subnet.refresh_from_db()
         assert subnet.deleted_at is not None
 
 

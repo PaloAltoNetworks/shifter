@@ -197,7 +197,7 @@ Then add the stack-native checks for the touched surfaces:
 
 - `cd shifter/shifter_platform && uv run ruff check . && uv run ruff format --check .`
 - `cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter` when Python imports change.
-- `cd platform/terraform && tflint --recursive --config ../../.tflint.hcl` when Terraform changes.
+- `TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"` when Terraform changes.
 - `actionlint` when workflows change.
 - `kube-linter lint --config .kube-linter.yaml platform/k8s/` and
   `kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 platform/k8s/gcp/base/*.yaml`

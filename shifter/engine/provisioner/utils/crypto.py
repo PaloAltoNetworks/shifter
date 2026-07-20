@@ -5,7 +5,7 @@ import secrets
 import string
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def derive_ssh_public_key(private_key_pem: str) -> str:
             .decode("utf-8")
         )
     except Exception as e:
-        logger.error("Failed to derive public key: %s", e)
+        logger.exception("Failed to derive public key: %s", e)
         raise KeyGenerationError(f"Failed to derive SSH public key: {e}") from e
 
     if not public_key_openssh.startswith("ssh-rsa "):
@@ -106,7 +106,7 @@ def generate_ssh_keypair() -> tuple[str, str]:
             key_size=4096,
         )
     except Exception as e:
-        logger.error("Failed to generate RSA private key: %s", e)
+        logger.exception("Failed to generate RSA private key: %s", e)
         raise KeyGenerationError(f"Failed to generate RSA private key: {e}") from e
 
     try:
@@ -116,13 +116,13 @@ def generate_ssh_keypair() -> tuple[str, str]:
             encryption_algorithm=serialization.NoEncryption(),
         ).decode("utf-8")
     except Exception as e:
-        logger.error("Failed to serialize private key: %s", e)
+        logger.exception("Failed to serialize private key: %s", e)
         raise KeyGenerationError(f"Failed to serialize private key: {e}") from e
 
     try:
         public_key_openssh = derive_ssh_public_key(private_key_pem)
     except Exception as e:
-        logger.error("Failed to serialize public key: %s", e)
+        logger.exception("Failed to serialize public key: %s", e)
         raise KeyGenerationError(f"Failed to serialize public key: {e}") from e
 
     # Validate generated keys have expected format
@@ -136,3 +136,56 @@ def generate_ssh_keypair() -> tuple[str, str]:
 
     logger.debug("Successfully generated SSH key pair")
     return private_key_pem, public_key_openssh
+
+
+def generate_ssh_host_keypair() -> tuple[str, str]:
+    """Generate an Ed25519 SSH **host** key pair for a GDC guest VM.
+
+    Unlike :func:`generate_ssh_keypair` (the per-instance *user* key used for
+    authentication), this produces the guest's *host* identity. The provisioner
+    injects the private half into the guest via cloud-init ``ssh_keys:`` and
+    seeds the setup-runner's ``known_hosts`` with the public half, so the guest
+    presents a host key the provisioner already knows over a trusted side
+    channel. This lets ``StrictHostKeyChecking=yes`` validate the connection
+    without a trust-on-first-use window (the pattern Google's guest-attributes
+    host-key flow and GitHub's published-host-key guidance both prescribe).
+
+    Ed25519 is used because the guest's default negotiated host key type is
+    ED25519 and the runner pins ``HostKeyAlgorithms=ssh-ed25519``.
+
+    Returns:
+        tuple[str, str]: (private_key_openssh, public_key_openssh) where:
+            - private_key_openssh: OpenSSH-format private key
+              (``-----BEGIN OPENSSH PRIVATE KEY-----``), written verbatim to the
+              guest's ``/etc/ssh/ssh_host_ed25519_key`` by cloud-init.
+            - public_key_openssh: OpenSSH-format public key
+              (``ssh-ed25519 AAAA...``) for the runner's ``known_hosts``.
+
+    Raises:
+        KeyGenerationError: If key generation or serialization fails.
+    """
+    try:
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        private_key_openssh = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.OpenSSH,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+        public_key_openssh = (
+            private_key.public_key()
+            .public_bytes(
+                encoding=serialization.Encoding.OpenSSH,
+                format=serialization.PublicFormat.OpenSSH,
+            )
+            .decode("utf-8")
+        )
+    except Exception as e:
+        logger.exception("Failed to generate Ed25519 host key pair: %s", e)
+        raise KeyGenerationError(f"Failed to generate Ed25519 host key pair: {e}") from e
+
+    if not private_key_openssh.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"):
+        raise KeyGenerationError("Generated host private key has unexpected format")
+    if not public_key_openssh.startswith("ssh-ed25519 "):
+        raise KeyGenerationError("Generated host public key has unexpected format")
+
+    return private_key_openssh, public_key_openssh

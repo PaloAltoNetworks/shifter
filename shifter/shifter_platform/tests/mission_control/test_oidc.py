@@ -4,9 +4,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import SuspiciousOperation
 from django.test import override_settings
+from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
-from config.oidc import OIDCAuthenticationBackend, ShifterOIDCBackend, generate_username, provider_logout_url
+from config.oidc import ShifterOIDCBackend, provider_logout_url
+from config.username import generate_username
+from management.services import get_user_profile
+from risk_register.models import AuditLog
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+)
+from shared.auth import CTF_ORGANIZER_GROUP
 
 User = get_user_model()
 
@@ -284,146 +295,460 @@ class TestProviderLogoutUrl:
         assert provider_logout_url(request) == "/"
 
 
+TEST_ISSUER = "https://issuer.example.test"
+
+
+def _stashed_backend(issuer=TEST_ISSUER, subject="sub-1"):
+    """A ShifterOIDCBackend with (issuer, subject) pre-stashed, as verify_token
+    would have set them from a real callback (issue #1521)."""
+    backend = ShifterOIDCBackend()
+    backend._verified_issuer = issuer
+    backend._verified_subject = subject
+    return backend
+
+
+@pytest.mark.django_db
 class TestShifterOIDCBackendBootstrapAdmin:
-    """Tests for OIDC bootstrap staff/superuser elevation."""
+    """OIDC bootstrap staff/superuser elevation, driven through the real backend.
+
+    Drives the real ``create_user`` / ``update_user`` (the mozilla base really
+    creates/updates the Django user from claims), the real
+    ``apply_bootstrap_admin_flags``, the real ``bind_provider_identity``
+    management service, and the real ``audit_auth_event`` — asserting
+    persisted state (flags, profile, audit row) instead of patching them.
+    ``_verified_issuer`` / ``_verified_subject`` are pre-stashed on the
+    backend the way ``verify_token`` would set them from a real callback
+    (issue #1521); ``verify_token`` itself is covered separately in
+    ``TestShifterOIDCBackendVerifyToken``.
+    """
 
     @override_settings(
         PLATFORM_BOOTSTRAP_STAFF_EMAILS=["admin@example.com"],
         PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=["admin@example.com"],
     )
-    def test_create_user_applies_bootstrap_admin_flags(self, db):
+    def test_create_user_applies_bootstrap_admin_flags(self):
         """OIDC first login elevates configured bootstrap admin emails."""
-        backend = ShifterOIDCBackend()
-        user = User.objects.create_user(
-            username="admin@example.com",
-            email="admin@example.com",
-        )
-        claims = {"email": "admin@example.com", "sub": "cognito-sub-123"}
+        backend = _stashed_backend(subject="cognito-sub-123")
+        claims = {"email": "admin@example.com", "sub": "cognito-sub-123", "email_verified": True}
 
-        with (
-            patch.object(OIDCAuthenticationBackend, "create_user", return_value=user),
-            patch("config.oidc.update_cognito_sub"),
-            patch("config.oidc.audit_auth_event"),
-        ):
-            created_user = backend.create_user(claims)
+        created_user = backend.create_user(claims)
 
-        assert created_user == user
-        user.refresh_from_db()
-        assert user.is_staff is True
-        assert user.is_superuser is True
+        created_user.refresh_from_db()
+        assert created_user.email == "admin@example.com"
+        assert created_user.is_staff is True
+        assert created_user.is_superuser is True
+        # (issuer, subject) bound via the real management service.
+        profile = get_user_profile(created_user)
+        assert profile.cognito_sub == "cognito-sub-123"
+        assert profile.issuer == TEST_ISSUER
+        # New-user audit row written via the real audit service.
+        assert AuditLog.objects.filter(
+            entity_type=AuditEntityType.USER, action=AuditAction.CREATE, actor_type=AuditActorType.COGNITO
+        ).exists()
+        # Strict bind/elevate security-mutation audit row (issue #1521).
+        assert AuditLog.objects.filter(
+            entity_type=AuditEntityType.USER, action=AuditAction.ROLE_SYNC, entity_id=created_user.id
+        ).exists()
 
     @override_settings(
         PLATFORM_BOOTSTRAP_STAFF_EMAILS=["ops@example.com"],
         PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=[],
     )
-    def test_update_user_applies_bootstrap_staff_flags(self, db):
+    def test_update_user_applies_bootstrap_staff_flags(self):
         """Returning OIDC users are elevated when bootstrap settings change."""
-        backend = ShifterOIDCBackend()
-        user = User.objects.create_user(
-            username="ops@example.com",
-            email="ops@example.com",
-        )
-        claims = {"email": "ops@example.com", "sub": "cognito-sub-456"}
+        backend = _stashed_backend(subject="cognito-sub-456")
+        user = User.objects.create_user(username="ops@example.com", email="ops@example.com")
+        claims = {"email": "ops@example.com", "sub": "cognito-sub-456", "email_verified": True}
 
-        with (
-            patch.object(OIDCAuthenticationBackend, "update_user", return_value=user),
-            patch("config.oidc.update_cognito_sub"),
-        ):
-            updated_user = backend.update_user(user, claims)
+        updated_user = backend.update_user(user, claims)
 
-        assert updated_user == user
+        updated_user.refresh_from_db()
+        assert updated_user.is_staff is True
+        assert updated_user.is_superuser is False
+        profile = get_user_profile(updated_user)
+        assert profile.cognito_sub == "cognito-sub-456"
+        assert profile.issuer == TEST_ISSUER
+
+    def test_create_user_rejects_missing_email_verified(self):
+        """No write survives when email_verified is absent (issue #1521)."""
+        backend = _stashed_backend(subject="cognito-sub-noverify")
+        claims = {"email": "noverify@example.com", "sub": "cognito-sub-noverify"}
+
+        with pytest.raises(SuspiciousOperation):
+            backend.create_user(claims)
+
+        assert not User.objects.filter(email="noverify@example.com").exists()
+
+    @pytest.mark.parametrize(
+        "email_verified",
+        [False, "false", 0, 1],
+        ids=["false", "str-false", "int-0", "int-1"],
+    )
+    def test_create_user_rejects_non_literal_true_email_verified(self, email_verified):
+        backend = _stashed_backend(subject="cognito-sub-malformed")
+        claims = {"email": "malformed@example.com", "sub": "cognito-sub-malformed", "email_verified": email_verified}
+
+        with pytest.raises(SuspiciousOperation):
+            backend.create_user(claims)
+
+        assert not User.objects.filter(email="malformed@example.com").exists()
+
+    def test_create_user_accepts_cognito_string_true_email_verified(self):
+        """Cognito UserInfo returns email_verified as the string 'true'; the
+        create/bind path must accept it (issue: proof login rejected)."""
+        backend = _stashed_backend(subject="cognito-sub-strtrue")
+        claims = {"email": "strtrue@example.com", "sub": "cognito-sub-strtrue", "email_verified": "true"}
+
+        created = backend.create_user(claims)
+
+        created.refresh_from_db()
+        assert created.email == "strtrue@example.com"
+        assert User.objects.filter(email="strtrue@example.com").exists()
+
+
+@pytest.mark.django_db
+class TestShifterOIDCBackendOrganizerAuthority:
+    """#1516 end-to-end through the real OIDC backend.
+
+    Self-service ``custom:user_type`` can never grant ``CTF Organizer``; only an
+    allowlisted, administrator-controlled provider group (``cognito:groups``)
+    does. Drives the real ``create_user`` pipeline (bootstrap flags, user-type
+    sync, cognito-group capture, and the provider-authority reconcile).
+    """
+
+    _ORG_PROVIDER_GROUP = "shifter-ctf-organizers"
+
+    def _organizer_groups(self, user):
+        return set(user.groups.values_list("name", flat=True))
+
+    def test_self_service_user_type_organizer_claim_grants_no_organizer(self):
+        backend = _stashed_backend(subject="sub-attacker")
+        # A participant self-asserts the organizer user_type; no provider group,
+        # allowlist unset -> the self-service path must not reach organizer.
+        claims = {
+            "email": "attacker@example.com",
+            "sub": "sub-attacker",
+            "email_verified": True,
+            "custom:user_type": "ctf_organizer",
+        }
+        user = backend.create_user(claims)
         user.refresh_from_db()
-        assert user.is_staff is True
+        assert CTF_ORGANIZER_GROUP not in self._organizer_groups(user)
+        assert user.is_staff is False
         assert user.is_superuser is False
 
+    @override_settings(CTF_ORGANIZER_PROVIDER_GROUPS=[_ORG_PROVIDER_GROUP])
+    def test_allowlisted_provider_group_grants_organizer(self):
+        backend = _stashed_backend(subject="sub-lead")
+        claims = {
+            "email": "lead@example.com",
+            "sub": "sub-lead",
+            "email_verified": True,
+            "cognito:groups": [self._ORG_PROVIDER_GROUP],
+        }
+        user = backend.create_user(claims)
+        assert CTF_ORGANIZER_GROUP in self._organizer_groups(user)
+
+    @override_settings(CTF_ORGANIZER_PROVIDER_GROUPS=[_ORG_PROVIDER_GROUP])
+    def test_self_service_claim_with_non_allowlisted_provider_group_grants_no_organizer(self):
+        backend = _stashed_backend(subject="sub-attacker2")
+        # Combining a self-asserted organizer user_type with a non-allowlisted
+        # provider group still grants nothing — neither path admits organizer.
+        claims = {
+            "email": "attacker2@example.com",
+            "sub": "sub-attacker2",
+            "email_verified": True,
+            "custom:user_type": "ctf_organizer",
+            "cognito:groups": ["random-group"],
+        }
+        user = backend.create_user(claims)
+        assert CTF_ORGANIZER_GROUP not in self._organizer_groups(user)
+
+    @override_settings(CTF_ORGANIZER_PROVIDER_GROUPS=[_ORG_PROVIDER_GROUP])
+    def test_provider_group_removal_revokes_previously_granted_organizer(self):
+        # Authoritative provider source: once the administrator removes the user
+        # from the allowlisted provider group, the next verified login revokes the
+        # provider-derived organizer membership (codex review #1516).
+        email, sub = "wasorg@example.com", "sub-wasorg"
+        backend = _stashed_backend(subject=sub)
+        user = backend.create_user(
+            {"email": email, "sub": sub, "email_verified": True, "cognito:groups": [self._ORG_PROVIDER_GROUP]}
+        )
+        assert CTF_ORGANIZER_GROUP in self._organizer_groups(user)
+
+        backend.update_user(user, {"email": email, "sub": sub, "email_verified": True, "cognito:groups": []})
+        user.refresh_from_db()
+        assert CTF_ORGANIZER_GROUP not in self._organizer_groups(user)
+
 
 # =============================================================================
-# ShifterOIDCBackend._update_cognito_sub
+# ShifterOIDCBackend.verify_token (issue #1521)
 # =============================================================================
 
 
-class TestShifterOIDCBackendUpdateCognitoSub:
-    """Tests for ShifterOIDCBackend._update_cognito_sub method."""
+class TestShifterOIDCBackendVerifyToken:
+    """Issuer/audience/authorized-party checks layered on mozilla's base verify_token.
 
-    # -------------------------------------------------------------------------
-    # Happy path
-    # -------------------------------------------------------------------------
+    mozilla-django-oidc 5.0.2's base ``verify_token`` decodes with
+    ``verify_aud=False`` and is not given an expected issuer, so the persisted
+    issuer/subject cannot be trusted from the base call alone (issue #1521).
+    Patches only the mozilla provider boundary (the JWS/JWT decode itself, via
+    ``OIDCAuthenticationBackend.verify_token``) so these tests exercise our own
+    override's assertions against a controlled decoded payload.
+    """
 
-    def test_calls_update_cognito_sub_service(self):
-        """_update_cognito_sub calls management service with user and sub."""
+    @override_settings(OIDC_ISSUER_URL=TEST_ISSUER, OIDC_RP_CLIENT_ID="client-abc")
+    def test_accepts_matching_issuer_and_audience_and_stashes_evidence(self):
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": "abc-123-cognito-sub"}
+        payload = {"iss": TEST_ISSUER, "aud": "client-abc", "sub": "sub-1"}
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        with patch.object(OIDCAuthenticationBackend, "verify_token", return_value=payload):
+            result = backend.verify_token("token")
 
-        mock_update.assert_called_once_with(user, "abc-123-cognito-sub")
+        assert result == payload
+        assert backend._verified_issuer == TEST_ISSUER
+        assert backend._verified_subject == "sub-1"
 
-    def test_extracts_sub_from_claims(self):
-        """_update_cognito_sub extracts sub value from claims dict."""
+    @override_settings(OIDC_ISSUER_URL=TEST_ISSUER, OIDC_RP_CLIENT_ID="client-abc")
+    def test_accepts_audience_list_containing_client_id(self):
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": "xyz-789", "email": "test@example.com", "name": "Test"}
+        payload = {"iss": TEST_ISSUER, "aud": ["client-abc", "other-aud"], "sub": "sub-1"}
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        with patch.object(OIDCAuthenticationBackend, "verify_token", return_value=payload):
+            result = backend.verify_token("token")
 
-        mock_update.assert_called_once_with(user, "xyz-789")
+        assert result == payload
 
-    # -------------------------------------------------------------------------
-    # Input validation - missing sub
-    # -------------------------------------------------------------------------
-
-    def test_logs_warning_when_sub_missing(self):
-        """_update_cognito_sub logs warning when claims has no sub."""
+    @override_settings(OIDC_ISSUER_URL=TEST_ISSUER, OIDC_RP_CLIENT_ID="client-abc")
+    def test_rejects_issuer_mismatch(self):
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"email": "test@example.com"}  # no sub
+        payload = {"iss": "https://attacker.example.test", "aud": "client-abc", "sub": "sub-1"}
 
-        with patch("config.oidc.logger") as mock_logger:
-            backend._update_cognito_sub(user, claims)
+        with (
+            patch.object(OIDCAuthenticationBackend, "verify_token", return_value=payload),
+            pytest.raises(SuspiciousOperation),
+        ):
+            backend.verify_token("token")
 
-        mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args
-        assert "missing 'sub'" in call_args[0][0]
-        assert "test@example.com" in str(call_args)
-
-    def test_does_not_call_service_when_sub_missing(self):
-        """_update_cognito_sub does not call service when sub is missing."""
+    @override_settings(OIDC_ISSUER_URL=TEST_ISSUER, OIDC_RP_CLIENT_ID="client-abc")
+    def test_rejects_audience_mismatch(self):
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {}  # no sub
+        payload = {"iss": TEST_ISSUER, "aud": "someone-elses-client", "sub": "sub-1"}
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        with (
+            patch.object(OIDCAuthenticationBackend, "verify_token", return_value=payload),
+            pytest.raises(SuspiciousOperation),
+        ):
+            backend.verify_token("token")
 
-        mock_update.assert_not_called()
-
-    def test_does_not_call_service_when_sub_is_none(self):
-        """_update_cognito_sub does not call service when sub is None."""
+    @override_settings(OIDC_ISSUER_URL=TEST_ISSUER, OIDC_RP_CLIENT_ID="client-abc")
+    def test_rejects_authorized_party_mismatch(self):
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": None}
+        payload = {
+            "iss": TEST_ISSUER,
+            "aud": ["client-abc", "other-aud"],
+            "azp": "someone-elses-client",
+            "sub": "sub-1",
+        }
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        with (
+            patch.object(OIDCAuthenticationBackend, "verify_token", return_value=payload),
+            pytest.raises(SuspiciousOperation),
+        ):
+            backend.verify_token("token")
 
-        mock_update.assert_not_called()
-
-    def test_does_not_call_service_when_sub_is_empty_string(self):
-        """_update_cognito_sub does not call service when sub is empty."""
+    @override_settings(OIDC_ISSUER_URL=TEST_ISSUER, OIDC_RP_CLIENT_ID="client-abc")
+    def test_rejects_missing_subject(self):
         backend = ShifterOIDCBackend()
-        user = MagicMock()
-        user.email = "test@example.com"
-        claims = {"sub": ""}
+        payload = {"iss": TEST_ISSUER, "aud": "client-abc"}
 
-        with patch("config.oidc.update_cognito_sub") as mock_update:
-            backend._update_cognito_sub(user, claims)
+        with (
+            patch.object(OIDCAuthenticationBackend, "verify_token", return_value=payload),
+            pytest.raises(SuspiciousOperation),
+        ):
+            backend.verify_token("token")
 
-        mock_update.assert_not_called()
+    @override_settings(OIDC_ISSUER_URL="", OIDC_RP_CLIENT_ID="client-abc")
+    def test_rejects_when_no_expected_issuer_configured(self):
+        """Fail closed rather than accept any issuer when OIDC_ISSUER_URL is unset."""
+        backend = ShifterOIDCBackend()
+        payload = {"iss": TEST_ISSUER, "aud": "client-abc", "sub": "sub-1"}
+
+        with (
+            patch.object(OIDCAuthenticationBackend, "verify_token", return_value=payload),
+            pytest.raises(SuspiciousOperation),
+        ):
+            backend.verify_token("token")
+
+
+# =============================================================================
+# ShifterOIDCBackend.verify_claims (issue #1521)
+# =============================================================================
+
+
+class TestShifterOIDCBackendVerifyClaims:
+    """Literal email_verified=True plus UserInfo/ID-token subject parity."""
+
+    def test_accepts_verified_matching_subject(self):
+        backend = _stashed_backend(subject="sub-1")
+        claims = {"sub": "sub-1", "email": "u@example.com", "email_verified": True}
+        assert backend.verify_claims(claims) is True
+
+    def test_rejects_missing_email_verified(self):
+        backend = _stashed_backend(subject="sub-1")
+        claims = {"sub": "sub-1", "email": "u@example.com"}
+        assert backend.verify_claims(claims) is False
+
+    @pytest.mark.parametrize(
+        "value",
+        [False, "false", 0, 1],
+        ids=["false", "str-false", "int-0", "int-1"],
+    )
+    def test_rejects_non_literal_true_email_verified(self, value):
+        backend = _stashed_backend(subject="sub-1")
+        claims = {"sub": "sub-1", "email": "u@example.com", "email_verified": value}
+        assert backend.verify_claims(claims) is False
+
+    @pytest.mark.parametrize("value", [True, "true", "True", " TRUE "], ids=["bool", "str", "str-caps", "str-pad"])
+    def test_accepts_verified_boolean_or_cognito_string(self, value):
+        """Cognito's UserInfo returns email_verified as the string 'true'; the
+        ID token returns a boolean. Both must be accepted (the string quirk
+        otherwise blocks all Cognito logins)."""
+        backend = _stashed_backend(subject="sub-1")
+        claims = {"sub": "sub-1", "email": "u@example.com", "email_verified": value}
+        assert backend.verify_claims(claims) is True
+
+    def test_rejects_subject_mismatch_with_verified_id_token(self):
+        """UserInfo's sub must equal the already-verified ID-token sub."""
+        backend = _stashed_backend(subject="sub-from-id-token")
+        claims = {"sub": "sub-from-userinfo", "email": "u@example.com", "email_verified": True}
+        assert backend.verify_claims(claims) is False
+
+    def test_rejects_when_no_verified_subject_stashed(self):
+        backend = ShifterOIDCBackend()
+        claims = {"sub": "sub-1", "email": "u@example.com", "email_verified": True}
+        assert backend.verify_claims(claims) is False
+
+    def test_rejects_missing_email(self):
+        backend = _stashed_backend(subject="sub-1")
+        claims = {"sub": "sub-1", "email_verified": True}
+        assert backend.verify_claims(claims) is False
+
+
+# =============================================================================
+# ShifterOIDCBackend.filter_users_by_claims (issue #1521)
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestShifterOIDCBackendFilterUsersByClaims:
+    """Subject-first account resolution, falling back to email only when no
+    stored profile is bound to the (issuer, subject) or a legacy subject-only
+    row."""
+
+    def test_resolves_exact_bound_tuple_over_a_different_email(self):
+        user = User.objects.create_user(username="bound@example.com", email="bound@example.com")
+        profile = get_user_profile(user)
+        profile.issuer = TEST_ISSUER
+        profile.cognito_sub = "sub-bound"
+        profile.save(update_fields=["issuer", "cognito_sub"])
+        backend = _stashed_backend(subject="sub-bound")
+
+        result = backend.filter_users_by_claims({"email": "someone-else@example.com"})
+
+        assert list(result) == [user]
+
+    def test_resolves_legacy_subject_only_row_over_a_different_email(self):
+        user = User.objects.create_user(username="legacy@example.com", email="legacy@example.com")
+        profile = get_user_profile(user)
+        profile.cognito_sub = "sub-legacy"
+        profile.issuer = ""
+        profile.save(update_fields=["cognito_sub", "issuer"])
+        backend = _stashed_backend(subject="sub-legacy")
+
+        result = backend.filter_users_by_claims({"email": "someone-else@example.com"})
+
+        assert list(result) == [user]
+
+    def test_falls_back_to_email_lookup_when_no_subject_bound(self):
+        user = User.objects.create_user(username="unbound@example.com", email="unbound@example.com")
+        backend = _stashed_backend(subject="sub-fresh")
+
+        result = backend.filter_users_by_claims({"email": "unbound@example.com"})
+
+        assert list(result) == [user]
+
+    def test_falls_back_to_base_email_lookup_when_no_verified_subject_stashed(self):
+        user = User.objects.create_user(username="nostash@example.com", email="nostash@example.com")
+        backend = ShifterOIDCBackend()
+
+        result = backend.filter_users_by_claims({"email": "nostash@example.com"})
+
+        assert list(result) == [user]
+
+
+# =============================================================================
+# ShifterOIDCBackend.authenticate audit coverage (OIDC callback events)
+# =============================================================================
+
+
+def _audit_request():
+    """A minimal request with the fields the audit path reads."""
+    request = MagicMock()
+    request.META = {"REMOTE_ADDR": "10.0.0.5", "HTTP_USER_AGENT": "Browser/1.0"}
+    return request
+
+
+@pytest.mark.django_db
+class TestShifterOIDCBackendAuthenticateAudit:
+    """``authenticate`` writes durable audit rows for OIDC callback outcomes.
+
+    Drives the real ``authenticate`` wrapper and the real ``audit_auth_event``,
+    stubbing only the mozilla base ``authenticate`` (the provider/token exchange
+    boundary) to force success, ``None``, and raising outcomes.
+    """
+
+    def test_successful_auth_writes_login_row(self):
+        user = User.objects.create_user(username="oidc-ok@example.com", email="oidc-ok@example.com")
+        backend = ShifterOIDCBackend()
+
+        with patch.object(OIDCAuthenticationBackend, "authenticate", return_value=user):
+            result = backend.authenticate(_audit_request())
+
+        assert result == user
+        row = AuditLog.objects.get(action=AuditAction.LOGIN, entity_type=AuditEntityType.USER)
+        assert row.new_state["email"] == "oidc-ok@example.com"
+        assert row.source_ip == "10.0.0.5"
+
+    def test_none_result_writes_login_failed_row(self):
+        backend = ShifterOIDCBackend()
+
+        with patch.object(OIDCAuthenticationBackend, "authenticate", return_value=None):
+            result = backend.authenticate(_audit_request())
+
+        assert result is None
+        row = AuditLog.objects.get(action=AuditAction.LOGIN_FAILED)
+        assert row.source_ip == "10.0.0.5"
+
+    def test_exception_writes_login_failed_with_bounded_reason_and_reraises(self):
+        """Token/validation errors raised before the ``None`` branch are audited.
+
+        The reason must be the bounded exception *type*, never ``str(exc)``,
+        which can carry token endpoint URLs, response bodies, codes, or client
+        ids. The original exception must propagate so mozilla's callback failure
+        handling is unchanged.
+        """
+        backend = ShifterOIDCBackend()
+        leaky = SuspiciousOperation("JWT signature invalid token=eyJraWQ-secret code=abc123")
+
+        request = _audit_request()
+        with (
+            patch.object(OIDCAuthenticationBackend, "authenticate", side_effect=leaky),
+            pytest.raises(SuspiciousOperation),
+        ):
+            backend.authenticate(request)
+
+        row = AuditLog.objects.get(action=AuditAction.LOGIN_FAILED)
+        assert "SuspiciousOperation" in row.context
+        assert "secret" not in row.context
+        assert "abc123" not in row.context

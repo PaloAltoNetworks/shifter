@@ -6,17 +6,40 @@ on:
       environment:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       is_dev:
         required: true
         type: boolean
       apply_changes:
         required: true
         type: boolean
+      # Split per concern (#913). `apply_changes` is deployment
+      # permission (environment branch / manual dispatch); these two
+      # say which paths actually changed. Terraform plan/apply and the
+      # Guacamole image publish run only for platform_changes;
+      # the portal image build/deploy runs for either signal.
+      platform_changes:
+        description: Terraform/platform-infrastructure inputs changed (or manual dispatch)
+        required: true
+        type: boolean
+      portal_image_changes:
+        description: Portal image source changed (or manual dispatch)
+        required: true
+        type: boolean
+      engine_image_digest:
+        description: Engine provisioner image digest from the upstream build job
+        required: false
+        type: string
+        default: ""
     secrets:
       AWS_ROLE_ARN:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
+      AWS_ROLE_ARN_PROOF:
+        required: false
       PLATFORM_BOOTSTRAP_STAFF_EMAILS:
         required: false
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS:
@@ -30,6 +53,29 @@ on:
         required: false
       TF_VARS_PROD_PORTAL:
         required: false
+      TF_INFRA_STATE_BUCKET:
+        required: false
+      TF_INFRA_STATE_BUCKET_DEV:
+        required: false
+      TF_INFRA_STATE_BUCKET_PROOF:
+        required: false
+      TF_VARS_PROOF_PORTAL:
+        required: false
+      # Per-environment deployment shifter.yaml (full root installation config).
+      # The renderer-owned CLOUD_PROVIDER binding (PLAT-2005) is rendered from
+      # this config's settings.backend, so it is the single source for the
+      # deployed backend identity and must NOT also be carried in
+      # TF_VARS_*_PORTAL. Declared required: false for the same dispatch-time
+      # reason as TF_VARS_*; the render step fails loud for the active
+      # environment. Reuses the same secrets _range.yml already declares.
+      SHIFTER_CONFIG_DEV_RANGE:
+        required: false
+      SHIFTER_CONFIG_PROOF_RANGE:
+        required: false
+      SHIFTER_CONFIG_PROD_RANGE:
+        required: false
+      SMOKE_TEST_USER_EMAIL:
+        required: false
 
 jobs:
   plan:
@@ -39,16 +85,74 @@ jobs:
       pull-requests: write
     name: Plan (${{ inputs.environment }})
     runs-on: self-hosted
+    # Backstop only: bound a hung step so it can't hold the self-hosted runner
+    # for GitHub's 6h default (see #1220). Generous vs. real plan times.
+    timeout-minutes: 45
+    needs: push-guacamole-images
+    if: |
+      always() &&
+      github.event_name != 'pull_request' &&
+      inputs.platform_changes &&
+      (needs.push-guacamole-images.result == 'success' ||
+       needs.push-guacamole-images.result == 'skipped')
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - name: Preflight - validate deploy prerequisites
+        # Shared fail-safe gate (scripts/bootstrap/preflight.py): reports every
+        # missing prerequisite up front before any Terraform apply. See docs/dev/deploy-secrets.md.
+        working-directory: scripts/bootstrap
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
+          TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
+        run: uv run python -m preflight --cloud aws --env "$ENVIRONMENT" --component portal --headless
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
       - run: terraform fmt -check -recursive
@@ -60,33 +164,152 @@ jobs:
         # into a gitignored local.auto.tfvars that Terraform auto-loads over
         # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
         env:
-          IS_DEV: ${{ inputs.is_dev }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          ENGINE_IMAGE_DIGEST: ${{ inputs.engine_image_digest }}
+          ENGINE_TASK_FAMILY: ${{ inputs.environment }}-portal-pulumi-provisioner
           TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
           TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
         run: |
-          # Select strictly on inputs.is_dev. A GitHub Actions
+          # Select strictly on inputs.environment in shell. A GitHub Actions
           # `is_dev && DEV_SECRET || PROD_SECRET` expression is unsafe: an
           # empty active-environment secret is falsy and falls through to
           # the other environment's secret. Selecting in shell keeps an
           # empty active secret empty so the check below trips fail-loud.
-          if [ "${IS_DEV}" = "true" ]; then
-            PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
-            TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
-          else
-            PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
-            TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
-          fi
+          case "$ENVIRONMENT" in
+            dev)
+              PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
+              TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
+              ;;
+            proof)
+              PORTAL_SECRET_NAME="TF_VARS_PROOF_PORTAL"
+              TF_VARS_PORTAL="${TF_VARS_PROOF_PORTAL}"
+              ;;
+            prod)
+              PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
+              TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
           if [ -z "${TF_VARS_PORTAL}" ]; then
             echo "::error::Required secret ${PORTAL_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
             exit 1
           fi
           printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
-      - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
+          resolve_engine_image_digest() {
+            local digest="${ENGINE_IMAGE_DIGEST}"
+            if [ -n "${digest}" ]; then
+              if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::Engine build did not produce a valid ECR image digest"
+                exit 1
+              fi
+              printf '%s\n' "${digest}"
+              return
+            fi
+
+            local current_image
+            if ! current_image=$(aws ecs describe-task-definition --task-definition "${ENGINE_TASK_FAMILY}" --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null); then
+              echo "::error::No engine image digest was provided and ECS task definition ${ENGINE_TASK_FAMILY} could not be read. Run a deploy path that builds the engine image so Terraform receives the build digest."
+              exit 1
+            fi
+            if [[ "${current_image}" =~ @(sha256:[0-9a-f]{64})$ ]]; then
+              printf '%s\n' "${BASH_REMATCH[1]}"
+              return
+            fi
+            echo "::error::Existing ECS task definition ${ENGINE_TASK_FAMILY} is not digest-pinned (${current_image}). Run the engine image deploy first so platform Terraform can preserve a digest."
+            exit 1
+          }
+          printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
+      - name: Render cloud_provider.auto.tfvars from shifter.yaml
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
+          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
+          SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
+        run: |
+          # Select strictly on inputs.environment in shell (same rule as the
+          # local.auto.tfvars step above): an empty active-environment config
+          # must fail loud, never fall through to the other environment's secret.
+          case "$ENVIRONMENT" in
+            dev)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_DEV_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_DEV_RANGE}"
+              ;;
+            proof)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROOF_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROOF_RANGE}"
+              ;;
+            prod)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROD_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROD_RANGE}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${ACTIVE_SHIFTER_CONFIG}" ]; then
+            echo "::error::Required secret ${CONFIG_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          # Write the deployment config to an ephemeral file outside the repo tree,
+          # then render its settings.backend into the renderer-owned CLOUD_PROVIDER
+          # tfvars (PLAT-2005), so the deployed backend identity comes from
+          # shifter.yaml, not a hardcoded Terraform literal. shifter.yaml holds
+          # secret *references*, not values, but is still treated as sensitive:
+          # written by redirection, never echoed, passed in argv, or uploaded as
+          # an artifact (#1015).
+          CONFIG_FILE="${RUNNER_TEMP}/shifter.yaml"
+          printf '%s\n' "${ACTIVE_SHIFTER_CONFIG}" > "${CONFIG_FILE}"
+          uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
+            shifter-config render-runtime "${CONFIG_FILE}" \
+            --output cloud_provider.auto.tfvars
+      - name: Render Terraform backend configs
+        working-directory: ${{ github.workspace }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_INFRA_STATE_BUCKET_PROD: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          AWS_REGION: us-east-2
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            dev)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_DEV"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"
+              ;;
+            proof)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_PROOF"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"
+              ;;
+            prod)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROD}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${STATE_BUCKET}" ]; then
+            echo "::error::Required secret ${BUCKET_SECRET_NAME} is not set for the ${ENVIRONMENT} Terraform backend"
+            exit 1
+          fi
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "${STATE_BUCKET}" \
+            --env "${{ inputs.environment }}" \
+            --stack portal \
+            --github-env
+      - run: terraform init -backend-config="${SHIFTER_BACKEND_CONFIG_PATH}"
       - run: terraform validate
-      - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
+      - run: terraform plan -no-color -lock-timeout=5m -var-file="${SHIFTER_PORTAL_REMOTE_STATE_TFVARS}" -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const fs = require('fs');
@@ -103,51 +326,158 @@ jobs:
       id-token: write
       contents: read
       pull-requests: write
+      attestations: write
     name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
-    needs: plan
+    # Backstop only (see #1220); generous vs. real image-push times.
+    timeout-minutes: 60
+    environment: ${{ inputs.github_environment }}
     if: |
-      always() &&
       inputs.apply_changes &&
-      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      inputs.platform_changes &&
       github.event_name != 'pull_request'
     env:
-      GUACD_REPO: ${{ inputs.is_dev && 'shifter-dev-guacd' || 'shifter-guacd' }}
-      GUACAMOLE_CLIENT_REPO: ${{ inputs.is_dev && 'shifter-dev-guacamole-client' || 'shifter-guacamole-client' }}
+      GUACD_REPO: ${{ inputs.environment == 'prod' && 'shifter-guacd' || format('shifter-{0}-guacd', inputs.environment) }}
+      GUACAMOLE_CLIENT_REPO: ${{ inputs.environment == 'prod' && 'shifter-guacamole-client' || format('shifter-{0}-guacamole-client', inputs.environment) }}
+      # Upstream Apache Guacamole version (documentation / build-arg).
       GUACAMOLE_VERSION: "1.5.5"
+      # ECR image tag for both guac images. Bump the -rN provenance-rebuild suffix
+      # HERE and in every environment's terraform.tfvars (guacd_image_tag /
+      # guacamole_client_image_tag) together whenever the guac build context
+      # changes: immutable ECR then receives a fresh, attested push (ADR-037-R5),
+      # and the guac module resolves this tag to its @sha256 digest for a verified
+      # deploy (ADR-037-R6). A guac-only change reaches this job through the
+      # terraform.tfvars edit, which is inside the shifter_platform change filter.
+      GUAC_IMAGE_TAG: "1.5.5-r1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Check guacd image tag
+        id: guacd-image
+        run: |
+          if aws ecr describe-images --repository-name "$GUACD_REPO" --image-ids imageTag="$GUAC_IMAGE_TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push guacd image (with RDP file transfer support)
-        uses: docker/build-push-action@v5
+        id: build-guacd
+        if: steps.guacd-image.outputs.exists != 'true'
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: ./shifter/engine/guacd
           push: true
           build-args: |
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUAC_IMAGE_TAG }}
           no-cache: true
+          # Build provenance (ADR-037-R5) for freshly built guacd images. Guac
+          # images are version-pinned upstream bases on immutable ECR tags, so a
+          # cached image is not re-pushed or re-attested here.
+          provenance: mode=max
+          sbom: true
+      - name: Attest guacd build provenance
+        if: steps.guacd-image.outputs.exists != 'true'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}
+          subject-digest: ${{ steps.build-guacd.outputs.digest }}
+          push-to-registry: false
+      - name: Check guacamole-client image tag
+        id: guacamole-client-image
+        run: |
+          if aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPO" --image-ids imageTag="$GUAC_IMAGE_TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push guacamole-client image (with OIDC extension)
-        uses: docker/build-push-action@v5
+        id: build-guacamole-client
+        if: steps.guacamole-client-image.outputs.exists != 'true'
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: ./shifter/engine/guacamole
           push: true
           build-args: |
             GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUAC_IMAGE_TAG }}
           no-cache: true
+          # Build provenance (ADR-037-R5) for freshly built guacamole-client
+          # images. See the guacd note above re: cached immutable-tag images.
+          provenance: mode=max
+          sbom: true
+      - name: Attest guacamole-client build provenance
+        if: steps.guacamole-client-image.outputs.exists != 'true'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}
+          subject-digest: ${{ steps.build-guacamole-client.outputs.digest }}
+          push-to-registry: false
+      - name: Verify guac image provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          # ADR-037-R6: verify the OIDC-signed attestation for each guac
+          # image@digest (resolved from its pinned GUAC_IMAGE_TAG) before the
+          # apply job (which needs this one) deploys that same digest via the guac
+          # module's data.aws_ecr_image lookup. Covers both freshly built and
+          # cached-but-already-attested images. No bypass.
+          set -euo pipefail
+          verify() {
+            repo="$1"; tag="$2"; label="$3"
+            digest=$(aws ecr describe-images --repository-name "$repo" \
+              --image-ids imageTag="$tag" --query 'imageDetails[0].imageDigest' --output text)
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::could not resolve a valid digest for ${label} (${repo}:${tag})"
+              exit 1
+            fi
+            echo "Verifying provenance for ${label} (${repo}@${digest})"
+            gh attestation verify "oci://${REGISTRY}/${repo}@${digest}" --repo Brad-Edwards/shifter
+          }
+          verify "$GUACD_REPO" "$GUAC_IMAGE_TAG" "guacd"
+          verify "$GUACAMOLE_CLIENT_REPO" "$GUAC_IMAGE_TAG" "guacamole-client"
 
   apply:
     permissions:
@@ -156,10 +486,14 @@ jobs:
       pull-requests: write
     name: Apply (${{ inputs.environment }})
     runs-on: self-hosted
+    # Backstop only (see #1220). Generous so a cold apply is never cut off.
+    timeout-minutes: 120
+    environment: ${{ inputs.github_environment }}
     needs: [plan, push-guacamole-images]
     if: |
       always() &&
       inputs.apply_changes &&
+      inputs.platform_changes &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
       (needs.push-guacamole-images.result == 'success' || needs.push-guacamole-images.result == 'skipped') &&
       github.event_name != 'pull_request'
@@ -167,14 +501,46 @@ jobs:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Render local.auto.tfvars from deployment secret
         # The committed terraform.tfvars ships an example.com baseline that
         # fails-loud on apply. Each deployment provides its real values via the
@@ -182,91 +548,200 @@ jobs:
         # into a gitignored local.auto.tfvars that Terraform auto-loads over
         # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
         env:
-          IS_DEV: ${{ inputs.is_dev }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          ENGINE_IMAGE_DIGEST: ${{ inputs.engine_image_digest }}
+          ENGINE_TASK_FAMILY: ${{ inputs.environment }}-portal-pulumi-provisioner
           TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
           TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
         run: |
-          # Select strictly on inputs.is_dev. A GitHub Actions
+          # Select strictly on inputs.environment in shell. A GitHub Actions
           # `is_dev && DEV_SECRET || PROD_SECRET` expression is unsafe: an
           # empty active-environment secret is falsy and falls through to
           # the other environment's secret. Selecting in shell keeps an
           # empty active secret empty so the check below trips fail-loud.
-          if [ "${IS_DEV}" = "true" ]; then
-            PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
-            TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
-          else
-            PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
-            TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
-          fi
+          case "$ENVIRONMENT" in
+            dev)
+              PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
+              TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
+              ;;
+            proof)
+              PORTAL_SECRET_NAME="TF_VARS_PROOF_PORTAL"
+              TF_VARS_PORTAL="${TF_VARS_PROOF_PORTAL}"
+              ;;
+            prod)
+              PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
+              TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
           if [ -z "${TF_VARS_PORTAL}" ]; then
             echo "::error::Required secret ${PORTAL_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
             exit 1
           fi
           printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
-      - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
-      - name: Handle Service Discovery replacement
-        env:
-          ENV: ${{ inputs.environment }}
-        run: |
-          # Check if Service Discovery service needs replacement
-          echo "Running terraform plan to check for Service Discovery changes..."
-          terraform plan -detailed-exitcode -lock-timeout=5m -out=tfplan 2>&1 || PLAN_EXIT=$?
-
-          echo "Plan exit code: ${PLAN_EXIT:-0}"
-
-          # Exit code 2 means there are changes
-          if [ "${PLAN_EXIT:-0}" = "2" ]; then
-            # Check if service discovery service is being deleted/replaced
-            echo "Checking plan for Service Discovery changes..."
-            if terraform show -json tfplan | jq -e '.resource_changes[]? | select(.address | contains("service_discovery_service")) | select(.change.actions | index("delete"))' > /dev/null 2>&1; then
-              echo "Service Discovery service deletion detected - scaling down ECS services first"
-
-              # Find the Guacamole ECS cluster using AWS CLI directly (pattern: {env}-portal-guacamole)
-              CLUSTER_NAME="${ENV}-portal-guacamole"
-              echo "Looking for Guacamole cluster: $CLUSTER_NAME"
-
-              # Verify cluster exists
-              if aws ecs describe-clusters --clusters "$CLUSTER_NAME" --query "clusters[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
-                echo "Found active Guacamole cluster: $CLUSTER_NAME"
-
-                # Scale down guacd service to deregister from Service Discovery
-                GUACD_SERVICE="${ENV}-portal-guacd"
-                echo "Scaling down guacd service: $GUACD_SERVICE"
-
-                if aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
-                  echo "Scaling guacd service to 0..."
-                  aws ecs update-service --cluster "$CLUSTER_NAME" --service "$GUACD_SERVICE" --desired-count 0 --no-cli-pager
-
-                  # Wait for tasks to drain (max 2 minutes)
-                  # shellcheck disable=SC2034
-                  for i in $(seq 1 24); do
-                    RUNNING=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
-                    if [ "$RUNNING" = "0" ]; then
-                      echo "All guacd tasks stopped"
-                      break
-                    fi
-                    echo "Waiting for tasks to stop... ($RUNNING running)"
-                    sleep 5
-                  done
-
-                  # Give Service Discovery time to deregister
-                  echo "Waiting for Service Discovery to deregister instances..."
-                  sleep 15
-                else
-                  echo "guacd service not found or not active"
-                fi
-              else
-                echo "Guacamole cluster not found or not active"
+          resolve_engine_image_digest() {
+            local digest="${ENGINE_IMAGE_DIGEST}"
+            if [ -n "${digest}" ]; then
+              if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::Engine build did not produce a valid ECR image digest"
+                exit 1
               fi
-            else
-              echo "No Service Discovery deletion in plan"
+              printf '%s\n' "${digest}"
+              return
             fi
-          else
-            echo "No changes detected or plan succeeded without changes"
-          fi
 
-          rm -f tfplan
-      - run: terraform apply -auto-approve
+            local current_image
+            if ! current_image=$(aws ecs describe-task-definition --task-definition "${ENGINE_TASK_FAMILY}" --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null); then
+              echo "::error::No engine image digest was provided and ECS task definition ${ENGINE_TASK_FAMILY} could not be read. Run a deploy path that builds the engine image so Terraform receives the build digest."
+              exit 1
+            fi
+            if [[ "${current_image}" =~ @(sha256:[0-9a-f]{64})$ ]]; then
+              printf '%s\n' "${BASH_REMATCH[1]}"
+              return
+            fi
+            echo "::error::Existing ECS task definition ${ENGINE_TASK_FAMILY} is not digest-pinned (${current_image}). Run the engine image deploy first so platform Terraform can preserve a digest."
+            exit 1
+          }
+          printf 'engine_container_image_digest = "%s"\n' "$(resolve_engine_image_digest)" > zz-engine-image.auto.tfvars
+      - name: Render cloud_provider.auto.tfvars from shifter.yaml
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
+          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
+          SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
+        run: |
+          # Select strictly on inputs.environment in shell (same rule as the
+          # local.auto.tfvars step above): an empty active-environment config
+          # must fail loud, never fall through to the other environment's secret.
+          case "$ENVIRONMENT" in
+            dev)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_DEV_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_DEV_RANGE}"
+              ;;
+            proof)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROOF_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROOF_RANGE}"
+              ;;
+            prod)
+              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROD_RANGE"
+              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROD_RANGE}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${ACTIVE_SHIFTER_CONFIG}" ]; then
+            echo "::error::Required secret ${CONFIG_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          # Write the deployment config to an ephemeral file outside the repo tree,
+          # then render its settings.backend into the renderer-owned CLOUD_PROVIDER
+          # tfvars (PLAT-2005), so the deployed backend identity comes from
+          # shifter.yaml, not a hardcoded Terraform literal. shifter.yaml holds
+          # secret *references*, not values, but is still treated as sensitive:
+          # written by redirection, never echoed, passed in argv, or uploaded as
+          # an artifact (#1015).
+          CONFIG_FILE="${RUNNER_TEMP}/shifter.yaml"
+          printf '%s\n' "${ACTIVE_SHIFTER_CONFIG}" > "${CONFIG_FILE}"
+          uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
+            shifter-config render-runtime "${CONFIG_FILE}" \
+            --output cloud_provider.auto.tfvars
+      - name: Render Terraform backend configs
+        working-directory: ${{ github.workspace }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_INFRA_STATE_BUCKET_PROD: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          AWS_REGION: us-east-2
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            dev)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_DEV"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"
+              ;;
+            proof)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_PROOF"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"
+              ;;
+            prod)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROD}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${STATE_BUCKET}" ]; then
+            echo "::error::Required secret ${BUCKET_SECRET_NAME} is not set for the ${ENVIRONMENT} Terraform backend"
+            exit 1
+          fi
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "${STATE_BUCKET}" \
+            --env "${{ inputs.environment }}" \
+            --stack portal \
+            --github-env
+      - run: terraform init -backend-config="${SHIFTER_BACKEND_CONFIG_PATH}"
+      - name: Plan
+        run: |
+          terraform plan -detailed-exitcode -lock-timeout=5m -var-file="${SHIFTER_PORTAL_REMOTE_STATE_TFVARS}" -out=tfplan 2>&1 || PLAN_EXIT=$?
+          if [ "${PLAN_EXIT:-0}" != "0" ] && [ "${PLAN_EXIT:-0}" != "2" ]; then
+            echo "::error::Terraform plan failed with exit code ${PLAN_EXIT}"
+            exit "${PLAN_EXIT}"
+          fi
+          if [ ! -f tfplan ]; then
+            echo "::error::Terraform did not create the expected saved plan tfplan"
+            exit 1
+          fi
+          terraform show -no-color tfplan
+      - name: Drain Service Discovery registrations before apply
+        # Detects aws_service_discovery_service deletes in the saved plan and
+        # scales the affected ECS services to 0, polling until Cloud Map
+        # deregisters all instances. Writes sd_replacement_snapshot.json for
+        # the restore step. No-op (empty snapshot) when no SD deletion is planned.
+        # See scripts/handle_sd_replacement/handle_sd_replacement.py.
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/handle_sd_replacement/handle_sd_replacement.py" \
+            drain --tf-plan tfplan --tf-outputs-from .
+      - run: terraform apply -lock-timeout=5m tfplan
+      - name: Restore ECS desired counts after apply
+        # Reads sd_replacement_snapshot.json written by the drain step and
+        # scales each ECS service back to its original desiredCount.
+        # Idempotent: no-op when the snapshot is empty or absent.
+        #
+        # Runs on every non-cancelled outcome (`!cancelled()`), including a
+        # failed drain or failed `terraform apply`. The drain step scales ECS
+        # services to 0 out of band, and aws_ecs_service.guacd ignores
+        # desired_count drift, so Terraform will NOT bring it back: if a
+        # failure between drain and this step skipped restore, the service
+        # would be stranded at 0. The failure-safe condition guarantees the
+        # out-of-band mutation always has its restore path. It does not mask a
+        # failed apply — the failed step still fails the job.
+        # See scripts/handle_sd_replacement/handle_sd_replacement.py.
+        if: ${{ !cancelled() }}
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/handle_sd_replacement/handle_sd_replacement.py" \
+            restore --snapshot sd_replacement_snapshot.json
+      - name: Assert portal inspection route/endpoint wiring
+        # When portal east-west inspection is enabled, the direct private->NAT
+        # default route is removed, so a stale / wrong-AZ / unhealthy firewall
+        # endpoint silently blackholes egress while `terraform apply` still
+        # succeeds. This post-apply check proves the live route tables point at
+        # the healthy per-AZ Network Firewall endpoints from
+        # firewall_status.sync_states and fails the deploy otherwise. It is a
+        # no-op when inspection is disabled, so it runs for every environment.
+        # See scripts/assert_portal_inspection/assert_portal_inspection.py.
+        working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/assert_portal_inspection/assert_portal_inspection.py" \
+            --tf-outputs-from .
       - name: Verify RDS pending modifications applied (dev only)
         # Dev opts into apply_immediately=true so any post-apply
         # PendingModifiedValues means the deploy is incomplete. Prod
@@ -341,87 +816,261 @@ jobs:
             sleep 30
           done
 
-          echo "::warning::Guacamole services did not stabilize within 20 minutes — continuing (services may still be starting)"
+          # Timeout is a failed deploy, not a warning: a green run that leaves
+          # Guacamole unstable reproduces the event-day inconsistent-RDP symptom
+          # with no pipeline evidence. The FAILED circuit-breaker branch above
+          # already exits 1; the timeout must too. If first boot legitimately
+          # needs longer, raise MAX_ATTEMPTS rather than downgrading the result.
+          echo "::error::Guacamole ECS services did not stabilize within 20 minutes (guacd: $GUACD_STATUS | guacamole-client: $CLIENT_STATUS) on cluster $CLUSTER_NAME. Inspect the ECS service events for $GUACD_SERVICE / $CLIENT_SERVICE."
+          exit 1
 
   build:
     permissions:
       id-token: write
       contents: read
       pull-requests: write
+      attestations: write
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
+    # Backstop only (see #1220); generous vs. real image-build times.
+    timeout-minutes: 90
+    environment: ${{ inputs.github_environment }}
     needs: apply
-    if: inputs.apply_changes && github.event_name != 'pull_request'
+    # Runs for Terraform changes (after a successful apply) AND for
+    # app-only changes (#913), where plan/apply are legitimately
+    # skipped. Fail-closed: a skipped apply passes only when no
+    # Terraform change was requested, so a failed/cancelled plan or
+    # apply (or an upstream failure that skipped apply on a
+    # Terraform-relevant run) still blocks the image deploy.
+    if: |
+      always() &&
+      inputs.apply_changes &&
+      github.event_name != 'pull_request' &&
+      (inputs.platform_changes || inputs.portal_image_changes) &&
+      (needs.apply.result == 'success' ||
+       (needs.apply.result == 'skipped' && !inputs.platform_changes))
     outputs:
-      image_tag: ${{ steps.sha.outputs.short }}
+      image_tag: ${{ steps.image.outputs.tag }}
+      image_digest: ${{ steps.build.outputs.digest }}
     env:
-      ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-portal' || 'shifter-portal' }}
+      ECR_REPOSITORY: ${{ inputs.environment == 'prod' && 'shifter-portal' || format('shifter-{0}-portal', inputs.environment) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Set short SHA
-        id: sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+      - name: Set image tag
+        id: image
+        run: |
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          echo "tag=${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: ./shifter
           file: ./shifter/shifter_platform/Dockerfile
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
           no-cache: true
+          # Build provenance (ADR-037-R5): embed an SBOM and max provenance,
+          # then attest below with a GitHub OIDC-signed statement.
+          provenance: mode=max
+          sbom: true
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
 
   deploy:
     permissions:
       id-token: write
       contents: read
       pull-requests: write
+      attestations: read
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
+    # Backstop only (see #1220); generous vs. real deploy/stabilization times.
+    timeout-minutes: 90
+    environment: ${{ inputs.github_environment }}
     needs: build
     if: inputs.apply_changes && github.event_name != 'pull_request'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}
       PS_PREFIX: /shifter/${{ inputs.environment }}/portal
-      INSTANCE_TAG: ${{ inputs.is_dev && 'dev-portal-ec2' || 'prod-portal-ec2' }}
+      INSTANCE_TAG: ${{ inputs.environment }}-portal-ec2
       PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
-          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Verify portal image build provenance
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+          ECR_REPOSITORY: ${{ inputs.environment == 'prod' && 'shifter-portal' || format('shifter-{0}-portal', inputs.environment) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # ADR-037-R6: verify the OIDC-signed provenance attestation for the
+          # exact portal image@digest and the fixed Brad-Edwards/shifter identity
+          # before the digest is promoted to Parameter Store and rolled out.
+          # No bypass mode.
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest to verify"
+            exit 1
+          fi
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE_REF="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          echo "Verifying provenance for ${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          gh attestation verify "oci://${IMAGE_REF}" --repo Brad-Edwards/shifter
+
+      - name: Render Terraform backend configs
+        working-directory: ${{ github.workspace }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_INFRA_STATE_BUCKET_PROD: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          AWS_REGION: us-east-2
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            dev)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_DEV"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"
+              ;;
+            proof)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_PROOF"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"
+              ;;
+            prod)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROD}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${STATE_BUCKET}" ]; then
+            echo "::error::Required secret ${BUCKET_SECRET_NAME} is not set for the ${ENVIRONMENT} Terraform backend"
+            exit 1
+          fi
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "${STATE_BUCKET}" \
+            --env "${ENV}" \
+            --stack portal \
+            --github-env
 
       - name: Get deployment config
         id: config
-        env:
-          # `vars` are repository / environment variables managed in
-          # GitHub settings; this avoids parsing the committed example
-          # tfvars baseline. Default `false` for safety — autoscaling
-          # opts in explicitly per environment.
-          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}
         run: |
-          echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> "$GITHUB_OUTPUT"
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" resolve-topology \
+            --terraform-dir "${GITHUB_WORKSPACE}/platform/terraform/environments/${ENV}/portal" \
+            --backend-config "${SHIFTER_BACKEND_CONFIG_PATH}" \
+            --instance-tag "$INSTANCE_TAG" \
+            --github-output "$GITHUB_OUTPUT"
 
-      - name: Update Parameter Store with new image tag
+      - name: Update Parameter Store with new image digest
         env:
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
         run: |
-          echo "Updating Parameter Store with image tag: ${IMAGE_TAG}"
+          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid ECR image digest"
+            exit 1
+          fi
+          echo "Updating Parameter Store with image digest: ${IMAGE_DIGEST}"
+          aws ssm put-parameter \
+            --name "${PS_PREFIX}/image-digest" \
+            --value "${IMAGE_DIGEST}" \
+            --type String \
+            --overwrite
           aws ssm put-parameter \
             --name "${PS_PREFIX}/image-tag" \
             --value "${IMAGE_TAG}" \
@@ -452,11 +1101,10 @@ jobs:
         id: instance
         if: steps.config.outputs.enable_autoscaling != 'true'
         run: |
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' --output text)
-          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "Error: Could not find running Platform EC2 instance with tag: $INSTANCE_TAG"; exit 1
+          INSTANCE_ID="${{ steps.config.outputs.instance_id }}"
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "::error::Terraform resolved single-instance mode but did not return an instance id"
+            exit 1
           fi
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
 
@@ -464,13 +1112,115 @@ jobs:
         id: asg
         if: steps.config.outputs.enable_autoscaling == 'true'
         run: |
-          ASG_NAME=$(aws autoscaling describe-auto-scaling-groups \
-            --query "AutoScalingGroups[?contains(AutoScalingGroupName, '${ENV}-portal-asg')].AutoScalingGroupName | [0]" \
-            --output text)
-          if [ "$ASG_NAME" == "None" ] || [ -z "$ASG_NAME" ]; then
-            echo "Error: Could not find ASG with name containing: ${ENV}-portal-asg"; exit 1
+          ASG_NAME="${{ steps.config.outputs.asg_name }}"
+          if [ -z "$ASG_NAME" ]; then
+            echo "::error::Terraform resolved ASG mode but did not return an ASG name"
+            exit 1
           fi
           echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Run database migrations (ASG mode)
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+        run: |
+          echo "Selecting one in-service ASG instance for deploy-owned migration: $ASG_NAME"
+          # On a first deploy to a fresh ASG there is no pre-existing in-service
+          # instance: the newly-applied instances must launch, pull the image by
+          # digest, bootstrap, and reach LifecycleState=InService. Poll for one
+          # to appear instead of a one-shot check, which races and fails on a
+          # cold ASG when run seconds after the image-digest param is updated.
+          MIGRATION_INSTANCE_WAIT_SECONDS=600
+          MIGRATION_INSTANCE_POLL_SECONDS=15
+          MIGRATION_INSTANCE_ID=""
+          for i in $(seq 1 $((MIGRATION_INSTANCE_WAIT_SECONDS / MIGRATION_INSTANCE_POLL_SECONDS))); do
+            MIGRATION_INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$ASG_NAME" \
+              --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" \
+              --output text)
+            if [ -n "$MIGRATION_INSTANCE_ID" ] && [ "$MIGRATION_INSTANCE_ID" != "None" ]; then
+              break
+            fi
+            echo "Attempt $i: No in-service instance yet in ASG $ASG_NAME; waiting..."
+            sleep "$MIGRATION_INSTANCE_POLL_SECONDS"
+          done
+
+          if [ -z "$MIGRATION_INSTANCE_ID" ] || [ "$MIGRATION_INSTANCE_ID" = "None" ]; then
+            echo "::error::No healthy in-service instance found in ASG $ASG_NAME for database migration after ${MIGRATION_INSTANCE_WAIT_SECONDS}s"
+            exit 1
+          fi
+
+          echo "Running migration on instance: $MIGRATION_INSTANCE_ID"
+
+          # Wait for cloud-init to complete so Docker and the ECR credential helper are available.
+          for i in $(seq 1 30); do
+            RESULT=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$MIGRATION_INSTANCE_ID" \
+              --parameters 'commands=["cloud-init status --wait || cloud-init status"]' \
+              --query "Command.CommandId" --output text 2>/dev/null) || true
+            if [ -n "$RESULT" ]; then
+              sleep 10
+              STATUS=$(aws ssm get-command-invocation --command-id "$RESULT" --instance-id "$MIGRATION_INSTANCE_ID" \
+                --query "StandardOutputContent" --output text 2>/dev/null) || true
+              if echo "$STATUS" | grep -q "done"; then echo "Cloud-init complete"; break; fi
+            fi
+            echo "Attempt $i: Waiting for cloud-init..."; sleep 10
+          done
+
+          DEPLOY_SCRIPT_PATH="${GITHUB_WORKSPACE}/scripts/portal-deploy/deploy_portal.sh"
+          DEPLOY_SCRIPT_B64=$(base64 -w0 "$DEPLOY_SCRIPT_PATH")
+          DEPLOY_ARGS=$(jq -cn \
+            --arg awsRegion "$AWS_REGION" \
+            --arg psPrefix "$PS_PREFIX" \
+            '[
+              "--aws-region", $awsRegion,
+              "--ps-prefix", $psPrefix,
+              "--migrate-only"
+            ]')
+
+          PARAMS_FILE=$(mktemp)
+          jq -n \
+            --arg deployScriptB64 "$DEPLOY_SCRIPT_B64" \
+            --argjson deployArgs "$DEPLOY_ARGS" \
+            '{
+              commands: [
+                ("printf %s " + ($deployScriptB64 | @sh) + " | base64 -d > /tmp/shifter-deploy-portal.sh"),
+                "chmod 0755 /tmp/shifter-deploy-portal.sh",
+                ((["/tmp/shifter-deploy-portal.sh"] + $deployArgs) | @sh)
+              ]
+            }' > "$PARAMS_FILE"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$MIGRATION_INSTANCE_ID" \
+            --parameters "file://$PARAMS_FILE" \
+            --timeout-seconds 900 \
+            --query "Command.CommandId" --output text)
+
+          rm -f "$PARAMS_FILE"
+
+          echo "Migration SSM Command ID: $COMMAND_ID"
+          # `aws ssm wait command-executed` is a fixed ~100s waiter (20x5s);
+          # --cli-*-timeout are per-HTTP-call, not the total wait. The migrate
+          # command docker-pulls the new image first, which on a cold instance
+          # exceeds 100s, so the waiter times out even though the command has a
+          # 900s budget and succeeds. Poll to the command budget instead (#1410).
+          STATUS="Pending"
+          for _ in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" --instance-id "$MIGRATION_INSTANCE_ID" \
+              --query "Status" --output text 2>/dev/null || echo "Pending")
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut|TimeoutExceeded) break ;;
+            esac
+            sleep 15
+          done
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Migration failed (status=$STATUS)!"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$MIGRATION_INSTANCE_ID" --query "StandardErrorContent" --output text || true
+            exit 1
+          fi
+          echo "Database migration completed successfully."
 
       - name: Deploy via SSM (single instance mode)
         if: steps.config.outputs.enable_autoscaling != 'true'
@@ -493,104 +1243,48 @@ jobs:
             echo "Attempt $i: Waiting for cloud-init..."; sleep 10
           done
 
-          # Deploy script reads config from Parameter Store and restarts containers
-          DEPLOY_SCRIPT=$(cat << 'EOFSCRIPT'
-          set -euo pipefail
-          AWS_REGION="us-east-2"
-          PS_PREFIX="__PS_PREFIX__"
+          # Deploy script reads config from Parameter Store and restarts containers.
+          DEPLOY_SCRIPT_PATH="${GITHUB_WORKSPACE}/scripts/portal-deploy/deploy_portal.sh"
+          DEPLOY_SCRIPT_B64=$(base64 -w0 "$DEPLOY_SCRIPT_PATH")
 
-          get_param() { aws ssm get-parameter --name "$1" --with-decryption --query 'Parameter.Value' --output text --region "$AWS_REGION"; }
-          validate_bootstrap_email_list() {
-            local name="$1"
-            local value="$2"
-            if [[ -n "$value" && ! "$value" =~ ^[A-Za-z0-9._%+@,-]+$ ]]; then
-              echo "Invalid $name: expected a comma-separated email list"
-              exit 1
-            fi
-          }
+          # Worker-container health supervisor (#953) artifacts stay single-sourced
+          # under modules/portal/ec2/worker-health and are injected base64-encoded
+          # so both AWS deploy paths install byte-identical files.
+          WH_DIR="${GITHUB_WORKSPACE}/platform/terraform/modules/portal/ec2/worker-health"
+          WH_MONITOR_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.sh")
+          WH_SERVICE_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.service")
+          WH_TIMER_B64=$(base64 -w0 "$WH_DIR/shifter-worker-health.timer")
+          # name_prefix is "<environment>-portal"; matches the Terraform alarm dimension.
+          WH_NAME_PREFIX="$ENV-portal"
 
-          IMAGE_TAG=$(get_param "$PS_PREFIX/image-tag")
-          ECR_REGISTRY=$(get_param "$PS_PREFIX/ecr-registry")
-          ECR_REPOSITORY=$(get_param "$PS_PREFIX/ecr-repository")
-          DOMAIN_NAME=$(get_param "$PS_PREFIX/domain-name")
-          S3_BUCKET=$(get_param "$PS_PREFIX/s3-bucket")
-          DB_SECRET_ARN=$(get_param "$PS_PREFIX/db-secret-arn")
-          APP_SECRET_ARN=$(get_param "$PS_PREFIX/app-secret-arn")
-          COGNITO_SECRET_ARN=$(get_param "$PS_PREFIX/cognito-secret-arn")
-          GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" || echo "")
-          DC_DOMAIN_PASSWORD_SECRET_ARN=$(get_param "$PS_PREFIX/dc-domain-password-secret-arn" || echo "")
-          GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" || echo "")
-          GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" || echo "")
-          ENGINE_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/engine-ecs-cluster-arn")
-          ENGINE_TASK_DEFINITION_ARN=$(get_param "$PS_PREFIX/engine-task-definition-arn")
-          ENGINE_ECS_SECURITY_GROUP_ID=$(get_param "$PS_PREFIX/engine-ecs-security-group-id")
-          ENGINE_PRIVATE_SUBNET_IDS=$(get_param "$PS_PREFIX/engine-private-subnet-ids")
-          SQS_CMS_URL=$(get_param "$PS_PREFIX/sqs-cms-url")
-          SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
-          SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
-          REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
-          EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend" || echo "")
-          CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email" || echo "")
-          PLATFORM_BOOTSTRAP_STAFF_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-staff-emails" || echo "")
-          PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-superuser-emails" || echo "")
-          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_STAFF_EMAILS" "$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
-          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
-
-          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          echo "Deploying image: $IMAGE"
-
-          COMMON_ENV="-e AWS_REGION=$AWS_REGION -e AWS_S3_BUCKET_NAME=$S3_BUCKET -e DB_SECRET_ARN=$DB_SECRET_ARN"
-          COMMON_ENV="$COMMON_ENV -e APP_SECRET_ARN=$APP_SECRET_ARN -e COGNITO_SECRET_ARN=$COGNITO_SECRET_ARN"
-          [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
-          [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
-          [ -n "$GUACAMOLE_API_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
-          [ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e DC_DOMAIN_PASSWORD_SECRET_ARN=$DC_DOMAIN_PASSWORD_SECRET_ARN"
-          # Add localhost to ALLOWED_HOSTS for dev (enables SSM tunnel testing)
-          # PS_PREFIX comes from Parameter Store, not user input - safe to use
-          if [[ "$PS_PREFIX" == *"/dev/"* ]]; then
-            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME,localhost,127.0.0.1"
-          else
-            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME"
-          fi
-          COMMON_ENV="$COMMON_ENV -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
-          COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e ENGINE_ECS_CLUSTER_ARN=$ENGINE_ECS_CLUSTER_ARN"
-          COMMON_ENV="$COMMON_ENV -e ENGINE_TASK_DEFINITION_ARN=$ENGINE_TASK_DEFINITION_ARN"
-          COMMON_ENV="$COMMON_ENV -e ENGINE_ECS_SECURITY_GROUP_ID=$ENGINE_ECS_SECURITY_GROUP_ID"
-          COMMON_ENV="$COMMON_ENV -e ENGINE_PRIVATE_SUBNET_IDS=$ENGINE_PRIVATE_SUBNET_IDS"
-          COMMON_ENV="$COMMON_ENV -e SQS_CMS_URL=$SQS_CMS_URL -e SQS_ENGINE_URL=$SQS_ENGINE_URL -e SQS_MC_URL=$SQS_MC_URL"
-          [ -n "$REDIS_ENDPOINT" ] && COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
-          [ -n "$EMAIL_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
-          [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
-          [ -n "$PLATFORM_BOOTSTRAP_STAFF_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_STAFF_EMAILS=$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
-          [ -n "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
-
-          docker pull "$IMAGE"
-          # The DC domain password secret is Terraform-managed (created and
-          # seeded by the engine-provisioner module), so it always carries an
-          # AWSCURRENT value — no pre-deploy populate check needed, same as the
-          # DB / app / Cognito secret ARNs above.
-          docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
-          docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
-          eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"
-          eval docker run -d --name worker-cms --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue cms
-          eval docker run -d --name worker-engine --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue engine
-          eval docker run -d --name worker-mc --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue mc
-          eval docker run -d --name ctf-scheduler --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_ctf_scheduler
-          docker ps
-          echo "Deployment complete!"
-          EOFSCRIPT
-          )
-
-          # Substitute PS_PREFIX
-          DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__PS_PREFIX__/${PS_PREFIX}}"
+          DEPLOY_ARGS=$(jq -cn \
+            --arg awsRegion "$AWS_REGION" \
+            --arg psPrefix "$PS_PREFIX" \
+            --arg whMonitorB64 "$WH_MONITOR_B64" \
+            --arg whServiceB64 "$WH_SERVICE_B64" \
+            --arg whTimerB64 "$WH_TIMER_B64" \
+            --arg whNamePrefix "$WH_NAME_PREFIX" \
+            '[
+              "--aws-region", $awsRegion,
+              "--ps-prefix", $psPrefix,
+              "--worker-health-monitor-b64", $whMonitorB64,
+              "--worker-health-service-b64", $whServiceB64,
+              "--worker-health-timer-b64", $whTimerB64,
+              "--worker-health-name-prefix", $whNamePrefix
+            ]')
 
           # Run deploy via SSM using temp file to avoid quoting issues
           PARAMS_FILE=$(mktemp)
-          cat > "$PARAMS_FILE" << EOF
-          {
-            "commands": [$(echo "$DEPLOY_SCRIPT" | jq -Rs .)]
-          }
-          EOF
+          jq -n \
+            --arg deployScriptB64 "$DEPLOY_SCRIPT_B64" \
+            --argjson deployArgs "$DEPLOY_ARGS" \
+            '{
+              commands: [
+                ("printf %s " + ($deployScriptB64 | @sh) + " | base64 -d > /tmp/shifter-deploy-portal.sh"),
+                "chmod 0755 /tmp/shifter-deploy-portal.sh",
+                ((["/tmp/shifter-deploy-portal.sh"] + $deployArgs) | @sh)
+              ]
+            }' > "$PARAMS_FILE"
 
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
@@ -627,7 +1321,17 @@ jobs:
           echo "Platform deployment successful!"
 
       - name: Trigger ASG instance refresh
-        if: steps.config.outputs.enable_autoscaling == 'true'
+        # Only cycle the portal fleet when the portal actually changed (issue
+        # #1639): a new portal image (portal_image_changes) or a platform
+        # Terraform change that can alter the launch template / user_data
+        # (platform_changes). An engine-provisioner-only deploy does not change
+        # the portal host, so paying the ~40-minute rolling refresh on it is pure
+        # iteration-loop waste. New instances still read the current image digest
+        # from Parameter Store at boot, so a skipped refresh never serves a stale
+        # image for a portal that did not change.
+        if: >-
+          steps.config.outputs.enable_autoscaling == 'true' &&
+          (inputs.portal_image_changes || inputs.platform_changes)
         env:
           ASG_NAME: ${{ steps.asg.outputs.asg_name }}
         run: |
@@ -644,11 +1348,16 @@ jobs:
             echo "Waiting for it to complete..."
           else
             # Start instance refresh
-            # New instances will read updated image tag from Parameter Store via user_data
-            # Lifecycle hook ensures instance is ready before joining ALB
+            # New instances read the updated image digest from Parameter Store via user_data.
+            # Lifecycle hook ensures instance is ready before joining ALB.
+            # InstanceWarmup is 120s: bootstrap completes the launch hook in ~90s
+            # and the ALB target-group health check gates real traffic, so a
+            # shorter warmup keeps a full (in-service + warm-pool) refresh inside
+            # the poll window without cutting availability (MinHealthyPercentage
+            # still holds 50% in service).
             REFRESH_ID=$(aws autoscaling start-instance-refresh \
               --auto-scaling-group-name "$ASG_NAME" \
-              --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 300}' \
+              --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 120}' \
               --query "InstanceRefreshId" --output text)
 
             echo "Instance refresh started: $REFRESH_ID"
@@ -658,7 +1367,11 @@ jobs:
           # Wait for instance refresh to complete
           echo "Waiting for instance refresh to complete..."
           RETRIES=0
-          MAX_RETRIES=60  # 30 minutes max wait
+          # A full refresh covers in-service + warm-pool instances (12 in dev),
+          # each with warmup plus per-instance termination drain, so it runs
+          # well beyond the original 30-minute cap. Combined with the reduced
+          # InstanceWarmup above, 60 minutes gives headroom for the full set.
+          MAX_RETRIES=120  # 60 minutes max wait
           while true; do
             STATUS=$(aws autoscaling describe-instance-refreshes \
               --auto-scaling-group-name "$ASG_NAME" \
@@ -689,3 +1402,224 @@ jobs:
           done
 
           echo "Platform ASG deployment successful!"
+
+      - name: Verify ASG image digest
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" verify-asg-image \
+            --asg-name "$ASG_NAME" \
+            --image-digest "$IMAGE_DIGEST"
+
+      - name: Verify ASG worker health
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+        # Gate the deploy on worker/scheduler container health: the image-digest
+        # and ALB /health/ checks only cover the portal web tier, so crash-looping
+        # workers would otherwise ship green (#1398). Retries internally to
+        # tolerate the health-start-period and a single transient restart.
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" verify-asg-workers \
+            --asg-name "$ASG_NAME"
+
+  verify:
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    name: Verify (${{ inputs.environment }})
+    runs-on: self-hosted
+    # Backstop only (see #1220).
+    timeout-minutes: 60
+    environment: ${{ inputs.github_environment }}
+    needs: deploy
+    if: inputs.apply_changes && github.event_name != 'pull_request' && needs.deploy.result == 'success'
+    env:
+      AWS_REGION: us-east-2
+      ENV: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
+              ROLE_ARN="$AWS_ROLE_ARN_DEV"
+              ;;
+            proof)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
+              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
+              ;;
+            prod)
+              ROLE_SECRET_NAME="AWS_ROLE_ARN"
+              ROLE_ARN="$AWS_ROLE_ARN_PROD"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
+          aws-region: us-east-2
+
+      - name: Render Terraform backend configs
+        working-directory: ${{ github.workspace }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_INFRA_STATE_BUCKET_PROD: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          AWS_REGION: us-east-2
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            dev)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_DEV"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"
+              ;;
+            proof)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_PROOF"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"
+              ;;
+            prod)
+              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROD}"
+              ;;
+            *)
+              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          if [ -z "${STATE_BUCKET}" ]; then
+            echo "::error::Required secret ${BUCKET_SECRET_NAME} is not set for the ${ENVIRONMENT} Terraform backend"
+            exit 1
+          fi
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "${STATE_BUCKET}" \
+            --env "${ENV}" \
+            --stack portal \
+            --github-env
+
+      - name: Verify post-deploy health
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py" verify-post-deploy \
+            --terraform-dir "${GITHUB_WORKSPACE}/platform/terraform/environments/${ENV}/portal" \
+            --backend-config "${SHIFTER_BACKEND_CONFIG_PATH}"
+
+  post-deploy-smoke:
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+    name: Post-deploy smoke (${{ inputs.environment }})
+    runs-on: self-hosted
+    # Backstop only (see #1220).
+    timeout-minutes: 60
+    environment: ${{ inputs.github_environment }}
+    needs: verify
+    if: |
+      inputs.is_dev &&
+      inputs.apply_changes &&
+      github.event_name != 'pull_request' &&
+      needs.verify.result == 'success'
+    continue-on-error: true
+    env:
+      AWS_REGION: us-east-2
+      ENV: ${{ inputs.environment }}
+      SMOKE_TEST_USER_EMAIL: ${{ secrets.SMOKE_TEST_USER_EMAIL }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+        run: |
+          if [ -z "${AWS_ROLE_ARN_DEV}" ]; then
+            echo "::error::Required secret AWS_ROLE_ARN_DEV is not set"
+            exit 1
+          fi
+          echo "role_arn=${AWS_ROLE_ARN_DEV}" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
+          aws-region: us-east-2
+
+      - name: Render Terraform backend configs
+        env:
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+        run: |
+          if [ -z "${TF_INFRA_STATE_BUCKET_DEV}" ]; then
+            echo "::error::Required secret TF_INFRA_STATE_BUCKET_DEV is not set"
+            exit 1
+          fi
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "${TF_INFRA_STATE_BUCKET_DEV}" \
+            --env "${ENV}" \
+            --stack portal \
+            --github-env
+
+      - name: Run linux post-deploy smoke
+        id: smoke
+        continue-on-error: true
+        run: bash scripts/smoke-test.sh --variant linux
+
+      - name: Open smoke failure issue
+        if: steps.smoke.outcome == 'failure'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const title = `[smoke-test][${process.env.ENV}][linux] ${context.sha.slice(0, 12)}`;
+            const body = [
+              '## Post-deploy smoke test failed',
+              '',
+              `- Environment: \`${process.env.ENV}\``,
+              `- Provider: \`aws\``,
+              `- Variant: \`linux\``,
+              `- Commit: \`${context.sha}\``,
+              `- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '',
+              'See the **Run linux post-deploy smoke** step logs for details.',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['bug', 'smoke-test'],
+            });
+
+      - name: Fail smoke job after issue creation
+        if: steps.smoke.outcome == 'failure'
+        run: |
+          echo "::warning::Post-deploy smoke failed; issue opened and deploy was not blocked (continue-on-error)."
+          exit 1

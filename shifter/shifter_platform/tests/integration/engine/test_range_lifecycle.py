@@ -5,7 +5,8 @@ AWS services (ECS, Secrets Manager) are mocked as they require infrastructure.
 """
 
 import uuid
-from unittest.mock import patch
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -20,27 +21,25 @@ from engine.services import (
     get_rdp_connection_info,
 )
 from shared.enums import RequestType, ResourceStatus
-from shared.schemas import RangeContext
+from shared.schemas import RangeRef
 
 User = get_user_model()
 
 
-def make_range_context(
+def make_range_ref(
     range_id: int | None = None,
     request_id=None,
     user_id: int = 1,
     status: str = "ready",
-) -> RangeContext:
-    """Create a valid RangeContext with all required fields."""
+) -> RangeRef:
+    """Create a valid RangeRef for lifecycle operations."""
     import uuid as uuid_module
 
-    return RangeContext(
+    return RangeRef(
         request_id=request_id or uuid_module.uuid4(),
         range_id=range_id,
-        scenario_id="test_scenario",
         user_id=user_id,
         status=ResourceStatus(status),
-        instances=[],
     )
 
 
@@ -193,7 +192,7 @@ class TestDestroyRangeIntegration:
 
     def test_sets_status_to_destroying(self, range_ready):
         """destroy_range updates status in database."""
-        context = make_range_context(
+        context = make_range_ref(
             range_id=range_ready.id,
             request_id=range_ready.request.request_id,
             user_id=range_ready.user.id,
@@ -212,7 +211,7 @@ class TestDestroyRangeIntegration:
 
     def test_returns_false_for_nonexistent_range(self):
         """destroy_range returns False for missing range."""
-        context = make_range_context(range_id=99999, user_id=1, status="ready")
+        context = make_range_ref(range_id=99999, user_id=1, status="ready")
 
         result = destroy_range(context)
         assert result is False
@@ -227,7 +226,7 @@ class TestDestroyRangeIntegration:
             subnet_index=10,
         )
 
-        context = make_range_context(
+        context = make_range_ref(
             range_id=range_obj.id,
             request_id=range_obj.request.request_id,
             user_id=user.id,
@@ -247,7 +246,7 @@ class TestDestroyRangeIntegration:
             subnet_index=11,
         )
 
-        context = make_range_context(
+        context = make_range_ref(
             range_id=range_obj.id,
             request_id=range_obj.request.request_id,
             user_id=user.id,
@@ -259,7 +258,7 @@ class TestDestroyRangeIntegration:
 
     def test_delegates_to_request_id_when_range_id_none(self, range_ready):
         """destroy_range delegates to destroy_range_by_request."""
-        context = make_range_context(
+        context = make_range_ref(
             range_id=None,
             request_id=range_ready.request.request_id,
             user_id=range_ready.user.id,
@@ -287,7 +286,7 @@ class TestCancelRangeIntegration:
 
     def test_cancels_pending_range(self, range_pending):
         """cancel_range sets DESTROYING status for PENDING range."""
-        context = make_range_context(
+        context = make_range_ref(
             range_id=range_pending.id,
             request_id=range_pending.request.request_id,
             user_id=range_pending.user.id,
@@ -301,7 +300,7 @@ class TestCancelRangeIntegration:
 
     def test_cancels_provisioning_range(self, range_provisioning):
         """cancel_range sets DESTROYING status for PROVISIONING range."""
-        context = make_range_context(
+        context = make_range_ref(
             range_id=range_provisioning.id,
             user_id=range_provisioning.user.id,
             status=range_provisioning.status,
@@ -314,7 +313,7 @@ class TestCancelRangeIntegration:
 
     def test_does_not_cancel_ready_range(self, range_ready):
         """cancel_range does not affect READY range."""
-        context = make_range_context(
+        context = make_range_ref(
             range_id=range_ready.id,
             request_id=range_ready.request.request_id,
             user_id=range_ready.user.id,
@@ -332,17 +331,17 @@ class TestCancelRangeIntegration:
             cancel_range(None)
 
     def test_raises_type_error_for_invalid_context_type(self):
-        """cancel_range raises TypeError for non-RangeContext."""
-        with pytest.raises(TypeError, match="must be RangeContext"):
+        """cancel_range raises TypeError for non-RangeRef."""
+        with pytest.raises(TypeError, match="must be RangeRef"):
             cancel_range({"range_id": 1})
 
     def test_raises_validation_error_for_negative_range_id(self, user):
-        """RangeContext raises ValidationError for negative range_id."""
+        """RangeRef raises ValidationError for negative range_id."""
         from pydantic import ValidationError
 
         # Validation happens at schema level, not in cancel_range
         with pytest.raises(ValidationError, match="range_id must be a positive"):
-            make_range_context(range_id=-1, user_id=user.id, status="pending")
+            make_range_ref(range_id=-1, user_id=user.id, status="pending")
 
 
 # =============================================================================
@@ -485,13 +484,24 @@ class TestGetActiveForUserIntegration:
 # =============================================================================
 
 
+@contextmanager
+def _boto3_rdp_secret(value):
+    """Bind the boto3 Secrets Manager client so the real get_rdp_password (and
+    the sftp ssh-key fetch) resolve ``value`` over the cloud boundary instead of
+    patching the first-party ``engine.services.get_rdp_password``."""
+    client = MagicMock()
+    client.get_secret_value.return_value = {"SecretString": value}
+    with patch("boto3.client", return_value=client):
+        yield
+
+
 @pytest.mark.django_db
 class TestGetRdpConnectionInfoIntegration:
     """Integration tests for get_rdp_connection_info with real DB."""
 
     def test_returns_connection_info_for_windows_instance(self, range_ready):
         """get_rdp_connection_info returns correct info for Windows."""
-        with patch("engine.services.get_rdp_password", return_value="PerInstanceWinPw!"):
+        with _boto3_rdp_secret("PerInstanceWinPw!"):
             result = get_rdp_connection_info(
                 user=range_ready.user,
                 instance_uuid="victim-uuid-456",
@@ -505,7 +515,7 @@ class TestGetRdpConnectionInfoIntegration:
 
     def test_returns_connection_info_for_kali_instance(self, range_ready):
         """get_rdp_connection_info returns correct info for Kali."""
-        with patch("engine.services.get_rdp_password", return_value="PerInstanceKaliPw!"):
+        with _boto3_rdp_secret("PerInstanceKaliPw!"):
             result = get_rdp_connection_info(
                 user=range_ready.user,
                 instance_uuid="attacker-uuid-123",
@@ -561,7 +571,7 @@ class TestGetRdpConnectionInfoIntegration:
             ],
         )
 
-        with patch("engine.services.get_rdp_password", return_value="PerInstanceUbuntuPw!"):
+        with _boto3_rdp_secret("PerInstanceUbuntuPw!"):
             result = get_rdp_connection_info(user=user, instance_uuid="ubuntu-uuid")
 
         assert result["os_type"] == "ubuntu"

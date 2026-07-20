@@ -2,10 +2,12 @@
 
 ## Scope
 
-Issue 1183 is a security consistency fix for the experiment and scenario editor
-authoring surfaces. The intended policy is: active staff users and active
-members of the `Threat Research` group may access and invoke these CMS
-authoring operations; unrelated authenticated users may not.
+Issue 1183 was a security consistency fix for the experiment and scenario
+editor authoring surfaces. ADR-027 / issue #1195 later removed the legacy
+experiment surface; the remaining live policy applies to scenario editor
+authoring. The intended policy is: active staff users and active members of the
+`Threat Research` group may access and invoke CMS authoring operations;
+unrelated authenticated users may not.
 
 The implementation must align the view decorators, service-layer gates,
 template/navigation visibility, and tests to that one policy. This is not a new
@@ -24,9 +26,10 @@ roles system, a scenario visibility redesign, or a permission matrix rewrite.
   `cms.scenarios.registry.check_scenario_access`, `list_all_scenarios(user=...)`,
   `enabled`, and `staff_only` semantics; do not treat editor authorization as
   permission to use disabled or staff-only scenarios in non-staff workflows.
-- Ownership checks remain per-object. Experiment and script queries must stay
-  scoped to `user`, and scenario editor writes must continue to respect default
-  scenario immutability and soft-delete/update rules.
+- Ownership checks remain per-object. The removed experiment and script
+  queries must not be revived without a new ADR; scenario editor writes must
+  continue to respect default scenario immutability and soft-delete/update
+  rules.
 - User-facing text and navigation must describe exactly the same audience as the
   service gate: staff or Threat Research, not staff-only unless the policy is
   intentionally changed in the canonical helper.
@@ -39,22 +42,18 @@ roles system, a scenario visibility redesign, or a permission matrix rewrite.
 - Scenario access policy: `cms.scenarios.registry.check_scenario_access`,
   `list_all_scenarios(user=...)`, `get_scenario_detail`, `enabled`, and
   `staff_only`.
-- Validation layers: `cms.experiments.schemas.ExperimentCreateInput`,
-  `ScriptUploadInput`, `cms.scenarios.schema.ScenarioTemplate`,
+- Validation layers: `cms.scenarios.schema.ScenarioTemplate`,
   `validate_definition`, `validate_yaml`, model `full_clean()`, and existing
   form JSON parsing.
-- Exception handling: existing `ExperimentError` subclasses,
-  `ScenarioEditorError`, `CMSError`, and Django `PermissionDenied`; do not add a
-  parallel authorization exception hierarchy.
-- Persistence and integrity: transaction blocks, soft deletes, per-user
-  experiment/script ownership filters, default scenario checks, and
-  `ScenarioMetadata` overlays.
+- Exception handling: existing `ScenarioEditorError`, `CMSError`, and Django
+  `PermissionDenied`; do not add a parallel authorization exception hierarchy.
+- Persistence and integrity: transaction blocks, soft deletes, default scenario
+  checks, and `ScenarioMetadata` overlays.
 - Observability: module-level loggers, ID-only authorization logs, `safe_log`
   for scenario IDs/S3 keys where already used, and `risk_register.services.audit_log`
   for successful mutating operations.
 - Workflow gates: `scripts/adr_guard/adr_guard.py`, `.importlinter`, and the
-  existing pytest suites under `shifter/shifter_platform/tests/cms/experiments`,
-  `tests/scenario_editor`, and `tests/shared`.
+  existing pytest suites under `tests/scenario_editor` and `tests/shared`.
 
 ## Security Layers
 

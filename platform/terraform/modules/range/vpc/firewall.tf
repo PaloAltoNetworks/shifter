@@ -60,6 +60,11 @@ resource "aws_route_table_association" "firewall" {
 
 # Victim domain allowlist - XDR/XSIAM endpoints only
 resource "aws_networkfirewall_rule_group" "victim_domains" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 100
@@ -96,6 +101,11 @@ resource "aws_networkfirewall_rule_group" "victim_domains" {
 
 # Kali domain allowlist - empty by default (Kali has full tools, no external access needed)
 resource "aws_networkfirewall_rule_group" "kali_domains" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall && length(var.kali_allowed_domains) > 0 ? 1 : 0
 
   capacity = 100
@@ -135,6 +145,11 @@ resource "aws_networkfirewall_rule_group" "kali_domains" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "ngfw_bypass" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall && var.enable_ngfw_infrastructure ? 1 : 0
 
   capacity = 10
@@ -164,6 +179,11 @@ resource "aws_networkfirewall_rule_group" "ngfw_bypass" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "block_ip_sni" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 10
@@ -227,6 +247,11 @@ locals {
 }
 
 resource "aws_networkfirewall_rule_group" "victim_ips" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? length(local.cidr_chunks) : 0
 
   capacity = 1000 # Each CIDR uses ~1 capacity unit
@@ -266,51 +291,20 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
   })
 }
 
-# ------------------------------------------------------------------------------
-# DNS Allow Rule (8.8.8.8 only)
-# ------------------------------------------------------------------------------
-
-resource "aws_networkfirewall_rule_group" "allow_dns" {
-  count = var.enable_network_firewall ? 1 : 0
-
-  capacity = 10
-  name     = "${var.name_prefix}-allow-dns"
-  type     = "STATEFUL"
-
-  rule_group {
-    rule_variables {
-      ip_sets {
-        key = "HOME_NET"
-        ip_set {
-          definition = [var.vpc_cidr]
-        }
-      }
-    }
-
-    rules_source {
-      # Allow DNS to Google Public DNS only
-      # Time sync: EC2 instances can use AWS Time Sync Service at 169.254.169.123 (no firewall rule needed)
-      rules_string = <<-EOT
-        pass udp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000020; rev:1;)
-        pass tcp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000021; rev:1;)
-      EOT
-    }
-
-    stateful_rule_options {
-      rule_order = "STRICT_ORDER"
-    }
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-allow-dns"
-  })
-}
+# DNS egress is handled in dns_resolver.tf: hosts use AmazonProvidedDNS inside
+# the VPC; Route 53 Resolver DNS Firewall allowlists scenario/bootstrap suffixes
+# and blocks unknown external names. No UDP/TCP 53 egress to public resolvers.
 
 # ------------------------------------------------------------------------------
 # NTP Allow Rule (UDP 123 - required for time sync)
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "allow_ntp" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 10
@@ -348,6 +342,11 @@ resource "aws_networkfirewall_rule_group" "allow_ntp" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "drop_all" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   capacity = 10
@@ -394,6 +393,11 @@ resource "aws_networkfirewall_rule_group" "drop_all" {
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_firewall_policy" "this" {
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   name = "${var.name_prefix}-firewall-policy"
@@ -414,8 +418,9 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     # Priority 2-N: Victim IPs - allow HTTPS to GCP/PANW IP ranges (chunked)
     # Priority N+1: Victim domains - allow listed domains (SNI-based)
     # Priority N+2: Kali domains - allow listed domains (if configured)
-    # Priority 99: DNS allow - allow DNS to 8.8.8.8 only
+    # Priority 98: NTP allow
     # Priority 100: Drop all - drop ALL unmatched traffic (default deny)
+    # DNS: no public-resolver egress rule; see dns_resolver.tf
 
     # NGFW bypass - allow all egress for SCM/licensing (priority 1)
     dynamic "stateful_rule_group_reference" {
@@ -456,12 +461,6 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       priority     = 98
     }
 
-    # DNS allow - allow DNS to 8.8.8.8 (priority 99 - just before drop all)
-    stateful_rule_group_reference {
-      resource_arn = aws_networkfirewall_rule_group.allow_dns[0].arn
-      priority     = 99
-    }
-
     # Drop all unmatched traffic (priority 100 - last, default deny)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.drop_all[0].arn
@@ -478,12 +477,24 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 # Network Firewall
 # ------------------------------------------------------------------------------
 
+# NF logging is wired via a separate aws_networkfirewall_logging_configuration
+# resource (line 563), but Checkov's graph check cannot evaluate the cross-
+# resource reference and flags this firewall as unlogged. See ADR-004-R11
+# exception ckv2-aws-63-nf-logging-cross-resource.
 resource "aws_networkfirewall_firewall" "this" {
+  # checkov:skip=CKV2_AWS_63:Logging defined in aws_networkfirewall_logging_configuration "this" below.
+  # checkov:skip=CKV_AWS_344:Deletion protection controlled by var.network_firewall_delete_protection (dev false / prod true). See ADR-004-R11 exception ckv-aws-344-nf-delete-protection.
+  encryption_configuration {
+    type   = "CUSTOMER_KMS"
+    key_id = aws_kms_key.range_vpc.arn
+  }
+
   count = var.enable_network_firewall ? 1 : 0
 
   name                = "${var.name_prefix}-firewall"
   firewall_policy_arn = aws_networkfirewall_firewall_policy.this[0].arn
   vpc_id              = aws_vpc.this.id
+  delete_protection   = var.network_firewall_delete_protection
 
   subnet_mapping {
     subnet_id = aws_subnet.firewall[0].id
@@ -503,6 +514,7 @@ resource "aws_cloudwatch_log_group" "firewall" {
 
   name              = "/aws/network-firewall/${var.name_prefix}"
   retention_in_days = var.firewall_log_retention_days
+  kms_key_id        = aws_kms_key.range_vpc.arn
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-firewall-logs"

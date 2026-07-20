@@ -1,0 +1,28 @@
+/* CTF admin: event list page.
+   Extracted from templates/ctf/admin/event_list.html (issue #414). */
+
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.filter-bar select {
+    width: auto;
+    min-width: 180px;
+}
+
+.team-indicator {
+    font-size: 11px;
+    color: var(--theme-text-secondary);
+    border: 1px solid var(--theme-border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-left: 8px;
+}
+
+/* Extracted inline styles (issue #414) */
+.status-filter-select {
+    width: auto;
+    min-width: 180px;
+}

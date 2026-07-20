@@ -14,10 +14,9 @@ import uuid as uuid_module
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from ..enums import ResourceStatus
-
 from .base import SpecBase
 
 if TYPE_CHECKING:
@@ -59,18 +58,15 @@ class InstanceSpec(SpecBase):
 
     Attributes:
         name: User-friendly instance name (inherited from SpecBase).
-        uuid: Unique identifier for this instance (assigned during hydration).
+        uuid: Unique identifier for this instance (inherited from SpecBase).
         role: Instance role (attacker, victim, dc, or ngfw).
         os_type: Operating system type (kali, ubuntu, windows, or panos).
         agent: Optional agent details for agent installation.
         dc_config: Optional domain controller configuration.
         join_domain: Whether instance should join the domain (default False).
         ngfw_app: Optional NGFW app spec for NGFW instances.
-
-    TODO: Remove redundant uuid field - now inherited from SpecBase (#522).
     """
 
-    uuid: str | None = None  # TODO: Remove - inherited from SpecBase (#522)
     role: Literal["attacker", "victim", "dc", "ngfw"]
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     agent: AgentDetails | None = None
@@ -159,14 +155,20 @@ def _resolve_os_and_agent(
     Returns:
         Tuple of (resolved_os_type, agent_object or None).
     """
-    if not xdr_agent:
-        return template_os_type, None
-
+    # `from_agent` derives the victim OS from the user-provided agent, so it
+    # always needs an agent regardless of the `xdr_agent` flag (the flag gates
+    # fixed-OS agent installs, not OS resolution). Handle it before the
+    # `xdr_agent` gate so a `from_agent` instance with `xdr_agent: false` (e.g.
+    # the canonical `basic` victim) still resolves instead of leaking the
+    # literal "from_agent" into InstanceSpec validation.
     if template_os_type == "from_agent":
         agent_obj = next(iter(agents.values()), None)
         if agent_obj is None:
             raise ValueError(f"Instance '{name}' uses from_agent but no agent provided")
         return _resolve_agent_os(agent_obj), agent_obj
+
+    if not xdr_agent:
+        return template_os_type, None
 
     if template_os_type == "windows":
         return template_os_type, agents.get("windows")
@@ -240,6 +242,24 @@ class RangeSpecBase(SpecBase):
         return [inst for subnet in self.subnets for inst in subnet.instances]
 
 
+class RangeAccessBinding(BaseModel):
+    """Scenario authorization for one participant-facing member channel."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target_ref: str
+    channel: Literal["ssh", "rdp"]
+
+    @field_validator("target_ref")
+    @classmethod
+    def target_ref_not_empty(cls, value: str) -> str:
+        """Require a stable authored member reference."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("target_ref cannot be empty or whitespace")
+        return normalized
+
+
 class RangeSpec(RangeSpecBase):
     """Demo range specification.
 
@@ -253,11 +273,32 @@ class RangeSpec(RangeSpecBase):
 
     range_type: Literal["demo"] = "demo"
     ngfw: bool = False
+    participant_access: list[RangeAccessBinding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def participant_access_targets_exist(self) -> RangeSpec:
+        """Reject duplicate or foreign participant access declarations."""
+        member_refs = {str(instance.uuid) for instance in self.all_instances if instance.uuid}
+        seen: set[tuple[str, str]] = set()
+        for binding in self.participant_access:
+            key = (binding.target_ref, binding.channel)
+            if binding.target_ref not in member_refs:
+                raise ValueError(f"participant_access references unknown member {binding.target_ref!r}")
+            if key in seen:
+                raise ValueError(
+                    f"participant_access contains duplicate target/channel {binding.target_ref!r}/{binding.channel}"
+                )
+            seen.add(key)
+        return self
 
 
 # =============================================================================
 # Projections - tailored views of the Range DSL kernel
 # =============================================================================
+
+
+_PRIVATE_IP_MAX_LEN = 64
+_PRIVATE_IP_ALLOWED_CHARS = frozenset("0123456789abcdefABCDEF.:")
 
 
 class InstanceContextBase(BaseModel):
@@ -272,6 +313,10 @@ class InstanceContextBase(BaseModel):
         role: Instance role (attacker, victim, dc, or ngfw).
         os_type: Operating system type (kali, ubuntu, windows, or panos).
         join_domain: Whether instance should join the domain.
+        private_ip: Optional display-only internal IP address sourced from
+            engine runtime state. Malformed or oversized input is coerced to
+            None rather than raised so one bad provisioner row never breaks
+            the whole projection.
     """
 
     uuid: str | None = None
@@ -280,6 +325,23 @@ class InstanceContextBase(BaseModel):
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     join_domain: bool = False
     ami_key: str | None = None
+    private_ip: str | None = None
+
+    @field_validator("private_ip", mode="before")
+    @classmethod
+    def normalize_private_ip(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        if len(stripped) > _PRIVATE_IP_MAX_LEN:
+            return None
+        if not all(ch in _PRIVATE_IP_ALLOWED_CHARS for ch in stripped):
+            return None
+        return stripped
 
 
 class InstanceContext(InstanceContextBase):

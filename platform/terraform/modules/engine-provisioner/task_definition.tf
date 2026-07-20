@@ -11,61 +11,29 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
-  # Issue #1103: dedicated writable volumes so the container can run with
-  # readonlyRootFilesystem = true. Fargate creates these from the task's
-  # ephemeral storage (no host_path), which is fine for Terraform staging
-  # and tool caches that should not persist across task restarts.
-  #
-  # Ownership contract — these volumes have NO `host` block and NO
-  # `host_path`, so AWS/Fargate creates a Docker named-volume on the
-  # task's ephemeral storage. Docker named-volume semantics (which AWS
-  # Fargate inherits) initialize the volume from the image's directory at
-  # the mount point: contents AND ownership/permissions are copied from
-  # the image dir at mount time. The Dockerfile pre-creates each of these
-  # paths (`/var/run/provisioner/workspace`, `/tmp`,
-  # `/home/appuser/.terraform.d/plugin-cache`, `/home/appuser/.pulumi`)
-  # with `mkdir` + `chown -R appuser:appgroup`, so the named volume comes
-  # up owned by uid/gid 1000 and the non-root container can write
-  # immediately. This is the AWS-native equivalent of the GKE
-  # `fsGroup: 1000` we set on the Pod spec — different mechanism, same
-  # outcome. End-to-end dev verification (per the issue's acceptance
-  # criterion) is the conclusive cross-check.
-  # See: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specify-bind-mount-config.html
-  volume {
-    name = "provisioner-workspace"
-  }
-  volume {
-    name = "tmp"
-  }
-  volume {
-    name = "tf-plugin-cache"
-  }
-  volume {
-    name = "pulumi-home"
-  }
-
   container_definitions = jsonencode([{
-    name                   = "pulumi-provisioner"
-    image                  = "${var.ecr_repository_url}:${var.container_image_tag}"
-    essential              = true
-    readonlyRootFilesystem = true
-    # Defense-in-depth: the image's USER directive already drops to UID/GID
-    # 1000, but declaring it on the task definition makes the contract
-    # explicit and guards against an image where USER was omitted. The
-    # mountPoints below resolve to ephemeral Fargate volumes that inherit
-    # the image directory's ownership (appuser:appgroup, pre-chowned in
-    # the Dockerfile), so writes by UID 1000 succeed without an init-chown.
-    user = "1000:1000"
-
-    mountPoints = [
-      { sourceVolume = "provisioner-workspace", containerPath = "/var/run/provisioner/workspace", readOnly = false },
-      { sourceVolume = "tmp", containerPath = "/tmp", readOnly = false },
-      { sourceVolume = "tf-plugin-cache", containerPath = "/home/appuser/.terraform.d/plugin-cache", readOnly = false },
-      { sourceVolume = "pulumi-home", containerPath = "/home/appuser/.pulumi", readOnly = false },
-    ]
+    name      = "pulumi-provisioner"
+    image     = var.container_image_digest != "" ? "${var.ecr_repository_url}@${var.container_image_digest}" : "${var.ecr_repository_url}:${var.container_image_tag}"
+    essential = true
+    # Keep the ECS task non-root. AWS Fargate task volumes are mounted
+    # root-owned and do not expose a Kubernetes-style fsGroup / uid option,
+    # so readonlyRootFilesystem + non-root + mounted /tmp/workspace paths
+    # leaves Python with no usable temp directory. The image still keeps
+    # application code root-owned and unwritable to UID 1000; writable
+    # paths are limited to /tmp, HOME tool caches, and
+    # TERRAFORM_WORKSPACE_DIR inside the task's ephemeral writable layer.
+    readonlyRootFilesystem = false
+    user                   = "1000:1000"
 
     environment = [
       { name = "ENVIRONMENT", value = var.environment },
+      # Explicit backend selection for the provisioner (PLAT-2005). The AWS
+      # provisioner previously relied on the runtime's implicit "aws" default;
+      # runtime now fails closed on a missing/unsupported backend, so every
+      # deployed role must receive the value explicitly. Renderer-owned: the
+      # value comes from var.cloud_provider (rendered from shifter.yaml at
+      # deploy time), not a hardcoded literal.
+      { name = "CLOUD_PROVIDER", value = var.cloud_provider },
       { name = "SECRETS_KMS_KEY_ARN", value = var.secrets_manager_kms_key_arn },
       { name = "AWS_REGION", value = local.region },
       { name = "DB_HOST", value = var.db_host },
@@ -77,6 +45,9 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "RANGE_VPC_CIDR", value = var.range_vpc_cidr },
       { name = "RANGE_ROUTE_TABLE_ID", value = var.range_route_table_id },
       { name = "RANGE_AVAILABILITY_ZONE", value = var.range_availability_zone },
+      { name = "RANGE_VPN_EDGE_SUBNET_ID", value = var.range_vpn_edge_subnet_id },
+      { name = "RANGE_VPN_GATEWAY_PERMISSIONS_BOUNDARY_ARN", value = var.permissions_boundary_arn },
+      { name = "RANGE_VPN_PROVIDER_ENDPOINT_SECURITY_GROUP_ID", value = var.range_vpn_provider_endpoint_security_group_id },
       { name = "RANGE_INSTANCE_PROFILE_NAME", value = var.range_instance_profile_name },
       { name = "KALI_AMI_ID", value = var.kali_ami_id },
       { name = "VICTIM_AMI_ID", value = var.victim_ami_id },
@@ -86,6 +57,7 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "S3_ENDPOINT_ID", value = var.s3_endpoint_id },
       { name = "FIREWALL_ENDPOINT_ID", value = var.firewall_endpoint_id },
+      { name = "RANGE_EGRESS_MODE", value = var.range_egress_mode },
       { name = "SSM_ENDPOINTS_SUBNET_CIDR", value = var.ssm_endpoints_subnet_cidr },
       { name = "PORTAL_VPC_CIDR", value = var.portal_vpc_cidr },
       { name = "PORTAL_VPC_PEERING_ID", value = var.portal_vpc_peering_id },
@@ -103,6 +75,22 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "NGFW_INSTANCE_PROFILE_NAME", value = var.ngfw_instance_profile_name },
       # Messaging (SNS for range events)
       { name = "SNS_RANGE_EVENTS_ARN", value = var.sns_topic_arn },
+      # Polaris Bedrock agent config (#1377). See
+      # shifter/engine/provisioner/config.py load_aws_polaris_agent_config().
+      # RANGE_INSTANCE_ROLE_ARN reuses the existing shared range-host role
+      # ARN (already granted iam:PassRole above) as the per-range Polaris
+      # agent role's trust principal.
+      { name = "AWS_POLARIS_AGENT_REGION", value = var.aws_polaris_agent_region },
+      { name = "AWS_POLARIS_AGENT_MAIN_MODEL_ID", value = var.aws_polaris_agent_main_model_id },
+      { name = "AWS_POLARIS_AGENT_SMALL_MODEL_ID", value = var.aws_polaris_agent_small_model_id },
+      { name = "AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN", value = var.aws_polaris_agent_main_inference_profile_arn },
+      { name = "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN", value = var.aws_polaris_agent_small_inference_profile_arn },
+      { name = "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS", value = join(",", var.aws_polaris_agent_main_backing_model_arns) },
+      { name = "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS", value = join(",", var.aws_polaris_agent_small_backing_model_arns) },
+      { name = "AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS", value = tostring(var.aws_polaris_agent_sts_session_duration_seconds) },
+      { name = "AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS", value = tostring(var.aws_polaris_agent_refresh_window_seconds) },
+      { name = "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN", value = var.permissions_boundary_arn },
+      { name = "RANGE_INSTANCE_ROLE_ARN", value = var.range_instance_role_arn },
     ]
 
     secrets = [

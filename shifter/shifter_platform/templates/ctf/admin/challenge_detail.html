@@ -1,149 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     {{ challenge.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.detail-layout {
-    display: grid;
-    grid-template-columns: 1fr 360px;
-    gap: 16px;
-    align-items: start;
-}
-
-.breadcrumb {
-    display: flex;
-    gap: 4px;
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-    list-style: none;
-    padding: 0;
-    margin-top: 0;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb li + li::before {
-    content: "/";
-    margin-right: 4px;
-    color: var(--theme-text-secondary);
-}
-
-.challenge-badges {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-}
-
-.badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 10px;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.badge-category {
-    background: rgba(148, 163, 184, 0.15);
-    color: #94a3b8;
-}
-
-.badge-easy {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.badge-medium {
-    background: rgba(250, 173, 20, 0.15);
-    color: #faad14;
-}
-
-.badge-hard {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
-}
-
-.badge-expert {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.badge-points {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.badge-correct {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.badge-incorrect {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
-}
-
-.badge-secondary {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.detail-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    font-size: 13px;
-}
-
-.detail-row + .detail-row {
-    border-top: 1px solid var(--theme-border);
-}
-
-.detail-label {
-    color: var(--theme-text-secondary);
-}
-
-.detail-value {
-    font-weight: 600;
-    color: var(--theme-text);
-}
-
-.challenge-description {
-    font-size: 14px;
-    line-height: 1.6;
-    color: var(--theme-text);
-}
-
-.challenge-description p {
-    margin: 0 0 8px;
-}
-
-.empty-message {
-    padding: 24px;
-    text-align: center;
-    color: var(--theme-text-secondary);
-    font-size: 13px;
-}
-
-.hint-empty-note {
-    font-size: 13px;
-    margin: 0;
-}
-
-@media (max-width: 960px) {
-    .detail-layout {
-        grid-template-columns: 1fr;
-    }
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-challenge_detail.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -327,7 +190,7 @@
             <div class="card">
                 <div class="card-title flex-between-center">
                     {% trans "Flags" %}
-                    {% if event.is_content_modifiable %}
+                    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                         <button type="button"
                                 class="btn btn-sm btn-primary"
                                 onclick="document.getElementById('add-flag-form').classList.toggle('is-open')">
@@ -348,7 +211,7 @@
                                 <th>
                                     {% trans "Case Sensitive" %}
                                 </th>
-                                {% if event.is_content_modifiable %}
+                                {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                                     <th>
                                         {% trans "Actions" %}
                                     </th>
@@ -371,7 +234,7 @@
                                             {% trans "No" %}
                                         {% endif %}
                                     </td>
-                                    {% if event.is_content_modifiable %}
+                                    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                                         <td>
                                             <button type="button"
                                                     class="btn btn-sm btn-danger"
@@ -389,7 +252,7 @@
                         {% trans "No flag records. Using legacy flag_hash field." %}
                     </div>
                 {% endif %}
-                {% if event.is_content_modifiable %}
+                {% if event.is_content_modifiable or event.is_live_flag_repairable %}
                     <div id="add-flag-form" class="collapse-panel">
                         <div class="mb-sm">
                             <label for="new-flag-value" class="field-label">
@@ -470,10 +333,10 @@
                             {% for file in challenge_files %}
                                 <tr>
                                     <td>
-                                        <a href="#"
-                                           data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
-                                           {{ file.display }}
-                                           </a>
+                                        <button type="button"
+                                                data-download-url="{% url 'v1:ctf:api_file_download' file.pk %}">
+                                            {{ file.display }}
+                                        </button>
                                     </td>
                                     <td>
                                         {{ file.file_size_display }}
@@ -836,14 +699,14 @@ document.querySelectorAll('[data-download-url]').forEach(function(link) {
     });
 });
     </script>
-    {% if event.is_content_modifiable %}
+    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
         <script>
 function addFlag() {
     const flagValue = document.getElementById('new-flag-value').value.trim();
     if (!flagValue) { alert('Flag value is required'); return; }
     const flagType = document.getElementById('new-flag-type').value;
     const caseSensitive = document.getElementById('new-flag-case-sensitive').value === 'true';
-    fetch("{% url 'ctf:api_add_flag' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_add_flag' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
         body: JSON.stringify({flag: flagValue, flag_type: flagType, case_sensitive: caseSensitive})
@@ -851,7 +714,7 @@ function addFlag() {
         if (data.error) { alert(data.error); } else { location.reload(); }
     });
 }
-const REMOVE_FLAG_URL = "{% url 'ctf:api_remove_flag' flag_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_FLAG_URL = "{% url 'v1:ctf:api_remove_flag' flag_id='00000000-0000-0000-0000-000000000000' %}";
 function removeFlag(flagId) {
     if (!confirm('Remove this flag?')) return;
     const url = REMOVE_FLAG_URL.replace('00000000-0000-0000-0000-000000000000', flagId);
@@ -863,7 +726,7 @@ function removeFlag(flagId) {
     });
 }
 
-const REMOVE_FILE_URL = "{% url 'ctf:api_challenge_file_delete' file_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_FILE_URL = "{% url 'v1:ctf:api_challenge_file_delete' file_id='00000000-0000-0000-0000-000000000000' %}";
 function removeFile(fileId) {
     if (!confirm('Remove this file?')) return;
     const url = REMOVE_FILE_URL.replace('00000000-0000-0000-0000-000000000000', fileId);
@@ -879,7 +742,7 @@ function addPrerequisite() {
     const select = document.getElementById('prereq-challenge-select');
     const challengeId = select.value;
     if (!challengeId) { alert('Select a challenge'); return; }
-    fetch("{% url 'ctf:api_challenge_prerequisites' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_challenge_prerequisites' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
         body: JSON.stringify({required_challenge_id: challengeId})
@@ -889,7 +752,7 @@ function addPrerequisite() {
 }
 
 const REMOVE_PREREQ_URL =
-    "{% url 'ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
+    "{% url 'v1:ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
 function removePrerequisite(prereqId) {
     if (!confirm('Remove this prerequisite?')) return;
     const url = REMOVE_PREREQ_URL.replace('00000000-0000-0000-0000-000000000000', prereqId);
@@ -907,7 +770,7 @@ function addHint() {
     const order = parseInt(document.getElementById('new-hint-order').value) || 0;
     if (!text) { alert('Hint text is required.'); return; }
 
-    fetch("{% url 'ctf:api_challenge_hints' challenge_id=challenge.pk %}", {
+    fetch("{% url 'v1:ctf:api_challenge_hints' challenge_id=challenge.pk %}", {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
         body: JSON.stringify({text: text, penalty: penalty, order: order}),
@@ -916,7 +779,7 @@ function addHint() {
     });
 }
 
-const REMOVE_HINT_URL = "{% url 'ctf:api_hint_delete' hint_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_HINT_URL = "{% url 'v1:ctf:api_hint_delete' hint_id='00000000-0000-0000-0000-000000000000' %}";
 function removeHint(hintId) {
     if (!confirm('Remove this hint?')) return;
     const url = REMOVE_HINT_URL.replace('00000000-0000-0000-0000-000000000000', hintId);

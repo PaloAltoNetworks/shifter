@@ -338,10 +338,6 @@
    Tab Mode Styles
    ============================================================================= */
 
-.terminal-container.mode-tabs ~ .terminal-tabs {
-    display: flex;
-}
-
 /* In tab mode, hide all panes except the active one */
 .mode-tabs .terminal-pane {
     display: none;
@@ -356,28 +352,33 @@
     display: none;
 }
 
-/* Show tabs bar when in tab mode */
-.mode-tabs ~ .terminal-tabs,
-.terminal-page:has(.mode-tabs) .terminal-tabs {
+/* Tabs-bar visibility across modes. The .terminal-tabs rules are ordered by
+   ascending selector specificity so source order matches the cascade
+   (no-descending-specificity). mode-tabs and mode-split are mutually
+   exclusive, so the flex/none values never conflict on a single node. */
+.mode-tabs ~ .terminal-tabs {
+    display: flex;
+}
+
+.mode-split ~ .terminal-tabs {
+    display: none;
+}
+
+.terminal-container.mode-tabs ~ .terminal-tabs {
+    display: flex;
+}
+
+.terminal-page:has(.mode-split) .terminal-tabs {
+    display: none;
+}
+
+.terminal-container.mode-tabs .terminal-tabs {
     display: flex;
 }
 
 /* =============================================================================
    Split Mode Styles
    ============================================================================= */
-
-/* Hide tabs bar in split mode */
-.mode-split ~ .terminal-tabs,
-.terminal-page:has(.mode-split) .terminal-tabs {
-    display: none;
-}
-
-/* Show tabs bar via the more-specific .terminal-container.mode-tabs descendant
-   path (placed AFTER the sibling-combinator rules so source order matches
-   specificity order). */
-.terminal-container.mode-tabs .terminal-tabs {
-    display: flex;
-}
 
 /* Hide regular panes in split mode */
 .mode-split .terminal-pane {

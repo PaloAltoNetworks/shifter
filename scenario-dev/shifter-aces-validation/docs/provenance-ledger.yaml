@@ -1,0 +1,30 @@
+schema_version: scenario-pack-provenance/v2
+pack:
+  name: shifter-aces-validation
+sources:
+  - source_id: original-design
+    name: Shifter ACES validation design
+    license: proprietary
+    usage: reused
+    attribution_required: false
+artifacts:
+  - artifact_id: concepts
+    path: docs/concepts.md
+    classification: open
+content_safety:
+  no_real_malware: true
+  no_real_third_party_targets: true
+  no_real_credentials: true
+  no_sensitive_data: true
+  offensive_tooling_boundary: true
+review:
+  status: approved
+  gates:
+    - gate_id: licensing
+      status: approved
+    - gate_id: attribution
+      status: approved
+    - gate_id: sensitive-data
+      status: approved
+    - gate_id: offensive-tooling
+      status: approved

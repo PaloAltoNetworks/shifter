@@ -1,15 +1,38 @@
-"""Tests for SNS event publishing in events.py.
+"""Tests for durable event enqueueing in events.py.
 
-This module tests the event publishing functions that send range status
-events to SNS for fan-out.
+Phase 1 (#476): _publish_event is renamed to _enqueue_event and now writes
+durably to the outbox via provisioner_db.enqueue_event_outbox instead of
+publishing directly to SNS. Failures propagate to the caller (no swallowing).
 """
 
 from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
+
+from events import (
+    _enqueue_event,
+    _get_sns_topic_arn,
+    _publish_event,
+    publish_cancelled,
+    publish_destroyed,
+    publish_failed,
+    publish_ngfw_event,
+    publish_ready,
+    publish_status_update,
+)
+
+
+def _make_mock_db():
+    """Return (mock_conn, mock_cur) backed by a fully stubbed psycopg connection."""
+    mock_cur = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    return mock_conn, mock_cur
 
 
 @pytest.fixture
@@ -22,6 +45,16 @@ def mock_sns_env(monkeypatch):
     )
 
 
+@pytest.fixture
+def db_env(monkeypatch):
+    """Set minimal DB env vars so get_db_connection() reaches psycopg.connect."""
+    monkeypatch.setenv("DB_HOST", "localhost")
+    monkeypatch.setenv("DB_PORT", "5432")
+    monkeypatch.setenv("DB_USER", "test")
+    monkeypatch.setenv("DB_NAME", "testdb")
+    monkeypatch.setenv("DB_PASSWORD", "testpass")
+
+
 class TestGetSNSTopicARN:
     """Tests for _get_sns_topic_arn() function."""
 
@@ -29,8 +62,6 @@ class TestGetSNSTopicARN:
         """Returns RANGE_EVENTS_TOPIC_ID when present."""
         monkeypatch.setenv("RANGE_EVENTS_TOPIC_ID", "projects/test/topics/range-events")
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:ignored")
-
-        from events import _get_sns_topic_arn
 
         assert _get_sns_topic_arn() == "projects/test/topics/range-events"
 
@@ -41,8 +72,6 @@ class TestGetSNSTopicARN:
             "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
         )
 
-        from events import _get_sns_topic_arn
-
         expected = "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
         assert _get_sns_topic_arn() == expected
 
@@ -51,57 +80,66 @@ class TestGetSNSTopicARN:
         monkeypatch.delenv("RANGE_EVENTS_TOPIC_ID", raising=False)
         monkeypatch.delenv("SNS_RANGE_EVENTS_ARN", raising=False)
 
-        from events import _get_sns_topic_arn
-
         with pytest.raises(ValueError, match="RANGE_EVENTS_TOPIC_ID"):
             _get_sns_topic_arn()
 
 
-class TestPublishEvent:
-    """Tests for _publish_event() internal function."""
+class TestEnqueueEvent:
+    """Tests for _enqueue_event() — the durable outbox writer."""
 
-    def test_publishes_event_via_event_bus(self, mock_sns_env):
-        """Event is published via cloud EventBus with correct args."""
-        from events import _publish_event
+    def test_raises_when_enqueue_fails(self, db_env):
+        """_enqueue_event propagates exceptions when the durable write fails."""
+        with (
+            patch("psycopg.connect", side_effect=RuntimeError("db down")),
+            pytest.raises(RuntimeError, match="db down"),
+        ):
+            _enqueue_event(
+                {
+                    "event_type": "range.status.updated",
+                    "event_id": str(uuid4()),
+                    "range_id": 42,
+                }
+            )
 
-        mock_bus = MagicMock()
-        with patch("events.get_event_bus", return_value=mock_bus):
-            event = {
-                "event_type": "range.status.updated",
-                "range_id": 42,
-                "user_id": 1,
-                "new_status": "provisioning",
-            }
+    def test_enqueue_delegates_to_provisioner_db(self, db_env):
+        """_enqueue_event writes the full event dict to the outbox table."""
+        event = {
+            "event_type": "range.status.updated",
+            "event_id": str(uuid4()),
+            "range_id": 42,
+            "user_id": 1,
+            "new_status": "provisioning",
+        }
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
+            _enqueue_event(event)
 
+        mock_cur.execute.assert_called_once()
+        params = mock_cur.execute.call_args[0][1]
+        assert params[0] == str(event["event_id"])
+        assert params[1] == event["event_type"]
+        assert json.loads(params[2]) == event
+
+    def test_publish_event_alias_delegates_to_enqueue(self, db_env):
+        """_publish_event alias also writes the event to the outbox table."""
+        event = {"event_type": "range.status.updated", "event_id": str(uuid4()), "range_id": 1}
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             _publish_event(event)
 
-            mock_bus.publish.assert_called_once()
-            call_kwargs = mock_bus.publish.call_args.kwargs
-
-            expected_arn = "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
-            assert call_kwargs["topic_id"] == expected_arn
-            assert json.loads(call_kwargs["message"]) == event
-            assert call_kwargs["attributes"] == {"event_type": "range.status.updated"}
-
-    def test_does_not_raise_on_publish_failure(self, mock_sns_env):
-        """EventBus publish failures are caught and logged, not raised."""
-        from events import _publish_event
-
-        mock_bus = MagicMock()
-        mock_bus.publish.side_effect = Exception("publish error")
-        with patch("events.get_event_bus", return_value=mock_bus):
-            # Should not raise
-            _publish_event({"event_type": "range.status.updated", "range_id": 42})
+        mock_cur.execute.assert_called_once()
+        params = mock_cur.execute.call_args[0][1]
+        assert params[1] == event["event_type"]
+        assert json.loads(params[2])["range_id"] == event["range_id"]
 
 
 class TestPublishStatusUpdate:
     """Tests for publish_status_update() function."""
 
-    def test_publishes_status_change_event(self, mock_sns_env):
+    def test_publishes_status_change_event(self, mock_sns_env, db_env):
         """Publishes event with status transition details."""
-        from events import publish_status_update
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_status_update(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
@@ -109,21 +147,19 @@ class TestPublishStatusUpdate:
                 new_status="provisioning",
             )
 
-            mock_publish.assert_called_once()
-            event = mock_publish.call_args[0][0]
+        mock_cur.execute.assert_called_once()
+        event = json.loads(mock_cur.execute.call_args[0][1][2])
 
-            assert event["event_type"] == "range.status.updated"
-            req_id = "550e8400-e29b-41d4-a716-446655440000"
-            assert event["request_id"] == req_id
-            assert event["range_id"] == 42
-            assert event["user_id"] == 1
-            assert event["new_status"] == "provisioning"
+        assert event["event_type"] == "range.status.updated"
+        assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+        assert event["range_id"] == 42
+        assert event["user_id"] == 1
+        assert event["new_status"] == "provisioning"
 
-    def test_includes_error_message_when_provided(self, mock_sns_env):
+    def test_includes_error_message_when_provided(self, mock_sns_env, db_env):
         """Error message is included in event when provided."""
-        from events import publish_status_update
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_status_update(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
@@ -132,8 +168,8 @@ class TestPublishStatusUpdate:
                 error_message="Subnet exhausted",
             )
 
-            event = mock_publish.call_args[0][0]
-            assert event["error_message"] == "Subnet exhausted"
+        event = json.loads(mock_cur.execute.call_args[0][1][2])
+        assert event["error_message"] == "Subnet exhausted"
 
 
 class TestPublishReady:
@@ -144,84 +180,72 @@ class TestPublishReady:
     is published.
     """
 
-    def test_publishes_ready_and_provisioned_events(self, mock_sns_env):
+    def test_publishes_ready_and_provisioned_events(self, mock_sns_env, db_env):
         """Publishes status update (ready) and provisioned events."""
-        from events import publish_ready
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_ready(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
             )
 
-            # Should publish both status update and provisioned event
-            assert mock_publish.call_count == 2
+        assert mock_cur.execute.call_count == 2
+        payloads = [json.loads(c[0][1][2]) for c in mock_cur.execute.call_args_list]
+        event_types = [e.get("event_type") for e in payloads]
 
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            event_types = [c.get("event_type") for c in calls]
+        assert "range.status.updated" in event_types
+        assert "range.provisioned" in event_types
 
-            assert "range.status.updated" in event_types
-            assert "range.provisioned" in event_types
-
-    def test_provisioned_event_is_notification_only(self, mock_sns_env):
+    def test_provisioned_event_is_notification_only(self, mock_sns_env, db_env):
         """Provisioned event has only identification fields, no state data."""
-        from events import publish_ready
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_ready(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
             )
 
-            # Find the provisioned event
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            provisioned_events = [c for c in calls if c.get("event_type") == "range.provisioned"]
+        payloads = [json.loads(c[0][1][2]) for c in mock_cur.execute.call_args_list]
+        provisioned_events = [e for e in payloads if e.get("event_type") == "range.provisioned"]
 
-            assert len(provisioned_events) == 1
-            event = provisioned_events[0]
+        assert len(provisioned_events) == 1
+        event = provisioned_events[0]
 
-            # Should have identification fields
-            req_id = "550e8400-e29b-41d4-a716-446655440000"
-            assert event["request_id"] == req_id
-            assert event["range_id"] == 42
-            assert event["user_id"] == 1
-            assert "event_id" in event
-            assert "timestamp" in event
+        assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+        assert event["range_id"] == 42
+        assert event["user_id"] == 1
+        assert "event_id" in event
+        assert "timestamp" in event
+        assert "instances" not in event
+        assert "subnets" not in event
+        assert "pulumi_stack" not in event
 
-            # Should NOT have state data (provisioner writes directly to DB)
-            assert "instances" not in event
-            assert "subnets" not in event
-            assert "pulumi_stack" not in event
-
-    def test_status_update_sets_ready_status(self, mock_sns_env):
+    def test_status_update_sets_ready_status(self, mock_sns_env, db_env):
         """Status update event has new_status='ready'."""
-        from events import publish_ready
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_ready(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
             )
 
-            # Find the status update event
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            status_events = [c for c in calls if c.get("event_type") == "range.status.updated"]
+        payloads = [json.loads(c[0][1][2]) for c in mock_cur.execute.call_args_list]
+        status_events = [e for e in payloads if e.get("event_type") == "range.status.updated"]
 
-            assert len(status_events) == 1
-            assert status_events[0]["new_status"] == "ready"
+        assert len(status_events) == 1
+        assert status_events[0]["new_status"] == "ready"
 
 
 class TestPublishLifecycleEvents:
     """Tests for publish_failed(), publish_destroyed(), publish_cancelled()."""
 
-    def test_publish_failed_includes_error_message(self, mock_sns_env):
+    def test_publish_failed_includes_error_message(self, mock_sns_env, db_env):
         """Publishes status update with failed status and error message."""
-        from events import publish_failed
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_failed(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
@@ -229,59 +253,54 @@ class TestPublishLifecycleEvents:
                 error_message="Instance launch failed",
             )
 
-            mock_publish.assert_called_once()
-            event = mock_publish.call_args[0][0]
+        mock_cur.execute.assert_called_once()
+        event = json.loads(mock_cur.execute.call_args[0][1][2])
 
-            assert event["new_status"] == "failed"
-            assert event["error_message"] == "Instance launch failed"
+        assert event["new_status"] == "failed"
+        assert event["error_message"] == "Instance launch failed"
 
-    def test_publish_destroyed_sends_event(self, mock_sns_env):
+    def test_publish_destroyed_sends_event(self, mock_sns_env, db_env):
         """Publishes range.destroyed event."""
-        from events import publish_destroyed
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_destroyed(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
             )
 
-            assert mock_publish.call_count >= 1
+        assert mock_cur.execute.call_count >= 1
+        payloads = [json.loads(c[0][1][2]) for c in mock_cur.execute.call_args_list]
+        destroyed_events = [e for e in payloads if e.get("event_type") == "range.destroyed"]
 
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            destroyed_events = [c for c in calls if c.get("event_type") == "range.destroyed"]
+        assert len(destroyed_events) == 1
 
-            assert len(destroyed_events) == 1
-
-    def test_publish_cancelled_sends_event(self, mock_sns_env):
+    def test_publish_cancelled_sends_event(self, mock_sns_env, db_env):
         """Publishes range.cancelled event."""
-        from events import publish_cancelled
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_cancelled(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
             )
 
-            mock_publish.assert_called_once()
-            event = mock_publish.call_args[0][0]
+        mock_cur.execute.assert_called_once()
+        event = json.loads(mock_cur.execute.call_args[0][1][2])
 
-            assert event["event_type"] == "range.cancelled"
-            req_id = "550e8400-e29b-41d4-a716-446655440000"
-            assert event["request_id"] == req_id
-            assert event["range_id"] == 42
-            assert event["user_id"] == 1
+        assert event["event_type"] == "range.cancelled"
+        assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+        assert event["range_id"] == 42
+        assert event["user_id"] == 1
 
 
 class TestPublishNgfwEvent:
     """Tests for publish_ngfw_event() unified function."""
 
-    def test_publishes_ngfw_event_with_required_fields(self, mock_sns_env):
+    def test_publishes_ngfw_event_with_required_fields(self, mock_sns_env, db_env):
         """Publishes event with all required UUID fields."""
-        from events import publish_ngfw_event
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_ngfw_event(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 instance_id="660e8400-e29b-41d4-a716-446655440001",
@@ -289,25 +308,21 @@ class TestPublishNgfwEvent:
                 status="provisioning",
             )
 
-            mock_publish.assert_called_once()
-            event = mock_publish.call_args[0][0]
+        mock_cur.execute.assert_called_once()
+        event = json.loads(mock_cur.execute.call_args[0][1][2])
 
-            assert event["event_type"] == "ngfw.event"
-            req_id = "550e8400-e29b-41d4-a716-446655440000"
-            assert event["request_id"] == req_id
-            inst_id = "660e8400-e29b-41d4-a716-446655440001"
-            assert event["instance_id"] == inst_id
-            app_id = "770e8400-e29b-41d4-a716-446655440002"
-            assert event["app_id"] == app_id
-            assert event["status"] == "provisioning"
-            assert "event_id" in event
-            assert "timestamp" in event
+        assert event["event_type"] == "ngfw.event"
+        assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+        assert event["instance_id"] == "660e8400-e29b-41d4-a716-446655440001"
+        assert event["app_id"] == "770e8400-e29b-41d4-a716-446655440002"
+        assert event["status"] == "provisioning"
+        assert "event_id" in event
+        assert "timestamp" in event
 
-    def test_publishes_ngfw_event_with_serial_number(self, mock_sns_env):
+    def test_publishes_ngfw_event_with_serial_number(self, mock_sns_env, db_env):
         """Publishes ready event with serial_number."""
-        from events import publish_ngfw_event
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_ngfw_event(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 instance_id="660e8400-e29b-41d4-a716-446655440001",
@@ -316,15 +331,14 @@ class TestPublishNgfwEvent:
                 serial_number="007951000123456",
             )
 
-            event = mock_publish.call_args[0][0]
-            assert event["status"] == "ready"
-            assert event["serial_number"] == "007951000123456"
+        event = json.loads(mock_cur.execute.call_args[0][1][2])
+        assert event["status"] == "ready"
+        assert event["serial_number"] == "007951000123456"
 
-    def test_publishes_ngfw_event_without_serial_number(self, mock_sns_env):
+    def test_publishes_ngfw_event_without_serial_number(self, mock_sns_env, db_env):
         """Publishes event without serial_number (e.g., for failed status)."""
-        from events import publish_ngfw_event
-
-        with patch("events._publish_event") as mock_publish:
+        mock_conn, mock_cur = _make_mock_db()
+        with patch("psycopg.connect", return_value=mock_conn):
             publish_ngfw_event(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 instance_id="660e8400-e29b-41d4-a716-446655440001",
@@ -332,6 +346,23 @@ class TestPublishNgfwEvent:
                 status="failed",
             )
 
-            event = mock_publish.call_args[0][0]
-            assert event["status"] == "failed"
-            assert "serial_number" not in event
+        event = json.loads(mock_cur.execute.call_args[0][1][2])
+        assert event["status"] == "failed"
+        assert "serial_number" not in event
+
+
+class TestStatusBuilderEvent:
+    """Verify that status builders enqueue (not swallow) on failure."""
+
+    def test_publish_status_update_propagates_enqueue_failure(self, db_env):
+        """publish_status_update raises if the outbox write fails."""
+        with (
+            patch("psycopg.connect", side_effect=RuntimeError("db error")),
+            pytest.raises(RuntimeError, match="db error"),
+        ):
+            publish_status_update(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                range_id=42,
+                user_id=1,
+                new_status="provisioning",
+            )

@@ -3,7 +3,7 @@
 The ops MCP server runs with the local operator's AWS credentials and
 can reach production-facing AWS APIs, the production database, and the
 operator's own range infrastructure. **`shifter-ops` is an *operator
-agent surface*** in the sense of ADR-014-R5 — the intended client is
+agent surface*** in the sense of ADR-014-R5—the intended client is
 the operator's own trusted agent loop, and agents are *meant* to
 perform writes, mutations, SSM execution, and secret retrieval as
 routine range-operations work.
@@ -15,7 +15,7 @@ to the server." It is:
    (`get_log_events`, `filter_log_events`, `tail_logs`,
    `get_s3_object`, `ssm_get_command_output`, range guest stdout, web
    fetches, issue/PR bodies, teammate comments).
-2. **Agent error** — hallucination, wrong instance id, dev/prod
+2. **Agent error**—hallucination, wrong instance id, dev/prod
    confusion, missing `WHERE` clause, retry storms.
 
 Defenses bound the blast radius of any single call, not the
@@ -67,7 +67,7 @@ status:
 The rest of this document describes the policy layer as it stands
 today on the live server.
 
-## Policy layer — target design (phased rollout)
+## Policy layer—target design (phased rollout)
 
 The sections below describe the **target** policy layer once every
 phase ships. The Implementation Status section above is authoritative
@@ -82,14 +82,14 @@ class**:
 
 | Class | What it covers |
 |-------|----------------|
-| `observability` | CloudWatch logs, `describe-*`, `list-*` — no writes, no secrets |
+| `observability` | CloudWatch logs, `describe-*`, `list-*`—no writes, no secrets |
 | `named_db_read` | Named, parameterized read-only DB diagnostics (`list_risks`, `get_risk`, ranges, etc.) |
 | `named_db_write` | Named, parameterized DB mutations (`create_risk`, `update_risk`, etc.) |
-| `secret_handle` | `get_secret`, `list_secrets` — returns references, not raw values |
+| `secret_handle` | `get_secret`, `list_secrets`—returns references, not raw values |
 | `ssm_named` | Allowlisted Django manage.py commands via SSM |
 | `ssm_arbitrary` | Free-form SSM `send-command` / `get-command-invocation` |
 | `db_arbitrary` | `query`, `execute`, `list_tables`, `describe_table` |
-| `infra_mutation` | `start_ec2_instance`, `stop_ec2_instance`, `terminate_ec2_instance`, `restart_ecs_service`, `reconcile_ranges` |
+| `infra_mutation` | `start_ec2_instance`, `stop_ec2_instance`, `terminate_ec2_instance`, `restart_ecs_service`, `reconcile_ranges`, `build_ami`, `promote_ami`, `build_gce_image`, `promote_gce_image` |
 | `dev_bypass_tunnel` | `start_portal_test_tunnel`, `stop_portal_test_tunnel` (agent auth without MFA in dev) |
 
 Class membership drives the gates the policy wrapper composes around
@@ -117,8 +117,8 @@ each handler:
 - **Idempotency keys.** `named_db_write` mutations require an
   `idempotency_key` argument. Same key on retry returns the cached
   result, so an agent retry storm cannot compound.
-- **Rate caps.** `infra_mutation` defaults to `{count: 3, window: 60s}`
-  — after three mutations in a minute, further calls are refused
+- **Rate caps.** `infra_mutation` defaults to `{count: 3, window: 60 seconds}`
+ —after three mutations in a minute, further calls are refused
   until the window resets.
 - **Audit.** Every invocation appends a JSONL record to
   `~/.shifter-ops-audit.jsonl` (configurable): timestamp, tool,
@@ -140,7 +140,7 @@ each handler:
   (`terminate_ec2_instance` against prod, `execute_plan` for
   `db_arbitrary` writes against prod, `restart_ecs_service` against
   prod) require operator-terminal confirmation before executing: the
-  server prints a token to stderr and pauses up to 60s waiting for
+  server prints a token to stderr and pauses up to 60 seconds waiting for
   the operator to type it back via a dedicated `approve` tool. Fails
   closed on timeout.
 
@@ -159,7 +159,7 @@ truth for the TLS configuration.
 **Trust model.**
 
 - TLS verification stays on (`rejectUnauthorized: true`). Disabling
-  verification — even as a documented exception — is rejected by
+  verification—even as a documented exception—is rejected by
   ADR-014-R7 and by the `mcp-ops-tls-strict` adr_guard check.
 - The tunnel terminates at `localhost`, but the RDS-issued cert
   carries the RDS endpoint in its CN/SAN. `buildPoolConfig` sets
@@ -175,7 +175,7 @@ truth for the TLS configuration.
   present.
 
 **Switching to a pinned CA bundle.** If the OS trust store ever
-proves insufficient (e.g., for an air-gapped host whose root bundle
+proves insufficient (for example, for an air-gapped host whose root bundle
 is curated separately), download AWS's published global RDS bundle
 from `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`,
 commit it under `mcp/ops/certs/rds-global-bundle.pem`, document the
@@ -205,13 +205,17 @@ layer:
 - Shell escaping is not a remediation strategy. If a value must be
   interpreted by a remote shell through SSM, that interpretation is
   isolated to the remote command payload and never routed through
-  the local MCP host shell.
+  the local MCP host shell. Named SSM tools such as
+  `run_manage_command` have a narrower contract: user input must be
+  parsed as structured management-command argv and rejected before
+  SSM rendering when it contains shell-control syntax. See
+  `docs/architecture/mcp-ops-manage-command-ssm-boundary-preflight-1176.md`.
 - Do not add a second AWS command builder. Extend the shared helpers
   in `mcp/shared/aws-helpers.js`.
 - `execSync` import remains forbidden in this package per ADR-010-R1
   and the `mcp-no-shell-exec` static check.
 
-## Validation and boundaries (target — phased rollout)
+## Validation and boundaries (target—phased rollout)
 
 These describe the target policy layer; today only the seam exists
 (see Implementation Status above).
@@ -230,7 +234,7 @@ These describe the target policy layer; today only the seam exists
   SQL, Secrets Manager names, EC2 IDs, and SSM command IDs can be
   syntactically valid and still need to be gated by class policy.
 
-## Output, errors, and audit (target — phased rollout)
+## Output, errors, and audit (target—phased rollout)
 
 These describe the target policy layer; today only the seam exists.
 
@@ -256,7 +260,7 @@ package; all are live in the current tree.
   forwards argv elements byte-for-byte across the boundary. (Shared
   across MCP servers via `mcp/shared/aws-helpers.js`.)
 - `mcp/ops/lib.test.js` covers AWS argv builders for individual call
-  sites — CloudWatch filters, SSM command parameters,
+  sites—CloudWatch filters, SSM command parameters,
   management-command SSM payloads, S3 bucket/key inputs.
 - `mcp/ops/policy.test.js` covers the policy wrapper end-to-end:
   `parsePolicy` shape validation (top-level keys, class-defaults
@@ -266,18 +270,18 @@ package; all are live in the current tree.
   `classDefaults`, `envDefault`, `envProdRequiresConfirm`);
   `registerTool`'s class-tag + profile gating (class-disabled tools
   are not registered; missing / undeclared classes fail closed); and
-  the per-gate behavior added by #1198–#1200 — env policy, dry-run
+  the per-gate behavior added by #1198–#1200—env policy, dry-run
   defaults, idempotency keys + retry caching, per-class rate caps,
   audit append, secret-handle return mode, two-phase
   `plan_<name>` / `execute_<name>` exchange, untrusted-input fencing
   (producer/consumer), description redaction, and apex out-of-band
-  approval (stderr-only token, single-use consume, 60s timeout).
+  approval (stderr-only token, single-use consume, 60 seconds timeout).
 - `mcp/ops/tool-surface.test.js` (added by #1202) is the
   load-bearing surface invariant for ADR-014-R3 / R5 / R6 on this
   server: profile gating removes tools from the registered set
   (read_only / standard / destructive); two-phase classes
   (`infra_mutation` / `ssm_arbitrary` / `db_arbitrary`) register
-  `plan_<name>` / `execute_<name>` pairs only — the direct name is
+  `plan_<name>` / `execute_<name>` pairs only—the direct name is
   absent; `secret_handle` class defaults pin `return_mode: handle`
   in the live policy; prod-touching tools refuse without
   `confirm_env="prod"`; `dev_bypass_tunnel` descriptions are
@@ -285,7 +289,7 @@ package; all are live in the current tree.
   input without `acknowledge_untrusted_input: true`; every
   `apex_operations[*].tool` rule in `.shifter.yaml` points at a live
   registered `execute_<name>` (`validateApexCoverage` is the load-
-  bearing gate). The behavioral apex flow (stderr-only token, 60s
+  bearing gate). The behavioral apex flow (stderr-only token, 60 seconds
   parking, `consumeApexToken` release) is unit-tested in
   `mcp/ops/policy.test.js`; the surface test asserts only the
   structural invariants that an MCP client sees.

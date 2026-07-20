@@ -95,18 +95,27 @@ class TestRangeContextValidation:
         assert ctx.range_id is None
 
     def test_computed_is_ready(self):
-        """RangeContext.is_ready returns True when status is READY."""
+        """RangeContext.is_ready is True only when status is READY."""
         from cyberscript.enums import ResourceStatus
         from cyberscript.schemas import RangeContext
 
-        ctx = RangeContext(
+        ready_ctx = RangeContext(
             request_id=uuid4(),
             scenario_id="test-scenario",
             user_id=1,
             status=ResourceStatus.READY,
             instances=[],
         )
-        assert ctx.is_ready is True
+        assert ready_ctx.is_ready is True
+
+        pending_ctx = RangeContext(
+            request_id=uuid4(),
+            scenario_id="test-scenario",
+            user_id=1,
+            status=ResourceStatus.PENDING,
+            instances=[],
+        )
+        assert pending_ctx.is_ready is False
 
     def test_computed_is_terminal(self):
         """RangeContext.is_terminal returns True for terminal statuses."""
@@ -190,6 +199,68 @@ class TestInstanceSpecValidation:
                 os_type=os_type,
             )
             assert spec.os_type == os_type
+
+    def test_uuid_inherited_from_spec_base_not_redeclared(self):
+        """InstanceSpec must inherit uuid from SpecBase, not redeclare it."""
+        from cyberscript.schemas import InstanceSpec
+        from cyberscript.schemas.base import SpecBase
+
+        assert "uuid" not in InstanceSpec.__annotations__
+        assert "uuid" in InstanceSpec.model_fields
+        spec = InstanceSpec(
+            name="test-instance",
+            role="attacker",
+            os_type="kali",
+            uuid="abc-123",
+        )
+        assert spec.uuid == "abc-123"
+        assert isinstance(spec, SpecBase)
+
+class TestInstanceContextPrivateIp:
+    """Tests for the optional InstanceContext.private_ip display field."""
+
+    def test_defaults_to_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali")
+        assert ctx.private_ip is None
+
+    def test_accepts_ipv4(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="10.0.1.5")
+        assert ctx.private_ip == "10.0.1.5"
+
+    def test_strips_whitespace(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="  10.0.1.5  ")
+        assert ctx.private_ip == "10.0.1.5"
+
+    def test_empty_string_becomes_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="   ")
+        assert ctx.private_ip is None
+
+    def test_overlong_input_becomes_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="x" * 65)
+        assert ctx.private_ip is None
+
+    def test_obviously_malformed_becomes_none(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="<script>")
+        assert ctx.private_ip is None
+
+    def test_accepts_ipv6(self):
+        from cyberscript.schemas import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali", private_ip="fe80::1")
+        assert ctx.private_ip == "fe80::1"
+
 
 class TestEventValidation:
     """Tests for event model validation."""

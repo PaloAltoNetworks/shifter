@@ -1,13 +1,36 @@
-"""Tests for api_ngfw_ssh_url view in mission_control/views.py."""
+"""Behavior tests for the api_ngfw_ssh_url view in mission_control/views.
+
+Drives the real view → real ``engine.services.connect_ngfw_terminal`` (against a
+real NGFW ``Instance`` + ``Request``) → real
+``mission_control.guacamole.create_guacamole_ssh_url``. Only the cloud/network
+boundaries are mocked: the boto3 Secrets Manager client that yields the NGFW SSH
+key (``secrets_boundary``) and the urllib Guacamole token POST
+(``guac_exchange``), instead of patching ``engine.services.connect_ngfw_terminal``
+/ ``mission_control.guacamole.create_guacamole_ssh_url``.
+
+Two generic fault-injection tests are folded into real-boundary equivalents: the
+500 path is driven by a real Secrets Manager ``ClientError``, and the URL-build
+failure by a real invalid signing secret.
+"""
 
 import json
-from unittest.mock import MagicMock, patch
+import logging
 
 import pytest
+from botocore.exceptions import ClientError
+from django.contrib.auth import get_user_model
 from django.test import RequestFactory
+from rest_framework.test import force_authenticate
 
-from engine.ssh import SSHConnection
-from mission_control.views import api_ngfw_ssh_url
+from mission_control.api.views import api_ngfw_ssh_url, guacamole_bootstrap_status
+
+# transaction=True (real commits, no wrapping transaction): the inline Guacamole
+# bootstrap path calls close_old_connections(), which corrupts pytest-django's
+# rolled-back wrapping transaction on PostgreSQL ("connection is closed"). SQLite
+# tolerated it; a real backend does not (#1524).
+pytestmark = pytest.mark.django_db(transaction=True)
+
+User = get_user_model()
 
 
 @pytest.fixture
@@ -16,281 +39,222 @@ def rf():
 
 
 @pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = 1
-    user.email = "test@example.com"
-    user.is_authenticated = True
-    return user
+def user(db):
+    return User.objects.create_user(username="ngfw-ssh@example.com", email="ngfw-ssh@example.com")
 
 
 @pytest.fixture
-def fake_private_key():
-    """Generate a fake private key for testing that won't trigger security scanners."""
-    header = "-----BEGIN " + "RSA PRIVATE " + "KEY-----"
-    footer = "-----END " + "RSA PRIVATE " + "KEY-----"
-    return f"{header}\n{'x' * 64}\n{footer}"
+def other_user(db):
+    return User.objects.create_user(username="ngfw-other@example.com", email="ngfw-other@example.com")
+
+
+@pytest.fixture(autouse=True)
+def guacamole_bootstrap_inline(settings):
+    settings.GUACAMOLE_BOOTSTRAP_INLINE = True
 
 
 @pytest.fixture
-def mock_ssh_connection(fake_private_key):
-    """Mock SSHConnection for NGFW."""
-    return SSHConnection(
-        host="10.1.5.10",
-        username="admin",
-        private_key=fake_private_key,
-        port=22,
-        session_id=None,
-    )
+def guac_secret(settings):
+    settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"  # nosec B105
 
 
-NGFW_UUID = "550e8400-e29b-41d4-a716-446655440000"
+@pytest.fixture
+def guac_configured(guac_secret, settings):
+    settings.GUACAMOLE_BASE_URL = "https://guac.example.com"
+    settings.GUACAMOLE_API_BASE_URL = "https://guac.example.com"
 
 
-def _post_request(rf, user):
-    """Build an authenticated POST request."""
-    request = rf.post(f"/mc/ngfw/{NGFW_UUID}/ssh-url/")
+def _post_request(rf, user, app_id):
+    request = rf.post(f"/mc/ngfw/{app_id}/ssh-url/")
     request.user = user
+    force_authenticate(request, user=user)
     return request
 
 
+def _json(response):
+    return json.loads(response.content)
+
+
+def _status_response(rf, user, request_id):
+    request = rf.get(f"/mc/api/guacamole/bootstrap/{request_id}/")
+    request.user = user
+    force_authenticate(request, user=user)
+    return guacamole_bootstrap_status(request, request_id)
+
+
 class TestApiNGFWSSHURL:
-    """Tests for api_ngfw_ssh_url view."""
+    # ---- success ----------------------------------------------------------
 
-    # -------------------------------------------------------------------------
-    # Success cases
-    # -------------------------------------------------------------------------
+    def test_returns_guacamole_url_for_ready_ngfw(
+        self, rf, user, guac_configured, make_ngfw, secrets_boundary, guac_exchange
+    ):
+        ngfw = make_ngfw(user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-    def test_returns_guacamole_url_for_ready_ngfw(self, rf, mock_user, mock_ssh_connection, settings):
-        """View returns 200 with Guacamole URL for accessible NGFW."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
-        settings.GUACAMOLE_BASE_URL = "https://guac.example.com"
+        with secrets_boundary(), guac_exchange():
+            response = api_ngfw_ssh_url(request, app_id)
 
-        request = _post_request(rf, mock_user)
+        assert response.status_code == 202
+        status = _status_response(rf, user, _json(response)["request_id"])
+        assert status.status_code == 200
+        url = _json(status)["url"]
+        assert url.startswith("https://guac.example.com/#/client/")
+        assert "token=token123" in url
 
-        with (
-            patch("engine.services.connect_ngfw_terminal", return_value=mock_ssh_connection),
-            patch(
-                "mission_control.guacamole.create_guacamole_ssh_url",
-                return_value="https://guac.example.com/#/client/abc?token=xyz",
-            ),
-        ):
-            response = api_ngfw_ssh_url(request, NGFW_UUID)
+    def test_passes_ssh_connection_details_to_guacamole(
+        self, rf, user, guac_configured, make_ngfw, secrets_boundary, guac_exchange, secret_key_128, ssh_key_pem
+    ):
+        ngfw = make_ngfw(user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-        assert response.status_code == 200
-        data = json.loads(response.content)
-        assert "url" in data
-        assert data["url"].startswith("https://guac.example.com")
+        with secrets_boundary(), guac_exchange() as exchange:
+            api_ngfw_ssh_url(request, app_id)
 
-    def test_calls_connect_ngfw_terminal_with_user_and_uuid(self, rf, mock_user, mock_ssh_connection, settings):
-        """View calls connect_ngfw_terminal with authenticated user and NGFW UUID."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        connections = exchange.posted_payload(secret_key_128)["connections"]
+        params = connections[f"ngfw-{app_id}"]["parameters"]
+        assert params["hostname"] == "10.1.5.10"
+        assert params["port"] == "22"
+        assert params["username"] == "admin"
+        assert params["private-key"] == ssh_key_pem
 
-        request = _post_request(rf, mock_user)
-
-        with (
-            patch("engine.services.connect_ngfw_terminal", return_value=mock_ssh_connection) as mock_connect,
-            patch("mission_control.guacamole.create_guacamole_ssh_url", return_value="https://url"),
-        ):
-            api_ngfw_ssh_url(request, NGFW_UUID)
-
-            mock_connect.assert_called_once()
-            call_args = mock_connect.call_args[0]
-            assert call_args[0].email == mock_user.email
-            assert str(call_args[1]) == NGFW_UUID
-
-    def test_passes_ssh_connection_details_to_guacamole(self, rf, mock_user, mock_ssh_connection, settings):
-        """View extracts SSH connection details and passes to Guacamole."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
-        settings.GUACAMOLE_BASE_URL = "https://guac.example.com"
-
-        request = _post_request(rf, mock_user)
-
-        with (
-            patch("engine.services.connect_ngfw_terminal", return_value=mock_ssh_connection),
-            patch("mission_control.guacamole.create_guacamole_ssh_url", return_value="https://url") as mock_guac,
-        ):
-            api_ngfw_ssh_url(request, NGFW_UUID)
-
-            mock_guac.assert_called_once()
-            call_kwargs = mock_guac.call_args[1]
-            assert call_kwargs["hostname"] == "10.1.5.10"
-            assert call_kwargs["port"] == 22
-            assert call_kwargs["ssh_username"] == "admin"
-            key_marker = "BEGIN " + "RSA PRIVATE " + "KEY"
-            assert key_marker in call_kwargs["ssh_private_key"]
-
-    # -------------------------------------------------------------------------
-    # Authorization
-    # -------------------------------------------------------------------------
+    # ---- authorization ----------------------------------------------------
 
     def test_requires_login(self, rf):
-        """View requires authentication (login_required decorator redirects)."""
         from django.contrib.auth.models import AnonymousUser
 
-        request = rf.post(f"/mc/ngfw/{NGFW_UUID}/ssh-url/")
+        request = rf.post("/mc/ngfw/some-uuid/ssh-url/")
         request.user = AnonymousUser()
 
-        response = api_ngfw_ssh_url(request, NGFW_UUID)
+        response = api_ngfw_ssh_url(request, "some-uuid")
 
-        assert response.status_code == 302
+        assert response.status_code == 401
 
-    def test_returns_400_for_non_owner(self, rf, mock_user, settings):
-        """View returns 400 when user doesn't own NGFW."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+    def test_returns_400_for_non_owner(self, rf, user, other_user, guac_secret, make_ngfw):
+        # Ownership resolution moved into the bootstrap worker (#929), so the
+        # permission failure surfaces as a polled FAILED bootstrap, not a
+        # synchronous 400.
+        ngfw = make_ngfw(user, owner=other_user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-        request = _post_request(rf, mock_user)
+        response = api_ngfw_ssh_url(request, app_id)
 
-        with patch(
-            "engine.services.connect_ngfw_terminal",
-            side_effect=PermissionError("You do not have permission"),
-        ):
-            response = api_ngfw_ssh_url(request, NGFW_UUID)
+        assert response.status_code == 202
+        status = _status_response(rf, user, _json(response)["request_id"])
+        assert status.status_code == 400
+        assert "permission" in _json(status)["error"].lower()
 
-        assert response.status_code == 400
-        data = json.loads(response.content)
-        assert "error" in data
-        assert "permission" in data["error"].lower()
+    # ---- validation -------------------------------------------------------
 
-    # -------------------------------------------------------------------------
-    # Validation
-    # -------------------------------------------------------------------------
+    def test_returns_400_when_ngfw_not_found(self, rf, user, guac_secret):
+        from uuid import uuid4
 
-    def test_returns_400_when_ngfw_not_found(self, rf, mock_user, settings):
-        """View returns 400 when NGFW doesn't exist."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        app_id = str(uuid4())
+        request = _post_request(rf, user, app_id)
 
-        request = _post_request(rf, mock_user)
+        response = api_ngfw_ssh_url(request, app_id)
 
-        with patch(
-            "engine.services.connect_ngfw_terminal",
-            side_effect=ValueError("NGFW instance not found"),
-        ):
-            response = api_ngfw_ssh_url(request, NGFW_UUID)
+        assert response.status_code == 202
+        status = _status_response(rf, user, _json(response)["request_id"])
+        assert status.status_code == 400
+        assert "not found" in _json(status)["error"].lower()
 
-        assert response.status_code == 400
-        data = json.loads(response.content)
-        assert "error" in data
-        assert "not found" in data["error"].lower()
+    def test_returns_400_when_ngfw_not_accessible(self, rf, user, guac_secret, make_ngfw):
+        from shared.enums import ResourceStatus
 
-    def test_returns_400_when_ngfw_not_accessible(self, rf, mock_user, settings):
-        """View returns 400 when NGFW is not in accessible state."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        ngfw = make_ngfw(user, status=ResourceStatus.PROVISIONING.value)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-        request = _post_request(rf, mock_user)
+        response = api_ngfw_ssh_url(request, app_id)
 
-        with patch(
-            "engine.services.connect_ngfw_terminal",
-            side_effect=ValueError("NGFW is not accessible (status: provisioning)"),
-        ):
-            response = api_ngfw_ssh_url(request, NGFW_UUID)
+        assert response.status_code == 202
+        status = _status_response(rf, user, _json(response)["request_id"])
+        assert status.status_code == 400
+        assert "error" in _json(status)
 
-        assert response.status_code == 400
-        data = json.loads(response.content)
-        assert "error" in data
+    def test_requires_post_method(self, rf, user, guac_secret):
+        request = rf.get("/mc/ngfw/some-uuid/ssh-url/")
+        request.user = user
 
-    def test_requires_post_method(self, rf, mock_user, settings):
-        """View requires POST method (not GET)."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        response = api_ngfw_ssh_url(request, "some-uuid")
 
-        request = rf.get(f"/mc/ngfw/{NGFW_UUID}/ssh-url/")
-        request.user = mock_user
+        assert response.status_code == 405
 
-        response = api_ngfw_ssh_url(request, NGFW_UUID)
+    # ---- error handling (real boundary faults) ----------------------------
 
-        assert response.status_code == 405  # Method Not Allowed
+    def test_returns_500_when_secrets_manager_fails(
+        self, rf, user, guac_secret, make_ngfw, secrets_boundary, secrets_client_factory
+    ):
+        ngfw = make_ngfw(user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-    # -------------------------------------------------------------------------
-    # Error handling
-    # -------------------------------------------------------------------------
+        failing = secrets_client_factory()
+        failing.get_secret_value.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Secrets Manager error"}}, "GetSecretValue"
+        )
 
-    def test_returns_500_when_connect_ngfw_terminal_raises_unexpected_error(self, rf, mock_user, settings):
-        """View returns 500 on unexpected errors from connect_ngfw_terminal."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        with secrets_boundary(client=failing):
+            response = api_ngfw_ssh_url(request, app_id)
 
-        request = _post_request(rf, mock_user)
+        # The Secrets Manager fetch now runs in the bootstrap worker (#929), so
+        # the failure surfaces via the polled status, not the initial response.
+        assert response.status_code == 202
+        status = _status_response(rf, user, _json(response)["request_id"])
+        assert status.status_code == 500
+        assert _json(status)["error"] == "Internal server error"
 
-        with patch(
-            "engine.services.connect_ngfw_terminal",
-            side_effect=RuntimeError("Unexpected database error"),
-        ):
-            response = api_ngfw_ssh_url(request, NGFW_UUID)
+    def test_returns_500_when_signing_secret_is_invalid(self, rf, user, settings, make_ngfw, secrets_boundary):
+        # A non-AES-length secret makes the real sign_and_encrypt step raise.
+        settings.GUACAMOLE_JSON_AUTH_SECRET = "abcd"  # nosec B105
+        ngfw = make_ngfw(user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-        assert response.status_code == 500
-        data = json.loads(response.content)
-        assert "error" in data
-        assert data["error"] == "Internal server error"
+        with secrets_boundary():
+            response = api_ngfw_ssh_url(request, app_id)
 
-    def test_returns_500_when_guacamole_url_generation_fails(self, rf, mock_user, mock_ssh_connection, settings):
-        """View returns 500 when Guacamole URL generation fails."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        assert response.status_code == 202
+        status = _status_response(rf, user, _json(response)["request_id"])
+        assert status.status_code == 500
+        assert "Failed to generate SSH URL" in _json(status)["error"]
 
-        request = _post_request(rf, mock_user)
+    def test_returns_503_when_guacamole_not_configured(self, rf, user, settings, make_ngfw, secrets_boundary):
+        settings.GUACAMOLE_JSON_AUTH_SECRET = ""
+        ngfw = make_ngfw(user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-        with (
-            patch("engine.services.connect_ngfw_terminal", return_value=mock_ssh_connection),
-            patch(
-                "mission_control.guacamole.create_guacamole_ssh_url",
-                side_effect=ValueError("Invalid secret key"),
-            ),
-        ):
-            response = api_ngfw_ssh_url(request, NGFW_UUID)
-
-        assert response.status_code == 500
-        data = json.loads(response.content)
-        assert "error" in data
-        assert "Failed to generate SSH URL" in data["error"]
-
-    def test_returns_503_when_guacamole_not_configured(self, rf, mock_user, mock_ssh_connection, settings):
-        """View returns 503 when GUACAMOLE_JSON_AUTH_SECRET is not set."""
-        settings.GUACAMOLE_JSON_AUTH_SECRET = ""  # Not configured
-
-        request = _post_request(rf, mock_user)
-
-        with patch("engine.services.connect_ngfw_terminal", return_value=mock_ssh_connection):
-            response = api_ngfw_ssh_url(request, NGFW_UUID)
+        with secrets_boundary():
+            response = api_ngfw_ssh_url(request, app_id)
 
         assert response.status_code == 503
-        data = json.loads(response.content)
-        assert "error" in data
-        assert "not configured" in data["error"].lower()
+        assert "not configured" in _json(response)["error"].lower()
 
-    # -------------------------------------------------------------------------
-    # Logging
-    # -------------------------------------------------------------------------
+    # ---- logging ----------------------------------------------------------
 
-    def test_logs_successful_url_generation(self, rf, mock_user, mock_ssh_connection, settings, caplog):
-        """View logs successful SSH URL generation."""
-        import logging
+    def test_logs_successful_url_generation(
+        self, rf, user, guac_configured, make_ngfw, secrets_boundary, guac_exchange, caplog
+    ):
+        ngfw = make_ngfw(user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
+        with secrets_boundary(), guac_exchange() as exchange, caplog.at_level(logging.INFO, logger="mission_control"):
+            api_ngfw_ssh_url(request, app_id)
 
-        request = _post_request(rf, mock_user)
+        assert len(exchange.requests) == 1
+        assert app_id in caplog.text
 
-        with (
-            patch("engine.services.connect_ngfw_terminal", return_value=mock_ssh_connection),
-            patch("mission_control.guacamole.create_guacamole_ssh_url", return_value="https://url"),
-            caplog.at_level(logging.INFO, logger="mission_control"),
-        ):
-            api_ngfw_ssh_url(request, NGFW_UUID)
+    def test_logs_permission_denied_errors(self, rf, user, other_user, guac_secret, make_ngfw, caplog):
+        ngfw = make_ngfw(user, owner=other_user)
+        app_id = str(ngfw.uuid)
+        request = _post_request(rf, user, app_id)
 
-        assert NGFW_UUID in caplog.text
+        with caplog.at_level(logging.ERROR, logger="mission_control"):
+            api_ngfw_ssh_url(request, app_id)
 
-    def test_logs_permission_denied_errors(self, rf, mock_user, settings, caplog):
-        """View logs permission denied errors."""
-        import logging
-
-        settings.GUACAMOLE_JSON_AUTH_SECRET = "0123456789abcdef0123456789abcdef"
-
-        request = _post_request(rf, mock_user)
-
-        with (
-            patch(
-                "engine.services.connect_ngfw_terminal",
-                side_effect=PermissionError("Permission denied"),
-            ),
-            caplog.at_level(logging.ERROR, logger="mission_control"),
-        ):
-            api_ngfw_ssh_url(request, NGFW_UUID)
-
-        assert "permission" in caplog.text.lower() or NGFW_UUID in caplog.text
+        assert "permission" in caplog.text.lower()

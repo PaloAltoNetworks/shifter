@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Assumes code is already committed and pushed. Handles: PR creation, CI monitoring, SonarCloud, code review, security review, fixing all issues, and merging.
 
-**IMPORTANT:** NEVER include Co-Authored-By, "Generated with Claude Code", or any Claude/AI attribution in commit messages, PR descriptions, or any other artifacts.
+**IMPORTANT:** NEVER include Co-Authored-By trailers, agent marketing footers, or any Claude/AI branding in commit messages, PR descriptions, or any other artifacts.
 
 ## Phase 1: Create PR
 

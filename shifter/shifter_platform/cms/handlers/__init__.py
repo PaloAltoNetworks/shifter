@@ -3,7 +3,6 @@
 Routes SNS/SQS events to per-domain submodules:
 - range.*       -> cms.handlers.range_events
 - ngfw.*        -> cms.handlers.ngfw_events
-- experiment.*  -> cms.experiments.handlers
 
 Public surface preserved for the SQS worker (`cms.handlers.process_event` in
 `config/settings.py`) and existing direct importers. The package re-exports
@@ -11,20 +10,16 @@ Public surface preserved for the SQS worker (`cms.handlers.process_event` in
 via these package-level names, so a `mock.patch("cms.handlers.<name>")` on
 either still intercepts worker dispatch — same as the pre-split module.
 
-The bridge functions (`notify_ctf_range_status`, `notify_experiment_on_range_ready`)
-are NOT package-level dispatch hooks. They are called directly from inside
-`range_events.process_range_event`, so test code that needs to intercept them
-must patch the owning submodule:
+The bridge function (`notify_ctf_range_status`) is NOT a package-level dispatch
+hook. It is called directly from inside `range_events.process_range_event`, so
+test code that needs to intercept it must patch the owning submodule:
 - `cms.handlers.range_events.notify_ctf_range_status`
-- `cms.handlers.range_events.notify_experiment_on_range_ready`
 """
 
 from __future__ import annotations
 
 import logging
 
-from cms.experiments import handlers as experiment_handlers
-from cms.handlers.experiment_bridge import notify_experiment_on_range_ready
 from cms.handlers.ngfw_events import process_ngfw_event
 from cms.handlers.range_events import process_range_event
 from shared.messages.envelope import parse_sns_message
@@ -32,7 +27,6 @@ from shared.messages.envelope import parse_sns_message
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "notify_experiment_on_range_ready",
     "parse_sns_message",
     "process_event",
     "process_ngfw_event",
@@ -63,8 +57,5 @@ def process_event(message: str | dict) -> None:
     elif event_type.startswith("ngfw."):
         logger.debug("Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id)
         process_ngfw_event(message)
-    elif event_type.startswith("experiment."):
-        logger.debug("Routing to experiment handler: event_type=%s event_id=%s", event_type, event_id)
-        experiment_handlers.process_event(message)
     else:
         logger.debug("Ignoring unknown event_type=%s event_id=%s", event_type, event_id)

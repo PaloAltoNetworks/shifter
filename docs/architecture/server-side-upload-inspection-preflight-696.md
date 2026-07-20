@@ -18,10 +18,9 @@ metadata. This is a validation-boundary change, not a new upload workflow.
 - The `ObjectStorage` protocol is the provider seam. If header reads are needed,
   add a small range-read capability there and implement it in both AWS S3 and
   GCS adapters instead of reaching for raw boto3 in CMS code.
-- The existing experiment script upload path is related but separate. Scripts
-  are text assets validated by `cms.experiments.schemas.ScriptUploadInput` and
-  the experiment service; do not merge agent installer and Python script
-  validation concepts.
+- ADR-027 removed the legacy experiment script upload path. If a future
+  script-like upload surface is accepted, it must get its own contract rather
+  than reusing the deleted experiment service.
 
 ## Incumbents To Reuse
 

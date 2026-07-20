@@ -20,11 +20,24 @@ hostname="{{ hostname }}"
 
 echo "Setting hostname to $hostname..."
 
+# Escalate when not already root. The AWS SSM path runs this as root; the GDC
+# in-range SSH path connects as an unprivileged user (ubuntu/kali) that holds a
+# passwordless-sudo entitlement (same assumption as set_local_password). Both
+# `hostnamectl set-hostname` (talks to systemd-hostnamed over a root-only
+# polkit action) and writing /etc/hosts require root, so escalate with
+# `sudo -n` off the root path. Empty SUDO keeps the AWS path free of any sudo
+# dependency.
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo -n"
+fi
+
 # Set hostname persistently
-hostnamectl set-hostname "$hostname"
+$SUDO hostnamectl set-hostname "$hostname"
 
 # Update /etc/hosts
-echo "127.0.0.1 $hostname" >> /etc/hosts
+echo "127.0.0.1 $hostname" | $SUDO tee -a /etc/hosts >/dev/null
 
 echo "Hostname set to $hostname"
 exit 0
@@ -74,7 +87,14 @@ echo "SSH configuration complete"
 exit 0
 """
 
-# Bash script to verify hostname is set correctly
+# Bash script to verify hostname is set correctly.
+#
+# The comparison is case-insensitive: hostnames are case-insensitive (RFC 4343),
+# and cloud-init on some AMIs re-applies the instance Name tag verbatim (e.g.
+# "Workstation") after `set_hostname` runs, so the live hostname can differ only
+# in case from the value we set. Failing verification on case alone would break
+# every scenario whose instance name is not already lowercase (e.g. the
+# "Workstation" victim in basic/ad_attack_lab), so match case-insensitively.
 VERIFY_HOSTNAME_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
@@ -84,7 +104,7 @@ echo "Verifying hostname configuration..."
 
 current_hostname=$(hostname)
 
-if [ "$current_hostname" = "$expected_hostname" ]; then
+if [ "${current_hostname,,}" = "${expected_hostname,,}" ]; then
     echo "Hostname verified: $current_hostname"
     exit 0
 else

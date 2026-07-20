@@ -1,16 +1,61 @@
-"""Tests for main.py parsing and utility functions.
+"""Tests for provisioner parsing and utility functions.
 
 Only tests for pure logic - no mock-heavy integration tests.
 """
 
 import json
 import sys
+from contextlib import contextmanager
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+@contextmanager
+def _provision_env(provider: str, subnet_cidr: str):
+    """Shared provision-time patches for ``_run_terraform_provision`` tests.
+
+    Consolidates the ``CLOUD_PROVIDER`` env override and the subnet-allocation
+    boundary patch. ``allocate_subnets`` takes a DB table lock, so it cannot run
+    unmocked in a unit test; keeping the patch in one place also keeps the
+    first-party-internal patch target to a single occurrence (ADR-019-R1).
+    """
+    with (
+        patch.dict("os.environ", {"CLOUD_PROVIDER": provider}, clear=True),
+        patch("components.network.allocate_subnets", return_value=[subnet_cidr]),
+    ):
+        yield
+
+
+class _MemoryVpnSecretOps:
+    """Minimal provider-secret port for the provision orchestration test."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def read_or_create_issuer(self, range_id, generation, payload_factory):
+        ref = f"issuer:{range_id}:{generation}"
+        self.values.setdefault(ref, payload_factory())
+        return self.values[ref]
+
+    def put_server(self, range_id, generation, payload):
+        self.values[f"server:{range_id}:{generation}"] = payload
+
+    def put_profile(self, range_id, generation, payload):
+        ref = f"profile:{range_id}:{generation}"
+        self.values[ref] = payload
+        return ref
+
+    def delete_generation(self, range_id, generation, *, delete_identity=True):
+        return None
 
 
 class TestParseSerialNumber:
@@ -18,7 +63,7 @@ class TestParseSerialNumber:
 
     def test_extracts_serial_from_system_info(self):
         """Extracts serial from PAN-OS show system info output."""
-        from main import parse_serial_number
+        from ngfw_polling import parse_serial_number
 
         system_info = """hostname: PA-VM
 serial: 007200001267
@@ -28,39 +73,39 @@ software-version: 11.1.0
 
     def test_extracts_serial_case_insensitive(self):
         """Handles case variations."""
-        from main import parse_serial_number
+        from ngfw_polling import parse_serial_number
 
         assert parse_serial_number("SERIAL: ABC123DEF456") == "ABC123DEF456"
 
     def test_extracts_serial_with_extra_whitespace(self):
         """Handles extra whitespace."""
-        from main import parse_serial_number
+        from ngfw_polling import parse_serial_number
 
         result = parse_serial_number("serial:   007200001267   ")
         assert result == "007200001267"
 
     def test_returns_none_when_not_found(self):
         """Returns None when serial not in output."""
-        from main import parse_serial_number
+        from ngfw_polling import parse_serial_number
 
         result = parse_serial_number("hostname: PA-VM\nsoftware-version: 11.1.0")
         assert result is None
 
     def test_returns_none_for_unknown_placeholder(self):
         """Returns None for 'unknown' placeholder."""
-        from main import parse_serial_number
+        from ngfw_polling import parse_serial_number
 
         assert parse_serial_number("serial: unknown") is None
 
     def test_returns_none_for_none_placeholder(self):
         """Returns None for 'none' placeholder."""
-        from main import parse_serial_number
+        from ngfw_polling import parse_serial_number
 
         assert parse_serial_number("serial: none") is None
 
     def test_returns_none_for_empty_output(self):
         """Returns None for empty output."""
-        from main import parse_serial_number
+        from ngfw_polling import parse_serial_number
 
         assert parse_serial_number("") is None
 
@@ -70,27 +115,27 @@ class TestParseDeviceCertificateStatus:
 
     def test_extracts_valid_cert_status(self):
         """Extracts 'Valid' certificate status."""
-        from main import parse_device_certificate_status
+        from ngfw_polling import parse_device_certificate_status
 
         system_info = "device-certificate-status: Valid"
         assert parse_device_certificate_status(system_info) == "Valid"
 
     def test_extracts_cert_status_case_insensitive(self):
         """Handles case variations in field name."""
-        from main import parse_device_certificate_status
+        from ngfw_polling import parse_device_certificate_status
 
         result = parse_device_certificate_status("DEVICE-CERTIFICATE-STATUS: Valid")
         assert result == "Valid"
 
     def test_returns_none_when_not_found(self):
         """Returns None when cert status not in output."""
-        from main import parse_device_certificate_status
+        from ngfw_polling import parse_device_certificate_status
 
         assert parse_device_certificate_status("serial: 12345") is None
 
     def test_returns_none_for_empty_output(self):
         """Returns None for empty output."""
-        from main import parse_device_certificate_status
+        from ngfw_polling import parse_device_certificate_status
 
         assert parse_device_certificate_status("") is None
 
@@ -99,7 +144,7 @@ class TestRangeStatePayloads:
     """Tests for provider-aware range state serialization helpers."""
 
     def test_build_subnet_state_preserves_aws_fields(self):
-        from main import _build_subnet_state
+        from state_helpers import _build_subnet_state
 
         subnet_state = _build_subnet_state(
             {
@@ -125,7 +170,7 @@ class TestRangeStatePayloads:
         }
 
     def test_build_subnet_state_persists_gdc_metadata_without_aws_aliases(self):
-        from main import _build_subnet_state
+        from state_helpers import _build_subnet_state
 
         subnet_state = _build_subnet_state(
             {
@@ -156,7 +201,7 @@ class TestRangeStatePayloads:
         }
 
     def test_build_instance_state_preserves_aws_instance_alias(self):
-        from main import _build_instance_state
+        from state_helpers import _build_instance_state
 
         instance_state = _build_instance_state(
             {
@@ -174,7 +219,7 @@ class TestRangeStatePayloads:
         assert instance_state["provider_metadata"] == {"aws": {"instance_id": "i-abc123"}}
 
     def test_build_instance_state_collects_gdc_metadata(self):
-        from main import _build_instance_state
+        from state_helpers import _build_instance_state
 
         instance_state = _build_instance_state(
             {
@@ -212,7 +257,7 @@ class TestRangeStatePayloads:
         }
 
     def test_build_instance_state_collects_gdc_alias_metadata_under_gcp_provider(self):
-        from main import _build_instance_state
+        from state_helpers import _build_instance_state
 
         instance_state = _build_instance_state(
             {
@@ -245,7 +290,7 @@ class TestRangeStatePayloads:
         # rdp_password_secret_arn alongside ssh_key_secret_arn. The
         # state writer must propagate it so engine.services can resolve
         # it through shared.cloud at access time.
-        from main import _build_instance_state
+        from state_helpers import _build_instance_state
 
         rdp_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-rdp-password"
         ssh_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-ssh-key"
@@ -269,7 +314,7 @@ class TestRangeStatePayloads:
         # surfaces it both at the top level (for engine.services'
         # symmetric resolver) and inside provider_metadata.gcp (for
         # state-shape consistency with ssh_key_secret_arn).
-        from main import _build_instance_state
+        from state_helpers import _build_instance_state
 
         rdp_ref = "projects/test/secrets/shifter-gcp-dev-range-42-victim-abc-rdp-password"
         instance_state = _build_instance_state(
@@ -293,7 +338,7 @@ class TestRangeStatePayloads:
         assert instance_state["provider_metadata"]["gcp"].get("rdp_password_secret_ref") == rdp_ref
 
     def test_build_provisioned_instance_payload_keeps_legacy_fields_and_adds_provider_metadata(self):
-        from main import _build_provisioned_instance_payload
+        from state_helpers import _build_provisioned_instance_payload
 
         payload = _build_provisioned_instance_payload(
             {
@@ -326,7 +371,7 @@ class TestRangeStatePayloads:
         # Per #762: Range.provisioned_instances entries carry the
         # rdp_password_secret_arn so engine.services can resolve a
         # guest password through shared.cloud at access time.
-        from main import _build_provisioned_instance_payload
+        from state_helpers import _build_provisioned_instance_payload
 
         rdp_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-rdp-password"
         ssh_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-ssh-key"
@@ -350,21 +395,21 @@ class TestRangeStatePayloads:
         assert payload["rdp_password_secret_arn"] == rdp_arn
 
     def test_get_cloud_provider_defaults_to_aws(self):
-        from main import _get_cloud_provider
+        from state_helpers import _get_cloud_provider
 
         with pytest.MonkeyPatch.context() as mp:
             mp.delenv("CLOUD_PROVIDER", raising=False)
             assert _get_cloud_provider() == "aws"
 
     def test_get_cloud_provider_reads_env(self):
-        from main import _get_cloud_provider
+        from state_helpers import _get_cloud_provider
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setenv("CLOUD_PROVIDER", "gcp")
             assert _get_cloud_provider() == "gcp"
 
-    def test_write_provisioned_state_persists_gcp_metadata_blocks(self):
-        from main import write_provisioned_state
+    def test_write_provisioned_state_persists_gcp_metadata_blocks(self, monkeypatch):
+        from provisioner_db import write_provisioned_state
 
         mock_cursor = MagicMock()
         mock_cursor.rowcount = 1
@@ -406,10 +451,9 @@ class TestRangeStatePayloads:
             }
         ]
 
-        with (
-            patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True),
-            patch("main.get_db_connection", return_value=mock_conn),
-        ):
+        monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        with patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True):
             write_provisioned_state(range_id=42, subnets=subnets, instances=instances, ngfw_instance_id=None)
 
         subnet_state = json.loads(mock_cursor.execute.call_args_list[0].args[1][0])
@@ -427,13 +471,82 @@ class TestRangeStatePayloads:
         assert provisioned_instances[0]["instance_id"] == "vmrt-vm-1"
         assert provisioned_instances[0]["provider_metadata"]["gcp"]["vm_name"] == "vmrt-vm-1"
 
+    def test_write_provisioned_state_persists_only_a_validated_vpn_binding(self, monkeypatch):
+        from provisioner_db import write_provisioned_state
+
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        binding = {
+            "version": "openvpn-binding-v1",
+            "channel": "openvpn",
+            "generation": "87a99f87-5af2-46e6-a459-0e5eb1ab1bf2",
+            "owner_user_id": 42,
+            "target_ref": "6ed14925-d8a1-42bd-a2d9-ce3730ab9313",
+            "endpoint": "vpn.example.test",
+            "port": 1194,
+            "profile_version": "openvpn-profile-v1",
+            "secret_ref": "projects/test/secrets/range-vpn-profile",
+            "ready": True,
+        }
+
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+        write_provisioned_state(
+            range_id=42,
+            subnets={},
+            instances=[],
+            vpn_access_binding=binding,
+        )
+
+        persisted = json.loads(mock_cursor.execute.call_args.args[1][1])
+        assert persisted == binding
+        assert "vpn_access_binding" in mock_cursor.execute.call_args.args[0]
+
+    def test_write_provisioned_state_rejects_an_extended_vpn_binding_before_db_write(self, monkeypatch):
+        from shared.remote_access import OpenVpnBindingError
+
+        from provisioner_db import write_provisioned_state
+
+        connection = MagicMock()
+        monkeypatch.setattr("provisioner_db.get_db_connection", connection)
+
+        with pytest.raises(OpenVpnBindingError, match="unknown fields"):
+            write_provisioned_state(
+                range_id=42,
+                subnets={},
+                instances=[],
+                vpn_access_binding={"profile": "credential material must not be persisted"},
+            )
+
+        connection.assert_not_called()
+
+    def test_destroyed_range_clears_the_vpn_binding(self, monkeypatch):
+        from provisioner_db import mark_range_instances_destroyed
+
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=mock_conn))
+
+        mark_range_instances_destroyed(42)
+
+        assert any("vpn_access_binding = NULL" in call.args[0] for call in mock_cursor.execute.call_args_list)
+
 
 class TestGdcProvisioning:
     """Tests for the active GDC VM Runtime range path."""
 
-    def test_run_terraform_provision_runs_setup_and_writes_state_for_gdc_ranges(self):
+    def test_run_terraform_provision_runs_setup_and_writes_state_for_gdc_ranges(self, monkeypatch):
         from config import RangeNetworkConfig
-        from main import _run_terraform_provision
+        from terraform_ops import _run_terraform_provision
 
         range_spec = {
             "subnets": [
@@ -453,159 +566,505 @@ class TestGdcProvisioning:
             ]
         }
 
-        with (
-            patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True),
-            patch("main.publish_status_update"),
-            patch("components.network.allocate_subnets", return_value=["10.200.0.96/28"]),
-            patch(
-                "main.load_range_network_config",
-                return_value=RangeNetworkConfig("cluster1", "10.200.0.0/24", "us-central1"),
-            ),
-            patch("main._update_range_config"),
-            patch(
-                "main._build_range_terraform_variables",
-                return_value={"range_id": 42, "subnets": range_spec["subnets"]},
-            ),
-            patch(
-                "main.range_terraform_runner.apply_range",
-                return_value={
-                    "subnets": {
-                        "attack": {
-                            "uuid": "subnet-123",
-                            "subnet_id": "range-42-attack",
-                            "subnet_cidr": "10.200.0.96/28",
-                            "gdc_namespace": "range-42",
-                            "gdc_network_name": "range-42-attack",
-                        }
-                    },
+        terraform_output = {
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-123",
+                    "subnet_id": "range-42-attack",
+                    "subnet_cidr": "10.200.0.96/28",
+                    "gdc_namespace": "range-42",
+                    "gdc_network_name": "range-42-attack",
+                }
+            },
+            "instances": [
+                {
+                    "uuid": "inst-123",
+                    "name": "attacker",
+                    "asset_type": "vm_runtime_vm",
+                    "role": "attacker",
+                    "os": "kali",
+                    "subnet_name": "attack",
+                    "instance_id": "range-42-attack-attacker-1234",
+                    "private_ip": "10.200.0.104",
+                    "public_key": "ssh-rsa AAAA",
+                    "ssh_key_secret_arn": "projects/test/secrets/range-42-attacker-ssh",
+                    "ssh_username": "kali",
+                    "gdc_vm_name": "range-42-attack-attacker-1234",
+                    "gdc_namespace": "range-42",
+                    "gdc_network_name": "range-42-attack",
+                    "gdc_ip": "10.200.0.104",
+                    "vmruntime_disk_name": "range-42-attack-attacker-1234-boot",
+                }
+            ],
+        }
+
+        mock_setup = MagicMock()
+        mock_write_state = MagicMock()
+        monkeypatch.setattr("terraform_ops.publish_status_update", MagicMock())
+        monkeypatch.setattr(
+            "range_subnet_allocation.load_range_network_config",
+            MagicMock(return_value=RangeNetworkConfig("cluster1", "10.200.0.0/24", "us-central1")),
+        )
+        monkeypatch.setattr("range_subnet_allocation._update_range_config", MagicMock())
+        monkeypatch.setattr(
+            "terraform_ops.build_range_variables",
+            MagicMock(return_value={"range_id": 42, "subnets": range_spec["subnets"]}),
+        )
+        monkeypatch.setattr(
+            "terraform_ops.range_terraform_runner.apply_range",
+            MagicMock(return_value=terraform_output),
+        )
+        monkeypatch.setattr("terraform_ops.run_instance_setup", mock_setup)
+        monkeypatch.setattr("terraform_ops.write_provisioned_state", mock_write_state)
+        monkeypatch.setattr(
+            "terraform_ops.get_range_data_by_request_id",
+            MagicMock(return_value={"ngfw_instance_id": None}),
+        )
+        monkeypatch.setattr("terraform_ops.publish_ready", MagicMock())
+        with _provision_env("gcp", "10.200.0.96/28"):
+            _run_terraform_provision("req-123", 42, 7, range_spec)
+
+        mock_setup.assert_called_once_with(
+            instances_output=terraform_output["instances"],
+            range_spec=range_spec,
+            range_id=42,
+            polaris_agent_role_arn="",
+        )
+        mock_write_state.assert_called_once_with(
+            range_id=42,
+            subnets=terraform_output["subnets"],
+            instances=terraform_output["instances"],
+            ngfw_instance_id=None,
+            vpn_access_binding=None,
+        )
+
+    def test_run_terraform_provision_threads_polaris_agent_role_arn_from_output(self, monkeypatch):
+        """The polaris_agent_role_arn Terraform output reaches run_instance_setup (#1377)."""
+        from config import RangeNetworkConfig
+        from terraform_ops import _run_terraform_provision
+
+        range_spec = {
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-9",
                     "instances": [
                         {
-                            "uuid": "inst-123",
+                            "uuid": "inst-9",
                             "name": "attacker",
                             "asset_type": "vm_runtime_vm",
                             "role": "attacker",
-                            "os": "kali",
-                            "subnet_name": "attack",
-                            "instance_id": "range-42-attack-attacker-1234",
-                            "private_ip": "10.200.0.104",
-                            "public_key": "ssh-rsa AAAA",
-                            "ssh_key_secret_arn": "projects/test/secrets/range-42-attacker-ssh",
-                            "ssh_username": "kali",
-                            "gdc_vm_name": "range-42-attack-attacker-1234",
-                            "gdc_namespace": "range-42",
-                            "gdc_network_name": "range-42-attack",
-                            "gdc_ip": "10.200.0.104",
-                            "vmruntime_disk_name": "range-42-attack-attacker-1234-boot",
+                            "os_type": "kali",
+                            "ami_key": "polaris-vm",
                         }
                     ],
-                },
-            ),
-            patch("main.run_instance_setup") as mock_setup,
-            patch("main.write_provisioned_state") as mock_write_state,
-            patch("main.get_range_data_by_request_id", return_value={"ngfw_instance_id": None}),
-            patch("main.publish_ready"),
-        ):
-            _run_terraform_provision("req-123", 42, 7, range_spec)
+                }
+            ]
+        }
+        terraform_output = {
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-9",
+                    "subnet_id": "range-9-attack",
+                    "subnet_cidr": "10.9.0.0/28",
+                }
+            },
+            "instances": [
+                {
+                    "uuid": "inst-9",
+                    "name": "attacker",
+                    "role": "attacker",
+                    "os": "kali",
+                    "subnet_name": "attack",
+                    "instance_id": "range-9-attack-attacker-1",
+                    "private_ip": "10.9.0.10",
+                }
+            ],
+            "polaris_agent_role_arn": "arn:aws:iam::123456789012:role/shifter-range-9-polaris-agent",
+        }
 
-        mock_setup.assert_called_once()
-        mock_write_state.assert_called_once()
+        mock_setup = MagicMock()
+        monkeypatch.setattr("terraform_ops.publish_status_update", MagicMock())
+        monkeypatch.setattr(
+            "range_subnet_allocation.load_range_network_config",
+            MagicMock(return_value=RangeNetworkConfig("vpc-9", "10.9.0.0/16", "us-east-2")),
+        )
+        monkeypatch.setattr("range_subnet_allocation._update_range_config", MagicMock())
+        monkeypatch.setattr(
+            "terraform_ops.build_range_variables",
+            MagicMock(return_value={"range_id": 9, "subnets": range_spec["subnets"]}),
+        )
+        monkeypatch.setattr(
+            "terraform_ops.range_terraform_runner.apply_range",
+            MagicMock(return_value=terraform_output),
+        )
+        monkeypatch.setattr("terraform_ops.run_instance_setup", mock_setup)
+        monkeypatch.setattr("terraform_ops.write_provisioned_state", MagicMock())
+        monkeypatch.setattr(
+            "terraform_ops.get_range_data_by_request_id",
+            MagicMock(return_value={"ngfw_instance_id": None}),
+        )
+        monkeypatch.setattr("terraform_ops.publish_ready", MagicMock())
+        with _provision_env("aws", "10.9.0.0/28"):
+            _run_terraform_provision("req-9", 9, 2, range_spec)
 
-    def test_run_instance_setup_skips_pod_backed_assets(self):
-        from main import run_instance_setup
+        mock_setup.assert_called_once_with(
+            instances_output=terraform_output["instances"],
+            range_spec=range_spec,
+            range_id=9,
+            polaris_agent_role_arn="arn:aws:iam::123456789012:role/shifter-range-9-polaris-agent",
+        )
 
-        with (
-            patch("main._run_dc_setup") as mock_dc_setup,
-            patch("main._run_single_instance_setup") as mock_single_setup,
-        ):
-            run_instance_setup(
-                instances_output=[
-                    {
-                        "uuid": "pod-uuid-1",
-                        "asset_type": "scenario_pod",
-                        "role": "victim",
-                        "os": "ubuntu",
-                        "instance_id": "range-42-mixed-victim-pod-uuid-1-pod",
-                        "private_ip": "10.200.0.107",
-                    }
-                ],
-                range_spec={
-                    "subnets": [
+    def test_run_terraform_provision_persists_finalized_vpn_binding(self, monkeypatch):
+        """The real prepare/apply/verify/finalize chain reaches persisted state."""
+        from shared.remote_access import build_openvpn_capability, parse_openvpn_binding
+
+        from config import RangeNetworkConfig
+        from terraform_ops import _run_terraform_provision
+
+        generation = uuid4()
+        target_ref = uuid4()
+        range_spec = {
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-vpn",
+                    "instances": [
                         {
-                            "instances": [
-                                {
-                                    "uuid": "pod-uuid-1",
-                                    "name": "lower-fidelity-target",
-                                    "asset_type": "scenario_pod",
-                                    "role": "victim",
-                                    "os_type": "ubuntu",
-                                }
-                            ]
+                            "uuid": str(target_ref),
+                            "name": "attacker",
+                            "role": "attacker",
+                            "os_type": "kali",
                         }
-                    ]
-                },
+                    ],
+                }
+            ]
+        }
+        capability = build_openvpn_capability(target_ref, datetime.now(UTC) + timedelta(days=5))
+        terraform_output = {
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-vpn",
+                    "subnet_id": "subnet-123",
+                    "subnet_cidr": "10.9.0.0/28",
+                }
+            },
+            "instances": [
+                {
+                    "uuid": str(target_ref),
+                    "name": "attacker",
+                    "role": "attacker",
+                    "os": "kali",
+                    "subnet_name": "attack",
+                    "instance_id": "i-vpn-target",
+                    "private_ip": "10.9.0.10",
+                }
+            ],
+            "vpn_gateway": {
+                "endpoint": "vpn.example.test",
+                "port": 1194,
+                "health_endpoint": "10.9.0.20",
+                "health_port": 1195,
+                "target_ref": str(target_ref),
+                "ready": False,
+            },
+        }
+        secret_ops = _MemoryVpnSecretOps()
+        mock_write_state = MagicMock()
+        monkeypatch.setattr("terraform_ops.publish_status_update", MagicMock())
+        monkeypatch.setattr(
+            "range_subnet_allocation.load_range_network_config",
+            MagicMock(return_value=RangeNetworkConfig("vpc-vpn", "10.9.0.0/16", "us-east-2")),
+        )
+        monkeypatch.setattr("range_subnet_allocation._update_range_config", MagicMock())
+        monkeypatch.setattr(
+            "terraform_ops.build_range_variables",
+            MagicMock(return_value={"range_id": 42, "subnets": range_spec["subnets"]}),
+        )
+        monkeypatch.setattr(
+            "terraform_ops.range_terraform_runner.apply_range",
+            MagicMock(return_value=terraform_output),
+        )
+        monkeypatch.setattr("terraform_ops.get_vpn_secret_ops", MagicMock(return_value=secret_ops))
+        monkeypatch.setattr("vpn_access._probe_openvpn_gateway", lambda endpoint, port: True)
+        monkeypatch.setattr("terraform_ops.run_instance_setup", MagicMock())
+        monkeypatch.setattr("terraform_ops.write_provisioned_state", mock_write_state)
+        monkeypatch.setattr(
+            "terraform_ops.get_range_data_by_request_id",
+            MagicMock(return_value={"ngfw_instance_id": None}),
+        )
+        monkeypatch.setattr("terraform_ops.publish_ready", MagicMock())
+
+        with _provision_env("aws", "10.9.0.0/28"):
+            _run_terraform_provision(
+                str(generation),
+                42,
+                7,
+                range_spec,
+                remote_access_capability=capability,
             )
+
+        binding = mock_write_state.call_args.kwargs["vpn_access_binding"]
+        parsed = parse_openvpn_binding(binding)
+        assert parsed.generation == generation
+        assert parsed.owner_user_id == 7
+        assert parsed.target_ref == target_ref
+        assert parsed.endpoint == "vpn.example.test"
+        assert parsed.port == 1194
+        assert parsed.secret_ref == f"profile:42:{generation}"
+        assert parsed.ready is True
+        assert secret_ops.values[parsed.secret_ref].startswith("client\n")
+
+    def test_run_instance_setup_skips_pod_backed_assets(self, monkeypatch):
+        from instance_orchestrator import run_instance_setup
+
+        mock_dc_setup = MagicMock()
+        mock_single_setup = MagicMock()
+        monkeypatch.setattr("instance_orchestrator._run_dc_setup", mock_dc_setup)
+        monkeypatch.setattr("instance_orchestrator._run_single_instance_setup", mock_single_setup)
+        run_instance_setup(
+            instances_output=[
+                {
+                    "uuid": "pod-uuid-1",
+                    "asset_type": "scenario_pod",
+                    "role": "victim",
+                    "os": "ubuntu",
+                    "instance_id": "range-42-mixed-victim-pod-uuid-1-pod",
+                    "private_ip": "10.200.0.107",
+                }
+            ],
+            range_spec={
+                "subnets": [
+                    {
+                        "instances": [
+                            {
+                                "uuid": "pod-uuid-1",
+                                "name": "lower-fidelity-target",
+                                "asset_type": "scenario_pod",
+                                "role": "victim",
+                                "os_type": "ubuntu",
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
 
         mock_dc_setup.assert_not_called()
         mock_single_setup.assert_not_called()
 
-    def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self, mocker):
-        from main import _build_range_terraform_variables
+    def test_polaris_bootstrap_runs_before_container_password_push(self, monkeypatch):
+        from instance_orchestrator import _setup_one_other_instance
+
+        events = []
+
+        def record_single_setup(*, instance_data, instance_id, spec):
+            events.append(("setup", spec.set_local_password))
+            assert instance_id == "i-polaris"
+            assert instance_data["instance_id"] == "i-polaris"
+            assert spec.set_local_password is False
+
+        def record_bootstrap(*, instance_data, instance_id, dc_ip, public_key, range_id, agent_role_arn):
+            events.append(("bootstrap", dc_ip, public_key, agent_role_arn))
+            assert instance_data["instance_id"] == "i-polaris"
+            assert range_id == 9
+
+        def record_container_password(*, instance_data, instance_id, container_name, ssh_user):
+            events.append(("password", container_name, ssh_user))
+
+        monkeypatch.setattr("instance_orchestrator.get_agent_presigned_url", MagicMock(return_value=""))
+        monkeypatch.setattr(
+            "instance_orchestrator._run_single_instance_setup",
+            MagicMock(side_effect=record_single_setup),
+        )
+        monkeypatch.setattr(
+            "instance_orchestrator._run_polaris_range_bootstrap",
+            MagicMock(side_effect=record_bootstrap),
+        )
+        monkeypatch.setattr(
+            "instance_orchestrator._set_attacker_container_password_after_bootstrap",
+            MagicMock(side_effect=record_container_password),
+        )
+        result = _setup_one_other_instance(
+            {
+                "uuid": "inst-polaris",
+                "asset_type": "vm_runtime_vm",
+                "role": "attacker",
+                "os": "kali",
+                "instance_id": "i-polaris",
+                "hostname": "kali",
+                "name": "kali",
+                "public_key": "ssh-rsa AAAA",
+            },
+            {"inst-polaris": {"ami_key": "polaris-vm"}},
+            actual_dc_ip="10.1.2.8",
+            actual_domain="boreas.local",
+            range_id=9,
+            polaris_agent_role_arn="arn:aws:iam::123456789012:role/shifter-range-9-polaris-agent",
+        )
+
+        assert result == ("i-polaris", True, None)
+        assert events == [
+            ("setup", False),
+            (
+                "bootstrap",
+                "10.1.2.8",
+                "ssh-rsa AAAA",
+                "arn:aws:iam::123456789012:role/shifter-range-9-polaris-agent",
+            ),
+            ("password", "a14-kali", "kali"),
+        ]
+
+    def test_polaris_bootstrap_gcp_routes_ssh_and_uses_gcp_plan(self, monkeypatch):
+        """GCP polaris bootstrap uses the routed executor and a gcp plan. No IMDS mutation exists anywhere (#1377)."""
+        import polaris_bootstrap
+
+        captured = {}
+
+        class _FakeExecution:
+            executor = MagicMock()
+            target = "10.50.2.3"
+            document_name = "AWS-RunShellScript"
+
+            def close(self):
+                captured["closed"] = True
+
+        def fake_build_context(instance_data, *, os_type, role):
+            captured["target_instance"] = instance_data["instance_id"]
+            return _FakeExecution()
+
+        class _FakeOrchestrator:
+            def __init__(self, *, executor):
+                captured["executor"] = executor
+
+            def orchestrate(self, target, plan, context, document_name):
+                captured["target"] = target
+                captured["plan_provider"] = plan.provider
+                captured["document_name"] = document_name
+                return SimpleNamespace(success=True, error=None)
+
+        monkeypatch.setattr(polaris_bootstrap, "build_guest_execution_context", fake_build_context)
+        monkeypatch.setattr(polaris_bootstrap, "SetupOrchestrator", _FakeOrchestrator)
+        monkeypatch.setenv("POLARIS_TESTS_BUCKET", "gcs-bucket")
+        monkeypatch.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "proj-123")
+
+        polaris_bootstrap._run_polaris_range_bootstrap(
+            instance_data={"instance_id": "shifter-r-9-polaris-kali", "os": "kali", "role": "attacker"},
+            instance_id="shifter-r-9-polaris-kali",
+            dc_ip="10.50.2.4",
+            public_key="ssh-ed25519 AAAA",
+            provider="gcp",
+        )
+
+        assert captured["plan_provider"] == "gcp"
+        assert captured["target"] == "10.50.2.3"
+        assert captured["closed"] is True
+        # The insecure hop-limit path is gone entirely, not merely skipped.
+        assert not hasattr(polaris_bootstrap, "_set_aws_imds_hop_limit")
+
+    def test_polaris_bootstrap_aws_uses_aws_plan_and_threads_role_arn(self, monkeypatch, aws_polaris_agent_env):
+        """AWS polaris bootstrap uses the aws plan and threads the per-range role ARN (#1377).
+
+        No IMDS hop-limit mutation exists anywhere in this module any more -- the
+        AWS agent shard scripts fetch credentials host-side via STS, not IMDS.
+        """
+        import polaris_bootstrap
+
+        captured = {}
+
+        class _FakeExecution:
+            executor = MagicMock()
+            target = "i-polaris"
+            document_name = "AWS-RunShellScript"
+
+            def close(self):
+                pass
+
+        def fake_build_context(instance_data, *, os_type, role):
+            return _FakeExecution()
+
+        class _FakeOrchestrator:
+            def __init__(self, *, executor):
+                pass
+
+            def orchestrate(self, target, plan, context, document_name):
+                captured["plan_provider"] = plan.provider
+                captured["context"] = context
+                return SimpleNamespace(success=True, error=None)
+
+        monkeypatch.setattr(polaris_bootstrap, "build_guest_execution_context", fake_build_context)
+        monkeypatch.setattr(polaris_bootstrap, "SetupOrchestrator", _FakeOrchestrator)
+        monkeypatch.setenv("AGENT_S3_BUCKET", "s3-bucket")
+
+        polaris_bootstrap._run_polaris_range_bootstrap(
+            instance_data={"instance_id": "i-polaris", "os": "kali", "role": "attacker"},
+            instance_id="i-polaris",
+            dc_ip="10.1.2.8",
+            public_key="ssh-rsa AAAA",
+            provider="aws",
+            agent_role_arn="arn:aws:iam::123456789012:role/shifter-range-9-polaris-agent",
+        )
+
+        assert captured["plan_provider"] == "aws"
+        assert captured["context"]["role_arn"] == "arn:aws:iam::123456789012:role/shifter-range-9-polaris-agent"
+        assert captured["context"]["region"] == aws_polaris_agent_env["AWS_POLARIS_AGENT_REGION"]
+        assert not hasattr(polaris_bootstrap, "_set_aws_imds_hop_limit")
+
+    def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self):
+        from terraform_vars import _build_range_terraform_variables
 
         # GCP path uses GDC VM Runtime + GCP Secret Manager and does not
         # consume SECRETS_KMS_KEY_ARN — verify by omitting it from the env.
-        mocker.patch.dict(
-            "os.environ",
-            {
-                "CLOUD_PROVIDER": "gcp",
-                "ENVIRONMENT": "gcp-dev",
-                "RANGE_NETWORK_ID": "cluster1",
-                "RANGE_NETWORK_CIDR": "10.200.0.0/24",
-                "RANGE_NETWORK_REGION": "us-central1",
-            },
-            clear=True,
-        )
-        mocker.patch(
-            "main.get_user_ngfw_data",
-            return_value={
-                "cloud_provider": "gcp",
-                "ngfw_request_id": "ngfw-req-1",
-                "management_ip": "10.200.0.10",
-                "ssh_key_secret_arn": "projects/test/secrets/ngfw-admin",
-                "route_next_hop_ip": "10.200.0.2",
-                "attachment_mode": "gdc-static-route",
-                "provider_metadata": {"gcp": {"namespace": "ngfw-user-1"}},
-            },
-        )
-        mocker.patch("main.generate_presigned_url", return_value="")
-        mocker.patch("main.get_range_availability_zone", return_value="us-central1-a")
-        mocker.patch("main._get_kali_instance_type", return_value="n2-standard-2")
-        mocker.patch("main._get_victim_instance_type", return_value="n2-standard-2")
-        mocker.patch("main._get_windows_instance_type", return_value="n2-standard-4")
-        mocker.patch("main._get_dc_instance_type", return_value="n2-standard-4")
-
-        variables = _build_range_terraform_variables(
-            request_id="req-123",
-            range_id=42,
-            user_id=7,
-            range_spec={
-                "ngfw": True,
-                "subnets": [
-                    {
-                        "name": "attack",
-                        "uuid": "subnet-1",
-                        "connected_to": [],
-                        "instances": [
-                            {
-                                "uuid": "inst-1",
-                                "name": "attacker",
-                                "role": "attacker",
-                                "os_type": "kali",
-                            }
-                        ],
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "gcp")
+            mp.setenv("ENVIRONMENT", "gcp-dev")
+            mp.setenv("RANGE_NETWORK_ID", "cluster1")
+            mp.setenv("RANGE_NETWORK_CIDR", "10.200.0.0/24")
+            mp.setenv("RANGE_NETWORK_REGION", "us-central1")
+            mp.setattr(
+                "terraform_vars.get_user_ngfw_data",
+                MagicMock(
+                    return_value={
+                        "cloud_provider": "gcp",
+                        "ngfw_request_id": "ngfw-req-1",
+                        "management_ip": "10.200.0.10",
+                        "ssh_key_secret_arn": "projects/test/secrets/ngfw-admin",
+                        "route_next_hop_ip": "10.200.0.2",
+                        "attachment_mode": "gdc-static-route",
+                        "provider_metadata": {"gcp": {"namespace": "ngfw-user-1"}},
                     }
-                ],
-            },
-        )
+                ),
+            )
+            mp.setattr("terraform_vars.generate_presigned_url", MagicMock(return_value=""))
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-central1-a"))
+            mp.setattr("terraform_vars._get_kali_instance_type", MagicMock(return_value="n2-standard-2"))
+            mp.setattr("terraform_vars._get_victim_instance_type", MagicMock(return_value="n2-standard-2"))
+            mp.setattr("terraform_vars._get_windows_instance_type", MagicMock(return_value="n2-standard-4"))
+            mp.setattr("terraform_vars._get_dc_instance_type", MagicMock(return_value="n2-standard-4"))
+
+            variables = _build_range_terraform_variables(
+                request_id="req-123",
+                range_id=42,
+                user_id=7,
+                range_spec={
+                    "ngfw": True,
+                    "subnets": [
+                        {
+                            "name": "attack",
+                            "uuid": "subnet-1",
+                            "connected_to": [],
+                            "instances": [
+                                {
+                                    "uuid": "inst-1",
+                                    "name": "attacker",
+                                    "role": "attacker",
+                                    "os_type": "kali",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
 
         assert variables["ngfw_data_eni_id"] == ""
         assert variables["ngfw_attachment"]["cloud_provider"] == "gcp"
@@ -613,111 +1072,474 @@ class TestGdcProvisioning:
         # GCP path must NOT include the AWS-only Secrets Manager CMK ARN (#213).
         assert "secrets_kms_key_arn" not in variables
 
-    def test_build_range_terraform_variables_aws_includes_secrets_kms_key_arn(self, mocker):
+    def test_build_range_terraform_variables_aws_includes_secrets_kms_key_arn(self):
         """AWS range tfvars include the Secrets Manager CMK ARN (#213).
 
         Mirrors the NGFW positive coverage in test_terraform_runner.py: the
         runtime range Terraform module's `aws_secretsmanager_secret.ssh_key`
         resource depends on this variable.
         """
-        from main import _build_range_terraform_variables
+        from terraform_vars import _build_range_terraform_variables
 
-        mocker.patch.dict(
-            "os.environ",
-            {
-                "CLOUD_PROVIDER": "aws",
-                "ENVIRONMENT": "dev",
-                "SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234",
-                "RANGE_INSTANCE_PROFILE_NAME": "shifter-dev-range-profile",
-            },
-            clear=True,
-        )
-        mocker.patch(
-            "main.load_range_network_config",
-            return_value=mocker.Mock(
-                network_id="vpc-test",
-                network_cidr="10.1.0.0/16",
-                primary_portal_cidr="10.0.0.0/16",
-            ),
-        )
-        mocker.patch("main.get_range_availability_zone", return_value="us-east-2a")
-        mocker.patch("main.get_ami_id", return_value="ami-deadbeef")
-        mocker.patch("main.generate_presigned_url", return_value="")
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.setattr(
+                "terraform_vars.load_range_network_config",
+                MagicMock(
+                    return_value=SimpleNamespace(
+                        network_id="vpc-test",
+                        network_cidr="10.1.0.0/16",
+                        primary_portal_cidr="10.0.0.0/16",
+                    )
+                ),
+            )
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-east-2a"))
+            mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+            mp.setattr("terraform_vars.generate_presigned_url", MagicMock(return_value=""))
 
-        variables = _build_range_terraform_variables(
-            request_id="req-aws-1",
-            range_id=1,
-            user_id=2,
-            range_spec={"ngfw": False, "subnets": []},
-        )
-
-        assert variables["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
-        assert variables["kali_ami_id"] == "ami-deadbeef"
-
-    def test_build_range_terraform_variables_aws_raises_when_secrets_kms_key_arn_missing(self, mocker):
-        """Fail-fast on missing SECRETS_KMS_KEY_ARN for AWS range path (#213)."""
-        from main import _build_range_terraform_variables
-
-        mocker.patch.dict(
-            "os.environ",
-            {
-                "CLOUD_PROVIDER": "aws",
-                "ENVIRONMENT": "dev",
-                "RANGE_INSTANCE_PROFILE_NAME": "shifter-dev-range-profile",
-            },
-            clear=True,
-        )
-        mocker.patch(
-            "main.load_range_network_config",
-            return_value=mocker.Mock(
-                network_id="vpc-test",
-                network_cidr="10.1.0.0/16",
-                primary_portal_cidr="10.0.0.0/16",
-            ),
-        )
-        mocker.patch("main.get_range_availability_zone", return_value="us-east-2a")
-        mocker.patch("main.get_ami_id", return_value="ami-deadbeef")
-        mocker.patch("main.generate_presigned_url", return_value="")
-
-        with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
-            _build_range_terraform_variables(
-                request_id="req-aws-2",
+            variables = _build_range_terraform_variables(
+                request_id="req-aws-1",
                 range_id=1,
                 user_id=2,
                 range_spec={"ngfw": False, "subnets": []},
             )
 
-    def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, mocker):
-        from main import run_range_terraform
+        assert variables["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
+        assert variables["kali_ami_id"] == "ami-deadbeef"
 
-        mocker.patch(
-            "main.get_range_data_by_request_id",
-            return_value={"range_id": 42, "user_id": 7, "spec": {"ngfw": True}},
+    def test_build_range_terraform_variables_aws_range_egress_mode_from_env(self):
+        """AWS range tfvars carry range_egress_mode for the runtime module (#1171)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.setenv("RANGE_EGRESS_MODE", "none")
+            mp.setenv("S3_ENDPOINT_ID", "vpce-s3-test")
+            mp.setattr(
+                "terraform_vars.load_range_network_config",
+                MagicMock(
+                    return_value=SimpleNamespace(
+                        network_id="vpc-test",
+                        network_cidr="10.1.0.0/16",
+                        primary_portal_cidr="10.0.0.0/16",
+                    )
+                ),
+            )
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-east-2a"))
+            mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+            mp.setattr("terraform_vars.generate_presigned_url", MagicMock(return_value="https://signed.example/agent"))
+
+            variables = _build_range_terraform_variables(
+                request_id="req-aws-none",
+                range_id=1,
+                user_id=2,
+                range_spec={
+                    "ngfw": False,
+                    "subnets": [
+                        {
+                            "name": "attack",
+                            "uuid": "u1",
+                            "cidr": "10.1.1.0/28",
+                            "instances": [
+                                {
+                                    "uuid": "i1",
+                                    "name": "kali",
+                                    "role": "attacker",
+                                    "os_type": "kali",
+                                    "agent": {"s3_key": "agents/xdr.deb"},
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+        assert variables["range_egress_mode"] == "none"
+        assert variables["s3_endpoint_id"] == ""
+        assert variables["subnets"][0]["instances"][0]["agent_presigned_url"] == ""
+
+    def test_build_range_terraform_variables_aws_raises_when_secrets_kms_key_arn_missing(self):
+        """Fail-fast on missing SECRETS_KMS_KEY_ARN for AWS range path (#213)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.delenv("SECRETS_KMS_KEY_ARN", raising=False)
+            mp.setattr(
+                "terraform_vars.load_range_network_config",
+                MagicMock(
+                    return_value=SimpleNamespace(
+                        network_id="vpc-test",
+                        network_cidr="10.1.0.0/16",
+                        primary_portal_cidr="10.0.0.0/16",
+                    )
+                ),
+            )
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-east-2a"))
+            mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+            mp.setattr("terraform_vars.generate_presigned_url", MagicMock(return_value=""))
+
+            with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
+                _build_range_terraform_variables(
+                    request_id="req-aws-2",
+                    range_id=1,
+                    user_id=2,
+                    range_spec={"ngfw": False, "subnets": []},
+                )
+
+    @staticmethod
+    def _polaris_vm_range_spec() -> dict[str, Any]:
+        return {
+            "ngfw": False,
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "u1",
+                    "instances": [
+                        {
+                            "uuid": "i1",
+                            "name": "kali",
+                            "role": "attacker",
+                            "os_type": "kali",
+                            "ami_key": "polaris-vm",
+                        }
+                    ],
+                }
+            ],
+        }
+
+    @staticmethod
+    def _patch_aws_range_terraform_helpers(mp: pytest.MonkeyPatch) -> None:
+        """Common AWS-path mocks shared by the Polaris agent terraform_vars tests (#1377)."""
+        mp.setattr(
+            "terraform_vars.load_range_network_config",
+            MagicMock(
+                return_value=SimpleNamespace(
+                    network_id="vpc-test",
+                    network_cidr="10.1.0.0/16",
+                    primary_portal_cidr="10.0.0.0/16",
+                )
+            ),
         )
-        mocker.patch(
-            "main.get_user_ngfw_data",
-            return_value={
-                "cloud_provider": "gcp",
-                "management_ip": "10.200.0.10",
-                "status": "paused",
-                "ngfw_request_id": "ngfw-req-1",
-            },
+        mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-east-2a"))
+        mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+        mp.setattr("terraform_vars.generate_presigned_url", MagicMock(return_value=""))
+
+    def test_build_range_terraform_variables_aws_polaris_vm_enables_agent_and_maps_config(self, aws_polaris_agent_env):
+        """AWS polaris-vm range enables the per-range agent role and maps config -> TF vars (#1377)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.setenv("RANGE_INSTANCE_ROLE_ARN", "arn:aws:iam::123456789012:role/shifter-dev-range-instance")
+            self._patch_aws_range_terraform_helpers(mp)
+
+            variables = _build_range_terraform_variables(
+                request_id="req-polaris-1",
+                range_id=9,
+                user_id=2,
+                range_spec=self._polaris_vm_range_spec(),
+            )
+
+        assert variables["polaris_agent_enabled"] is True
+        assert variables["range_instance_role_arn"] == "arn:aws:iam::123456789012:role/shifter-dev-range-instance"
+        assert (
+            variables["polaris_agent_main_inference_profile_arn"]
+            == aws_polaris_agent_env["AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN"]
         )
+        assert (
+            variables["polaris_agent_small_inference_profile_arn"]
+            == aws_polaris_agent_env["AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN"]
+        )
+        assert variables["polaris_agent_main_backing_model_arns"] == [
+            aws_polaris_agent_env["AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS"]
+        ]
+        assert variables["polaris_agent_small_backing_model_arns"] == [
+            aws_polaris_agent_env["AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS"]
+        ]
+        assert (
+            variables["polaris_agent_permissions_boundary_arn"]
+            == aws_polaris_agent_env["AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN"]
+        )
+
+    def test_build_aws_polaris_agent_tf_variables_raises_on_empty_permissions_boundary(self):
+        """Defensive fail-closed guard (#1377 codex pre-push finding, cycle 2): even
+        if a caller builds an AWSPolarisAgentConfig directly with an empty boundary
+        (bypassing load_aws_polaris_agent_config's now-mandatory validation),
+        terraform_vars must still refuse to emit Terraform variables for an enabled
+        per-range agent role with no permissions boundary -- an enabled role must
+        never apply without one (ADR-004-R21)."""
+        from terraform_vars import _build_aws_polaris_agent_tf_variables
+
+        fake_config = SimpleNamespace(
+            main_inference_profile_arn="arn:aws:bedrock:us-east-2:123456789012:inference-profile/main",
+            small_inference_profile_arn="arn:aws:bedrock:us-east-2:123456789012:inference-profile/small",
+            main_backing_model_arns=("arn:aws:bedrock:us-east-2::foundation-model/main",),
+            small_backing_model_arns=("arn:aws:bedrock:us-east-2::foundation-model/small",),
+            permissions_boundary_arn="",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("terraform_vars.load_aws_polaris_agent_config", lambda: fake_config)
+            mp.setenv("RANGE_INSTANCE_ROLE_ARN", "arn:aws:iam::123456789012:role/shifter-dev-range-instance")
+
+            with pytest.raises(RuntimeError, match="permissions boundary"):
+                _build_aws_polaris_agent_tf_variables(True)
+
+    def test_build_range_terraform_variables_aws_polaris_vm_without_config_raises(self):
+        """AWS polaris-vm range with no AWS Polaris agent config fails closed -- no IMDS fallback (#1377)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.setenv("RANGE_INSTANCE_ROLE_ARN", "arn:aws:iam::123456789012:role/shifter-dev-range-instance")
+            mp.delenv("AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN", raising=False)
+            self._patch_aws_range_terraform_helpers(mp)
+
+            polaris_vm_range_spec = self._polaris_vm_range_spec()
+            with pytest.raises(RuntimeError, match="AWS Polaris agent"):
+                _build_range_terraform_variables(
+                    request_id="req-polaris-2",
+                    range_id=9,
+                    user_id=2,
+                    range_spec=polaris_vm_range_spec,
+                )
+
+    def test_build_range_terraform_variables_aws_polaris_vm_without_role_arn_raises(self, aws_polaris_agent_env):
+        """AWS polaris-vm range with config but no RANGE_INSTANCE_ROLE_ARN fails closed (#1377)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.delenv("RANGE_INSTANCE_ROLE_ARN", raising=False)
+            self._patch_aws_range_terraform_helpers(mp)
+
+            polaris_vm_range_spec = self._polaris_vm_range_spec()
+            with pytest.raises(RuntimeError, match="RANGE_INSTANCE_ROLE_ARN"):
+                _build_range_terraform_variables(
+                    request_id="req-polaris-3",
+                    range_id=9,
+                    user_id=2,
+                    range_spec=polaris_vm_range_spec,
+                )
+
+    def test_build_range_terraform_variables_aws_non_polaris_range_disables_agent(self):
+        """A non-Polaris AWS range leaves the agent role vars at Terraform defaults (#1377)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setenv("RANGE_INSTANCE_PROFILE_NAME", "shifter-dev-range-profile")
+            mp.delenv("AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN", raising=False)
+            mp.delenv("RANGE_INSTANCE_ROLE_ARN", raising=False)
+            self._patch_aws_range_terraform_helpers(mp)
+
+            variables = _build_range_terraform_variables(
+                request_id="req-non-polaris",
+                range_id=9,
+                user_id=2,
+                range_spec={
+                    "ngfw": False,
+                    "subnets": [
+                        {
+                            "name": "attack",
+                            "uuid": "u1",
+                            "instances": [
+                                {"uuid": "i1", "name": "webserver", "role": "victim", "os_type": "ubuntu"},
+                            ],
+                        }
+                    ],
+                },
+            )
+
+        assert variables["polaris_agent_enabled"] is False
+        assert "range_instance_role_arn" not in variables
+        assert "polaris_agent_main_inference_profile_arn" not in variables
+
+    def test_build_range_terraform_variables_gcp_polaris_vm_skips_agent_vars(self):
+        """GCP Polaris keeps its Vertex path; the AWS agent-role vars never apply (#1377)."""
+        from terraform_vars import _build_range_terraform_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "gcp")
+            mp.setenv("ENVIRONMENT", "gcp-dev")
+            mp.setenv("RANGE_NETWORK_ID", "cluster1")
+            mp.setenv("RANGE_NETWORK_CIDR", "10.200.0.0/24")
+            mp.setenv("RANGE_NETWORK_REGION", "us-central1")
+            # No AWS Polaris agent config or RANGE_INSTANCE_ROLE_ARN at all -- proves the
+            # GCP path never even evaluates the AWS agent fail-closed checks.
+            mp.delenv("AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN", raising=False)
+            mp.delenv("RANGE_INSTANCE_ROLE_ARN", raising=False)
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-central1-a"))
+            mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+            mp.setattr("terraform_vars.generate_presigned_url", MagicMock(return_value=""))
+
+            variables = _build_range_terraform_variables(
+                request_id="req-gcp-polaris",
+                range_id=9,
+                user_id=2,
+                range_spec=self._polaris_vm_range_spec(),
+            )
+
+        assert "polaris_agent_enabled" not in variables
+        assert "range_instance_role_arn" not in variables
+
+    def test_build_range_variables_gce_preserves_scenario_intent(self):
+        """GCE carries scenario intent only inside the digest-bound artifact."""
+        from shared.range_cells import build_scenario_artifact
+
+        from terraform_vars import build_range_variables
+
+        scenario_payload = {
+            "scenario_id": "polaris",
+            "user_id": 7,
+            "subnets": [
+                {
+                    "name": "polaris",
+                    "uuid": "s1",
+                    "instances": [
+                        {
+                            "uuid": "i1",
+                            "name": "kali",
+                            "role": "attacker",
+                            "os_type": "kali",
+                            "ami_key": "polaris-vm",
+                            "instance_type": "m5.2xlarge",
+                        },
+                        {
+                            "uuid": "i2",
+                            "name": "dc01",
+                            "role": "dc",
+                            "os_type": "windows",
+                            "ami_key": "polaris-dc",
+                            "dc_config": {"domain_name": "boreas.local", "netbios_name": "BOREAS"},
+                        },
+                    ],
+                }
+            ],
+            "participant_access": [
+                {"target_ref": "i1", "channel": "ssh"},
+                {"target_ref": "i1", "channel": "rdp"},
+            ],
+        }
+        artifact = build_scenario_artifact(
+            {"spec_schema": "range_spec", "spec_version": "1", "payload": scenario_payload}
+        )
+        runtime_spec = deepcopy(scenario_payload)
+        runtime_spec["subnets"][0]["cidr"] = "10.50.2.0/28"
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "gcp")
+            mp.setenv("GCP_RANGE_BACKEND", "gce")
+            variables = build_range_variables(
+                request_id="req-gce",
+                range_id=42,
+                user_id=7,
+                range_spec=runtime_spec,
+                scenario_artifact=artifact,
+            )
+
+        assert variables["operation"] == {"request_id": "req-gce", "range_id": 42}
+        host, dc = variables["scenario_artifact"]["payload"]["subnets"][0]["instances"]
+        assert host["ami_key"] == "polaris-vm"
+        assert host["os_type"] == "kali"
+        # No AWS ami_id translation or platform scenario re-modeling.
+        assert "ami_id" not in host
+        assert dc["dc_config"] == {"domain_name": "boreas.local", "netbios_name": "BOREAS"}
+        assert variables["network_bindings"] == [{"subnet_ref": "s1", "cidr": "10.50.2.0/28"}]
+        assert variables["access_declarations"] == scenario_payload["participant_access"]
+
+    def test_build_range_variables_aws_routes_to_terraform_vars(self):
+        """Without the GCE backend, the dispatcher returns AWS Terraform variables."""
+        from terraform_vars import build_range_variables
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "aws")
+            mp.setenv("ENVIRONMENT", "dev")
+            mp.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
+            mp.setattr(
+                "terraform_vars.load_range_network_config",
+                MagicMock(
+                    return_value=SimpleNamespace(
+                        network_id="vpc-test",
+                        network_cidr="10.1.0.0/16",
+                        primary_portal_cidr="10.0.0.0/16",
+                    )
+                ),
+            )
+            mp.setattr("terraform_vars.get_range_availability_zone", MagicMock(return_value="us-east-2a"))
+            mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
+
+            variables = build_range_variables(
+                request_id="req-aws",
+                range_id=1,
+                user_id=2,
+                range_spec={"ngfw": False, "subnets": []},
+            )
+
+        # AWS-only variables are present; the GCE shape omits these.
+        assert "secrets_kms_key_arn" in variables
+        assert variables["kali_ami_id"] == "ami-deadbeef"
+
+    def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, monkeypatch):
+        from terraform_ops import run_range_terraform
+
+        monkeypatch.setattr(
+            "terraform_ops.get_range_data_by_request_id",
+            MagicMock(return_value={"range_id": 42, "user_id": 7, "spec": {"ngfw": True}}),
+        )
+        monkeypatch.setattr(
+            "terraform_ngfw_range.get_user_ngfw_data",
+            MagicMock(
+                return_value={
+                    "cloud_provider": "gcp",
+                    "management_ip": "10.200.0.10",
+                    "status": "paused",
+                    "ngfw_request_id": "ngfw-req-1",
+                }
+            ),
+        )
+        publish_failed = MagicMock()
+        monkeypatch.setattr("terraform_ops.publish_failed", publish_failed)
 
         with pytest.raises(RuntimeError, match="already be in ready state"):
             run_range_terraform("up", "req-123")
 
-    def test_record_and_remove_ngfw_range_attachment_updates_state(self, mocker):
-        from main import _record_ngfw_range_attachment, _remove_ngfw_range_attachment
+        publish_failed.assert_called_once()
 
-        mocker.patch(
-            "main.get_ngfw_data_by_request_id",
-            side_effect=[
-                {"state": {"attached_ranges": [{"range_id": 10}]}},
-                {"state": {"attached_ranges": [{"range_id": 10}, {"range_id": 42}]}},
-            ],
+    def test_record_and_remove_ngfw_range_attachment_updates_state(self, monkeypatch):
+        from provisioner_db_ngfw import _record_ngfw_range_attachment, _remove_ngfw_range_attachment
+
+        monkeypatch.setattr(
+            "provisioner_db_ngfw.get_ngfw_data_by_request_id",
+            MagicMock(
+                side_effect=[
+                    {"state": {"attached_ranges": [{"range_id": 10}]}},
+                    {"state": {"attached_ranges": [{"range_id": 10}, {"range_id": 42}]}},
+                ]
+            ),
         )
-        mock_update = mocker.patch("main.update_instance_state")
+        mock_update = MagicMock()
+        monkeypatch.setattr("ngfw_runtime.update_instance_state", mock_update)
 
         attachment_record = {
             "range_id": 42,
@@ -747,7 +1569,7 @@ class TestPollForSerialAndCert:
 
     def test_returns_serial_when_both_present(self, mocker):
         """Returns serial when both serial and cert are valid."""
-        from main import poll_for_serial_and_cert
+        from ngfw_polling import poll_for_serial_and_cert
 
         mock_ssh = MagicMock()
         mock_ssh.run_command.return_value = MagicMock(stdout="serial: 007200001267\ndevice-certificate-status: Valid")
@@ -764,7 +1586,7 @@ class TestPollForSerialAndCert:
     def test_retries_until_both_present(self, mocker):
         """Retries when serial present but cert missing."""
         mocker.patch("time.sleep")
-        from main import poll_for_serial_and_cert
+        from ngfw_polling import poll_for_serial_and_cert
 
         mock_ssh = MagicMock()
         mock_ssh.run_command.side_effect = [
@@ -785,7 +1607,7 @@ class TestPollForSerialAndCert:
     def test_raises_after_timeout(self, mocker):
         """Raises RuntimeError after timeout with details."""
         mocker.patch("time.sleep")
-        from main import poll_for_serial_and_cert
+        from ngfw_polling import poll_for_serial_and_cert
 
         mock_ssh = MagicMock()
         mock_ssh.run_command.return_value = MagicMock(stdout="serial: unknown")
@@ -802,27 +1624,43 @@ class TestPollForSerialAndCert:
 class TestDcSetupRouting:
     """Tests for provider-aware DC setup behavior."""
 
-    def test_should_promote_dc_at_runtime_defaults_by_provider(self):
-        from main import _should_promote_dc_at_runtime
+    def test_should_promote_dc_at_runtime_is_always_disabled(self):
+        # Runtime DC promotion is intentionally unreachable for every provider:
+        # DCs must be pre-promoted at bake time.
+        from state_helpers import _should_promote_dc_at_runtime
 
         with pytest.MonkeyPatch.context() as mp:
             mp.delenv("DC_RUNTIME_PROMOTION", raising=False)
             assert _should_promote_dc_at_runtime("aws") is False
-            assert _should_promote_dc_at_runtime("gcp") is True
-
-    def test_should_promote_dc_at_runtime_honors_override(self):
-        from main import _should_promote_dc_at_runtime
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("DC_RUNTIME_PROMOTION", "false")
             assert _should_promote_dc_at_runtime("gcp") is False
+
+    def test_should_promote_dc_at_runtime_has_no_env_enable_path(self):
+        # The former DC_RUNTIME_PROMOTION escape hatch must not re-enable it;
+        # re-enabling runtime promotion requires an explicit future decision.
+        from state_helpers import _should_promote_dc_at_runtime
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setenv("DC_RUNTIME_PROMOTION", "true")
-            assert _should_promote_dc_at_runtime("aws") is True
+            assert _should_promote_dc_at_runtime("aws") is False
+            assert _should_promote_dc_at_runtime("gcp") is False
 
-    def test_run_dc_setup_bootstraps_and_promotes_for_gcp(self, mocker):
-        from main import _run_dc_setup
+    def test_should_run_dc_bootstrap_plan_is_always_disabled(self):
+        # The DC bootstrap plan renames the guest (runtime DC mutation), so it is
+        # unreachable for every provider and has no env enable path; a pre-promoted
+        # DC gets SSH from the guest metadata startup script instead.
+        from state_helpers import _should_run_dc_bootstrap_plan
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("DC_BOOTSTRAP_VIA_SETUP_PLAN", raising=False)
+            assert _should_run_dc_bootstrap_plan("aws") is False
+            assert _should_run_dc_bootstrap_plan("gcp") is False
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("DC_BOOTSTRAP_VIA_SETUP_PLAN", "true")
+            assert _should_run_dc_bootstrap_plan("gcp") is False
+
+    def test_run_dc_setup_bootstraps_and_promotes_for_gcp(self, monkeypatch):
+        from dc_setup import _run_dc_setup
 
         mock_execution = MagicMock()
         mock_execution.target = "10.50.1.10"
@@ -844,13 +1682,16 @@ class TestDcSetupRouting:
             "domain_admin_password": "Secret123!",
         }
 
-        build_context = mocker.patch("main.build_guest_execution_context", return_value=mock_execution)
-        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        bootstrap_plan_cls = mocker.patch("main.BootstrapPlan", return_value=mock_bootstrap_plan)
-        dc_plan_cls = mocker.patch("main.DCSetupPlan", return_value=mock_dc_plan)
-        mocker.patch("main._should_run_dc_bootstrap_plan", return_value=True)
-        mocker.patch("main._should_promote_dc_at_runtime", return_value=True)
-        mocker.patch.dict("os.environ", {"DC_DOMAIN_PASSWORD": "Secret123!"}, clear=False)
+        build_context = MagicMock(return_value=mock_execution)
+        bootstrap_plan_cls = MagicMock(return_value=mock_bootstrap_plan)
+        dc_plan_cls = MagicMock(return_value=mock_dc_plan)
+        monkeypatch.setattr("dc_setup.build_guest_execution_context", build_context)
+        monkeypatch.setattr("dc_setup.SetupOrchestrator", MagicMock(return_value=mock_orchestrator))
+        monkeypatch.setattr("dc_setup.BootstrapPlan", bootstrap_plan_cls)
+        monkeypatch.setattr("dc_setup.DCSetupPlan", dc_plan_cls)
+        monkeypatch.setattr("dc_setup._should_run_dc_bootstrap_plan", MagicMock(return_value=True))
+        monkeypatch.setattr("dc_setup._should_promote_dc_at_runtime", MagicMock(return_value=True))
+        monkeypatch.setenv("DC_DOMAIN_PASSWORD", "Secret123!")
 
         _run_dc_setup(
             instance_data={"hostname": "dc-01", "name": "dc-01", "public_key": "ssh-rsa AAAA"},
@@ -866,8 +1707,8 @@ class TestDcSetupRouting:
         assert mock_orchestrator.orchestrate.call_count == 2
         mock_execution.close.assert_called_once_with()
 
-    def test_run_dc_setup_keeps_prebaked_mode_for_aws(self, mocker):
-        from main import _run_dc_setup
+    def test_run_dc_setup_keeps_prebaked_mode_for_aws(self, monkeypatch):
+        from dc_setup import _run_dc_setup
 
         mock_execution = MagicMock()
         mock_execution.target = "i-1234567890"
@@ -887,13 +1728,15 @@ class TestDcSetupRouting:
             "domain_admin_password": "Secret123!",
         }
 
-        mocker.patch("main.build_guest_execution_context", return_value=mock_execution)
-        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        bootstrap_plan_cls = mocker.patch("main.BootstrapPlan")
-        dc_plan_cls = mocker.patch("main.DCSetupPlan", return_value=mock_dc_plan)
-        mocker.patch("main._should_run_dc_bootstrap_plan", return_value=False)
-        mocker.patch("main._should_promote_dc_at_runtime", return_value=False)
-        mocker.patch.dict("os.environ", {"DC_DOMAIN_PASSWORD": "Secret123!"}, clear=False)
+        bootstrap_plan_cls = MagicMock()
+        dc_plan_cls = MagicMock(return_value=mock_dc_plan)
+        monkeypatch.setattr("dc_setup.build_guest_execution_context", MagicMock(return_value=mock_execution))
+        monkeypatch.setattr("dc_setup.SetupOrchestrator", MagicMock(return_value=mock_orchestrator))
+        monkeypatch.setattr("dc_setup.BootstrapPlan", bootstrap_plan_cls)
+        monkeypatch.setattr("dc_setup.DCSetupPlan", dc_plan_cls)
+        monkeypatch.setattr("dc_setup._should_run_dc_bootstrap_plan", MagicMock(return_value=False))
+        monkeypatch.setattr("dc_setup._should_promote_dc_at_runtime", MagicMock(return_value=False))
+        monkeypatch.setenv("DC_DOMAIN_PASSWORD", "Secret123!")
 
         _run_dc_setup(
             instance_data={"hostname": "dc-01", "name": "dc-01", "public_key": "ssh-rsa AAAA"},
@@ -912,8 +1755,8 @@ class TestDcSetupRouting:
 class TestNgfwRuntimeOperations:
     """Tests for provider-aware NGFW runtime ops."""
 
-    def test_run_ngfw_operation_runs_gdc_vmseries_power_operation(self, mocker):
-        from main import run_ngfw_operation
+    def test_run_ngfw_operation_runs_gdc_vmseries_power_operation(self, monkeypatch):
+        from ngfw_runtime_ops import run_ngfw_operation
 
         state = {
             "cloud_provider": "gcp",
@@ -927,17 +1770,22 @@ class TestNgfwRuntimeOperations:
                 }
             },
         }
-        mocker.patch(
-            "main.get_ngfw_data_by_request_id",
-            return_value={
-                "instance_id": "ngfw-inst-1",
-                "app_id": "ngfw-app-1",
-                "state": state,
-            },
+        monkeypatch.setattr(
+            "ngfw_runtime_ops.get_ngfw_data_by_request_id",
+            MagicMock(
+                return_value={
+                    "instance_id": "ngfw-inst-1",
+                    "app_id": "ngfw-app-1",
+                    "state": state,
+                }
+            ),
         )
-        mock_update = mocker.patch("main.update_instance_state")
-        mock_publish = mocker.patch("main.publish_ngfw_event")
-        mock_power = mocker.patch("gdc_vmseries_ngfw.run_power_operation")
+        mock_update = MagicMock()
+        mock_publish = MagicMock()
+        mock_power = MagicMock()
+        monkeypatch.setattr("ngfw_runtime_ops.update_instance_state", mock_update)
+        monkeypatch.setattr("ngfw_runtime_ops.publish_ngfw_event", mock_publish)
+        monkeypatch.setattr("gdc_vmseries_ngfw.run_power_operation", mock_power)
 
         run_ngfw_operation("start", "ngfw-req-1")
 

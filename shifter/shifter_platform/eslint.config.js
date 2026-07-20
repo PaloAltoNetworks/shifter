@@ -4,7 +4,7 @@ import security from 'eslint-plugin-security';
 
 export default [
   {
-    ignores: ['**/*.test.js'],
+    ignores: ['**/*.test.js', 'static/js/vendor/**'],
   },
   eslint.configs.recommended,
   security.configs.recommended,
@@ -21,6 +21,15 @@ export default [
     },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^init' }],
+    },
+  },
+  {
+    // jest test doubles for the Firebase modular SDK (used only under jest).
+    files: ['static/js/__mocks__/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+      },
     },
   },
 ];

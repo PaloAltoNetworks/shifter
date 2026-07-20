@@ -1,0 +1,12 @@
+# actionlint configuration.
+#
+# Custom self-hosted runner labels used by `runs-on:` in this repo. actionlint
+# only knows the GitHub-hosted labels and the generic `self-hosted` label by
+# default, so any custom label must be declared here or actionlint reports it as
+# unknown (runner-label rule).
+self-hosted-runner:
+  labels:
+    # GCP-native self-hosted runner for the gcp-dev tenant (issue #1546). The
+    # GCP runner registers with --no-default-labels + this label so GCP-dev CI
+    # runs on its own runner instead of borrowing the AWS self-hosted fleet.
+    - gcp-dev

@@ -64,6 +64,21 @@ class TestDCSetupPlan:
         assert "Install-WindowsFeature -Name AD-Domain-Services" in promote_step.script
         assert "Get-ADDomainController" in promote_step.script
 
+    def test_ssh_auth_step_bootstraps_missing_openssh_config(self):
+        """SSH auth step should configure a prebaked DC with OpenSSH present."""
+        plan = DCSetupPlan()
+        ssh_step = plan.steps[1]
+
+        assert ssh_step.timeout_seconds == 600
+        assert "Get-Service -Name sshd" in ssh_step.script
+        assert "Rebuild and publish a Polaris DC AMI with OpenSSH preinstalled" in ssh_step.script
+        assert "Add-WindowsCapability -Online -Name OpenSSH.Server" not in ssh_step.script
+        assert "New-Service -Name sshd" in ssh_step.script
+        assert "sshd_config_default" in ssh_step.script
+        assert "Created minimal sshd_config" in ssh_step.script
+        assert 'New-NetFirewallRule -Name "OpenSSH-Server-In-TCP"' in ssh_step.script
+        assert "PasswordAuthentication yes" in ssh_step.script
+
 
 class TestDCSetupPlanContext:
     """Tests for get_context method."""

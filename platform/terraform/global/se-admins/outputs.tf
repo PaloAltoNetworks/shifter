@@ -15,5 +15,5 @@ output "passwords" {
 
 output "console_sign_in_url" {
   description = "AWS console sign-in URL for this account"
-  value       = "https://454996813239.signin.aws.amazon.com/console"
+  value       = "https://${data.aws_caller_identity.current.account_id}.signin.aws.amazon.com/console"
 }

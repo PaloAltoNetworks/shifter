@@ -41,4 +41,81 @@ describe('ctf-event-timing', () => {
             expect(result).toMatch(/2026/);
         });
     });
+
+    describe('initCountdown', () => {
+        var DAY_MS = 24 * 60 * 60 * 1000;
+
+        function isoFromNow(offsetMs) {
+            return new Date(Date.now() + offsetMs).toISOString();
+        }
+
+        function setupCard(attrs) {
+            document.body.innerHTML =
+                '<div id="ctf-countdown-card" class="d-none"></div>' +
+                '<span id="ctf-countdown-label"></span>' +
+                '<span id="ctf-countdown-timer"></span>';
+            var card = document.getElementById('ctf-countdown-card');
+            if (attrs.start) card.setAttribute('data-event-start', attrs.start);
+            if (attrs.end) card.setAttribute('data-event-end', attrs.end);
+            if (attrs.status) card.setAttribute('data-event-status', attrs.status);
+            return card;
+        }
+
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+
+        afterEach(() => {
+            jest.clearAllTimers();
+            jest.useRealTimers();
+            document.body.innerHTML = '';
+        });
+
+        test('no-ops when the countdown card is absent', () => {
+            document.body.innerHTML = '';
+            expect(() => timing.initCountdown()).not.toThrow();
+        });
+
+        test('reveals the card and counts down to a future start', () => {
+            var card = setupCard({ start: isoFromNow(DAY_MS), end: isoFromNow(2 * DAY_MS) });
+            timing.initCountdown();
+            expect(card.classList.contains('d-none')).toBe(false);
+            expect(document.getElementById('ctf-countdown-label').textContent).toBe('Event starts in');
+        });
+
+        test('reveals the card and shows time remaining while in progress', () => {
+            var card = setupCard({ start: isoFromNow(-DAY_MS), end: isoFromNow(DAY_MS) });
+            timing.initCountdown();
+            expect(card.classList.contains('d-none')).toBe(false);
+            expect(document.getElementById('ctf-countdown-label').textContent).toBe('Time remaining');
+        });
+
+        test('reveals the card and shows ended after the end time', () => {
+            var card = setupCard({ start: isoFromNow(-2 * DAY_MS), end: isoFromNow(-DAY_MS) });
+            timing.initCountdown();
+            expect(card.classList.contains('d-none')).toBe(false);
+            expect(document.getElementById('ctf-countdown-timer').textContent).toBe('Event has ended');
+        });
+
+        test('shows ended for a completed event regardless of timestamps', () => {
+            var card = setupCard({
+                start: isoFromNow(-DAY_MS),
+                end: isoFromNow(DAY_MS),
+                status: 'completed',
+            });
+            timing.initCountdown();
+            expect(card.classList.contains('d-none')).toBe(false);
+            expect(document.getElementById('ctf-countdown-timer').textContent).toBe('Event has ended');
+        });
+
+        test('stays hidden for a cancelled event', () => {
+            var card = setupCard({
+                start: isoFromNow(DAY_MS),
+                end: isoFromNow(2 * DAY_MS),
+                status: 'cancelled',
+            });
+            timing.initCountdown();
+            expect(card.classList.contains('d-none')).toBe(true);
+        });
+    });
 });

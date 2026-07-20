@@ -1,0 +1,11 @@
+[Unit]
+Description=Shifter worker-container health supervisor (#953)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Per-environment name prefix for the CloudWatch metric dimension; written by
+# the deploy path. Optional (-) so a missing file does not fail the unit.
+EnvironmentFile=-/etc/shifter-worker-health.env
+ExecStart=/usr/local/bin/shifter-worker-health.sh

@@ -7,13 +7,15 @@
 # and exits non-zero on any failure.
 #
 # Usage:
-#     bash /home/atomik/range/run-all-smoketests.sh
+#     bash tests/run-all-smoketests.sh
 #     RANGE_DIR=/other bash run-all-smoketests.sh
 #
 # Exits 0 only if every asset sweep AND the isolation sweep pass.
 
 set -u
-RANGE_DIR="${RANGE_DIR:-/home/atomik/range}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_RANGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RANGE_DIR="${RANGE_DIR:-$DEFAULT_RANGE_DIR}"
 cd "$RANGE_DIR"
 
 # asset|runner|smoketest path (relative to $SMOKETESTS_DIR)|interpreter

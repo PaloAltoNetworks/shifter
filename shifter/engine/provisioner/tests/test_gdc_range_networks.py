@@ -96,6 +96,9 @@ class TestRangeNetworkProvisioning:
         core_api.create_namespace.assert_called_once()
         custom_api.create_cluster_custom_object.assert_called_once()
         custom_api.create_namespaced_custom_object.assert_called_once()
+        network_body = custom_api.create_cluster_custom_object.call_args.kwargs["body"]
+        assert network_body["metadata"]["annotations"]["shifter.dev/subnet-cidr"] == "10.200.0.96/28"
+        assert network_body["spec"]["routes"] == []
         subnet = result["subnets"]["attack"]
         assert subnet["subnet_id"] == "range-42-attack"
         assert subnet["gdc_namespace"] == "range-42"

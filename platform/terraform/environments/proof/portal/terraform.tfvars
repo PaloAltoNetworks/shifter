@@ -1,0 +1,277 @@
+# terraform.tfvars — committed example.com baseline for OSS deployers.
+# This file IS `terraform.tfvars` (committed). Deployment-specific overrides go in
+# a sibling `local.auto.tfvars` (gitignored) — Terraform auto-loads
+# `*.auto.tfvars` and the local values win. CI deploys render the overrides
+# from GitHub secrets/repository variables.
+
+
+# ------------------------------------------------------------------------------
+# General
+# ------------------------------------------------------------------------------
+
+environment        = "proof"
+aws_region         = "us-east-2"
+log_retention_days = 365
+
+tags = {
+  Project     = "shifter"
+  Environment = "proof"
+  ManagedBy   = "terraform"
+}
+
+# ------------------------------------------------------------------------------
+# VPC
+# ------------------------------------------------------------------------------
+
+vpc_cidr           = "10.0.0.0/16"
+az_count           = 2
+enable_nat_gateway = true
+
+# ------------------------------------------------------------------------------
+# RDS
+# ------------------------------------------------------------------------------
+
+db_name                  = "shifter"
+db_username              = "shifter_admin"
+db_engine_version        = "16"
+db_instance_class        = "db.m6i.xlarge"
+db_allocated_storage     = 100
+db_max_allocated_storage = 500
+db_multi_az              = true
+db_backup_retention_days = 7
+db_deletion_protection   = false
+db_skip_final_snapshot   = true
+db_apply_immediately     = true
+
+# ------------------------------------------------------------------------------
+# EC2
+# ------------------------------------------------------------------------------
+
+# Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
+ec2_ami_id           = "ami-xxxxxxxxxxxxxxxxx"
+ec2_instance_type    = "t3.xlarge"
+ec2_root_volume_size = 50
+
+# Standalone CTFd host in the portal VPC
+enable_ctfd                 = true
+ctfd_ami_id                 = "ami-xxxxxxxxxxxxxxxxx"
+ctfd_instance_type          = "t3.xlarge"
+ctfd_root_volume_size       = 50
+ctfd_root_volume_type       = "gp3"
+ctfd_root_volume_iops       = 3000
+ctfd_root_volume_throughput = 125
+ctfd_domain                 = "polaris.example.com"
+ctfd_repo_url               = "https://github.com/CTFd/CTFd.git"
+ctfd_git_ref                = "b5f0cf2b7f0e29f72c9227ea9bc08024230b4f06"
+ctfd_docker_compose_version = "v5.1.0"
+ctfd_docker_buildx_version  = "v0.21.2"
+# REPLACE: paste your own SSH public key (an empty string disables CTFd SSH and
+# the corresponding security-group rule); never commit a real private-key holder's
+# public key into the example.
+ctfd_ssh_public_key = ""
+# REPLACE: per-operator /32 CIDRs from which you allow SSH to the CTFd host;
+# leaving this empty disables CTFd SSH ingress.
+ctfd_ssh_allowed_cidrs = {}
+
+# ------------------------------------------------------------------------------
+# ALB
+# ------------------------------------------------------------------------------
+
+# TODO: Update with your proof domain
+domain_name       = "proof.shifter.example.com"
+app_port          = 8000
+health_check_path = "/health"
+
+# ------------------------------------------------------------------------------
+# Cognito
+# ------------------------------------------------------------------------------
+
+cognito_domain_prefix = "shifter-proof-portal"
+# REPLACE: the email domains permitted to self-register via Cognito pre-signup.
+# Leaving this empty fails closed — no domain-wide self-signup. Add only domains
+# your tenancy owns; do NOT ship a third-party domain in an example.
+allowed_email_domains = []
+allowed_emails        = []
+
+# ------------------------------------------------------------------------------
+# S3
+# ------------------------------------------------------------------------------
+
+# REPLACE: your S3 bucket name for user-uploaded artifacts. Convention is
+# "shifter-<env>-user-storage-<account-id>" but the actual name is up to you.
+user_storage_bucket = "shifter-proof-user-storage-REPLACE_WITH_ACCOUNT_ID"
+
+# ------------------------------------------------------------------------------
+# Provisioner
+# ------------------------------------------------------------------------------
+
+# AMI IDs are now managed via SSM Parameter Store (/shifter/ami/*)
+# See shifter/packer/ for AMI build configuration
+
+victim_instance_type = "t3.large"
+kali_instance_type   = "t3.large"
+
+# ------------------------------------------------------------------------------
+# Autoscaling
+# ------------------------------------------------------------------------------
+
+enable_autoscaling     = false
+asg_min_size           = 1
+asg_max_size           = 1
+asg_desired_capacity   = 1
+asg_warm_pool_min_size = 0
+asg_warm_pool_state    = "Stopped"
+scale_up_threshold     = 70
+
+# Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
+# Event-representative proof runs the portal on Redis so websocket behavior is
+# shared across the ASG instead of being pinned to per-instance memory.
+enable_redis = true
+
+# ------------------------------------------------------------------------------
+# Redis
+# ------------------------------------------------------------------------------
+
+redis_node_type          = "cache.m6g.xlarge"
+redis_engine_version     = "7.1"
+redis_enable_replication = true
+redis_apply_immediately  = true
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+
+log_level = "DEBUG"
+
+# ------------------------------------------------------------------------------
+# Log Aggregation
+# ------------------------------------------------------------------------------
+
+# Enabled so portal Network Firewall FLOW / ALERT logs reach the existing
+# CloudWatch -> Firehose -> S3 / SQS pipeline (#122 fail-closed contract).
+enable_log_aggregation = true
+
+# ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+enable_alb_access_logs = true
+enable_vpc_flow_logs   = true
+enable_rds_log_exports = true
+enable_waf_logging     = true
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+# Disabled on proof: per-AZ Network Firewall inspection requires the portal in
+# every AZ the ALB spans. proof runs a single instance (enable_autoscaling =
+# false) in one AZ, so the cross-AZ ALB node routes ALB->portal through the
+# firewall endpoint in one AZ and the return path through the other, and the
+# stateful firewall drops the asymmetric flow (intermittent 504s on the
+# cross-AZ ALB node). Re-enable only alongside a multi-AZ portal.
+enable_portal_inspection    = false
+firewall_log_retention_days = 365
+
+# proof: allow intentional teardown; apply once with this false before destroying
+portal_inspection_delete_protection = false
+
+# ------------------------------------------------------------------------------
+# Engine Provisioner
+# ------------------------------------------------------------------------------
+
+engine_container_tag = "latest"
+
+# Windows/DC AMIs also managed via SSM Parameter Store
+
+dc_domain_name = "internal.shifter"
+# Domain Controller Administrator password is sourced from
+# aws_secretsmanager_secret.dc_domain_password (engine-provisioner module)
+# at runtime; the value is managed out-of-band and is intentionally not
+# present in Terraform configuration. See
+# shifter/shifter_platform/documentation/docs/technical/dev/secrets.md.
+
+# ------------------------------------------------------------------------------
+# Guacamole
+# ------------------------------------------------------------------------------
+
+guacd_image_tag            = "1.5.5-r1"
+guacamole_client_image_tag = "1.5.5-r1"
+guacd_cpu                  = 2048
+guacd_memory               = 4096
+guacamole_client_cpu       = 4096
+guacamole_client_memory    = 8192
+guacd_desired_count        = 6
+# Guacamole JSON-auth tokens are scoped to the guacamole-client webapp task
+# that minted them. Keep guacamole-client singleton until token affinity is
+# implemented; scale guacd for protocol capacity instead.
+guacamole_client_desired_count = 1
+
+# Database
+guacamole_db_instance_class        = "db.m6i.xlarge"
+guacamole_db_allocated_storage     = 100
+guacamole_db_max_allocated_storage = 500
+guacamole_db_engine_version        = "16"
+guacamole_db_multi_az              = true
+guacamole_db_backup_retention_days = 7
+guacamole_db_deletion_protection   = false
+guacamole_db_skip_final_snapshot   = true
+guacamole_db_apply_immediately     = true
+
+# Autoscaling
+guacamole_enable_autoscaling       = true
+guacamole_autoscaling_min_capacity = 6
+guacamole_autoscaling_max_capacity = 12
+guacamole_autoscaling_cpu_target   = 60
+
+# Secrets
+guacamole_secrets_recovery_window_days = 0
+
+# OIDC/Cognito authentication
+guacamole_enable_oidc = true
+
+# ------------------------------------------------------------------------------
+# Messaging (SNS/SQS)
+# ------------------------------------------------------------------------------
+
+messaging_consumers                  = ["cms", "engine", "mc"]
+messaging_visibility_timeout_seconds = 60
+messaging_message_retention_seconds  = 86400
+
+# Dead Letter Queue
+messaging_enable_dlq                    = true
+messaging_dlq_max_receive_count         = 3
+messaging_dlq_message_retention_seconds = 1209600 # 14 days
+
+# CloudWatch Alarms
+messaging_enable_alarms               = true
+messaging_alarm_queue_depth_threshold = 100
+messaging_alarm_message_age_threshold = 300 # 5 minutes
+messaging_alarm_dlq_threshold         = 1
+messaging_alarm_actions               = [] # Populated by main.tf from shared SNS topic
+
+# ------------------------------------------------------------------------------
+# SES
+# ------------------------------------------------------------------------------
+
+ses_domain     = "example.com"
+email_backend  = "django_ses.SESBackend"
+ctf_from_email = "ctf@example.com"
+
+# ------------------------------------------------------------------------------
+# Alerting
+# ------------------------------------------------------------------------------
+
+alarm_email = "admin@example.com"
+
+# ------------------------------------------------------------------------------
+# Bedrock Logging
+# ------------------------------------------------------------------------------
+
+enable_bedrock_logging = true
+
+# ------------------------------------------------------------------------------
+# CI Testing (not used by Terraform, extracted by quality.yml workflow)
+# ------------------------------------------------------------------------------
+
+django_secret_key_ci = "ci-test-key-proof-not-for-production"

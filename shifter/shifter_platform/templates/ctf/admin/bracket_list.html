@@ -1,48 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     Brackets - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.breadcrumb {
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb .separator {
-    margin: 0 6px;
-    color: var(--theme-text-secondary);
-}
-
-.action-btn {
-    font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 3px;
-    text-decoration: none;
-    border: 1px solid var(--theme-border);
-    color: var(--theme-text-secondary);
-    background: transparent;
-    cursor: pointer;
-}
-
-.action-btn:hover {
-    color: var(--theme-text);
-    border-color: var(--theme-text-secondary);
-}
-
-.action-btn.danger:hover {
-    color: #ff4d4f;
-    border-color: #ff4d4f;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-bracket_list.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -54,9 +18,7 @@
             <span class="separator">/</span>
             <span>{% trans "Brackets" %}</span>
         </div>
-        <div style="display: flex;
-                    justify-content: space-between;
-                    align-items: center">
+        <div class="flex-between-center">
             <h1 class="page-title">
                 {% trans "Brackets" %}
             </h1>
@@ -65,7 +27,7 @@
         </div>
     </div>
     <!-- Brackets Table -->
-    <div class="card" style="padding: 0;">
+    <div class="card p-0">
         {% if brackets %}
             <table class="table">
                 <thead>
@@ -107,7 +69,7 @@
                                    class="action-btn">{% trans "Edit" %}</a>
                                 <form method="post"
                                       action="{% url 'ctf:admin_bracket_delete' bracket_id=bracket.pk %}"
-                                      style="display: inline">
+                                      class="d-inline">
                                     {% csrf_token %}
                                     <button type="submit"
                                             class="action-btn danger"

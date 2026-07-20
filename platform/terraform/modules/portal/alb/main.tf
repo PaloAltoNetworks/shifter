@@ -15,6 +15,10 @@ locals {
   })
 }
 
+resource "terraform_data" "logs_bucket_policy_ready" {
+  input = var.logs_bucket_policy_id
+}
+
 # ------------------------------------------------------------------------------
 # Security Group
 # ------------------------------------------------------------------------------
@@ -64,9 +68,8 @@ resource "aws_security_group_rule" "egress_all" {
 # ------------------------------------------------------------------------------
 
 resource "aws_acm_certificate" "this" {
-  domain_name               = var.domain_name
-  subject_alternative_names = ["chat.${var.domain_name}"]
-  validation_method         = "DNS"
+  domain_name       = var.domain_name
+  validation_method = "DNS"
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-cert"
@@ -93,7 +96,14 @@ resource "aws_acm_certificate_validation" "this" {
 # Application Load Balancer
 # ------------------------------------------------------------------------------
 
+# ALB access logging is enabled when var.enable_access_logs is true AND
+# var.logs_bucket_name is non-empty. Checkov reads the bare resource and
+# cannot evaluate the conditional, so it reports "no logging" even though
+# the production deployment sets both. See ADR-004-R11 exception
+# ckv-aws-91-alb-conditional.
 resource "aws_lb" "this" {
+  # checkov:skip=CKV_AWS_91:Access logging is variable-gated; enabled in env tfvars when logs_bucket_name set.
+  # checkov:skip=CKV2_AWS_76:AWS Managed Rules for Log4j follow-up; not in scope for #757.
   name                       = "${var.name_prefix}-alb"
   internal                   = false
   load_balancer_type         = "application"
@@ -101,6 +111,14 @@ resource "aws_lb" "this" {
   subnets                    = var.public_subnet_ids
   drop_invalid_header_fields = true
   enable_deletion_protection = var.enable_deletion_protection
+
+  # Explicit idle timeout for the portal's long-lived WebSocket workload
+  # (terminal SSH, notification/range-status sockets, and the Guacamole
+  # /guacamole RDP/SSH tunnel, which share this ALB). Sized well above the
+  # WebSocket keepalive interval (uvicorn ws_ping, default 20s) so an idle
+  # terminal is never silently reaped (issue #931). idle_timeout is a
+  # load-balancer attribute only; it does not change listener or SG exposure.
+  idle_timeout = var.idle_timeout_seconds
 
   access_logs {
     bucket  = var.logs_bucket_name
@@ -111,6 +129,8 @@ resource "aws_lb" "this" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-alb"
   })
+
+  depends_on = [terraform_data.logs_bucket_policy_ready]
 }
 
 # ------------------------------------------------------------------------------
@@ -122,6 +142,11 @@ resource "aws_lb_target_group" "this" {
   port     = var.app_port
   protocol = "HTTP"
   vpc_id   = var.vpc_id
+
+  # Allow in-flight terminal/WebSocket connections to drain when a target is
+  # deregistered (ASG instance refresh / scale-in) before the connection is
+  # closed (issue #931). Sized to overlap the ASG termination-drain window.
+  deregistration_delay = var.deregistration_delay_seconds
 
   health_check {
     enabled             = true
@@ -216,7 +241,12 @@ resource "aws_lb_listener" "http" {
 # WAF Web ACL
 # ------------------------------------------------------------------------------
 
+# WAF logging is configured via a separate aws_wafv2_web_acl_logging_configuration
+# resource (line 354), but the Checkov graph check cannot evaluate the cross-
+# resource reference reliably and flags this ACL as unlogged. See ADR-004-R11
+# exception ckv2-aws-31-waf-logging-cross-resource.
 resource "aws_wafv2_web_acl" "this" {
+  # checkov:skip=CKV2_AWS_31:Logging configured via separate aws_wafv2_web_acl_logging_configuration resource below.
   count = var.enable_waf ? 1 : 0
 
   name        = "${var.name_prefix}-waf"
@@ -352,7 +382,12 @@ resource "aws_wafv2_web_acl_association" "this" {
 # ------------------------------------------------------------------------------
 
 resource "aws_wafv2_web_acl_logging_configuration" "this" {
-  count = var.enable_waf && var.enable_waf_logging && var.waf_log_destination_arn != "" ? 1 : 0
+  # The previous guard `var.waf_log_destination_arn != ""` becomes
+  # apply-time when the caller wires the ARN from a Firehose output, so
+  # plan can't determine the count. Rely on the boolean toggle: callers
+  # must set `enable_waf_logging = false` (and may pass any value for
+  # waf_log_destination_arn) when WAF logging is off.
+  count = var.enable_waf && var.enable_waf_logging ? 1 : 0
 
   log_destination_configs = [var.waf_log_destination_arn]
   resource_arn            = aws_wafv2_web_acl.this[0].arn

@@ -1,0 +1,31 @@
+/* CTF admin: notification form page.
+   Extracted from templates/ctf/admin/notification_form.html (issue #414). */
+
+.notification-form {
+    max-width: 720px;
+}
+
+.form-alert {
+    padding: 12px 16px;
+    border: 1px solid #ff4d4f;
+    border-radius: 4px;
+    background: #28191a;
+    color: #ff4d4f;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+textarea.form-input {
+    resize: vertical;
+    min-height: 120px;
+}
+
+input[type="datetime-local"] {
+    color-scheme: dark;
+}

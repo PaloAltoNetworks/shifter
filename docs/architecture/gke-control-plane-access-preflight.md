@@ -143,7 +143,7 @@ Run the repo-required checks for whatever this area's change touches:
 - Terraform changes under `platform/terraform/`:
 
   ```bash
-  cd platform/terraform && tflint --recursive --config ../../.tflint.hcl
+  TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"
   # plus the native validation CI runs from the environment root, e.g.:
   cd platform/terraform/gcp/environments/gcp-dev && terraform init -backend=false && terraform validate
   ```

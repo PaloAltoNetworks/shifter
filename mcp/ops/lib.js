@@ -8,6 +8,7 @@
 // module governs the argv-array contract that ADR-010 enforces;
 // see `mcp/ngfw/lib.js` and `mcp/ops/SECURITY.md` for context.
 
+import { spawnSync } from "node:child_process";
 import { buildSsmSendCommandArgs } from "../shared/aws-helpers.js";
 
 export {
@@ -19,6 +20,159 @@ export {
   awsText,
   buildSsmSendCommandArgs,
 } from "../shared/aws-helpers.js";
+
+// --- GitHub Actions (gh CLI) ---
+
+export const DEFAULT_GITHUB_REPO = "Brad-Edwards/shifter";
+
+/** Protected integration branch for prod AMI promotion workflows. */
+export const PROMOTE_AMI_REF = "dev";
+
+/** Protected refs a base/DC AMI build or promotion may be dispatched from (#1656). */
+export const PROTECTED_AMI_REFS = Object.freeze(["dev", "main"]);
+
+/** Default protected ref for base/DC AMI builds (issue #1656). */
+export const BUILD_AMI_REF = "dev";
+
+export const BASE_AMI_TYPES = Object.freeze([
+  "kali",
+  "ubuntu",
+  "windows",
+  "dc",
+  "brokenbk",
+]);
+
+/** Protected integration branch for prod GCE image promotion workflows. */
+export const PROMOTE_GCE_IMAGE_REF = "dev";
+
+// GCE image build/promote (issue #505, PLAT-001.10). Mirrors the AWS AMI
+// constants above for the GCP guest-image bake pipeline. The order matches the
+// `image_type` choices in .github/workflows/packer-gcp.yml.
+export const GCE_IMAGE_TYPES = Object.freeze([
+  "ubuntu",
+  "brokenbk",
+  "kali",
+  "windows",
+  "dc",
+]);
+
+/**
+ * Build argv for `gh workflow run`. User-controlled values land as
+ * literal argv elements; no shell interpolation (ADR-010).
+ */
+export function buildGhWorkflowRunArgs({ workflow, repo, ref, inputs = {} }) {
+  if (typeof workflow !== "string" || workflow.trim() === "") {
+    throw new TypeError("buildGhWorkflowRunArgs: workflow is required");
+  }
+  if (typeof repo !== "string" || repo.trim() === "") {
+    throw new TypeError("buildGhWorkflowRunArgs: repo is required");
+  }
+  if (typeof ref !== "string" || ref.trim() === "") {
+    throw new TypeError("buildGhWorkflowRunArgs: ref is required");
+  }
+  if (inputs === null || typeof inputs !== "object" || Array.isArray(inputs)) {
+    throw new TypeError("buildGhWorkflowRunArgs: inputs must be an object");
+  }
+  const args = ["workflow", "run", workflow, "--repo", repo, "--ref", ref];
+  for (const [key, value] of Object.entries(inputs)) {
+    args.push("-f", `${key}=${String(value)}`);
+  }
+  return args;
+}
+
+export function resolveGhToken(env = process.env) {
+  const token = env.GH_TOKEN || env.GITHUB_TOKEN;
+  if (typeof token !== "string" || token.trim() === "") {
+    throw new Error(
+      "GitHub token not configured. Set GH_TOKEN or GITHUB_TOKEN in the MCP environment.",
+    );
+  }
+  return token.trim();
+}
+
+function ghOperationLabel(args) {
+  if (!Array.isArray(args) || args.length < 2) return "gh";
+  return `gh ${args.slice(0, 2).join(" ")}`;
+}
+
+function defaultGhRunner(argv, options) {
+  return spawnSync("gh", argv, options); // NOSONAR
+}
+
+export function ghExec(args, options = {}) {
+  if (!Array.isArray(args)) {
+    throw new TypeError(
+      "gh CLI args must be an argv array, not a shell string.",
+    );
+  }
+  const {
+    env = process.env,
+    runner = defaultGhRunner,
+    timeoutMs = 60000,
+    token,
+  } = options;
+  const ghToken = token ?? resolveGhToken(env);
+  const label = ghOperationLabel(args);
+  const result = runner(args, {
+    encoding: "utf-8",
+    timeout: timeoutMs,
+    env: { ...env, GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken },
+  });
+  if (result.error) {
+    const wrapped = new Error(`${label}: ${result.error.message}`);
+    wrapped.cause = result.error;
+    throw wrapped;
+  }
+  if (result.status !== 0) {
+    const stderr = (result.stderr || "").trim();
+    const detail = stderr || `exited with status ${result.status}`;
+    throw new Error(`${label}: ${detail}`);
+  }
+  return (result.stdout || "").trim();
+}
+
+function defaultGitRunner(argv, options) {
+  return spawnSync("git", argv, options); // NOSONAR
+}
+
+/**
+ * Resolve the current git branch for workflow `--ref`, mirroring
+ * `scripts/ami.sh`. Falls back to `defaultRef` when git is unavailable.
+ */
+export function resolveGitRef(cwd, options = {}) {
+  const { runner = defaultGitRunner, defaultRef = "dev" } = options;
+  const result = runner(["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd,
+    encoding: "utf-8",
+    timeout: 5000,
+  });
+  if (result.error || result.status !== 0) {
+    return defaultRef;
+  }
+  const ref = (result.stdout || "").trim();
+  if (!ref || ref === "HEAD") {
+    return defaultRef;
+  }
+  return ref;
+}
+
+/**
+ * Resolve + validate the dispatch ref for base/DC AMI build/promote workflows.
+ *
+ * Base builds and prod promotions run only from a protected ref (dev|main): a
+ * feature-branch copy of the workflow could otherwise weaken its own inline
+ * protected-ref gate before it runs (#1656). Default to BUILD_AMI_REF (dev) and
+ * reject any non-protected ref rather than dispatch the working-tree branch.
+ */
+export function resolveProtectedAmiRef(ref) {
+  const branch = ref ?? BUILD_AMI_REF;
+  if (!PROTECTED_AMI_REFS.includes(branch)) {
+    throw new Error(
+      `AMI workflow ref must be a protected branch (${PROTECTED_AMI_REFS.join(" or ")}); got '${branch}'`,
+    );
+  }
+  return branch;
+}
 
 // --- AWS ---
 
@@ -210,8 +364,43 @@ const BLOCKED_MANAGE_COMMANDS = new Set([
   "test",
 ]);
 
+// A single validated management-command token: the base command or one
+// argument. Positive allowlist — any token containing shell-control syntax
+// (`;`, `|`, `&`, `$`, backtick, `<`, `>`, `(`, `)`, quotes, `*`, `#`,
+// whitespace, CR/LF, ...) fails to match and is rejected. Optional leading
+// dashes support flags (`--deploy`, `-v2`) and `=` supports `--flag=value`.
+// The supported language is "Django management command argv", not a shell
+// grammar — see docs/architecture/mcp-ops-manage-command-ssm-boundary-preflight-1176.md.
+const SAFE_MANAGE_TOKEN = /^-{0,2}[A-Za-z0-9][A-Za-z0-9._=-]*$/;
+
+// Thrown when a management command carries shell-control syntax. Deliberately
+// generic: the attacker-controlled payload is never echoed into the error
+// message, MCP response, audit record, or test diagnostics (issue #1176).
+const SHELL_SYNTAX_ERROR =
+  "Management command contains disallowed characters or shell syntax";
+
+// Validate that every token is a safe management-command token. The base
+// allowlist below only governs the first token; validating every token here
+// is what prevents user-controlled arguments from reaching the remote shell
+// verbatim (issue #1176 / CWE-78).
+function assertSafeManageTokens(parts) {
+  for (const part of parts) {
+    if (typeof part !== "string" || !SAFE_MANAGE_TOKEN.test(part)) {
+      throw new Error(SHELL_SYNTAX_ERROR);
+    }
+  }
+}
+
 export function validateManageCommand(command) {
-  const parts = command.trim().split(/\s+/);
+  const trimmed = typeof command === "string" ? command.trim() : "";
+  if (trimmed === "") {
+    throw new Error("Empty management command");
+  }
+  const parts = trimmed.split(/\s+/);
+  // Reject shell-control syntax in ANY token before trusting the base
+  // command, so a rejected payload never reaches the allowlist error (which
+  // echoes the base command) or the SSM argv builder.
+  assertSafeManageTokens(parts);
   const baseCmd = parts[0];
   if (BLOCKED_MANAGE_COMMANDS.has(baseCmd)) {
     throw new Error(`Blocked management command: ${baseCmd}`);
@@ -253,16 +442,28 @@ export function buildFilterLogEventsArgs({ logGroup, filterPattern, limit }) {
 }
 
 /**
- * SSM `send-command` argv for the Django manage.py wrapper. The user's
- * `command` is concatenated into the docker-exec invocation that runs
- * inside the remote shell on the EC2 host. That remote shell IS
- * intentional (the tool's contract is to forward a command for remote
- * execution); the security boundary protected here is the LOCAL host
- * shell, which never sees the payload because the wrapped string
- * lands inside the JSON parameters argv element.
+ * SSM `send-command` argv for the Django manage.py wrapper.
+ *
+ * `commandParts` MUST be the validated argv returned by
+ * `validateManageCommand` — a structured array of shell-metacharacter-free
+ * tokens, NOT a raw command string. The remote `AWS-RunShellScript` shell
+ * on the EC2 host executes the rendered command, so the security boundary
+ * protected here is the REMOTE shell: the fixed `docker exec portal python
+ * manage.py …` wrapper is joined only from validated tokens, leaving no
+ * user-controlled separators, substitutions, redirects, pipes, or newlines
+ * for that shell to interpret (issue #1176 / CWE-78). Local argv safety
+ * (buildSsmSendCommandArgs keeping the payload in one JSON element) is
+ * necessary but not sufficient once the payload reaches the remote shell.
+ *
+ * The per-token check is repeated here as defense in depth so the renderer
+ * is safe regardless of how a caller obtained `commandParts`.
  */
-export function buildRunManageArgs({ targetId, command }) {
-  const dockerCmd = `docker exec portal python manage.py ${command}`;
+export function buildRunManageArgs({ targetId, commandParts }) {
+  if (!Array.isArray(commandParts) || commandParts.length === 0) {
+    throw new Error("Empty management command");
+  }
+  assertSafeManageTokens(commandParts);
+  const dockerCmd = `docker exec portal python manage.py ${commandParts.join(" ")}`;
   return buildSsmSendCommandArgs({
     instanceId: targetId,
     docName: "AWS-RunShellScript",

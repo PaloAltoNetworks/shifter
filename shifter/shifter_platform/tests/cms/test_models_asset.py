@@ -3,12 +3,32 @@
 Tests Asset soft-delete and active_for_user behavior through concrete model.
 """
 
-from unittest.mock import MagicMock, patch
-
+import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 User = get_user_model()
+
+
+def _real_agent(user, *, name, deleted_at=None):
+    """Create a real AgentConfig owned by ``user``."""
+    from cms.models import AgentConfig, OperatingSystem
+
+    os_obj, _ = OperatingSystem.objects.get_or_create(
+        slug="windows", defaults={"name": "Windows", "extensions": [".msi"]}
+    )
+    agent = AgentConfig.objects.create(
+        user=user,
+        name=name,
+        os=os_obj,
+        s3_key=f"agents/{name}.msi",
+        original_filename="test.msi",
+        file_size_bytes=1024,
+    )
+    if deleted_at is not None:
+        agent.deleted_at = deleted_at
+        agent.save(update_fields=["deleted_at"])
+    return agent
 
 
 class TestAssetBehavior:
@@ -49,36 +69,27 @@ class TestAssetBehavior:
         agent.deleted_at = timezone.now()
         assert agent.is_deleted is True
 
+    @pytest.mark.django_db
     def test_active_for_user_excludes_deleted_records(self):
-        """active_for_user filters AgentConfig.objects (a SoftDeleteManager, active-only)."""
+        """active_for_user (a SoftDeleteManager) returns active rows, not deleted ones."""
         from cms.models import AgentConfig
 
-        user = MagicMock(id=1)
-        active = self._make_agent(name="Active Agent")
+        user = User.objects.create_user(username="asset-active@e.com", email="asset-active@e.com")
+        _real_agent(user, name="Active Agent")
+        _real_agent(user, name="Deleted Agent", deleted_at=timezone.now())
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([active])
+        result = list(AgentConfig.active_for_user(user))
+        assert [a.name for a in result] == ["Active Agent"]
 
-        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
-            result = list(AgentConfig.active_for_user(user))
-
-        mock_filter.assert_called_once_with(user=user)
-        assert len(result) == 1
-        assert result[0] == active
-
+    @pytest.mark.django_db
     def test_active_for_user_filters_by_user(self):
         """active_for_user only returns records for the specified user."""
         from cms.models import AgentConfig
 
-        user = MagicMock(id=1)
-        user_agent = self._make_agent(name="User Agent")
+        user = User.objects.create_user(username="asset-u1@e.com", email="asset-u1@e.com")
+        other = User.objects.create_user(username="asset-u2@e.com", email="asset-u2@e.com")
+        _real_agent(user, name="User Agent")
+        _real_agent(other, name="Other Agent")
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([user_agent])
-
-        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
-            result = list(AgentConfig.active_for_user(user))
-
-        mock_filter.assert_called_once_with(user=user)
-        assert len(result) == 1
-        assert result[0].name == "User Agent"
+        result = list(AgentConfig.active_for_user(user))
+        assert [a.name for a in result] == ["User Agent"]

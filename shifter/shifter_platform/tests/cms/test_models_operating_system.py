@@ -14,8 +14,7 @@ Lookup logic is now layered:
   queryset method and is verified via a delegation assertion.
 """
 
-from unittest.mock import patch
-
+import pytest
 from django.db import models
 
 from cms.models.catalogs import (
@@ -198,15 +197,13 @@ class TestOperatingSystemQuerySetForExtension:
 class TestGetForExtensionWrapper:
     """``OperatingSystem.get_for_extension`` delegates to the queryset method."""
 
+    @pytest.mark.django_db
     def test_delegates_to_objects_for_extension(self):
         from cms.models import OperatingSystem
 
-        sentinel = object()
-        with patch.object(OperatingSystem.objects, "for_extension", return_value=sentinel) as mock_method:
-            result = OperatingSystem.get_for_extension(".testmsi")
-
-            assert result is sentinel
-            mock_method.assert_called_once_with(".testmsi")
+        os_obj = OperatingSystem.objects.create(slug="testos", name="Test OS", extensions=[".testmsi"])
+        assert OperatingSystem.get_for_extension(".testmsi") == os_obj
+        assert OperatingSystem.get_for_extension(".no-such-ext") is None
 
 
 # -----------------------------------------------------------------------------

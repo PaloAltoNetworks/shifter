@@ -52,6 +52,9 @@ class TestProtocolStructuralTyping:
             def copy_object(self, bucket, src_key, dst_key):
                 pass
 
+            def copy_object_conditional(self, bucket, src_key, dst_key, *, expected_identity):
+                pass
+
             def object_exists(self, bucket, key):
                 return False
 
@@ -60,6 +63,9 @@ class TestProtocolStructuralTyping:
 
             def read_object_header(self, bucket, key, max_bytes):
                 return b""
+
+            def download_object(self, bucket, key, dest_path, *, max_bytes, expected_identity=None):
+                return {}
 
             def generate_presigned_upload_url(self, bucket, key, content_type, expires_in):
                 return ""

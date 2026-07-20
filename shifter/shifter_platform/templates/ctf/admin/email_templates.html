@@ -1,69 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     Email Templates - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.breadcrumb {
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb .separator {
-    margin: 0 6px;
-    color: var(--theme-text-secondary);
-}
-
-.template-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 16px;
-}
-
-.template-card {
-    border: 1px solid var(--theme-border);
-    border-radius: 6px;
-    padding: 16px;
-    background: var(--theme-bg-secondary);
-}
-
-.template-card .type-label {
-    font-weight: 600;
-    font-size: 15px;
-    margin-bottom: 8px;
-}
-
-.template-card .status {
-    font-size: 13px;
-    margin-bottom: 12px;
-}
-
-.badge-default {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 3px;
-    background: var(--theme-bg-tertiary);
-    color: var(--theme-text-secondary);
-    font-size: 12px;
-}
-
-.badge-custom {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 3px;
-    background: rgba(40, 167, 69, 0.15);
-    color: #28a745;
-    font-size: 12px;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-email_templates.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -79,9 +22,7 @@
             <h1 class="page-title">
                 {% trans "Email Templates" %}
             </h1>
-            <p style="color: var(--theme-text-secondary);
-                      font-size: 13px;
-                      margin-top: 4px">
+            <p class="email-templates-subtitle">
                 {% blocktrans trimmed %}
                     Customise email templates for this event. Types using the default template can be
                     overridden via the API.
@@ -99,9 +40,7 @@
                     {% if item.custom %}
                         <span class="badge-custom">{% trans "Custom" %}</span>
                         {% if item.custom.subject %}
-                            <div style="margin-top: 6px;
-                                        font-size: 13px;
-                                        color: var(--theme-text-secondary)">
+                            <div class="email-templates-custom-subject">
                                 {% blocktrans with v1=item.custom.subject %}
                                     Subject: {{ v1 }}
                                 {% endblocktrans %}

@@ -1,140 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     Import Participants - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.import-layout {
-    display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: 16px;
-    align-items: start;
-    max-width: 900px;
-}
-
-.breadcrumb {
-    display: flex;
-    gap: 4px;
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-    list-style: none;
-    padding: 0;
-    margin-top: 0;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb li + li::before {
-    content: "/";
-    margin-right: 4px;
-    color: var(--theme-text-secondary);
-}
-
-.form-help {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-    margin-top: 4px;
-}
-
-.field-error {
-    font-size: 12px;
-    color: #ff4d4f;
-    margin-top: 4px;
-}
-
-.form-alert-error {
-    padding: 12px 16px;
-    border: 1px solid #ff4d4f;
-    border-radius: 4px;
-    background: rgba(255, 77, 79, 0.08);
-    color: #ff4d4f;
-    font-size: 13px;
-    margin-bottom: 16px;
-}
-
-.form-alert-error ul {
-    margin: 4px 0 0;
-    padding-left: 16px;
-}
-
-.form-alert-error li {
-    margin-bottom: 2px;
-}
-
-.form-actions {
-    display: flex;
-    gap: 8px;
-    padding-top: 16px;
-    border-top: 1px solid var(--theme-border);
-    margin-top: 8px;
-}
-
-.btn-cancel {
-    background: transparent;
-    color: var(--theme-text-secondary);
-    border: 1px solid var(--theme-border);
-}
-
-/* File input styled for dark theme */
-input[type="file"] {
-    color-scheme: dark;
-}
-
-.csv-example {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--theme-border);
-    border-radius: 4px;
-    padding: 8px 12px;
-    font-family: monospace;
-    font-size: 12px;
-    color: var(--theme-text);
-    margin: 8px 0;
-    white-space: pre;
-    overflow-x: auto;
-}
-
-.info-note {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-    padding: 8px 12px;
-    border: 1px solid var(--theme-border);
-    border-radius: 4px;
-    background: rgba(148, 163, 184, 0.05);
-}
-
-.detail-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    font-size: 13px;
-}
-
-.detail-row + .detail-row {
-    border-top: 1px solid var(--theme-border);
-}
-
-.detail-label {
-    color: var(--theme-text-secondary);
-}
-
-.detail-value {
-    font-weight: 600;
-    color: var(--theme-text);
-}
-
-@media (max-width: 800px) {
-    .import-layout {
-        grid-template-columns: 1fr;
-    }
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-participant_import.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -219,15 +91,10 @@ input[type="file"] {
                 <div class="card-title">
                     {% trans "CSV Format" %}
                 </div>
-                <p style="margin: 0 0 8px;
-                          font-size: 13px;
-                          color: var(--theme-text)">
+                <p class="csv-text">
                     {% trans "Upload a CSV file with participant data. The file should have two columns:" %}
                 </p>
-                <ol style="margin: 0 0 12px;
-                           padding-left: 20px;
-                           font-size: 13px;
-                           color: var(--theme-text)">
+                <ol class="csv-list">
                     <li>
                         <strong>{% trans "Name" %}</strong> {% trans "- Participant display name" %}
                     </li>
@@ -235,10 +102,7 @@ input[type="file"] {
                         <strong>{% trans "Email" %}</strong> {% trans "- Participant email address" %}
                     </li>
                 </ol>
-                <div style="font-size: 13px;
-                            font-weight: 600;
-                            color: var(--theme-text);
-                            margin-bottom: 4px">
+                <div class="csv-note">
                     {% trans "Example:" %}
                 </div>
                 <div class="csv-example">

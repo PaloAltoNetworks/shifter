@@ -40,8 +40,9 @@ locals {
   common_tags = merge(var.tags, {
     Module = "guacamole"
   })
-  account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.id
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
+  account_id      = data.aws_caller_identity.current.account_id
+  region          = data.aws_region.current.id
 }
 
 # ------------------------------------------------------------------------------
@@ -78,6 +79,7 @@ resource "aws_ecs_cluster_capacity_providers" "guacamole" {
 resource "aws_cloudwatch_log_group" "guacd" {
   name              = "/ecs/${var.name_prefix}-guacd"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-guacd-logs"
@@ -87,6 +89,7 @@ resource "aws_cloudwatch_log_group" "guacd" {
 resource "aws_cloudwatch_log_group" "guacamole_client" {
   name              = "/ecs/${var.name_prefix}-guacamole-client"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-guacamole-client-logs"

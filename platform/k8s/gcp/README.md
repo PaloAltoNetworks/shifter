@@ -40,15 +40,20 @@ Security posture:
 - DNS is currently expected to be managed outside this tree, so the hostname must be pointed at the ingress IP for certificate activation.
 
 The generated runtime env now carries the provider-neutral range-network
-contract and the GDC access settings used by the provisioner for the active
-GDC range plane:
+contract, the active GCP range backend selector, and the GDC access settings
+used by the provisioner for the default GDC range plane:
 
 - `RANGE_NETWORK_ID`
 - `RANGE_NETWORK_CIDR`
 - `RANGE_NETWORK_REGION`
 - `PORTAL_NETWORK_CIDRS`
+- `GCP_RANGE_BACKEND`
 - `GDC_ACCESS_SECRET_ID`
 - `GDC_RANGE_NAMESPACE_PREFIX`
 - `GDC_NETWORK_INTERFACE`
 - `GDC_NETWORK_DNS_NAMESERVERS`
 - `GDC_STATIC_IP_RESERVATION_COUNT`
+
+When `GCP_RANGE_BACKEND=gce`, the renderer and provisioner job allowlist also
+forward the `GCP_RANGE_*` image/profile, host-service-account, network-mode, and
+egress-allowlist keys required by the GCE range-cell backend.

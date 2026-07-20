@@ -1,1134 +1,592 @@
-"""Tests for CTF scoring service.
+"""Real-DB behavior tests for ``ctf.services.scoring`` (issue #850).
 
-Unit tests covering all public functions in ctf/services/scoring.py
-and scoring-related model edge cases. All ORM calls are mocked.
+Replaces the prior all-mocked suite. These exercise the materialized leaderboard
+read paths against a real (sqlite) test database and cross-check them against the
+authoritative recompute, plus the incremental-maintenance helpers/hooks, the
+participant-rank path, and the query-count guarantees that the materialized
+design exists to provide.
+
+Challenge / event statistics and the score timeline keep their own suites
+(``test_scoring_statistics.py``, ``test_scoring_timeline.py``).
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 
-from ctf.enums import ParticipantStatus
+from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus, ParticipantStatus
+from ctf.models import CTFAward, CTFChallenge, CTFEvent, CTFParticipant, CTFSubmission, CTFTeam
 from ctf.services.scoring import (
     calculate_score,
-    get_challenge_statistics,
-    get_event_statistics,
     get_participant_rank,
     get_scoreboard,
     get_team_scoreboard,
+    recompute_event_leaderboard,
+    recompute_participant_score,
 )
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
+pytestmark = pytest.mark.django_db
 
-_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
+# A freeze cutoff far in the future forces ``get_scoreboard`` /
+# ``get_team_scoreboard`` down the authoritative recompute path while still
+# counting every submission/award, so the recompute result is directly
+# comparable to the live materialized read.
+_FAR_FUTURE = timezone.now() + timedelta(days=3650)
+
+
+# ---------------------------------------------------------------------------
+# Builders (persisted)
+# ---------------------------------------------------------------------------
+
+
+def _make_event(organizer, *, team_mode: bool = False) -> CTFEvent:
+    now = timezone.now()
+    return CTFEvent.objects.create(
+        name=f"Event {uuid4().hex[:8]}",
+        description="scoring behavior test event",
+        created_by=organizer,
+        status=EventStatus.ACTIVE.value,
+        event_start=now - timedelta(hours=1),
+        event_end=now + timedelta(hours=7),
+        scenario_id="basic",
+        team_mode=team_mode,
+        team_size_limit=4 if team_mode else None,
+    )
+
+
+def _make_challenge(event: CTFEvent, *, points: int = 100, name: str | None = None) -> CTFChallenge:
+    return CTFChallenge.objects.create(
+        event=event,
+        name=name or f"Challenge {uuid4().hex[:8]}",
+        description="x",
+        category=ChallengeCategory.WEB.value,
+        points=points,
+        difficulty=ChallengeDifficulty.EASY.value,
+        flag_hash="$2b$12$placeholder",
+        flag_format="FLAG{...}",
+    )
 
 
 def _make_participant(
+    event: CTFEvent,
     name: str,
-    computed_score: int = 0,
-    solve_count: int = 0,
-    last_solve_time: datetime | None = None,
-    team: MagicMock | None = None,
-    pid: str | None = None,
-) -> MagicMock:
-    """Build a mock participant with annotated attributes."""
-    p = MagicMock()
-    p.id = pid or str(uuid4())
-    p.name = name
-    p.computed_score = computed_score
-    p.solve_count = solve_count
-    p.last_solve_time = last_solve_time
-    p.team = team
-    return p
+    *,
+    status: str = ParticipantStatus.ACTIVE.value,
+    registered: bool = True,
+    team: CTFTeam | None = None,
+    bracket=None,
+) -> CTFParticipant:
+    return CTFParticipant.objects.create(
+        event=event,
+        email=f"{name}-{uuid4().hex[:8]}@t.test",
+        name=name,
+        status=status,
+        registered_at=timezone.now() if registered else None,
+        team=team,
+        bracket=bracket,
+    )
 
 
-def _make_team(
-    name: str,
-    computed_score: int = 0,
-    solve_count: int = 0,
-    computed_member_count: int = 0,
-    last_solve_time: datetime | None = None,
-    tid: str | None = None,
-) -> MagicMock:
-    """Build a mock team with annotated attributes."""
-    t = MagicMock()
-    t.id = tid or str(uuid4())
-    t.name = name
-    t.computed_score = computed_score
-    t.solve_count = solve_count
-    t.computed_member_count = computed_member_count
-    t.last_solve_time = last_solve_time
-    return t
+def _solve(participant, challenge, *, points: int, at=None) -> CTFSubmission:
+    """Create a correct submission, optionally overriding the auto ``submitted_at``."""
+    sub = CTFSubmission.objects.create(
+        participant=participant,
+        challenge=challenge,
+        submitted_flag="FLAG{x}",
+        is_correct=True,
+        points_awarded=points,
+        attempt_number=1,
+    )
+    if at is not None:
+        CTFSubmission.objects.filter(pk=sub.pk).update(submitted_at=at)
+    return sub
 
 
-# -----------------------------------------------------------------------------
-# Shared fixtures
-# -----------------------------------------------------------------------------
+def _award(event, participant, points: int, organizer) -> CTFAward:
+    return CTFAward.objects.create(
+        event=event,
+        participant=participant,
+        points=points,
+        reason="bonus",
+        granted_by=organizer,
+    )
 
 
-@pytest.fixture
-def mock_submission_objects():
-    """Patch CTFSubmission.objects for calculate_score tests."""
-    with patch("ctf.services.scoring.CTFSubmission.objects") as mock_objects:
-        yield mock_objects
+def _by_participant(board: list[dict]) -> dict[str, tuple]:
+    """Order-independent view of an individual board keyed by participant id."""
+    return {r["participant_id"]: (r["rank"], r["score"], r["solve_count"], r["last_solve"]) for r in board}
 
 
-@pytest.fixture
-def mock_award_objects():
-    """Patch CTFAward.objects for calculate_score and statistics tests."""
-    with patch("ctf.services.scoring.CTFAward.objects") as mock_objects:
-        yield mock_objects
+def _by_team(board: list[dict]) -> dict[str, tuple]:
+    """Order-independent view of a team board keyed by team id."""
+    return {r["team_id"]: (r["rank"], r["score"], r["solve_count"], r["member_count"], r["last_solve"]) for r in board}
 
 
-@pytest.fixture
-def mock_participant_objects():
-    """Patch CTFParticipant.objects for scoreboard tests."""
-    with patch("ctf.services.scoring.CTFParticipant.objects") as mock_objects:
-        yield mock_objects
+# ---------------------------------------------------------------------------
+# Materialized vs authoritative-recompute equivalence
+# ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def mock_team_objects():
-    """Patch CTFTeam.objects for team scoreboard tests."""
-    with patch("ctf.services.scoring.CTFTeam.objects") as mock_objects:
-        yield mock_objects
+class TestMaterializedEquivalence:
+    """The live materialized read must equal the authoritative recompute."""
+
+    def test_individual_board_matches_recompute(self, organizer_user):
+        event = _make_event(organizer_user)
+        c1 = _make_challenge(event, points=100)
+        c2 = _make_challenge(event, points=200)
+        now = timezone.now()
+
+        alice = _make_participant(event, "Alice")
+        bob = _make_participant(event, "Bob")
+        carol = _make_participant(event, "Carol")
+        _make_participant(event, "NoSolve")  # eligible, zero score
+        dq = _make_participant(event, "Disq", status=ParticipantStatus.DISQUALIFIED.value)
+
+        _solve(alice, c1, points=100, at=now - timedelta(minutes=30))
+        _solve(bob, c1, points=100, at=now - timedelta(minutes=20))
+        _solve(bob, c2, points=200, at=now - timedelta(minutes=10))
+        _solve(carol, c2, points=200, at=now - timedelta(minutes=5))
+        _award(event, alice, 50, organizer_user)
+        _solve(dq, c1, points=100, at=now - timedelta(minutes=1))  # excluded (disqualified)
+
+        recompute_event_leaderboard(event.id)
+
+        materialized = get_scoreboard(event.id)
+        authoritative = get_scoreboard(event.id, freeze_at=_FAR_FUTURE)
+
+        assert _by_participant(materialized) == _by_participant(authoritative)
+        # Disqualified participant never appears.
+        assert str(dq.id) not in _by_participant(materialized)
+        # Spot-check the actual ranking: Bob 300 (rank1), Carol 200 (rank2),
+        # Alice 150 (rank3), NoSolve 0 (rank4).
+        ranks = {r["name"]: r["rank"] for r in materialized}
+        assert ranks == {"Bob": 1, "Carol": 2, "Alice": 3, "NoSolve": 4}
+
+    def test_team_board_matches_recompute(self, organizer_user):
+        event = _make_event(organizer_user, team_mode=True)
+        c1 = _make_challenge(event, points=100)
+        c2 = _make_challenge(event, points=200)
+        now = timezone.now()
+
+        alpha = CTFTeam.objects.create(event=event, name="Alpha")
+        bravo = CTFTeam.objects.create(event=event, name="Bravo")
+        CTFTeam.objects.create(event=event, name="Empty")
+
+        a1 = _make_participant(event, "A1", team=alpha)
+        a2 = _make_participant(event, "A2", team=alpha)
+        b1 = _make_participant(event, "B1", team=bravo)
+        # Disqualified Alpha member: contributions must not count.
+        a_dq = _make_participant(event, "Adq", team=alpha, status=ParticipantStatus.DISQUALIFIED.value)
+
+        _solve(a1, c1, points=100, at=now - timedelta(minutes=30))
+        _solve(a2, c2, points=200, at=now - timedelta(minutes=20))
+        _solve(b1, c1, points=100, at=now - timedelta(minutes=10))
+        _award(event, a1, 25, organizer_user)
+        _solve(a_dq, c2, points=200, at=now - timedelta(minutes=1))
+
+        recompute_event_leaderboard(event.id)
+
+        materialized = get_team_scoreboard(event.id)
+        authoritative = get_team_scoreboard(event.id, freeze_at=_FAR_FUTURE)
+        assert _by_team(materialized) == _by_team(authoritative)
+
+        stats = {r["name"]: r for r in materialized}
+        assert stats["Alpha"]["score"] == 325  # 100 + 200 + 25 award; dq excluded
+        assert stats["Alpha"]["solve_count"] == 2  # two distinct challenges
+        assert stats["Alpha"]["member_count"] == 2  # eligible only
+        assert stats["Bravo"]["score"] == 100
+        assert stats["Empty"]["score"] == 0
+        assert stats["Empty"]["member_count"] == 0
+
+    def test_team_score_dedupes_shared_challenge_solves(self, organizer_user):
+        # #1138: two teammates solving the SAME challenge count once for the
+        # team, at the best (max) points — not summed twice. Asserts both the
+        # materialized and the frozen/authoritative recompute paths agree.
+        event = _make_event(organizer_user, team_mode=True)
+        c1 = _make_challenge(event, points=100)
+        now = timezone.now()
+
+        team = CTFTeam.objects.create(event=event, name="Dup")
+        m1 = _make_participant(event, "M1", team=team)
+        m2 = _make_participant(event, "M2", team=team)
+
+        _solve(m1, c1, points=100, at=now - timedelta(minutes=20))
+        # Same challenge, fewer points (e.g. a hint penalty) for the second solver.
+        _solve(m2, c1, points=80, at=now - timedelta(minutes=10))
+
+        recompute_event_leaderboard(event.id)
+
+        materialized = get_team_scoreboard(event.id)
+        authoritative = get_team_scoreboard(event.id, freeze_at=_FAR_FUTURE)
+        assert _by_team(materialized) == _by_team(authoritative)
+
+        stats = {r["name"]: r for r in materialized}
+        # Counted once at the max (100), not 100 + 80.
+        assert stats["Dup"]["score"] == 100
+        assert stats["Dup"]["solve_count"] == 1
 
 
-# -----------------------------------------------------------------------------
-# calculate_score tests
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Scoreboard behavior contract
+# ---------------------------------------------------------------------------
 
 
-class TestCalculateScore:
-    """Tests for calculate_score()."""
+class TestScoreboardBehavior:
+    def test_ranked_by_score_descending(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        now = timezone.now()
+        for name, pts in [("Bob", 300), ("Charlie", 200), ("Alice", 100)]:
+            p = _make_participant(event, name)
+            _solve(p, c, points=pts, at=now - timedelta(minutes=10))
+        recompute_event_leaderboard(event.id)
 
-    def test_score_sums_correct_submissions_only(self, mock_submission_objects, mock_award_objects):
-        """Correct submissions are summed; incorrect ones are ignored."""
-        pid = uuid4()
-        mock_qs = MagicMock()
-        mock_submission_objects.filter.return_value = mock_qs
-        mock_qs.aggregate.return_value = {"total": 300}
+        board = get_scoreboard(event.id)
+        assert [(r["name"], r["rank"]) for r in board] == [("Bob", 1), ("Charlie", 2), ("Alice", 3)]
 
-        award_qs = MagicMock()
-        mock_award_objects.filter.return_value = award_qs
-        award_qs.aggregate.return_value = {"total": 0}
+    def test_tie_breaking_by_earlier_last_solve(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        now = timezone.now()
+        alice = _make_participant(event, "Alice")
+        bob = _make_participant(event, "Bob")
+        _solve(alice, c, points=100, at=now - timedelta(minutes=10))  # earlier
+        _solve(bob, c, points=100, at=now - timedelta(minutes=5))  # later
+        recompute_event_leaderboard(event.id)
 
-        assert calculate_score(pid) == 300
-        mock_submission_objects.filter.assert_called_once_with(participant_id=pid, is_correct=True)
+        board = get_scoreboard(event.id)
+        assert [(r["name"], r["rank"]) for r in board] == [("Alice", 1), ("Bob", 2)]
 
-    def test_score_zero_with_no_submissions(self, mock_submission_objects, mock_award_objects):
-        """Participant with no submissions scores 0."""
-        pid = uuid4()
-        mock_qs = MagicMock()
-        mock_submission_objects.filter.return_value = mock_qs
-        mock_qs.aggregate.return_value = {"total": 0}
+    def test_limit(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        now = timezone.now()
+        for i, pts in enumerate([300, 200, 100]):
+            _solve(_make_participant(event, f"P{i}"), c, points=pts, at=now - timedelta(minutes=10))
+        recompute_event_leaderboard(event.id)
 
-        award_qs = MagicMock()
-        mock_award_objects.filter.return_value = award_qs
-        award_qs.aggregate.return_value = {"total": 0}
-
-        assert calculate_score(pid) == 0
-
-    def test_score_zero_with_only_incorrect(self, mock_submission_objects, mock_award_objects):
-        """Participant with only incorrect submissions scores 0 (Coalesce returns 0)."""
-        pid = uuid4()
-        mock_qs = MagicMock()
-        mock_submission_objects.filter.return_value = mock_qs
-        mock_qs.aggregate.return_value = {"total": 0}
-
-        award_qs = MagicMock()
-        mock_award_objects.filter.return_value = award_qs
-        award_qs.aggregate.return_value = {"total": 0}
-
-        assert calculate_score(pid) == 0
-
-
-# -----------------------------------------------------------------------------
-# get_scoreboard tests
-# -----------------------------------------------------------------------------
-
-
-class TestGetScoreboard:
-    """Tests for get_scoreboard()."""
-
-    @staticmethod
-    def _wire_qs(mock_participant_objects, mock_queryset, participants):
-        """Wire a shared mock_queryset to the participant manager and make it iterable."""
-        mock_participant_objects.filter.return_value = mock_queryset
-        mock_queryset.__iter__ = MagicMock(return_value=iter(participants))
-        return mock_queryset
-
-    def test_ranked_by_score_descending(self, mock_participant_objects, mock_queryset):
-        """Higher score = lower rank number."""
-        p_bob = _make_participant("Bob", computed_score=300, solve_count=2, last_solve_time=_NOW)
-        p_charlie = _make_participant("Charlie", computed_score=200, solve_count=1, last_solve_time=_NOW)
-        p_alice = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=_NOW)
-
-        self._wire_qs(mock_participant_objects, mock_queryset, [p_bob, p_charlie, p_alice])
-
-        board = get_scoreboard(uuid4())
-
-        assert board[0]["name"] == "Bob"
-        assert board[0]["score"] == 300
-        assert board[0]["rank"] == 1
-
-        assert board[1]["name"] == "Charlie"
-        assert board[1]["score"] == 200
-        assert board[1]["rank"] == 2
-
-        assert board[2]["name"] == "Alice"
-        assert board[2]["score"] == 100
-        assert board[2]["rank"] == 3
-
-    def test_tie_breaking_by_earlier_last_solve(self, mock_participant_objects, mock_queryset):
-        """Same score: participant who solved last challenge earlier ranks higher."""
-        early = _NOW - timedelta(minutes=10)
-        late = _NOW
-
-        p_alice = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=early)
-        p_bob = _make_participant("Bob", computed_score=100, solve_count=1, last_solve_time=late)
-
-        self._wire_qs(mock_participant_objects, mock_queryset, [p_alice, p_bob])
-
-        board = get_scoreboard(uuid4())
-
-        tied = [e for e in board if e["score"] == 100]
-        assert tied[0]["name"] == "Alice"
-        assert tied[1]["name"] == "Bob"
-        assert tied[0]["rank"] == 1
-        assert tied[1]["rank"] == 2
-
-    def test_limit_parameter(self, mock_participant_objects, mock_queryset):
-        """Limit restricts the number of scoreboard entries."""
-        p1 = _make_participant("Charlie", computed_score=300, solve_count=1, last_solve_time=_NOW)
-        p2 = _make_participant("Bob", computed_score=200, solve_count=1, last_solve_time=_NOW)
-
-        mock_participant_objects.filter.return_value = mock_queryset
-
-        # Slicing via __getitem__ returns a new qs that yields limited results
-        sliced_qs = MagicMock()
-        sliced_qs.__iter__ = MagicMock(return_value=iter([p1, p2]))
-        mock_queryset.__getitem__ = MagicMock(return_value=sliced_qs)
-
-        board = get_scoreboard(uuid4(), limit=2)
+        board = get_scoreboard(event.id, limit=2)
         assert len(board) == 2
         assert board[0]["score"] == 300
 
-    def test_excludes_non_active_statuses(self, mock_participant_objects, mock_queryset):
-        """Only ACTIVE / REGISTERED / COMPLETED participants appear.
+    def test_excludes_non_eligible(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        active = _make_participant(event, "Active")
+        _make_participant(event, "Invited", status=ParticipantStatus.INVITED.value, registered=False)
+        _make_participant(event, "Disq", status=ParticipantStatus.DISQUALIFIED.value)
+        _solve(active, c, points=100)
+        recompute_event_leaderboard(event.id)
 
-        Codex review (issue #765/#768/#769) consolidated the eligibility
-        predicate behind `eligible_participant_q`, which is now passed as a
-        positional `Q` argument rather than a `status__in` kwarg. We verify
-        the predicate matches the playing-status set here so any future
-        change to the shared helper has to update this test deliberately.
-        """
-        from django.db.models import Q
+        names = [r["name"] for r in get_scoreboard(event.id)]
+        assert names == ["Active"]
 
-        from ctf.services.participant import eligible_participant_q
+    def test_empty(self, organizer_user):
+        event = _make_event(organizer_user)
+        assert get_scoreboard(event.id) == []
 
-        p_active = _make_participant("Active", computed_score=100, solve_count=1, last_solve_time=_NOW)
+    def test_solve_count_and_zero_score_participants(self, organizer_user):
+        event = _make_event(organizer_user)
+        c1 = _make_challenge(event, points=100)
+        c2 = _make_challenge(event, points=100)
+        solver = _make_participant(event, "Solver")
+        _make_participant(event, "Idle")
+        _solve(solver, c1, points=100)
+        _solve(solver, c2, points=100)
+        recompute_event_leaderboard(event.id)
 
-        self._wire_qs(mock_participant_objects, mock_queryset, [p_active])
+        board = {r["name"]: r for r in get_scoreboard(event.id)}
+        assert board["Solver"]["solve_count"] == 2
+        assert board["Idle"]["solve_count"] == 0
+        assert board["Idle"]["score"] == 0
+        assert board["Idle"]["rank"] == 2  # still ranked
 
-        board = get_scoreboard(uuid4())
-        names = [e["name"] for e in board]
-        assert "Active" in names
+    def test_bracket_filter(self, organizer_user):
+        from ctf.models import CTFBracket
 
-        # Verify the eligibility Q predicate is passed positionally and
-        # matches the canonical playing-status filter.
-        call_args, _call_kwargs = mock_participant_objects.filter.call_args
-        positional_q_args = [a for a in call_args if isinstance(a, Q)]
-        assert positional_q_args, "expected eligibility Q to be passed positionally"
-        # Compare children (Q stores predicates as a tree of (key, value) tuples).
-        expected = eligible_participant_q()
-        assert positional_q_args[0].children == expected.children
-        # Sanity: the predicate must reject DISQUALIFIED.
-        assert ParticipantStatus.DISQUALIFIED.value not in dict(expected.children)["status__in"]
+        event = _make_event(organizer_user)
+        beginner = CTFBracket.objects.create(event=event, name="Beginner")
+        advanced = CTFBracket.objects.create(event=event, name="Advanced")
+        c = _make_challenge(event, points=100)
+        b_player = _make_participant(event, "Beg", bracket=beginner)
+        a_player = _make_participant(event, "Adv", bracket=advanced)
+        _solve(b_player, c, points=100)
+        _solve(a_player, c, points=100)
+        recompute_event_leaderboard(event.id)
 
-    def test_empty_scoreboard(self, mock_participant_objects, mock_queryset):
-        """Event with no participants returns empty list."""
-        self._wire_qs(mock_participant_objects, mock_queryset, [])
-
-        board = get_scoreboard(uuid4())
-        assert board == []
-
-    def test_scoreboard_includes_solve_count(self, mock_participant_objects, mock_queryset):
-        """solve_count reflects number of correct submissions."""
-        p_alice = _make_participant("Alice", computed_score=300, solve_count=2, last_solve_time=_NOW)
-
-        self._wire_qs(mock_participant_objects, mock_queryset, [p_alice])
-
-        board = get_scoreboard(uuid4())
-        p1_entry = next(e for e in board if e["name"] == "Alice")
-        assert p1_entry["solve_count"] == 2
-
-
-# -----------------------------------------------------------------------------
-# get_team_scoreboard tests
-# -----------------------------------------------------------------------------
+        names = [r["name"] for r in get_scoreboard(event.id, bracket_id=beginner.id)]
+        assert names == ["Beg"]
 
 
-class TestGetTeamScoreboard:
-    """Tests for get_team_scoreboard()."""
-
-    @staticmethod
-    def _wire_qs(mock_team_objects, mock_queryset, teams):
-        """Wire a shared mock_queryset to the team manager and make it iterable."""
-        mock_team_objects.filter.return_value = mock_queryset
-        mock_queryset.__iter__ = MagicMock(return_value=iter(teams))
-        return mock_queryset
-
-    def test_team_scores_aggregated(self, mock_team_objects, mock_queryset):
-        """Team score is the sum of all members' correct submissions."""
-        t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=2, last_solve_time=_NOW)
-        t_bravo = _make_team("Bravo", computed_score=100, solve_count=1, computed_member_count=1, last_solve_time=_NOW)
-
-        self._wire_qs(mock_team_objects, mock_queryset, [t_alpha, t_bravo])
-
-        board = get_team_scoreboard(uuid4())
-
-        assert board[0]["name"] == "Alpha"
-        assert board[0]["score"] == 200
-        assert board[0]["rank"] == 1
-        assert board[0]["member_count"] == 2
-
-        assert board[1]["name"] == "Bravo"
-        assert board[1]["score"] == 100
-        assert board[1]["rank"] == 2
-
-    def test_team_scoreboard_limit(self, mock_team_objects, mock_queryset):
-        """Limit restricts team scoreboard results."""
-        t_alpha = _make_team("Alpha", computed_score=200, solve_count=1, computed_member_count=2, last_solve_time=_NOW)
-
-        mock_team_objects.filter.return_value = mock_queryset
-
-        sliced_qs = MagicMock()
-        sliced_qs.__iter__ = MagicMock(return_value=iter([t_alpha]))
-        mock_queryset.__getitem__ = MagicMock(return_value=sliced_qs)
-
-        board = get_team_scoreboard(uuid4(), limit=1)
-        assert len(board) == 1
-
-    def test_team_with_no_solves_scores_zero(self, mock_team_objects, mock_queryset):
-        """Teams with no correct submissions have score 0."""
-        t_alpha = _make_team("Alpha", computed_score=0, computed_member_count=2)
-        t_bravo = _make_team("Bravo", computed_score=0, computed_member_count=1)
-
-        self._wire_qs(mock_team_objects, mock_queryset, [t_alpha, t_bravo])
-
-        board = get_team_scoreboard(uuid4())
-        for entry in board:
-            assert entry["score"] == 0
-
-    def test_team_solve_count_is_unique_challenges(self, mock_team_objects, mock_queryset):
-        """solve_count should reflect unique challenges solved, not total submissions."""
-        # Mock team where 3 members solved 2 unique challenges (some overlap)
-        t_alpha = _make_team(
-            "Alpha",
-            computed_score=300,
-            solve_count=2,  # 2 unique challenges
-            computed_member_count=3,
-            last_solve_time=_NOW,
-        )
-
-        self._wire_qs(mock_team_objects, mock_queryset, [t_alpha])
-
-        board = get_team_scoreboard(uuid4())
-        assert board[0]["solve_count"] == 2
+# ---------------------------------------------------------------------------
+# Participant rank
+# ---------------------------------------------------------------------------
 
 
-# -----------------------------------------------------------------------------
-# get_participant_rank tests
-# -----------------------------------------------------------------------------
+class TestParticipantRank:
+    def test_ranks_match_board(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        now = timezone.now()
+        charlie = _make_participant(event, "Charlie")
+        bob = _make_participant(event, "Bob")
+        alice = _make_participant(event, "Alice")
+        _solve(charlie, c, points=300, at=now - timedelta(minutes=10))
+        _solve(bob, c, points=200, at=now - timedelta(minutes=10))
+        _solve(alice, c, points=100, at=now - timedelta(minutes=10))
+        recompute_event_leaderboard(event.id)
 
+        assert get_participant_rank(charlie.id) == 1
+        assert get_participant_rank(bob.id) == 2
+        assert get_participant_rank(alice.id) == 3
 
-class TestGetParticipantRank:
-    """Tests for get_participant_rank()."""
+    def test_tied_participants_share_rank(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        now = timezone.now()
+        # Two exact ties (same score, same last-solve) then a lower score.
+        p1 = _make_participant(event, "P1")
+        p2 = _make_participant(event, "P2")
+        low = _make_participant(event, "Low")
+        same = now - timedelta(minutes=10)
+        _solve(p1, c, points=100, at=same)
+        _solve(p2, c, points=100, at=same)
+        _solve(low, c, points=50, at=now - timedelta(minutes=5))
+        recompute_event_leaderboard(event.id)
 
-    def test_returns_correct_rank(self, mock_participant_objects):
-        """Rank matches scoreboard position."""
-        pid1 = str(uuid4())
-        pid2 = str(uuid4())
-        pid3 = str(uuid4())
+        assert get_participant_rank(p1.id) == 1
+        assert get_participant_rank(p2.id) == 1  # shares rank 1 (competition ranking)
+        assert get_participant_rank(low.id) == 3  # 1 + 2 ahead
 
-        # Mock participant lookup
-        mock_participant = MagicMock()
-        mock_participant.event_id = uuid4()
-        mock_participant_objects.get.return_value = mock_participant
+    def test_zero_score_participant_has_rank(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        leader = _make_participant(event, "Leader")
+        idle = _make_participant(event, "Idle")
+        _solve(leader, c, points=100)
+        recompute_event_leaderboard(event.id)
 
-        # Mock the scoreboard queryset chain (called inside get_scoreboard)
-        p1 = _make_participant("Charlie", computed_score=300, solve_count=1, last_solve_time=_NOW, pid=pid3)
-        p2 = _make_participant("Bob", computed_score=200, solve_count=1, last_solve_time=_NOW, pid=pid2)
-        p3 = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=_NOW, pid=pid1)
+        assert get_participant_rank(leader.id) == 1
+        assert get_participant_rank(idle.id) == 2
 
-        qs = MagicMock()
-        mock_participant_objects.filter.return_value = qs
-        qs.annotate.return_value = qs
-        qs.order_by.return_value = qs
-        qs.select_related.return_value = qs
-        qs.__iter__ = MagicMock(return_value=iter([p1, p2, p3]))
-
-        assert get_participant_rank(pid3) == 1
-
-        # Reset iterator for next call
-        qs.__iter__ = MagicMock(return_value=iter([p1, p2, p3]))
-        assert get_participant_rank(pid2) == 2
-
-        qs.__iter__ = MagicMock(return_value=iter([p1, p2, p3]))
-        assert get_participant_rank(pid1) == 3
-
-    def test_returns_none_for_nonexistent_participant(self, mock_participant_objects):
-        """Non-existent participant ID returns None."""
-        from ctf.models import CTFParticipant
-
-        mock_participant_objects.get.side_effect = CTFParticipant.DoesNotExist
-
+    def test_nonexistent_returns_none(self):
         assert get_participant_rank(uuid4()) is None
 
-    def test_participant_with_no_submissions_has_rank(self, mock_participant_objects):
-        """Participants with no submissions still appear on scoreboard (rank by 0 score)."""
-        pid1 = str(uuid4())
-        pid2 = str(uuid4())
+    def test_ineligible_returns_none(self, organizer_user):
+        event = _make_event(organizer_user)
+        dq = _make_participant(event, "Disq", status=ParticipantStatus.DISQUALIFIED.value)
+        recompute_event_leaderboard(event.id)
+        assert get_participant_rank(dq.id) is None
 
-        mock_participant = MagicMock()
-        mock_participant.event_id = uuid4()
-        mock_participant_objects.get.return_value = mock_participant
 
-        p1 = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=_NOW, pid=pid1)
-        p2 = _make_participant("Bob", computed_score=0, solve_count=0, last_solve_time=None, pid=pid2)
+# ---------------------------------------------------------------------------
+# Incremental maintenance helpers + hooks
+# ---------------------------------------------------------------------------
 
-        qs = MagicMock()
-        mock_participant_objects.filter.return_value = qs
-        qs.annotate.return_value = qs
-        qs.order_by.return_value = qs
-        qs.select_related.return_value = qs
-        qs.__iter__ = MagicMock(return_value=iter([p1, p2]))
 
-        rank = get_participant_rank(pid1)
+class TestMaintenance:
+    def test_recompute_participant_from_submissions_and_awards(self, organizer_user):
+        event = _make_event(organizer_user)
+        c1 = _make_challenge(event, points=100)
+        c2 = _make_challenge(event, points=200)
+        now = timezone.now()
+        p = _make_participant(event, "P")
+        _solve(p, c1, points=100, at=now - timedelta(minutes=20))
+        last = _solve(p, c2, points=200, at=now - timedelta(minutes=5))
+        _award(event, p, 25, organizer_user)
+
+        recompute_participant_score(p.id)
+        p.refresh_from_db()
+        assert p.cached_score == 325
+        assert p.cached_solve_count == 2
+        assert p.last_solve_at == CTFSubmission.objects.get(pk=last.pk).submitted_at
+
+    def test_recompute_participant_no_solves(self, organizer_user):
+        event = _make_event(organizer_user)
+        p = _make_participant(event, "P")
+        recompute_participant_score(p.id)
+        p.refresh_from_db()
+        assert p.cached_score == 0
+        assert p.cached_solve_count == 0
+        assert p.last_solve_at is None
+
+    def test_grant_award_updates_cached_score(self, organizer_user):
+        from ctf.services.award import grant_award
+
+        event = _make_event(organizer_user)
+        p = _make_participant(event, "P")
+        recompute_participant_score(p.id)
+        grant_award(event.id, p.id, 75, "bonus", organizer_user)
+        p.refresh_from_db()
+        assert p.cached_score == 75
+
+    def test_revoke_award_updates_cached_score(self, organizer_user):
+        from ctf.services.award import grant_award, revoke_award
+
+        event = _make_event(organizer_user)
+        p = _make_participant(event, "P")
+        award = grant_award(event.id, p.id, 75, "bonus", organizer_user)
+        p.refresh_from_db()
+        assert p.cached_score == 75
+        revoke_award(award.id)
+        p.refresh_from_db()
+        assert p.cached_score == 0
+
+    def test_disqualify_drops_team_contribution(self, organizer_user):
+        from ctf.services.participant import disqualify_participant
+
+        event = _make_event(organizer_user, team_mode=True)
+        # Distinct challenges so each member's contribution is independent; a
+        # shared challenge would dedupe to a single count (see #1138).
+        c1 = _make_challenge(event, points=100)
+        c2 = _make_challenge(event, points=100)
+        team = CTFTeam.objects.create(event=event, name="Alpha")
+        keep = _make_participant(event, "Keep", team=team)
+        drop = _make_participant(event, "Drop", team=team)
+        _solve(keep, c1, points=100)
+        _solve(drop, c2, points=100)
+        recompute_event_leaderboard(event.id)
+        team.refresh_from_db()
+        assert team.cached_score == 200
+        assert team.cached_member_count == 2
+
+        disqualify_participant(drop.id)
+        team.refresh_from_db()
+        assert team.cached_score == 100  # dropped member's solve removed
+        assert team.cached_member_count == 1
+
+    def test_submit_flag_hook_updates_cached_columns(self, organizer_user):
+        from ctf.services.challenge import hash_flag
+        from ctf.services.submission import submit_flag
+
+        event = _make_event(organizer_user)
+        challenge = _make_challenge(event)
+        CTFChallenge.objects.filter(pk=challenge.pk).update(flag_hash=hash_flag("FLAG{win}"))
+        participant = _make_participant(event, "P")
+
+        submit_flag(participant.id, challenge.id, "FLAG{win}")
+        participant.refresh_from_db()
+        assert participant.cached_score == 100
+        assert participant.cached_solve_count == 1
+        assert participant.last_solve_at is not None
+
+    def test_recompute_event_scoped(self, organizer_user):
+        event_a = _make_event(organizer_user)
+        event_b = _make_event(organizer_user)
+        ca = _make_challenge(event_a, points=100)
+        cb = _make_challenge(event_b, points=100)
+        pa = _make_participant(event_a, "A")
+        pb = _make_participant(event_b, "B")
+        _solve(pa, ca, points=100)
+        _solve(pb, cb, points=100)
+
+        participants, _teams = recompute_event_leaderboard(event_a.id)
+        assert participants == 1  # only event_a
+        pa.refresh_from_db()
+        pb.refresh_from_db()
+        assert pa.cached_score == 100
+        assert pb.cached_score == 0  # event_b untouched
+
+
+# ---------------------------------------------------------------------------
+# Query-count guarantees (the point of materializing)
+# ---------------------------------------------------------------------------
+
+
+class TestQueryCounts:
+    def test_scoreboard_query_count_constant_in_participants(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        for i in range(40):
+            p = _make_participant(event, f"P{i}")
+            _solve(p, c, points=(i + 1) * 10)
+        recompute_event_leaderboard(event.id)
+
+        with CaptureQueriesContext(connection) as ctx:
+            board = get_scoreboard(event.id)
+        assert len(board) == 40
+        # Materialized read is a single indexed query (plus select_related joins);
+        # it must not issue a query per participant.
+        assert len(ctx.captured_queries) <= 3
+
+    def test_participant_rank_query_count_constant(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        target = _make_participant(event, "Target")
+        _solve(target, c, points=500)
+        for i in range(40):
+            p = _make_participant(event, f"P{i}")
+            _solve(p, c, points=(i + 1) * 10)
+        recompute_event_leaderboard(event.id)
+
+        with CaptureQueriesContext(connection) as ctx:
+            rank = get_participant_rank(target.id)
         assert rank == 1
-
-        # p2 with 0 score still has a rank
-        qs.__iter__ = MagicMock(return_value=iter([p1, p2]))
-        rank_p2 = get_participant_rank(pid2)
-        assert rank_p2 is not None
+        # get + eligibility-exists + count == a small constant, not O(participants).
+        assert len(ctx.captured_queries) <= 4
 
 
-# -----------------------------------------------------------------------------
-# get_challenge_statistics tests
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# calculate_score (authoritative helper)
+# ---------------------------------------------------------------------------
 
 
-class TestGetChallengeStatistics:
-    """Tests for get_challenge_statistics()."""
+class TestRecomputeCommand:
+    def test_command_rebuilds_materialized_columns(self, organizer_user):
+        from django.core.management import call_command
 
-    @pytest.fixture
-    def mock_challenge_and_submissions(self):
-        """Patch CTFChallenge.objects and CTFSubmission.objects for stats tests.
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        p = _make_participant(event, "P")
+        # Insert a submission directly (no hook), leaving cached_score stale.
+        _solve(p, c, points=100)
+        p.refresh_from_db()
+        assert p.cached_score == 0
 
-        CTFChallenge is imported locally inside get_challenge_statistics,
-        so we patch it at ctf.models rather than ctf.services.scoring.
-        """
-        with (
-            patch("ctf.services.scoring.CTFSubmission.objects") as mock_sub,
-            patch("ctf.models.CTFChallenge.objects") as mock_chal,
-        ):
-            yield mock_chal, mock_sub
+        call_command("ctf_recompute_leaderboard")
+        p.refresh_from_db()
+        assert p.cached_score == 100
 
-    def test_basic_statistics(self, mock_challenge_and_submissions):
-        """Returns correct solve count, attempts, and first blood."""
-        mock_chal, mock_sub = mock_challenge_and_submissions
-        cid = uuid4()
+    def test_command_event_scope(self, organizer_user):
+        from django.core.management import call_command
 
-        mock_challenge = MagicMock()
-        mock_chal.get.return_value = mock_challenge
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        p = _make_participant(event, "P")
+        _solve(p, c, points=100)
 
-        # All submissions queryset
-        all_qs = MagicMock()
-        mock_sub.filter.return_value = all_qs
-        all_qs.count.return_value = 4
+        call_command("ctf_recompute_leaderboard", "--event", str(event.id))
+        p.refresh_from_db()
+        assert p.cached_score == 100
 
-        # Correct submissions queryset
-        correct_qs = MagicMock()
-        all_qs.filter.return_value = correct_qs
-        correct_qs.count.return_value = 2
+    def test_command_rejects_invalid_event_uuid(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
 
-        # First blood
-        first_blood_sub = MagicMock()
-        first_blood_sub.participant.name = "Alice"
-        first_blood_sub.submitted_at.isoformat.return_value = "2026-01-15T12:00:00+00:00"
-        ordered_qs = MagicMock()
-        correct_qs.order_by.return_value = ordered_qs
-        ordered_qs.first.return_value = first_blood_sub
-
-        # Distinct participants
-        values_qs = MagicMock()
-        all_qs.values.return_value = values_qs
-        distinct_qs = MagicMock()
-        values_qs.distinct.return_value = distinct_qs
-        distinct_qs.count.return_value = 3
-
-        stats = get_challenge_statistics(cid)
-
-        assert stats["challenge_id"] == str(cid)
-        assert stats["total_attempts"] == 4
-        assert stats["solve_count"] == 2
-        assert stats["first_blood"] is not None
-        assert stats["first_blood"]["participant_name"] == "Alice"
-
-    def test_no_submissions(self, mock_challenge_and_submissions):
-        """Challenge with no submissions returns zero counts."""
-        mock_chal, mock_sub = mock_challenge_and_submissions
-        cid = uuid4()
-
-        mock_chal.get.return_value = MagicMock()
-
-        all_qs = MagicMock()
-        mock_sub.filter.return_value = all_qs
-        all_qs.count.return_value = 0
-
-        correct_qs = MagicMock()
-        all_qs.filter.return_value = correct_qs
-        correct_qs.count.return_value = 0
-        ordered_qs = MagicMock()
-        correct_qs.order_by.return_value = ordered_qs
-        ordered_qs.first.return_value = None
-
-        values_qs = MagicMock()
-        all_qs.values.return_value = values_qs
-        distinct_qs = MagicMock()
-        values_qs.distinct.return_value = distinct_qs
-        distinct_qs.count.return_value = 0
-
-        stats = get_challenge_statistics(cid)
-
-        assert stats["total_attempts"] == 0
-        assert stats["solve_count"] == 0
-        assert stats["first_blood"] is None
-        assert stats["solve_rate"] == 0
-
-    def test_nonexistent_challenge(self):
-        """Non-existent challenge returns empty dict."""
-        from ctf.models import CTFChallenge
-
-        with patch("ctf.models.CTFChallenge.objects") as mock_chal:
-            mock_chal.get.side_effect = CTFChallenge.DoesNotExist
-            assert get_challenge_statistics(uuid4()) == {}
-
-    def test_solve_rate(self, mock_challenge_and_submissions):
-        """Solve rate = solvers / distinct participants who attempted."""
-        mock_chal, mock_sub = mock_challenge_and_submissions
-        cid = uuid4()
-
-        mock_chal.get.return_value = MagicMock()
-
-        all_qs = MagicMock()
-        mock_sub.filter.return_value = all_qs
-        all_qs.count.return_value = 2
-
-        correct_qs = MagicMock()
-        all_qs.filter.return_value = correct_qs
-        correct_qs.count.return_value = 1
-        ordered_qs = MagicMock()
-        correct_qs.order_by.return_value = ordered_qs
-        ordered_qs.first.return_value = None  # Not testing first blood here
-
-        values_qs = MagicMock()
-        all_qs.values.return_value = values_qs
-        distinct_qs = MagicMock()
-        values_qs.distinct.return_value = distinct_qs
-        distinct_qs.count.return_value = 2
-
-        stats = get_challenge_statistics(cid)
-        # 1 solver out of 2 participants who attempted
-        assert stats["solve_rate"] == pytest.approx(0.5)
+        with pytest.raises(CommandError):
+            call_command("ctf_recompute_leaderboard", "--event", "not-a-uuid")
 
 
-# -----------------------------------------------------------------------------
-# get_event_statistics tests
-# -----------------------------------------------------------------------------
-
-
-class TestGetEventStatistics:
-    """Tests for get_event_statistics()."""
-
-    @pytest.fixture
-    def mock_event_models(self):
-        """Patch all model managers and get_scoreboard used by get_event_statistics."""
-        with (
-            patch("ctf.models.CTFEvent.objects") as mock_event,
-            patch("ctf.services.scoring.CTFParticipant.objects") as mock_part,
-            patch("ctf.models.CTFChallenge.objects") as mock_chal,
-            patch("ctf.services.scoring.CTFSubmission.objects") as mock_sub,
-            patch("ctf.services.scoring.CTFAward.objects") as mock_award,
-            patch("ctf.services.scoring.get_scoreboard") as mock_scoreboard,
-        ):
-            yield mock_event, mock_part, mock_chal, mock_sub, mock_award, mock_scoreboard
-
-    def _setup_mocks(
-        self,
-        mock_event_models,
-        *,
-        participant_count=3,
-        active_count=2,
-        challenge_count=3,
-        total_subs=5,
-        correct_subs=2,
-        points_awarded=200,
-        award_count=0,
-        solved_challenge_count=2,
-        scoreboard_scores=None,
-        duration_hours=4.0,
-    ):
-        """Helper to configure mocks for get_event_statistics tests."""
-        mock_event, mock_part, mock_chal, mock_sub, mock_award, mock_scoreboard = mock_event_models
-
-        event_obj = MagicMock()
-        event_obj.duration_hours = duration_hours
-        mock_event.get.return_value = event_obj
-
-        # Participants
-        part_qs = MagicMock()
-        mock_part.filter.return_value = part_qs
-        part_qs.count.return_value = participant_count
-        active_qs = MagicMock()
-        active_qs.count.return_value = active_count
-        part_qs.filter.return_value = active_qs
-        active_qs.distinct.return_value = active_qs
-
-        # Challenges
-        chal_qs = MagicMock()
-        mock_chal.filter.return_value = chal_qs
-        chal_qs.count.return_value = challenge_count
-
-        # Submissions
-        sub_qs = MagicMock()
-        mock_sub.filter.return_value = sub_qs
-        sub_qs.count.return_value = total_subs
-        correct_qs = MagicMock()
-        sub_qs.filter.return_value = correct_qs
-        correct_qs.count.return_value = correct_subs
-        correct_qs.aggregate.return_value = {"total": points_awarded}
-        # For challenges_with_zero_solves: correct_qs.values().distinct().count()
-        values_qs = MagicMock()
-        correct_qs.values.return_value = values_qs
-        distinct_qs = MagicMock()
-        values_qs.distinct.return_value = distinct_qs
-        distinct_qs.count.return_value = solved_challenge_count
-
-        # Awards
-        award_qs = MagicMock()
-        mock_award.filter.return_value = award_qs
-        award_qs.count.return_value = award_count
-
-        # Scoreboard
-        if scoreboard_scores is None:
-            scoreboard_scores = [100, 50, 50]
-        mock_scoreboard.return_value = [{"score": s} for s in scoreboard_scores]
-
-        return event_obj
-
-    def test_basic_event_stats(self, mock_event_models):
-        """Returns correct participant count, challenge count, submissions."""
-        eid = uuid4()
-        self._setup_mocks(
-            mock_event_models,
-            participant_count=3,
-            active_count=2,
-            challenge_count=3,
-            total_subs=5,
-            correct_subs=2,
-            points_awarded=200,
-            solved_challenge_count=2,
-            scoreboard_scores=[100, 50, 50],
-            duration_hours=4.0,
+class TestCalculateScore:
+    def test_sums_correct_submissions_and_awards(self, organizer_user):
+        event = _make_event(organizer_user)
+        c = _make_challenge(event, points=100)
+        p = _make_participant(event, "P")
+        _solve(p, c, points=100)
+        _award(event, p, 50, organizer_user)
+        # An incorrect submission must not count.
+        CTFSubmission.objects.create(
+            participant=p, challenge=c, submitted_flag="nope", is_correct=False, points_awarded=0, attempt_number=2
         )
-
-        stats = get_event_statistics(eid)
-
-        assert stats["event_id"] == str(eid)
-        assert stats["participant_count"] == 3
-        assert stats["active_participants"] == 2
-        assert stats["challenge_count"] == 3
-        assert stats["challenges_with_zero_solves"] == 1
-        assert stats["total_submissions"] == 5
-        assert stats["correct_submissions"] == 2
-        assert stats["incorrect_submissions"] == 3
-        assert stats["average_score"] == 66.7
-        assert stats["median_score"] == 50
-        assert stats["event_duration_hours"] == 4.0
-        assert stats["total_points_awarded"] == 200
-        assert stats["total_awards"] == 0
-
-    def test_nonexistent_event(self):
-        """Non-existent event returns empty dict."""
-        from ctf.models import CTFEvent
-
-        with patch("ctf.models.CTFEvent.objects") as mock_event:
-            mock_event.get.side_effect = CTFEvent.DoesNotExist
-            assert get_event_statistics(uuid4()) == {}
-
-    def test_event_with_no_activity(self, mock_event_models):
-        """Event with no participants/submissions returns zero counts."""
-        eid = uuid4()
-        self._setup_mocks(
-            mock_event_models,
-            participant_count=0,
-            active_count=0,
-            challenge_count=0,
-            total_subs=0,
-            correct_subs=0,
-            points_awarded=0,
-            solved_challenge_count=0,
-            scoreboard_scores=[],
-            duration_hours=2.0,
-        )
-
-        stats = get_event_statistics(eid)
-
-        assert stats["participant_count"] == 0
-        assert stats["active_participants"] == 0
-        assert stats["challenge_count"] == 0
-        assert stats["challenges_with_zero_solves"] == 0
-        assert stats["total_submissions"] == 0
-        assert stats["correct_submissions"] == 0
-        assert stats["incorrect_submissions"] == 0
-        assert stats["average_score"] == 0
-        assert stats["median_score"] == 0
-        assert stats["event_duration_hours"] == 2.0
-        assert stats["total_points_awarded"] == 0
-        assert stats["total_awards"] == 0
-
-    def test_all_challenges_solved(self, mock_event_models):
-        """All challenges have at least one solve."""
-        eid = uuid4()
-        self._setup_mocks(
-            mock_event_models,
-            challenge_count=5,
-            solved_challenge_count=5,
-            scoreboard_scores=[100, 80, 60],
-        )
-
-        stats = get_event_statistics(eid)
-        assert stats["challenges_with_zero_solves"] == 0
-
-    def test_single_participant_score(self, mock_event_models):
-        """Average and median are equal with a single participant."""
-        eid = uuid4()
-        self._setup_mocks(
-            mock_event_models,
-            participant_count=1,
-            active_count=1,
-            scoreboard_scores=[75],
-        )
-
-        stats = get_event_statistics(eid)
-        assert stats["average_score"] == 75
-        assert stats["median_score"] == 75
-
-    def test_even_number_of_scores(self, mock_event_models):
-        """Median with even number of participants uses midpoint."""
-        eid = uuid4()
-        self._setup_mocks(
-            mock_event_models,
-            scoreboard_scores=[100, 80, 60, 40],
-        )
-
-        stats = get_event_statistics(eid)
-        assert stats["average_score"] == 70.0
-        assert stats["median_score"] == 70.0
-
-
-# -----------------------------------------------------------------------------
-# calculate_points_with_penalty edge cases (model method)
-# -----------------------------------------------------------------------------
-
-
-class TestCalculatePointsWithPenalty:
-    """Tests for CTFChallenge.calculate_points_with_penalty().
-
-    This is a pure model method that only reads self.points —
-    no DB calls needed, just mock instances.
-    """
-
-    def _make_challenge(self, points):
-        """Create a mock challenge with the fields needed by calculate_points_with_penalty."""
-        from ctf.models import CTFChallenge
-
-        challenge = MagicMock(spec=CTFChallenge)
-        challenge.points = points
-        challenge.calculate_points_with_penalty = CTFChallenge.calculate_points_with_penalty.__get__(challenge)
-        return challenge
-
-    def test_zero_penalty_returns_full_points(self):
-        """0% cumulative penalty gives full points."""
-        challenge = self._make_challenge(points=100)
-        assert challenge.calculate_points_with_penalty(0) == 100
-
-    def test_100_percent_penalty_guarantees_minimum_1_point(self):
-        """100% penalty still awards at least 1 point."""
-        challenge = self._make_challenge(points=100)
-        assert challenge.calculate_points_with_penalty(100) == 1
-
-    def test_partial_penalty_reduces_correctly(self):
-        """25% penalty on 200 points = 150 points."""
-        challenge = self._make_challenge(points=200)
-        assert challenge.calculate_points_with_penalty(25) == 150
-
-    def test_over_100_capped(self):
-        """Penalties over 100% are capped — still awards 1 point."""
-        challenge = self._make_challenge(points=100)
-        assert challenge.calculate_points_with_penalty(150) == 1
-
-
-# -----------------------------------------------------------------------------
-# get_score_timeline
-# -----------------------------------------------------------------------------
-
-
-class TestGetScoreTimeline:
-    """Tests for get_score_timeline().
-
-    Verifies the chronological score progression (submissions + awards)
-    with cumulative totals for a single participant.
-    """
-
-    @pytest.fixture
-    def mock_models(self):
-        """Patch all ORM objects used by get_score_timeline."""
-        with (
-            patch("ctf.services.scoring.CTFParticipant.objects") as mock_part,
-            patch("ctf.services.scoring.CTFSubmission.objects") as mock_sub,
-            patch("ctf.services.scoring.CTFAward.objects") as mock_award,
-        ):
-            yield mock_part, mock_sub, mock_award
-
-    def _setup(self, mock_models, submissions=None, awards=None):
-        """Configure mocks for a standard timeline query.
-
-        Args:
-            mock_models: Tuple of (participant, submission, award) mocks.
-            submissions: List of (submitted_at, points_awarded, challenge_name) tuples.
-            awards: List of (created_at, points, reason) tuples.
-
-        Returns:
-            UUID used as participant_id.
-        """
-        mock_part, mock_sub, mock_award = mock_models
-        pid = uuid4()
-
-        # Mock participant lookup
-        participant = MagicMock()
-        participant.event.event_start = _NOW - timedelta(hours=8)
-        mock_part.select_related.return_value.get.return_value = participant
-
-        # Mock submissions query chain
-        sub_data = [
-            {"submitted_at": s[0], "points_awarded": s[1], "challenge__name": s[2]} for s in (submissions or [])
-        ]
-        mock_sub.filter.return_value.values.return_value.order_by.return_value = sub_data
-
-        # Mock awards query chain
-        award_data = [{"created_at": a[0], "points": a[1], "reason": a[2]} for a in (awards or [])]
-        mock_award.filter.return_value.values.return_value.order_by.return_value = award_data
-
-        return pid
-
-    def test_timeline_correct_submissions_ordered(self, mock_models):
-        """Two solves produce correct cumulative sequence."""
-        from ctf.services.scoring import get_score_timeline
-
-        t1 = _NOW - timedelta(hours=6)
-        t2 = _NOW - timedelta(hours=4)
-        pid = self._setup(
-            mock_models,
-            submissions=[
-                (t1, 100, "Web 101"),
-                (t2, 200, "Crypto 201"),
-            ],
-        )
-
-        timeline = get_score_timeline(pid)
-
-        assert len(timeline) == 3  # origin + 2 solves
-        assert timeline[0]["cumulative"] == 0
-        assert timeline[0]["type"] == "start"
-        assert timeline[1]["cumulative"] == 100
-        assert timeline[1]["type"] == "solve"
-        assert timeline[2]["cumulative"] == 300
-        assert timeline[2]["type"] == "solve"
-
-    def test_timeline_includes_awards(self, mock_models):
-        """Solve + award are merged and sorted by timestamp."""
-        from ctf.services.scoring import get_score_timeline
-
-        t1 = _NOW - timedelta(hours=6)
-        t2 = _NOW - timedelta(hours=5)
-        pid = self._setup(
-            mock_models,
-            submissions=[(t1, 100, "Web 101")],
-            awards=[(t2, 50, "Bonus for style")],
-        )
-
-        timeline = get_score_timeline(pid)
-
-        assert len(timeline) == 3
-        assert timeline[1]["type"] == "solve"
-        assert timeline[1]["cumulative"] == 100
-        assert timeline[2]["type"] == "award"
-        assert timeline[2]["cumulative"] == 150
-
-    def test_timeline_negative_award(self, mock_models):
-        """Penalty (negative award) reduces cumulative score."""
-        from ctf.services.scoring import get_score_timeline
-
-        t1 = _NOW - timedelta(hours=6)
-        t2 = _NOW - timedelta(hours=5)
-        pid = self._setup(
-            mock_models,
-            submissions=[(t1, 200, "Pwn 301")],
-            awards=[(t2, -50, "Penalty")],
-        )
-
-        timeline = get_score_timeline(pid)
-
-        assert timeline[2]["cumulative"] == 150
-        assert timeline[2]["points"] == -50
-
-    def test_timeline_empty_activity(self, mock_models):
-        """No submissions or awards returns only the origin point."""
-        from ctf.services.scoring import get_score_timeline
-
-        pid = self._setup(mock_models)
-
-        timeline = get_score_timeline(pid)
-
-        assert len(timeline) == 1
-        assert timeline[0]["cumulative"] == 0
-        assert timeline[0]["type"] == "start"
-
-    def test_timeline_origin_at_event_start(self, mock_models):
-        """First entry timestamp matches event_start."""
-        from ctf.services.scoring import get_score_timeline
-
-        pid = self._setup(mock_models)
-        expected_start = (_NOW - timedelta(hours=8)).isoformat()
-
-        timeline = get_score_timeline(pid)
-
-        assert timeline[0]["timestamp"] == expected_start
-
-    def test_timeline_excludes_incorrect_submissions(self, mock_models):
-        """Only correct submissions appear — filter is in the query."""
-        from ctf.services.scoring import get_score_timeline
-
-        _mock_part, mock_sub, _mock_award = mock_models
-
-        pid = self._setup(
-            mock_models,
-            submissions=[
-                (_NOW - timedelta(hours=6), 100, "Web 101"),
-            ],
-        )
-
-        get_score_timeline(pid)
-
-        # Verify the filter was called with is_correct=True
-        call_kwargs = mock_sub.filter.call_args[1]
-        assert call_kwargs["is_correct"] is True
-
-    def test_timeline_labels_truncated(self, mock_models):
-        """Labels exceeding 50 characters are truncated."""
-        from ctf.services.scoring import get_score_timeline
-
-        long_name = "A" * 60
-        pid = self._setup(
-            mock_models,
-            submissions=[
-                (_NOW - timedelta(hours=6), 100, long_name),
-            ],
-        )
-
-        timeline = get_score_timeline(pid)
-
-        assert len(timeline[1]["label"]) == 50
-
-    def test_timeline_type_field(self, mock_models):
-        """Solve entries have type 'solve', award entries have type 'award'."""
-        from ctf.services.scoring import get_score_timeline
-
-        t1 = _NOW - timedelta(hours=6)
-        t2 = _NOW - timedelta(hours=5)
-        pid = self._setup(
-            mock_models,
-            submissions=[(t1, 100, "Web")],
-            awards=[(t2, 25, "Bonus")],
-        )
-
-        timeline = get_score_timeline(pid)
-
-        types = [e["type"] for e in timeline]
-        assert types == ["start", "solve", "award"]
-
-    def test_timeline_pre_start_awards_folded_into_origin(self, mock_models):
-        """Awards granted before event_start are folded into the origin point."""
-        from ctf.services.scoring import get_score_timeline
-
-        # event_start is _NOW - 8h; award at _NOW - 10h is before start
-        pre_start = _NOW - timedelta(hours=10)
-        post_start = _NOW - timedelta(hours=6)
-        pid = self._setup(
-            mock_models,
-            submissions=[(post_start, 100, "Web 101")],
-            awards=[(pre_start, 50, "Early bonus")],
-        )
-
-        timeline = get_score_timeline(pid)
-
-        # Origin includes the pre-start award
-        assert timeline[0]["type"] == "start"
-        assert timeline[0]["cumulative"] == 50
-        assert timeline[0]["points"] == 50
-        # Post-start solve adds on top
-        assert timeline[1]["cumulative"] == 150
-        # No entry for the pre-start award itself
-        assert len(timeline) == 2
-
-
-# -----------------------------------------------------------------------------
-# Scoreboard freeze tests
-# -----------------------------------------------------------------------------
-
-
-class TestScoreboardFreeze:
-    """Tests for the freeze_at parameter on get_scoreboard / get_team_scoreboard."""
-
-    def test_get_scoreboard_accepts_freeze_at(self, mock_participant_objects, mock_queryset):
-        """get_scoreboard with freeze_at runs without error and returns results."""
-        freeze_time = _NOW - timedelta(hours=1)
-        p_alice = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=_NOW)
-        mock_participant_objects.filter.return_value = mock_queryset
-        mock_queryset.__iter__ = MagicMock(return_value=iter([p_alice]))
-
-        result = get_scoreboard(uuid4(), freeze_at=freeze_time)
-
-        assert len(result) == 1
-        assert result[0]["name"] == "Alice"
-
-    def test_get_scoreboard_without_freeze_at(self, mock_participant_objects, mock_queryset):
-        """get_scoreboard with freeze_at=None still works (default behaviour)."""
-        p_alice = _make_participant("Alice", computed_score=100, solve_count=1)
-        mock_participant_objects.filter.return_value = mock_queryset
-        mock_queryset.__iter__ = MagicMock(return_value=iter([p_alice]))
-
-        result = get_scoreboard(uuid4(), freeze_at=None)
-
-        assert len(result) == 1
-
-    def test_get_team_scoreboard_accepts_freeze_at(self, mock_team_objects, mock_queryset):
-        """get_team_scoreboard with freeze_at runs without error and returns results."""
-        freeze_time = _NOW - timedelta(hours=1)
-        t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=3)
-        mock_team_objects.filter.return_value = mock_queryset
-        mock_queryset.__iter__ = MagicMock(return_value=iter([t_alpha]))
-
-        result = get_team_scoreboard(uuid4(), freeze_at=freeze_time)
-
-        assert len(result) == 1
-        assert result[0]["name"] == "Alpha"
-
-    def test_get_team_scoreboard_without_freeze_at(self, mock_team_objects, mock_queryset):
-        """get_team_scoreboard with freeze_at=None still works (default behaviour)."""
-        t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=3)
-        mock_team_objects.filter.return_value = mock_queryset
-        mock_queryset.__iter__ = MagicMock(return_value=iter([t_alpha]))
-
-        result = get_team_scoreboard(uuid4(), freeze_at=None)
-
-        assert len(result) == 1
-
-
-class TestIsScoreboardFrozen:
-    """Tests for CTFEvent.is_scoreboard_frozen property."""
-
-    def _make_event(self, freeze_at=None, status="active"):
-        """Create a mock event with freeze configuration."""
-        from ctf.models import CTFEvent
-
-        event = MagicMock(spec=CTFEvent)
-        event.scoreboard_freeze_at = freeze_at
-        event.status = status
-        event.is_scoreboard_frozen = CTFEvent.is_scoreboard_frozen.fget(event)
-        return event
-
-    def test_frozen_when_past_freeze_time_and_active(self):
-        """Event is frozen when now >= freeze_at and status is active."""
-        event = self._make_event(
-            freeze_at=_NOW - timedelta(hours=1),
-            status="active",
-        )
-        assert event.is_scoreboard_frozen is True
-
-    def test_not_frozen_when_no_freeze_time(self):
-        """Event is not frozen when scoreboard_freeze_at is None."""
-        event = self._make_event(freeze_at=None, status="active")
-        assert event.is_scoreboard_frozen is False
-
-    def test_not_frozen_when_event_ended(self):
-        """Event is not frozen when status is ended (freeze lifts on end)."""
-        event = self._make_event(
-            freeze_at=_NOW - timedelta(hours=1),
-            status="ended",
-        )
-        assert event.is_scoreboard_frozen is False
-
-    @patch("ctf.models.timezone")
-    def test_not_frozen_before_freeze_time(self, mock_tz):
-        """Event is not frozen when freeze_at is in the future."""
-        mock_tz.now.return_value = _NOW
-        event = self._make_event(
-            freeze_at=_NOW + timedelta(hours=24),
-            status="active",
-        )
-        assert event.is_scoreboard_frozen is False
-
-
-class TestScoreboardVisibility:
-    """Tests for CTFEvent.scoreboard_visible field behaviour."""
-
-    def _make_event(self, scoreboard_visible=True):
-        """Create a mock event with visibility configuration."""
-        from ctf.models import CTFEvent
-
-        event = MagicMock(spec=CTFEvent)
-        event.scoreboard_visible = scoreboard_visible
-        return event
-
-    def test_scoreboard_visible_by_default(self):
-        """scoreboard_visible defaults to True."""
-        from ctf.models import CTFEvent
-
-        field = CTFEvent._meta.get_field("scoreboard_visible")
-        assert field.default is True
-
-    def test_scoreboard_hidden_when_not_visible(self):
-        """Event with scoreboard_visible=False reports hidden."""
-        event = self._make_event(scoreboard_visible=False)
-        assert event.scoreboard_visible is False
-
-    def test_scoreboard_shown_when_visible(self):
-        """Event with scoreboard_visible=True reports visible."""
-        event = self._make_event(scoreboard_visible=True)
-        assert event.scoreboard_visible is True
-
-    def test_scoreboard_visible_in_mutable_fields(self):
-        """scoreboard_visible is in the event mutable fields whitelist."""
-        from ctf.services.event import _EVENT_MUTABLE_FIELDS
-
-        assert "scoreboard_visible" in _EVENT_MUTABLE_FIELDS
+        assert calculate_score(p.id) == 150
+
+    def test_zero_with_no_activity(self, organizer_user):
+        event = _make_event(organizer_user)
+        p = _make_participant(event, "P")
+        assert calculate_score(p.id) == 0

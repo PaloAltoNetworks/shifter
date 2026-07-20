@@ -42,3 +42,8 @@ output "lifecycle_hook_name" {
   description = "Name of the ASG lifecycle hook (empty if not enabled)"
   value       = var.enable_autoscaling ? aws_autoscaling_lifecycle_hook.launch[0].name : ""
 }
+
+output "termination_lifecycle_hook_name" {
+  description = "Name of the ASG termination-drain lifecycle hook (empty if not enabled)"
+  value       = var.enable_autoscaling ? aws_autoscaling_lifecycle_hook.terminate[0].name : ""
+}

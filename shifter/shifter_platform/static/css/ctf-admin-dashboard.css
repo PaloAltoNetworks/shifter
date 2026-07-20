@@ -1,0 +1,85 @@
+/* CTF admin: dashboard page.
+   Extracted from templates/ctf/admin/dashboard.html (issue #414). */
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+}
+
+.stat-card {
+    padding: 16px;
+}
+
+.stat-card .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--theme-text);
+}
+
+.stat-card .stat-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--theme-text-secondary);
+    margin-top: 4px;
+}
+
+.recent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.status-badge.ready { background: #d1fae5; color: #065f46; }
+.status-badge.provisioning { background: #dbeafe; color: #1e40af; }
+.status-badge.error { background: #fee2e2; color: #991b1b; }
+
+.quick-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--theme-border);
+}
+.quick-controls-row:last-child { border-bottom: none; }
+
+.quick-controls-info { flex: 1; }
+
+.quick-controls-info .event-name {
+    font-weight: 600;
+    color: var(--theme-text);
+}
+
+.quick-controls-info .event-meta {
+    font-size: 12px;
+    color: var(--theme-text-secondary);
+    margin-top: 2px;
+}
+
+.quick-controls-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.quick-controls-actions select {
+    padding: 4px 8px;
+    font-size: 13px;
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    background: var(--theme-bg);
+    color: var(--theme-text);
+}
+
+.quick-controls-actions button {
+    padding: 4px 12px;
+    font-size: 13px;
+}

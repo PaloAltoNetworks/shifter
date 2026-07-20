@@ -1,0 +1,93 @@
+/* CTF admin: event detail page.
+   Extracted from templates/ctf/admin/event_detail.html (issue #414). */
+
+.breadcrumb {
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #94a3b8;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--theme-text-secondary);
+}
+
+.detail-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+}
+
+.schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+
+.schedule-item strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.mgmt-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.mgmt-grid .btn {
+    width: 100%;
+    min-width: auto;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+}
+
+.stat-row + .stat-row {
+    margin-top: 4px;
+}
+
+.stat-divider {
+    border: none;
+    border-top: 1px solid var(--theme-border);
+    margin: 8px 0;
+}
+
+.status-form select {
+    width: 100%;
+    min-width: 0;
+}
+
+.status-form .btn {
+    width: 100%;
+    margin-top: 12px;
+}
+
+/* Extracted inline styles (issue #414) */
+.danger-card {
+    border: 1px solid #dc3545;
+}
+
+.danger-title {
+    color: #dc3545;
+}
+
+.danger-text {
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+    margin-bottom: 12px;
+}
+
+.btn-force-delete {
+    background: #dc3545;
+    color: #fff;
+    width: 100%;
+}

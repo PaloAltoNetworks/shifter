@@ -4,6 +4,10 @@ Issue #700 centralizes experiment script variable sanitization into one
 Pydantic-validated context object. The change is a security boundary change, not
 a new experiment orchestration abstraction.
 
+Superseded note: ADR-027 / issue #1195 removed the legacy experiments runtime
+path. The `ScriptExecutionContext` security boundary remains relevant only as
+historical context and for future ACES-backed designs that explicitly adopt it.
+
 ## Boundary
 
 - The canonical contract belongs with the existing `cyberscript` template

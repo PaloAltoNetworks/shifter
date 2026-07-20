@@ -35,5 +35,5 @@ class GCPConfigStore:
         except ImportError as e:
             raise CloudConfigStoreError("GCP config store support requires google-cloud-secret-manager") from e
         except Exception as e:
-            logger.error("get_parameter: failed name=%s error=%s", name, e)
+            logger.exception("get_parameter: failed name=%s error=%s", name, e)
             raise CloudConfigStoreError(f"Failed to get GCP config parameter: {e}") from e

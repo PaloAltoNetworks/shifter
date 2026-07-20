@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from cms.models import App, Instance
 from shared.enums import ResourceStatus
 from shared.messages.envelope import parse_sns_message
 from shared.messages.events import EVENT_TYPE_NGFW
+from shared.messages.payloads import NGFWEventPayload
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +41,21 @@ def process_ngfw_event(message: str | dict) -> None:
         logger.debug("Ignoring NGFW event_type=%s", event_type)
         return
 
-    event_id = event.get("event_id", "unknown")
-    instance_id = event.get("instance_id")
-    app_id = event.get("app_id")
-    status = event.get("status")
-    serial_number = event.get("serial_number")
+    # event_type confirmed; narrow to the typed payload. Required-field and
+    # status validation below is retained — the payload is still untrusted input.
+    payload = cast(NGFWEventPayload, event)
+
+    event_id = payload.get("event_id", "unknown")
+    instance_id = payload.get("instance_id")
+    app_id = payload.get("app_id")
+    status = payload.get("status")
+    serial_number = payload.get("serial_number")
 
     if not _validate_required_fields(event_id, instance_id, app_id):
         return
     if not _validate_status(event_id, status):
         return
-    # _validate_required_fields confirms both are truthy; narrow for type checkers.
-    assert instance_id is not None
+    # _validate_required_fields confirms app_id is truthy; narrow str | None -> str.
     assert app_id is not None
 
     try:

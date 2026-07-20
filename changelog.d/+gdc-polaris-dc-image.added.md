@@ -1,0 +1,1 @@
+Added a GCP Packer build for the `polaris-dc` (BOREAS.LOCAL) domain-controller image, salvaged from the GDC effort when Polaris moved to the GCE range-cell backend, so a GDC AD image can still be baked if needed in future.

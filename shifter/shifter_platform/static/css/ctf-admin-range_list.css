@@ -1,0 +1,66 @@
+/* CTF admin: range list page.
+   Extracted from templates/ctf/admin/range_list.html (issue #414). */
+
+.range-id {
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+}
+
+.btn-group-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.btn-group-actions .btn {
+    padding: 4px 10px;
+    font-size: 13px;
+}
+
+.provision-progress {
+    margin-bottom: 12px;
+    display: none;
+}
+
+.recovery-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.recovery-controls select {
+    font-size: 13px;
+    padding: 2px 4px;
+}
+
+.recovery-failure-category {
+    font-size: 12px;
+}
+
+.spare-pool-card {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+}
+
+.spare-pool-title {
+    margin: 0 0 8px;
+    font-size: 15px;
+}
+
+.spare-pool-summary {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+
+.spare-pool-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.spare-pool-controls input[type="number"] {
+    width: 80px;
+}

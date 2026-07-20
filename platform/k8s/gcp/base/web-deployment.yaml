@@ -22,7 +22,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       serviceAccountName: portal
-      automountServiceAccountToken: true
+      automountServiceAccountToken: false
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -48,6 +48,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # MEDIA_ROOT (/app/media) must be writable for the django-health-check
+            # storage probe under readOnlyRootFilesystem; the app source tree is
+            # immutable, so back it with an ephemeral writable volume.
+            - name: media
+              mountPath: /app/media
           envFrom:
             - configMapRef:
                 name: platform-runtime
@@ -75,4 +80,6 @@ spec:
               memory: 1Gi
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: media
           emptyDir: {}

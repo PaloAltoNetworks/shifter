@@ -1,0 +1,830 @@
+{
+  "backend_bundle_schema": {
+    "$defs": {
+      "BackendCapability": {
+        "description": "A cloud-neutral capability protocol a backend can satisfy.\n\nThese name the seams under ``shared.cloud`` and ``engine/provisioner/cloud`` that\ndomain code already calls; a backend bundle *declares* which it provides, but it\ndoes not let domain code import provider packages directly.",
+        "enum": [
+          "storage",
+          "queue-consumer",
+          "queue-publisher",
+          "task-runner",
+          "secrets",
+          "config-store",
+          "event-bus",
+          "database-auth",
+          "network-inventory"
+        ],
+        "title": "BackendCapability",
+        "type": "string"
+      },
+      "BackendMaturity": {
+        "description": "How production-ready a backend bundle is.",
+        "enum": [
+          "experimental",
+          "beta",
+          "stable",
+          "deprecated"
+        ],
+        "title": "BackendMaturity",
+        "type": "string"
+      },
+      "CommandSpec": {
+        "additionalProperties": false,
+        "description": "A backend check/renderer invocation, as an argv array (never a shell string).",
+        "properties": {
+          "argv": {
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\s;&|`$<>]+$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "prefixItems": [
+              {
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              }
+            ],
+            "title": "Argv",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "argv",
+          "description"
+        ],
+        "title": "CommandSpec",
+        "type": "object"
+      },
+      "GeneratedOutput": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "sensitivity": {
+                  "const": "secret-value"
+                }
+              },
+              "required": [
+                "sensitivity"
+              ]
+            },
+            "then": {
+              "properties": {
+                "destination": {
+                  "enum": [
+                    "kubernetes-secret",
+                    "provider-secret-store"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "description": "A runtime/infrastructure/CI value a backend renderer produces.\n\n``sensitivity`` and ``destination`` together keep secret *values* out of non-secret\nplaces: a ``SECRET_VALUE`` output may only be placed in a Kubernetes Secret or a\nprovider secret store, never in a ConfigMap, Terraform variables, Helm values, a\ngenerated file, generated docs, a dry-run, or a plan comment.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/$defs/OutputDestination"
+          },
+          "kind": {
+            "$ref": "#/$defs/OutputKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "process_roles": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ProcessRole"
+            },
+            "title": "Process Roles",
+            "type": "array"
+          },
+          "sensitivity": {
+            "$ref": "#/$defs/OutputSensitivity"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "owner",
+          "source",
+          "destination",
+          "sensitivity",
+          "description"
+        ],
+        "title": "GeneratedOutput",
+        "type": "object"
+      },
+      "HealthCheck": {
+        "additionalProperties": false,
+        "description": "A read-only post-render or post-deploy probe.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_credentials": {
+            "title": "Requires Credentials",
+            "type": "boolean"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "target",
+          "requires_credentials",
+          "timeout_seconds",
+          "description"
+        ],
+        "title": "HealthCheck",
+        "type": "object"
+      },
+      "OutputDestination": {
+        "description": "Where a generated output is placed.\n\nUsed together with :class:`OutputSensitivity` to keep secret *values* out of\nnon-secret destinations: a ``SECRET_VALUE`` output may only land in a secret store.",
+        "enum": [
+          "runtime-env",
+          "kubernetes-secret",
+          "provider-secret-store",
+          "terraform-variables",
+          "helm-values",
+          "generated-file"
+        ],
+        "title": "OutputDestination",
+        "type": "string"
+      },
+      "OutputKind": {
+        "description": "The shape of a generated output.",
+        "enum": [
+          "runtime-env",
+          "terraform-var",
+          "terraform-output",
+          "helm-value",
+          "k8s-artifact",
+          "compat-alias"
+        ],
+        "title": "OutputKind",
+        "type": "string"
+      },
+      "OutputSensitivity": {
+        "description": "How a generated output must be handled.\n\n``PUBLIC`` values may appear in ConfigMaps, generated docs, and dry-run output;\n``SECRET_REFERENCE`` values are pointers (a provider secret name, a GitHub Actions\nsecret name, an env var, or ``prompt``); ``SECRET_VALUE`` is the secret material\nitself and must stay in a secret store or Kubernetes Secret — never a ConfigMap,\nlog, dry-run, or plan comment.",
+        "enum": [
+          "public",
+          "secret-reference",
+          "secret-value"
+        ],
+        "title": "OutputSensitivity",
+        "type": "string"
+      },
+      "OwnedFiles": {
+        "additionalProperties": false,
+        "description": "Repo-relative path roots a backend bundle owns, grouped by purpose.\n\nValidation and docs generation use these to find a backend's files without a branch\nrouter. Every entry must be repository-relative (no absolute host paths, no ``..``).",
+        "properties": {
+          "docs": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Docs",
+            "type": "array"
+          },
+          "examples": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "infrastructure": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Infrastructure",
+            "type": "array"
+          },
+          "kubernetes": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Kubernetes",
+            "type": "array"
+          },
+          "scripts": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Scripts",
+            "type": "array"
+          },
+          "workflows": {
+            "default": [],
+            "items": {
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+              "type": "string"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "title": "OwnedFiles",
+        "type": "object"
+      },
+      "ProcessRole": {
+        "description": "Which Shifter process a generated runtime output is for.",
+        "enum": [
+          "portal",
+          "worker",
+          "provisioner",
+          "range-task"
+        ],
+        "title": "ProcessRole",
+        "type": "string"
+      },
+      "RequiredSecret": {
+        "additionalProperties": false,
+        "description": "A secret the backend needs, declared by logical name and reference grammar.\n\nThe root config holds *references* (a per-provider secret name, a GitHub Actions\nsecret name, an env var, or ``prompt``), never values. ``reference_grammar`` is the\nhuman-readable description of what a valid reference looks like for this backend;\n``reference_pattern`` is the optional machine-readable form — an anchored regex a\nconsumer can match a supplied reference against. The provisional registry entries\nleave ``reference_pattern`` unset (no enforcement) until the backend supplies one,\njust like :attr:`BackendBundle.settings_model`.",
+        "properties": {
+          "logical_name": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Logical Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "reference_grammar": {
+            "title": "Reference Grammar",
+            "type": "string"
+          },
+          "reference_pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Pattern"
+          }
+        },
+        "required": [
+          "logical_name",
+          "purpose",
+          "reference_grammar"
+        ],
+        "title": "RequiredSecret",
+        "type": "object"
+      },
+      "RequiredTool": {
+        "additionalProperties": false,
+        "description": "A command-line tool the backend's setup/deploy/doctor flow needs.\n\n``name`` is the bare executable name a setup/doctor flow looks up on PATH (e.g.\n``terraform``, ``uv``), so it is held to the same grammar as a command spec's\n``argv[0]`` — not free-form text.",
+        "properties": {
+          "min_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Version"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "purpose"
+        ],
+        "title": "RequiredTool",
+        "type": "object"
+      },
+      "ValidationCheck": {
+        "additionalProperties": false,
+        "description": "A check a backend runs (or front-runs) before mutating infrastructure.",
+        "properties": {
+          "blocking": {
+            "default": true,
+            "title": "Blocking",
+            "type": "boolean"
+          },
+          "command": {
+            "$ref": "#/$defs/CommandSpec"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "command",
+          "description"
+        ],
+        "title": "ValidationCheck",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "The machine-readable contract a Shifter backend bundle exposes (PLAT-2003).",
+    "properties": {
+      "capabilities": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/BackendCapability"
+        },
+        "title": "Capabilities",
+        "type": "array",
+        "uniqueItems": true
+      },
+      "contract_version": {
+        "enum": [
+          1
+        ],
+        "title": "Contract Version",
+        "type": "integer"
+      },
+      "description": {
+        "title": "Description",
+        "type": "string"
+      },
+      "docs": {
+        "default": [],
+        "items": {
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:.*\\S)?$",
+          "type": "string"
+        },
+        "title": "Docs",
+        "type": "array"
+      },
+      "generated_outputs": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/GeneratedOutput"
+        },
+        "title": "Generated Outputs",
+        "type": "array"
+      },
+      "health_checks": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/HealthCheck"
+        },
+        "title": "Health Checks",
+        "type": "array"
+      },
+      "maturity": {
+        "$ref": "#/$defs/BackendMaturity"
+      },
+      "name": {
+        "pattern": "^[a-z][a-z0-9-]*$",
+        "title": "Name",
+        "type": "string"
+      },
+      "owned_files": {
+        "$ref": "#/$defs/OwnedFiles",
+        "default": {
+          "docs": [],
+          "examples": [],
+          "infrastructure": [],
+          "kubernetes": [],
+          "scripts": [],
+          "workflows": []
+        }
+      },
+      "required_secrets": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RequiredSecret"
+        },
+        "title": "Required Secrets",
+        "type": "array"
+      },
+      "required_tools": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RequiredTool"
+        },
+        "title": "Required Tools",
+        "type": "array"
+      },
+      "settings_schema": {
+        "anyOf": [
+          {
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "The backend's settings JSON schema, or null when the bundle declares no settings model.",
+        "title": "Settings Schema"
+      },
+      "supported_profiles": {
+        "items": {
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "type": "string"
+        },
+        "title": "Supported Profiles",
+        "type": "array",
+        "uniqueItems": true
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      },
+      "validation_checks": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ValidationCheck"
+        },
+        "title": "Validation Checks",
+        "type": "array"
+      }
+    },
+    "required": [
+      "contract_version",
+      "name",
+      "title",
+      "maturity",
+      "description",
+      "supported_profiles"
+    ],
+    "title": "BackendBundle",
+    "type": "object"
+  },
+  "backends": {
+    "aws": {
+      "capabilities": [
+        "config-store",
+        "database-auth",
+        "event-bus",
+        "network-inventory",
+        "queue-consumer",
+        "queue-publisher",
+        "secrets",
+        "storage",
+        "task-runner"
+      ],
+      "contract_version": 1,
+      "description": "Shifter on AWS: ECS task execution, RDS, SQS, S3, Secrets Manager, and Cognito/OIDC identity, provisioned by the Terraform modules under platform/terraform (and the CloudFormation under platform/cloudformation) and deployed by the AWS workflow.",
+      "docs": [
+        "docs/architecture/root-configured-backend-bundles.md",
+        "shifter/installation/README.md"
+      ],
+      "generated_outputs": [
+        {
+          "description": "Selects the cloud adapter family at runtime for the portal, workers, and provisioner; emitted by the backend, never set from a branch name.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "CLOUD_PROVIDER",
+          "owner": "aws backend runtime-env renderer",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "the backend runtime-env renderer"
+        },
+        {
+          "description": "Reference to the app secret bundle (the AWS-style alias entrypoint.sh normalizes) in the portal/worker runtime environment; the process fetches the value from AWS Secrets Manager at startup (entrypoint.sh) — a reference only, the secret value stays in AWS Secrets Manager.",
+          "destination": "runtime-env",
+          "kind": "compat-alias",
+          "name": "APP_SECRET_ARN",
+          "owner": "aws backend runtime-env renderer",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "the backend runtime-env renderer (a AWS Secrets Manager reference for the app secret bundle (the AWS-style alias entrypoint.sh normalizes))"
+        },
+        {
+          "description": "Reference to the database secret (the AWS-style alias entrypoint.sh normalizes) in the portal/worker runtime environment; the process fetches the value from AWS Secrets Manager at startup (entrypoint.sh) — a reference only, the secret value stays in AWS Secrets Manager.",
+          "destination": "runtime-env",
+          "kind": "compat-alias",
+          "name": "DB_SECRET_ARN",
+          "owner": "aws backend runtime-env renderer",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "the backend runtime-env renderer (a AWS Secrets Manager reference for the database secret (the AWS-style alias entrypoint.sh normalizes))"
+        }
+      ],
+      "health_checks": [
+        {
+          "description": "Read-only probe of the portal /health/ endpoint after deploy.",
+          "name": "portal-health",
+          "requires_credentials": false,
+          "target": "https://<deployment.domain>/health/",
+          "timeout_seconds": 10
+        }
+      ],
+      "maturity": "stable",
+      "name": "aws",
+      "owned_files": {
+        "docs": [
+          "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md"
+        ],
+        "examples": [
+          "shifter/installation/examples/aws.yaml"
+        ],
+        "infrastructure": [
+          "platform/terraform/modules",
+          "platform/terraform/environments",
+          "platform/cloudformation"
+        ],
+        "kubernetes": [],
+        "scripts": [
+          "scripts/bootstrap"
+        ],
+        "workflows": [
+          ".github/workflows/deploy.yml"
+        ]
+      },
+      "required_secrets": [
+        {
+          "logical_name": "django_secret_key",
+          "purpose": "seeds the app secret bundle (Django SECRET_KEY) for the portal and workers",
+          "reference_grammar": "an AWS Secrets Manager secret name or ARN, a GitHub Actions secret name, an environment variable, or the literal 'prompt'",
+          "reference_pattern": null
+        },
+        {
+          "logical_name": "db_password",
+          "purpose": "application database password",
+          "reference_grammar": "an AWS Secrets Manager secret name or ARN, a GitHub Actions secret name, an environment variable, or the literal 'prompt'",
+          "reference_pattern": null
+        }
+      ],
+      "required_tools": [
+        {
+          "min_version": null,
+          "name": "uv",
+          "purpose": "run the Shifter installation tooling (shifter-config validate)"
+        },
+        {
+          "min_version": null,
+          "name": "terraform",
+          "purpose": "provision AWS infrastructure (platform/terraform)"
+        },
+        {
+          "min_version": null,
+          "name": "aws",
+          "purpose": "AWS CLI: authentication, Secrets Manager, and ECS deployment"
+        },
+        {
+          "min_version": null,
+          "name": "docker",
+          "purpose": "build the Shifter Platform container image"
+        }
+      ],
+      "settings_schema": null,
+      "supported_profiles": [
+        "dev",
+        "prod"
+      ],
+      "title": "Amazon Web Services",
+      "validation_checks": [
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "uv",
+              "run",
+              "--project",
+              "shifter/installation",
+              "shifter-config",
+              "validate",
+              "shifter.yaml"
+            ],
+            "description": "Validate the root installation config (shifter.yaml) shape."
+          },
+          "description": "Fail fast on a malformed shifter.yaml before any backend infrastructure runs.",
+          "name": "root-config"
+        }
+      ]
+    },
+    "gcp": {
+      "capabilities": [
+        "config-store",
+        "database-auth",
+        "event-bus",
+        "network-inventory",
+        "queue-consumer",
+        "queue-publisher",
+        "secrets",
+        "storage",
+        "task-runner"
+      ],
+      "contract_version": 1,
+      "description": "Shifter on GCP: GKE workloads, Cloud SQL, Pub/Sub, GCS, Secret Manager, and Identity Platform identity, provisioned by the Terraform configuration under platform/terraform/gcp with Kubernetes overlays under platform/k8s/gcp and the shared Helm chart under platform/charts/shifter.",
+      "docs": [
+        "docs/architecture/root-configured-backend-bundles.md",
+        "shifter/installation/README.md"
+      ],
+      "generated_outputs": [
+        {
+          "description": "Selects the cloud adapter family at runtime for the portal, workers, and provisioner; emitted by the backend, never set from a branch name.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "CLOUD_PROVIDER",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "the backend runtime-env renderer"
+        },
+        {
+          "description": "Reference to the app secret bundle in the portal/worker runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Google Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "APP_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "the backend runtime-env renderer (a Google Secret Manager reference for the app secret bundle)"
+        },
+        {
+          "description": "Reference to the database secret in the portal/worker runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Google Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "the backend runtime-env renderer (a Google Secret Manager reference for the database secret)"
+        }
+      ],
+      "health_checks": [
+        {
+          "description": "Read-only probe of the portal /health/ endpoint after deploy.",
+          "name": "portal-health",
+          "requires_credentials": false,
+          "target": "https://<deployment.domain>/health/",
+          "timeout_seconds": 10
+        }
+      ],
+      "maturity": "stable",
+      "name": "gcp",
+      "owned_files": {
+        "docs": [
+          "platform/terraform/gcp/README.md",
+          "platform/k8s/gcp/README.md"
+        ],
+        "examples": [
+          "shifter/installation/examples/gcp.yaml"
+        ],
+        "infrastructure": [
+          "platform/terraform/gcp"
+        ],
+        "kubernetes": [
+          "platform/k8s/gcp",
+          "platform/charts/shifter"
+        ],
+        "scripts": [
+          "scripts/gcp",
+          "scripts/bootstrap"
+        ],
+        "workflows": [
+          ".github/workflows/_gcp-dev.yml"
+        ]
+      },
+      "required_secrets": [
+        {
+          "logical_name": "django_secret_key",
+          "purpose": "seeds the app secret bundle (Django SECRET_KEY) for the portal and workers",
+          "reference_grammar": "a Google Secret Manager resource name (projects/<project>/secrets/<name>/versions/<v>), a GitHub Actions secret name, an environment variable, or the literal 'prompt'",
+          "reference_pattern": null
+        }
+      ],
+      "required_tools": [
+        {
+          "min_version": null,
+          "name": "uv",
+          "purpose": "run the Shifter installation tooling (shifter-config validate)"
+        },
+        {
+          "min_version": null,
+          "name": "terraform",
+          "purpose": "provision GCP infrastructure (platform/terraform/gcp)"
+        },
+        {
+          "min_version": null,
+          "name": "gcloud",
+          "purpose": "Google Cloud SDK: authentication, GKE credentials, Secret Manager"
+        },
+        {
+          "min_version": null,
+          "name": "helm",
+          "purpose": "render and install the platform chart (platform/charts/shifter)"
+        },
+        {
+          "min_version": null,
+          "name": "kubectl",
+          "purpose": "apply Kubernetes manifests under platform/k8s/gcp"
+        },
+        {
+          "min_version": null,
+          "name": "docker",
+          "purpose": "build the Shifter Platform container image"
+        }
+      ],
+      "settings_schema": null,
+      "supported_profiles": [
+        "dev",
+        "prod"
+      ],
+      "title": "Google Cloud Platform",
+      "validation_checks": [
+        {
+          "blocking": true,
+          "command": {
+            "argv": [
+              "uv",
+              "run",
+              "--project",
+              "shifter/installation",
+              "shifter-config",
+              "validate",
+              "shifter.yaml"
+            ],
+            "description": "Validate the root installation config (shifter.yaml) shape."
+          },
+          "description": "Fail fast on a malformed shifter.yaml before any backend infrastructure runs.",
+          "name": "root-config"
+        }
+      ]
+    }
+  },
+  "contract_version": 1,
+  "supported_contract_versions": [
+    1
+  ]
+}

@@ -14,8 +14,8 @@ Note: No default security policy is created. Per-range rules are
 created by NGFWConfigureSubnetsPlan during range provisioning.
 Those rules attach Alert-Group for threat detection without blocking.
 
-Note: SSH wait is handled by main.py before this plan runs.
-Serial number polling is also in main.py (after plan completes).
+Note: SSH wait is handled by ngfw_terraform.py before this plan runs.
+Serial number polling is also in ngfw_terraform.py after the plan completes.
 Commands use stdin_input for PAN-OS configure mode.
 """
 
@@ -51,7 +51,7 @@ class TestNGFWProvisionPlanStructure:
             assert step.script or step.stdin_input, f"Step {step.name} must have content"
             assert step.timeout_seconds > 0, f"Step {step.name} must have positive timeout"
 
-        # NGFW verification is handled by poll_for_serial_and_cert() in main.py,
+        # NGFW verification is handled by poll_for_serial_and_cert() in ngfw_terraform.py,
         # not via a verify_step (serial + cert polling happens after plan completes)
         assert plan.verify_step is None
 

@@ -1,4 +1,4 @@
-# POLARIS / NORTHSTORM CTF — Scenario Development
+# POLARIS / NORTHSTORM CTF—Scenario Development
 
 Consolidated working directory for the NORTHSTORM CTF range (Operation POLARIS).
 Everything related to designing, building, deploying, and testing the range
@@ -41,12 +41,12 @@ scenario-dev/polaris/
 │   ├── dns/                        BIND sidecar (boreas-systems.ctf + boreas.local zones, AXFR enabled)
 │   ├── a0/ ... a14/                Dockerfiles + runtime configs per asset
 │   └── A0-boreas-website/ ...      content generators (server.py, build_*.py, bootstrap.sh, init SQL)
-│       A14-kali/
+│       A14-kali/                   Kali starter text, warm-up note, Claude prompt
 │
 ├── tests/                          everything test-related
 │   ├── setup.sh                    build + up + wait ready
 │   ├── reset.sh                    force-recreate sticky-state services (a5/a10/a11/a12/a13)
-│   ├── run-all-smoketests.sh       full sweep: reset + 15 asset smoketests + isolation
+│   ├── run-all-smoketests.sh       infra sweep: reset + per-asset smoketests + isolation
 │   ├── isolation-smoketest.sh      cross-cutting network boundary validation (70 checks)
 │   ├── smoketests/                 one per asset, pointed at the live range from its pivot container
 │   │   ├── A0-smoketest.sh ... A14-smoketest.(sh|py)
@@ -74,28 +74,53 @@ trust these in this order:
 
 1. `build/docker-compose.yml` and the build/runtime content under `build/`
 2. `build/ctfd-challenges.json` for the core Polaris board: challenge names, categories, values, hints, and prerequisites
-3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd-only onboarding content such as the landing page, quickstart page, and Start Here warm-up
-4. `tests/walkthroughs/` for the intended participant path through the live topology
-5. `design/` as the spec that should be kept in sync with the implementation
+3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd onboarding content such as the landing page, quickstart page, and Start Here warm-up
+4. `build/A14-kali/START_HERE.txt` and `build/A14-kali/welcome.txt` for the local Kali copy of the first-five-minutes path and warm-up flag note
+5. `tests/walkthroughs/` for the intended participant path through the live topology
+6. `design/` as the spec that should be kept in sync with the implementation
 
 If these disagree, reconcile the docs against the actual build and walkthroughs
 first instead of assuming the older design prose is correct.
 
+Per-scenario verification adapters and answer material are not stored in this
+tree. Shifter core provides only the neutral discovery, runner, prerequisite,
+aggregation, and redacted-report framework. Operators install a reviewed,
+version-pinned verification distribution separately and select its exact
+distribution version and entry point. See the
+[scenario-verification technical guide](../../docs/technical/shifter_platform/scenario-verification.md).
+
 ## Getting started
 
-1. **Deploy** — on the range host (ctf-range-builder GCP VM):
+For AWS standalone/default-VPC bring-up, use
+[`scripts/polaris-aws-range/README.md`](../../scripts/polaris-aws-range/README.md).
+That path provisions the Ubuntu range host and A2 Windows DC in AWS, then runs
+the same `tests/` validation scripts over SSM.
+
+Legacy local-compose flow:
+
+1. **Deploy**—on the range host:
    ```
    rsync -a scenario-dev/polaris/ ctf-range-builder:/home/atomik/range/
    ssh ctf-range-builder 'bash /home/atomik/range/tests/setup.sh'
    ```
 
-2. **Test** — run the full sweep:
+2. **Test**—run the full sweep:
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/run-all-smoketests.sh'
    ```
-   Expected: `16 / 16 asset sweeps PASS`, `NORTHSTORM full range: PASS`.
+   Expected: all listed asset sweeps pass and `NORTHSTORM full range: PASS`.
+   Infrastructure-level: per-asset connectivity + cross-cutting network
+   isolation. Does not verify CTFd challenge content.
 
-3. **Reset** — before each test or between participant sessions:
+3. **Verify scenario content**—in a separate least-privilege operator
+   environment, run the explicitly selected, version-pinned installed
+   verification distribution against the staged range. Keep its bindings and
+   credentials outside this repository. A cutover-grade redacted report must
+   cover the declared acceptance universe with zero failed, blocked, errored,
+   or missing checks. The core package deliberately supplies no Polaris
+   adapter, board reader, answer key, or scenario-specific CLI.
+
+4. **Reset**—before each test or between participant sessions:
    ```
    ssh ctf-range-builder 'bash /home/atomik/range/tests/reset.sh'
    ```
@@ -108,7 +133,7 @@ first instead of assuming the older design prose is correct.
 |--------|--------------------------|---------------------|-----|
 | A0     | shared                   | a14-kali            | a14 is on shared |
 | A1     | corporate                | a14-kali            | a14 is on corporate |
-| A2     | external GCP VM          | a14-kali            | routed via host |
+| A2     | adjacent Windows VM      | a14-kali            | routed via host/VPC |
 | A3     | corporate                | a14-kali            | a14 reaches on corporate |
 | A4     | corporate                | a14-kali            | a14 is on corporate |
 | A5     | scada (VLAN 40)          | a15-ops-eng         | only A15 reaches scada |

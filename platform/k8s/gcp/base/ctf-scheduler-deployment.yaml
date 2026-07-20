@@ -21,7 +21,7 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-      serviceAccountName: workers
+      serviceAccountName: ctf-scheduler
       automountServiceAccountToken: false
       containers:
         - name: ctf-scheduler

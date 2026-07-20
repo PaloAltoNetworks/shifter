@@ -1,0 +1,162 @@
+# Shifter Architecture
+
+Shifter is a Django application for managing cyber ranges. It deploys to AWS or
+GCP.
+
+## Platform Infrastructure
+
+Infrastructure is defined per cloud provider. `shifter.yaml` selects the backend
+bundle for installation. The backend emits runtime configuration, including
+`CLOUD_PROVIDER`, for Django, workers, and the provisioner.
+
+| Component | Purpose |
+|-----------|---------|
+| **Global** | IAM roles, cloud identity services, CI/CD identity federation. |
+| **Core** | Container registries, base environment resources. |
+| **Range** | Range networking and guest isolation. |
+| **Portal*** | Shifter application infrastructure (load balancer, compute, database, object storage). |
+
+*Portal is a legacy name. This component deploys the Shifter Django application infrastructure.
+
+| | AWS | GCP |
+|---|---|---|
+| **IaC** | Terraform (`platform/terraform/modules/`, `environments/`) | Terraform (`platform/terraform/gcp/`) + Helm (`platform/charts/shifter/`) with bootstrap-generated values |
+| **Compute** | EC2 (configurable ASG) + ECS Fargate | GKE (node pools: web, workers, provisioner) |
+| **Database** | RDS PostgreSQL | Cloud SQL PostgreSQL |
+| **Cache** | ElastiCache Redis | Memorystore Redis |
+| **Object Storage** | S3 | GCS |
+| **Messaging** | SNS (fanout) → SQS (per-domain queues) | Pub/Sub (topic → per-domain subscriptions) |
+| **Container Registry** | ECR | Artifact Registry |
+| **Secrets** | Secrets Manager + SSM Parameter Store | Secret Manager |
+| **Identity** | Cognito hosted UI via OIDC | Identity Platform browser-side auth via FirebaseUI/Google SDKs + TOTP |
+| **Range Guests** | EC2 instances in isolated VPC subnets | GDC VM Runtime (KubeVirt) with optional lower-fidelity pod execution on GDC cluster |
+| **Egress Filtering** | AWS Network Firewall (domain-based rules) | Per-range namespace and L2 network isolation |
+
+### Identity
+
+AWS and GCP keep provider-specific identity stacks behind a shared auth seam:
+
+- AWS uses Cognito through `mozilla-django-oidc`
+- GCP uses Identity Platform through FirebaseUI/browser-side Google auth flows. Django only exchanges verified identity tokens for Shifter sessions.
+
+Common operator requirements:
+- Email as username
+- MFA required (TOTP)
+- Domain restriction for allowed email domains
+- Email verification required
+- Temporary CTF participant username/password accounts remain separate from the corporate identity-provider flow
+
+### Hosting
+
+CI/CD runs through GitHub Actions on self-hosted runners. AWS and GCP have
+separate deployment paths.
+
+## Shifter (Django)
+
+Django monorepo. Users interact through Mission Control. Backend apps expose
+service interfaces.
+
+| Element | App | Purpose |
+|---------|-----|---------|
+| **Mission Control** | `mission_control` | Presentation layer. Single UI for all users. |
+| **Shifter Engine** | `engine` | Range management. Owns Range lifecycle, references CMS assets. |
+| **Shifter CMS** | `cms` | Content management. Assets, credentials, scenario catalog. |
+| **Shifter Admin** | `management` | Platform management. Audit logging, user profiles. |
+
+### Event-Driven Communication
+
+The provisioner publishes status events to a message topic. Domains subscribe
+through per-domain queues and process events through domain-specific handlers.
+
+On AWS this is SNS → SQS. On GCP this is Pub/Sub topic → subscriptions. The application code uses cloud adapter interfaces (see [Cloud Adapters](dev/cloud-adapters)) and does not reference provider APIs directly.
+
+```mermaid
+sequenceDiagram
+    participant P as Provisioner
+    participant T as Event Topic
+    participant Q as Domain Queues
+    participant ENG as Engine Handlers
+    participant CMS as CMS Handlers
+    participant MC as MC Handlers
+    participant R as Redis Channels
+    participant B as Browser
+
+    P->>T: publish event
+    T->>Q: fanout
+    Q->>ENG: process
+    Q->>CMS: process
+    Q->>MC: process
+    ENG->>ENG: update Engine models
+    CMS->>CMS: update CMS models
+    MC->>R: broadcast
+    R->>B: WebSocket push
+```
+
+- **Engine handlers**: Update `Range` status, timestamps
+- **CMS handlers**: Update `RangeInstance`, `Instance`, `App` status
+- **MC handlers**: Broadcast to WebSocket for real-time UI updates (advisory; see below)
+
+#### Consistency Model and Event-Loss Recovery
+
+PostgreSQL is the authoritative state store for range, request, instance,
+application, and experiment-run state. Range and experiment events are
+correctness-critical propagation signals, not a replacement state store and
+not best-effort UI-only notifications. Range state diverges when an event is
+lost; the platform makes every correctness-critical event recoverable through
+two complementary layers.
+
+**Layer 1—Transactional outbox.** The provisioner enqueues each event into
+`engine_range_event_outbox` (`RangeEventOutbox`) in the same DB transaction as
+the authoritative state write, so state and event-intent commit atomically. The
+`drain_range_event_outbox` portal management command reads PENDING outbox rows
+and publishes them to the SNS topic (AWS) or Pub/Sub topic (GCP) with
+exponential-backoff retry. After `max_attempts`, a row transitions to a DLQ
+terminal state and an operator-visible alert fires. Drained rows transition to
+PUBLISHED. PENDING rows can be replayed by re-running the drainer.
+
+**Layer 2—DB-authoritative reconciler.** The `reconcile_range_events` portal
+management command re-reads authoritative `engine.Range` state and
+idempotently re-drives stale CMS `RangeInstance` projections through the
+existing handler seam. It does not bypass domain invariants or write Engine
+models from CMS.
+
+**Consumer failure propagation.** Consumer handlers propagate transient DB or
+broker failures rather than swallowing them, so the worker ack-after-handler
+retry and the SQS/Pub/Sub dead-letter path engage for transient failures.
+Invalid, permanently unprocessable, or duplicate payloads are logged and
+deliberately acknowledged.
+
+**MC websocket fanout is advisory.** WebSocket delivery is a projection of
+authoritative state and is not a recovery path. Experiment continuation, CMS
+state convergence, and Engine status transitions do not depend on websocket
+delivery.
+
+**Messaging parity.** AWS SNS/SQS and GCP Pub/Sub maintain dead-letter,
+retry-policy, and operator-visible alerting parity (CloudWatch alarms on AWS;
+Cloud Monitoring alerts on GCP).
+
+See `docs/architecture/range-event-delivery-preflight-476.md` for the
+pre-implementation consistency model and cross-cutting constraints (ADR-025).
+
+## Cloud Adapters
+
+The platform and provisioner use protocol-based abstractions to isolate
+cloud-specific code. `CLOUD_PROVIDER` selects the implementation at runtime via
+factory functions.
+
+The installation backend registry declares the supported backends, required
+tools, required secrets, generated outputs, validation checks, health checks,
+owned files, and cloud-neutral capabilities. See
+[Installation Config](dev/installation-config).
+
+See [Cloud Adapters](dev/cloud-adapters) for the full interface reference.
+
+## Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| UI separation | Mission Control is presentation only | Clean separation of presentation from domain logic. Views handle HTTP; services own business rules. |
+| API style | REST via Django REST Framework | Uses the existing Django application stack. |
+| Cloud abstraction | Protocol-based adapters per provider | Same Django app runs on AWS or GCP. Cloud-specific code isolated behind interfaces. |
+| Identity | Provider seam with per-cloud implementations | AWS keeps Cognito/OIDC. GCP uses Identity Platform with FirebaseUI/browser auth. Both require MFA, email-based usernames, and keep provider-specific auth details behind the app auth seam. |
+| Domains | Operator-owned hostname | DNS may be hosted externally or in cloud-managed DNS. |

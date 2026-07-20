@@ -1,0 +1,7 @@
+/* CTF participant: scoreboard page.
+   Extracted from templates/ctf/participant/scoreboard.html (issue #414). */
+
+.score-chart-container {
+    position: relative;
+    height: 250px;
+}

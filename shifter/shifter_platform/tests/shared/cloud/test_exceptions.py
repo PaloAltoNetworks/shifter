@@ -30,3 +30,17 @@ class TestExceptionHierarchy:
     def test_provider_not_implemented_error(self):
         err = CloudProviderNotImplementedError("gcp")
         assert "gcp" in str(err)
+
+    def test_provider_not_implemented_lists_registry_backends(self):
+        """Supported-backend list is derived from the installation registry (PLAT-2005)."""
+        err = CloudProviderNotImplementedError("azure")
+        assert "aws" in str(err)
+        assert "gcp" in str(err)
+
+    def test_provider_not_implemented_names_capability(self):
+        """A capability-scoped failure names the missing capability (PLAT-2005)."""
+        from installation.contract import BackendCapability
+
+        err = CloudProviderNotImplementedError("aws", BackendCapability.STORAGE)
+        assert "STORAGE" in str(err)
+        assert err.capability is BackendCapability.STORAGE

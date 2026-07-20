@@ -6,6 +6,9 @@ root_packages =
     mission_control
     shared
     ctf
+    config
+    risk_register
+include_external_packages = True
 
 [importlinter:contract:engine-forbidden]
 name = Engine may not depend on CMS, Mission Control, or CTF
@@ -41,6 +44,10 @@ forbidden_modules =
 allow_indirect_imports = True
 
 [importlinter:contract:mission-control-forbidden]
+# ADR-001-R4: mission_control intentionally consumes both cms.services and
+# engine.services (the engine seam narrowed to a per-symbol allowlist). The
+# canonical allowlist is enumerated in scripts/check_layer_imports/layer_imports.yaml;
+# this complementary contract prevents a direct CTF dependency.
 name = Mission Control may not depend on CTF directly
 type = forbidden
 source_modules =
@@ -57,4 +64,63 @@ source_modules =
 forbidden_modules =
     engine
     mission_control
+allow_indirect_imports = True
+
+# ADR-001 (#1523): risk_register is a domain layer. It owns the AuditLog store
+# and risk CRUD; it may use shared and management.services only, never another
+# feature/presentation domain or the composition root.
+[importlinter:contract:risk-register-forbidden]
+name = Risk Register may not depend on other feature layers or the composition root
+type = forbidden
+source_modules =
+    risk_register
+forbidden_modules =
+    cms
+    engine
+    mission_control
+    ctf
+    config
+allow_indirect_imports = True
+
+# ADR-001 (#1523): config is the composition root. It wires public domain
+# service facades but must never import domain models directly.
+[importlinter:contract:config-forbidden-domain-models]
+name = Config (composition root) may not import domain models
+type = forbidden
+source_modules =
+    config
+forbidden_modules =
+    cms.models
+    engine.models
+    management.models
+    mission_control.models
+    ctf.models
+    risk_register.models
+allow_indirect_imports = True
+
+# ADR-031-R1: the ACES SDL tooling (aces-sdl) may be imported only within
+# shared.aces. The realization layers must consume ACES provisioning through the
+# neutral ProvisioningSpec and shared seams, never by importing an aces_*
+# package. shared is intentionally excluded as a source module here because
+# shared.aces (the manifest builder and RuntimeTarget backend) is the one place
+# allowed to import the tooling; shared.aces.__init__ is inert so importing a
+# runtime-safe shared.aces submodule never pulls the tooling in transitively.
+[importlinter:contract:aces-sdl-confined-to-shared-aces]
+name = ACES SDL tooling is confined to shared.aces (ADR-031-R1)
+type = forbidden
+source_modules =
+    cms
+    engine
+    management
+    mission_control
+    ctf
+    config
+    risk_register
+forbidden_modules =
+    aces_sdl
+    aces_contracts
+    aces_runtime
+    aces_processor
+    aces_conformance
+    aces_backend_protocols
 allow_indirect_imports = True

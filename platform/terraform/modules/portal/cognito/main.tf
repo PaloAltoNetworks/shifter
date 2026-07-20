@@ -2,6 +2,10 @@
 # Cognito User Pool
 # ------------------------------------------------------------------------------
 
+locals {
+  iam_name_prefix = coalesce(var.iam_name_prefix, var.name_prefix)
+}
+
 resource "aws_cognito_user_pool" "main" {
   name = "${var.name_prefix}-users"
 
@@ -128,6 +132,7 @@ resource "aws_cognito_user_pool_client" "portal" {
 resource "aws_cloudwatch_log_group" "pre_signup" {
   name              = "/aws/lambda/${var.name_prefix}-cognito-pre-signup"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-cognito-pre-signup-logs"
@@ -140,7 +145,16 @@ data "archive_file" "pre_signup" {
   output_path = "${path.module}/lambda/pre_signup.zip"
 }
 
+# Cognito pre-signup Lambda — invoked synchronously by Cognito (AWS-owned
+# infrastructure), so several Lambda hardening checks do not apply in the
+# usual way. Per ADR-004-R11 exception ckv-aws-cognito-pre-signup-lambda.
 resource "aws_lambda_function" "pre_signup" {
+  # checkov:skip=CKV_AWS_50:Sync Cognito pre-signup; CloudWatch logs are sufficient observability.
+  # checkov:skip=CKV_AWS_115:Hot synchronous Cognito hook; reserved concurrency would block legitimate signups.
+  # checkov:skip=CKV_AWS_116:DLQ only applies to async Lambda; this is invoked synchronously by Cognito.
+  # checkov:skip=CKV_AWS_117:Cognito invokes from AWS-managed infra; VPC config needs a Cognito VPC endpoint for no security gain.
+  # checkov:skip=CKV_AWS_173:Env vars are non-sensitive allowlists (email domains).
+  # checkov:skip=CKV_AWS_272:Lambda code signing requires CodeArtifact + Signer; out of scope for #757.
   function_name    = "${var.name_prefix}-cognito-pre-signup"
   filename         = data.archive_file.pre_signup.output_path
   source_code_hash = data.archive_file.pre_signup.output_base64sha256
@@ -177,7 +191,8 @@ resource "aws_lambda_permission" "cognito_invoke" {
 # ------------------------------------------------------------------------------
 
 resource "aws_iam_role" "lambda_exec" {
-  name = "${var.name_prefix}-cognito-lambda-role"
+  name                 = "${local.iam_name_prefix}-cognito-lambda-role"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -222,4 +237,11 @@ resource "aws_secretsmanager_secret_version" "cognito_client" {
     domain        = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
     issuer_url    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
   })
+
+  lifecycle {
+    # Terraform bootstraps the initial client into the bundle; the rotation
+    # Lambda (rotation.tf, #159) writes the blue/green replacement client and
+    # owns the bundle thereafter, so do not revert secret_string.
+    ignore_changes = [secret_string]
+  }
 }

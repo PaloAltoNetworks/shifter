@@ -1,0 +1,1 @@
+Sanitize the operator-supplied `strategy` and spare-pool `count` values through `safe_log_value` before logging them in the CTF range-recovery and spare-provisioning services, resolving three CodeQL log-injection findings (alerts 1087–1089) raised on the #1018 recovery feature.

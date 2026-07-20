@@ -15,9 +15,24 @@ output "vpc_cidr" {
   value       = aws_vpc.this.cidr_block
 }
 
+output "vpc_dns_server" {
+  description = "AmazonProvidedDNS address for the range VPC (VPC CIDR base + 2)"
+  value       = cidrhost(var.vpc_cidr, 2)
+}
+
 output "internet_gateway_id" {
   description = "ID of the internet gateway"
   value       = aws_internet_gateway.this.id
+}
+
+output "vpn_edge_subnet_id" {
+  description = "Public placement subnet for request-owned OpenVPN NLBs"
+  value       = aws_subnet.vpn_edge.id
+}
+
+output "provider_api_endpoint_security_group_id" {
+  description = "Destination security group for private provider API endpoints used by VPN gateways"
+  value       = aws_security_group.ssm_endpoints.id
 }
 
 # ------------------------------------------------------------------------------

@@ -1,0 +1,24 @@
+{% load i18n static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
+    <title>{% trans "CTF participant login" %}</title>
+  </head>
+  <body>
+    <main>
+      <h1>{% trans "CTF participant login" %}</h1>
+      {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+      <form method="post">
+        {% csrf_token %}
+        <label for="id_username">{% trans "Username" %}</label>
+        <input id="id_username" name="username" autocomplete="username" maxlength="150" required>
+        <label for="id_password">{% trans "Password" %}</label>
+        <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+        <button type="submit">{% trans "Log in" %}</button>
+      </form>
+    </main>
+  </body>
+</html>

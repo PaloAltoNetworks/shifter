@@ -1,0 +1,224 @@
+"""CMS service interface.
+
+Content and asset management for Shifter platform. The implementation is
+split across private submodules (``_common``, ``_agents``, ``_credentials``,
+``_range_queries``, ``_range_create``, ``_range_destroy``, ``_range_pause``,
+``_range_resume``, ``_uploads``, ``_scenarios``, ``_ngfws``, ``_queries``)
+and re-exported here so callers continue to use
+``from cms.services import X``.
+
+The re-exports also rebind names that tests historically patch at
+``cms.services.<name>`` (``assets_create_agent``, ``assets_delete_agent``,
+``audit_log``, the ``engine_*`` aliases, ``RangeInstance``) so existing
+``unittest.mock.patch`` targets still work.
+
+The cross-layer re-export (``cms.signals.*``) is
+preserved on the facade so the layer-imports gate
+(``scripts/check_layer_imports/layer_imports.yaml``) continues to allow
+only ``cms.services`` from mission_control / ctf rather than reaching into
+``cms.signals`` directly.
+"""
+
+from __future__ import annotations
+
+# --- Names tests patch via ``patch("cms.services.X")`` -----------------------
+# Rebound here so the patch target resolves at the package level, which means
+# submodules that look these up at call time through ``cms.services`` honour
+# the mock for free.
+from cms.assets.services import AgentUploadSpec
+from cms.assets.services import create_agent as assets_create_agent
+from cms.assets.services import delete_agent as assets_delete_agent
+from cms.exceptions import CMSError
+from cms.models import AgentConfig, RangeInstance
+from cms.signals import range_status_changed as range_status_changed
+from engine.services import EventCapacitySignal as EngineEventCapacitySignal
+from engine.services import cancel_range_by_request as engine_cancel_range_by_request
+from engine.services import create_range as engine_create_range
+from engine.services import destroy_range_by_request as engine_destroy_range_by_request
+from engine.services import get_instance_ips_by_uuid as engine_get_instance_ips_by_uuid
+from engine.services import get_openvpn_profile as engine_get_openvpn_profile
+from engine.services import has_openvpn_profile as engine_has_openvpn_profile
+from engine.services import pause_range as engine_pause_range
+from engine.services import (
+    range_owner_reassignment_available_by_request as engine_range_owner_reassignment_available,
+)
+from engine.services import reassign_range_owner_by_request as engine_reassign_range_owner
+from engine.services import (
+    record_capacity_declaration as engine_record_capacity_declaration,
+)
+from engine.services import resume_range as engine_resume_range
+from shared.audit import (
+    AuditEvent,
+    audit_log,
+)
+
+from ._aces_range_create import create_aces_native_range, create_range_dispatch
+
+# --- Public service functions ------------------------------------------------
+from ._agents import (
+    create_agent,
+    delete_agent,
+    get_agent,
+    get_allowed_extensions,
+    list_agents,
+)
+from ._content_ingestion import PackRegistrationRequest, RegisteredPack, register_pack
+from ._credentials import (
+    create_credential,
+    delete_credential,
+    get_credential,
+    list_credentials,
+)
+from ._ngfws import (
+    create_ngfw,
+    destroy_ngfw,
+    get_ngfw,
+    list_ngfws,
+)
+from ._queries import (
+    find_range_instance_id_by_request,
+    get_range_spec_by_id,
+    get_range_status_by_id,
+    get_range_target_instances,
+)
+from ._range_create import create_range
+from ._range_destroy import (
+    cancel_range,
+    cancel_range_by_request_id,
+    destroy_range,
+    destroy_range_by_request_id,
+)
+from ._range_lease import (
+    RangeLeaseConflict,
+    RangeLeaseNotFound,
+    expire_due_ranges,
+    extend_mission_control_range,
+    get_mission_control_range_lease,
+    reconcile_ctf_range_leases,
+)
+from ._range_pause import pause_range, pause_range_by_request_id
+from ._range_queries import (
+    get_active_range,
+    get_range,
+    get_range_by_request_id,
+    has_ready_active_range,
+    list_mission_control_range_history,
+    list_ranges,
+)
+from ._range_reassign import range_owner_reassignment_available, reassign_range_owner
+from ._range_resume import resume_range, resume_range_by_request_id
+from ._range_vpn import (
+    CtfOpenVpnProfileConflict,
+    CtfOpenVpnProfileNotFound,
+    CtfOpenVpnProfileUnavailable,
+    OpenVpnProfileConflict,
+    OpenVpnProfileNotFound,
+    OpenVpnProfileUnavailable,
+    get_ctf_openvpn_profile,
+    get_mission_control_openvpn_profile,
+    has_ctf_openvpn_profile,
+    has_mission_control_openvpn_profile,
+)
+from ._scenarios import (
+    get_scenario,
+    list_launchable_scenarios,
+    list_scenarios,
+    validate_scenario_requirements,
+)
+from ._uploads import (
+    cancel_upload,
+    complete_upload,
+    get_storage_used,
+    initiate_upload,
+)
+
+# Cross-layer re-export preserved on cms.services so the layer-imports gate
+# (scripts/check_layer_imports/layer_imports.yaml) can continue to allow only
+# `cms.services` from mission_control / ctf rather than reaching into
+# cms.signals directly.
+__all__ = (
+    "AgentConfig",
+    "AgentUploadSpec",
+    "AuditEvent",
+    "CMSError",
+    "CtfOpenVpnProfileConflict",
+    "CtfOpenVpnProfileNotFound",
+    "CtfOpenVpnProfileUnavailable",
+    "EngineEventCapacitySignal",
+    "OpenVpnProfileConflict",
+    "OpenVpnProfileNotFound",
+    "OpenVpnProfileUnavailable",
+    "PackRegistrationRequest",
+    "RangeInstance",
+    "RangeLeaseConflict",
+    "RangeLeaseNotFound",
+    "RegisteredPack",
+    "assets_create_agent",
+    "assets_delete_agent",
+    "audit_log",
+    "cancel_range",
+    "cancel_range_by_request_id",
+    "cancel_upload",
+    "complete_upload",
+    "create_aces_native_range",
+    "create_agent",
+    "create_credential",
+    "create_ngfw",
+    "create_range",
+    "create_range_dispatch",
+    "delete_agent",
+    "delete_credential",
+    "destroy_ngfw",
+    "destroy_range",
+    "destroy_range_by_request_id",
+    "engine_cancel_range_by_request",
+    "engine_create_range",
+    "engine_destroy_range_by_request",
+    "engine_get_instance_ips_by_uuid",
+    "engine_get_openvpn_profile",
+    "engine_has_openvpn_profile",
+    "engine_pause_range",
+    "engine_range_owner_reassignment_available",
+    "engine_reassign_range_owner",
+    "engine_record_capacity_declaration",
+    "engine_resume_range",
+    "expire_due_ranges",
+    "extend_mission_control_range",
+    "find_range_instance_id_by_request",
+    "get_active_range",
+    "get_agent",
+    "get_allowed_extensions",
+    "get_credential",
+    "get_ctf_openvpn_profile",
+    "get_mission_control_openvpn_profile",
+    "get_mission_control_range_lease",
+    "get_ngfw",
+    "get_range",
+    "get_range_by_request_id",
+    "get_range_spec_by_id",
+    "get_range_status_by_id",
+    "get_range_target_instances",
+    "get_scenario",
+    "get_storage_used",
+    "has_ctf_openvpn_profile",
+    "has_mission_control_openvpn_profile",
+    "has_ready_active_range",
+    "initiate_upload",
+    "list_agents",
+    "list_credentials",
+    "list_launchable_scenarios",
+    "list_mission_control_range_history",
+    "list_ngfws",
+    "list_ranges",
+    "list_scenarios",
+    "pause_range",
+    "pause_range_by_request_id",
+    "range_owner_reassignment_available",
+    "range_status_changed",
+    "reassign_range_owner",
+    "reconcile_ctf_range_leases",
+    "register_pack",
+    "resume_range",
+    "resume_range_by_request_id",
+    "validate_scenario_requirements",
+)

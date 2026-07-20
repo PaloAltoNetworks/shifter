@@ -1,0 +1,29 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+{# Operator-owned privacy notice body. Replace this template before production use. #}
+<section class="privacy-notice-content">
+    <h1>{% trans "Privacy Notice Placeholder" %}</h1>
+    <p>
+        {% blocktrans trimmed %}
+        This page is a neutral shell shipped with the Shifter portal.
+        It is not a binding privacy policy and does not assert GDPR compliance.
+        {% endblocktrans %}
+    </p>
+    <p>
+        {% blocktrans trimmed %}
+        Before production use, the deployment operator must replace this content with reviewed legal text
+        that identifies the data controller, contact details, categories of personal data processed,
+        retention periods, subprocessors or processors, international transfers (if any),
+        lawful bases (if applicable), and data-subject rights mechanisms relevant to that deployment.
+        {% endblocktrans %}
+    </p>
+    <p>
+        {% blocktrans trimmed %}
+        This OSS project does not add analytics, advertising, tracking cookies,
+        or non-essential cookie consent flows.
+        The portal only discloses strictly necessary browser storage used for authentication,
+        session behavior, and notice dismissal.
+        {% endblocktrans %}
+    </p>
+</section>

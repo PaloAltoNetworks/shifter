@@ -7,6 +7,7 @@ import {
   getProfile as _getProfile,
   awsJson,
 } from "./lib.js";
+import { installToolSchemaDialectNormalizer } from "../shared/tool-schema-dialect.js";
 
 const PROFILES = {
   dev: process.env.PANW_SHIFTER_DEV_PROFILE,
@@ -47,6 +48,7 @@ const server = new McpServer({
   name: "shifter-ngfw",
   version: "1.0.0",
 });
+installToolSchemaDialectNormalizer(server);
 
 const EnvSchema = z
   .enum(["dev", "prod"])

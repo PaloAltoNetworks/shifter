@@ -4,11 +4,26 @@
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
 echo "=== Installing XFCE desktop and xrdp for RDP access ==="
-# Install lightweight XFCE desktop (ubuntu-desktop is too heavy)
-# dbus-x11 is required for xrdp session communication
-apt-get install -y xfce4 xfce4-goodies xrdp xorgxrdp dbus-x11
+# Some XFCE-related packages still assume a classic inetd config exists.
+touch /etc/inetd.conf
+
+# Install only the XFCE components xrdp needs. The full xfce4-goodies
+# dependency chain pulls hardware/peripheral packages that are brittle in
+# an EC2 bake environment and are not needed for challenge victims.
+apt-get install -y --no-install-recommends \
+    dbus-x11 \
+    thunar \
+    xfce4-panel \
+    xfce4-session \
+    xfce4-settings \
+    xfconf \
+    xfdesktop4 \
+    xfwm4 \
+    xorgxrdp \
+    xrdp
 
 # Enable xrdp service
 systemctl enable xrdp
@@ -81,4 +96,11 @@ ResultInactive=no
 ResultActive=yes
 EOF
 
+touch /var/tmp/shifter-desktop-ready
 echo "=== Desktop setup complete ==="
+
+# On Ubuntu 22.04, desktop package hooks have intermittently left the Packer
+# shell wrapper reporting 123 after the script's intended work completed. Keep
+# strict-mode failure behavior for every command above, then return success once
+# the desktop configuration has reached this marker.
+exit 0

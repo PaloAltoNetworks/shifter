@@ -12,13 +12,6 @@ from typing import Any
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_EVENT_PATH = SCRIPT_DIR / "agentic_workshop.json"
-
-
-def load_event_config(path: str | None = None) -> dict[str, Any]:
-    event_path = Path(path) if path else DEFAULT_EVENT_PATH
-    with event_path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
 
 
 def build_password(length: int = 20) -> str:

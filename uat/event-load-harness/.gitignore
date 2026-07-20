@@ -1,0 +1,17 @@
+# Python / tooling caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# Operator run artifacts and secret-bearing files. Never commit these:
+# generated reports, run configs, and credential manifests are environment- and
+# secret-specific. The committed evidence artifact is sample-envelope-report.md.
+out/
+*.envelope.md
+run*.toml
+actors*.toml
+*.actors.toml

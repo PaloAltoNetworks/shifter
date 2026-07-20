@@ -38,5 +38,5 @@ class GCPDBAuth:
         except ImportError as e:
             raise CloudDBAuthError("GCP DB auth support requires google-auth") from e
         except Exception as e:
-            logger.error("generate_auth_token: failed error=%s", e)
+            logger.exception("generate_auth_token: failed error=%s", e)
             raise CloudDBAuthError(f"Failed to generate Cloud SQL IAM auth token: {e}") from e

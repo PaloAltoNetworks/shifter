@@ -1,0 +1,20 @@
+/* CTF admin: notification list page.
+   Extracted from templates/ctf/admin/notification_list.html (issue #414). */
+
+.notification-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.notification-meta {
+    font-size: 12px;
+    color: var(--theme-text-secondary);
+    margin-top: 4px;
+}
+
+.notification-body {
+    margin-top: 8px;
+    color: var(--theme-text);
+}

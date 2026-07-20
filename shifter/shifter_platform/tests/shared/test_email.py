@@ -68,18 +68,24 @@ class TestSendEmail:
 class TestSendEmailAsync:
     """Tests for send_email_async()."""
 
-    @patch("shared.email.send_email")
-    def test_dispatches_to_thread(self, mock_send):
-        """Submits email to thread pool and returns immediately."""
-        mock_send.return_value = True
+    def test_dispatches_to_thread_and_delivers(self, mailoutbox):
+        """Submits the real send_email to the thread pool; the message lands.
 
-        # Should not raise and should return None (fire-and-forget)
-        email.send_email_async("a@b.com", "Sub", "<h>", "t")
+        Drives the real ``send_email`` (no first-party patch) so the locmem
+        email backend records the delivery — asserting the effect rather than
+        that ``send_email`` was called.
+        """
+        # Fire-and-forget: returns None immediately.
+        assert email.send_email_async("a@b.com", "Sub", "<h>", "t") is None
 
-        # Wait for the thread pool to finish
+        # Flush the background thread so the send completes before asserting.
         email._get_executor().shutdown(wait=True)
-
-        # Re-create executor for other tests
+        # Re-create the module-level executor for other tests.
         email._executor = None
 
-        mock_send.assert_called_once_with("a@b.com", "Sub", "<h>", "t", from_email=None)
+        assert len(mailoutbox) == 1
+        message = mailoutbox[0]
+        assert message.to == ["a@b.com"]
+        assert message.subject == "Sub"
+        assert message.body == "t"
+        assert message.alternatives == [("<h>", "text/html")]

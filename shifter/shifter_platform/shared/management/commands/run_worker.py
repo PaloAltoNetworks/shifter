@@ -139,11 +139,13 @@ class Command(BaseCommand):
                     "Worker restart detected: queue=%s previous_heartbeat_age=%.1fs",
                     self.queue_name,
                     age_seconds,
+                    extra={"worker_queue": self.queue_name},
                 )
             except OSError:
                 logger.warning(
                     "Worker restart detected: queue=%s (could not read previous heartbeat)",
                     self.queue_name,
+                    extra={"worker_queue": self.queue_name},
                 )
 
     def _touch_heartbeat(self):

@@ -1,0 +1,1 @@
+Added an operator-triggered `techvault-scenario-bake` workflow that bakes the TechVault golden AMI (the APTL `techvault-operational` stack plus the VS Code seat) and records it in the `/shifter/ami/techvault` SSM parameter, automating the manual bake runbook.

@@ -22,7 +22,7 @@ spec:
     spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
       automountServiceAccountToken: false
-      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      serviceAccountName: {{ .Values.serviceAccounts.ctfScheduler.name }}
       containers:
         - name: ctf-scheduler
           image: {{ include "shifter.portalImage" . }}

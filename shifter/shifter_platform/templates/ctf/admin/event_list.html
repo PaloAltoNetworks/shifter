@@ -1,32 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     CTF Events
 {% endblock %}
 {% block extra_css %}
-    <style>
-.filter-bar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.filter-bar select {
-    width: auto;
-    min-width: 180px;
-}
-
-.team-indicator {
-    font-size: 11px;
-    color: var(--theme-text-secondary);
-    border: 1px solid var(--theme-border);
-    border-radius: 3px;
-    padding: 1px 6px;
-    margin-left: 8px;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-event_list.css' %}">
 {% endblock %}
 {% block content %}
     <div class="page-header flex-between">
@@ -39,14 +19,12 @@
     <!-- Filter -->
     <div class="card">
         <form method="get" class="filter-bar">
-            <label for="status" class="form-label" style="margin-bottom: 0;">
+            <label for="status" class="form-label mb-0">
                 {% trans "Filter by Status:" %}
             </label>
             <select name="status"
                     id="status"
-                    class="form-input"
-                    style="width: auto;
-                           min-width: 180px"
+                    class="form-input status-filter-select"
                     onchange="this.form.submit()">
                 <option value="">
                     {% trans "All Statuses" %}
@@ -67,7 +45,7 @@
         </form>
     </div>
     <!-- Events Table -->
-    <div class="card" style="padding: 0;">
+    <div class="card p-0">
         {% if events %}
             <table class="table">
                 <thead>
@@ -122,12 +100,14 @@
                             <td>
                                 <div class="flex-row gap-sm">
                                     <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}"
-                                       class="btn btn-secondary"
-                                       title='{% trans "View" %}'>{% trans "View" %}</a>
+                                       class="btn btn-secondary">
+                                        {% trans "View" %}<span class="visually-hidden"> {{ event.name }}</span>
+                                    </a>
                                     {% if event.is_modifiable %}
                                         <a href="{% url 'ctf:admin_event_edit' event_id=event.pk %}"
-                                           class="btn btn-secondary"
-                                           title='{% trans "Edit" %}'>{% trans "Edit" %}</a>
+                                           class="btn btn-secondary">
+                                            {% trans "Edit" %}<span class="visually-hidden"> {{ event.name }}</span>
+                                        </a>
                                     {% endif %}
                                 </div>
                             </td>

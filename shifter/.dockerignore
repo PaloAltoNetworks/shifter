@@ -36,3 +36,12 @@
 **/.coverage
 **/htmlcov/
 **/coverage.xml
+
+# Generated static assets. The SPA bundle is built in a dedicated image stage
+# and copied in explicitly; collectstatic regenerates STATIC_ROOT. Excluding
+# local copies keeps them from being baked in stale (#1302).
+**/static/spa/
+**/staticfiles/
+**/frontend/openapi.json
+**/frontend/playwright-report/
+**/frontend/test-results/

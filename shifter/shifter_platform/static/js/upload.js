@@ -12,6 +12,7 @@ class DirectUploader {
         this.completeUrl = options.completeUrl;
         this.cancelUrl = options.cancelUrl;
         this.csrfToken = options.csrfToken;
+        this.cancelOnUnload = options.cancelOnUnload !== false;
         this.maxSizeMB = options.maxSizeMB || 2048;
 
         // Callbacks
@@ -32,10 +33,13 @@ class DirectUploader {
      */
     _registerBeforeUnload() {
         this._boundBeforeUnload = () => {
-            if (this.uploadToken && !this.cancelled) {
-                // Use sendBeacon for reliable delivery during page unload
-                const data = JSON.stringify({ upload_token: this.uploadToken });
-                navigator.sendBeacon(this.cancelUrl, new Blob([data], { type: 'application/json' }));
+            if (this.cancelOnUnload && this.cancelUrl && this.uploadToken && this.csrfToken && !this.cancelled) {
+                // sendBeacon cannot set custom headers, so include Django's CSRF field in the body.
+                const data = new URLSearchParams({
+                    upload_token: this.uploadToken,
+                    csrfmiddlewaretoken: this.csrfToken,
+                });
+                navigator.sendBeacon(this.cancelUrl, data);
             }
         };
         globalThis.addEventListener('beforeunload', this._boundBeforeUnload);
@@ -198,7 +202,7 @@ class DirectUploader {
     }
 
     async _cancelUpload() {
-        if (!this.uploadToken) return;
+        if (!this.uploadToken || !this.cancelUrl) return;
 
         try {
             await fetch(this.cancelUrl, {

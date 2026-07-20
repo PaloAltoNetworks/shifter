@@ -97,11 +97,14 @@ resource "aws_vpc_security_group_ingress_rule" "ctfd_http" {
 
 resource "aws_vpc_security_group_egress_rule" "ctfd_all" {
   security_group_id = aws_security_group.ctfd.id
+  description       = "Ctfd egress (all protocols)"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
 
 resource "aws_instance" "ctfd" {
+  monitoring                  = true
+  ebs_optimized               = true
   ami                         = var.ctfd_ami_id
   instance_type               = var.instance_type
   subnet_id                   = var.subnet_id

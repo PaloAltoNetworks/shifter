@@ -39,6 +39,8 @@ def _wait_for_postgres(container_name: str, timeout_seconds: int = 60) -> None:
             "exec",
             container_name,
             "pg_isready",
+            "-h",
+            "127.0.0.1",
             "-U",
             "postgres",
             "-d",
@@ -58,6 +60,8 @@ def _docker_psql(container_name: str, database: str, sql: str) -> str:
         "PGPASSWORD=postgres",
         container_name,
         "psql",
+        "-h",
+        "127.0.0.1",
         "-U",
         "postgres",
         "-d",
@@ -70,9 +74,10 @@ def _docker_psql(container_name: str, database: str, sql: str) -> str:
 
 
 def _run_manage_py(database_name: str, port: str, *args: str) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
+    env = {k: v for k, v in os.environ.items() if k not in {"TESTING", "DJANGO_SETTINGS_MODULE"}}
     env.update(
         {
+            "ENVIRONMENT": "test",
             "DJANGO_SECRET_KEY": DJANGO_TEST_SECRET_KEY,
             "DJANGO_DEBUG": "true",
             "SITE_URL": "http://localhost",

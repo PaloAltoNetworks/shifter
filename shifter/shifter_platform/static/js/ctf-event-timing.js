@@ -102,7 +102,7 @@
             if (eventStatus === 'completed' || eventStatus === 'ended') {
                 labelEl.textContent = '';
                 timerEl.textContent = 'Event has ended';
-                card.style.display = '';
+                card.classList.remove('d-none');
                 clearInterval(intervalId);
                 return;
             }
@@ -111,16 +111,16 @@
                 labelEl.textContent = 'Event starts in';
                 diff = eventStart - now;
                 timerEl.textContent = formatDuration(diff);
-                card.style.display = '';
+                card.classList.remove('d-none');
             } else if (now < eventEnd) {
                 labelEl.textContent = 'Time remaining';
                 diff = eventEnd - now;
                 timerEl.textContent = formatDuration(diff);
-                card.style.display = '';
+                card.classList.remove('d-none');
             } else {
                 labelEl.textContent = '';
                 timerEl.textContent = 'Event has ended';
-                card.style.display = '';
+                card.classList.remove('d-none');
                 clearInterval(intervalId);
             }
         }
@@ -142,6 +142,11 @@
 
     // Expose for testing
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-        module.exports = { formatLocalTime: formatLocalTime, formatDuration: formatDuration }; // eslint-disable-line no-undef
+        module.exports = { // eslint-disable-line no-undef
+            formatLocalTime: formatLocalTime,
+            formatDuration: formatDuration,
+            initLocalTimes: initLocalTimes,
+            initCountdown: initCountdown,
+        };
     }
 })();

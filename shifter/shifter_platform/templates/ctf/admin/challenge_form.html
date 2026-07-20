@@ -1,7 +1,7 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     {% if is_edit %}
         Edit Challenge
@@ -10,68 +10,7 @@
     {% endif %}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.challenge-form {
-    max-width: 720px;
-}
-
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-}
-
-.form-help {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-    margin-top: 4px;
-}
-
-.field-error {
-    font-size: 12px;
-    color: #ff4d4f;
-    margin-top: 4px;
-}
-
-.form-alert {
-    padding: 12px 16px;
-    border: 1px solid #ff4d4f;
-    border-radius: 4px;
-    background: rgba(255, 77, 79, 0.08);
-    color: #ff4d4f;
-    font-size: 13px;
-    margin-bottom: 16px;
-}
-
-.form-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 16px;
-    border-top: 1px solid var(--theme-border);
-    margin-top: 8px;
-}
-
-.btn-cancel {
-    background: transparent;
-    color: var(--theme-text-secondary);
-    border: 1px solid var(--theme-border);
-}
-
-textarea.form-input {
-    resize: vertical;
-    min-height: 80px;
-}
-
-select.form-input {
-    appearance: auto;
-}
-
-/* datetime-local inputs need color-scheme for dark mode */
-input[type="datetime-local"] {
-    color-scheme: dark;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-challenge_form.css' %}">
 {% endblock %}
 {% block content %}
     <div class="challenge-form">
@@ -96,7 +35,7 @@ input[type="datetime-local"] {
             {% if form.non_field_errors %}
                 <div class="form-alert">
                     {% for error in form.non_field_errors %}
-                        <p style="margin: 0;">
+                        <p class="m-0">
                             {{ error }}
                         </p>
                     {% endfor %}
@@ -314,7 +253,7 @@ input[type="datetime-local"] {
                         </div>
                     {% endif %}
                 </div>
-                <div class="form-group" style="max-width: 340px;">
+                <div class="form-group max-w-340">
                     <label class="form-label"
                            for="{{ form.max_attempts.id_for_label }}">
                         {% trans "Max Attempts" %}
@@ -417,7 +356,7 @@ input[type="datetime-local"] {
                 <div class="card-title">
                     {% trans "Release Settings" %}
                 </div>
-                <div class="form-group" style="max-width: 340px;">
+                <div class="form-group max-w-340">
                     <label class="form-label"
                            for="{{ form.release_time.id_for_label }}">
                         {% trans "Release Time" %}
@@ -442,7 +381,7 @@ input[type="datetime-local"] {
                 <div class="card-title">
                     {% trans "Challenge Navigation" %}
                 </div>
-                <div class="form-group" style="max-width: 340px;">
+                <div class="form-group max-w-340">
                     <label class="form-label"
                            for="{{ form.next_challenge.id_for_label }}">
                         {% trans "Next Challenge" %}

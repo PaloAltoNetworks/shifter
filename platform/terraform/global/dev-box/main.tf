@@ -43,9 +43,37 @@ resource "random_password" "admin" {
   override_special = "!@#$%^&*"
 }
 
+resource "aws_kms_key" "admin_password" {
+  description             = "CMK for shifter-dev-box admin-password secret (CKV_AWS_149)"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "EnableRootAccountAdmin"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+      Action    = "kms:*"
+      Resource  = "*"
+    }]
+  })
+
+  tags = {
+    Name    = "shifter-dev-box-admin-password-cmk"
+    Project = "shifter"
+  }
+}
+
+resource "aws_kms_alias" "admin_password" {
+  name          = "alias/shifter-dev-box-admin-password"
+  target_key_id = aws_kms_key.admin_password.key_id
+}
+
 resource "aws_secretsmanager_secret" "admin_password" {
   name        = "shifter-dev-box-admin-password"
   description = "Windows Administrator password for dev-box"
+  kms_key_id  = aws_kms_key.admin_password.arn
 
   tags = {
     Name    = "shifter-dev-box-admin-password"
@@ -110,6 +138,7 @@ resource "aws_security_group" "dev_box" {
 
   # All outbound
   egress {
+    description = "Dev box egress to internet (package updates, SSM agent traffic)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -342,6 +371,9 @@ resource "aws_scheduler_schedule" "stop_dev_box" {
   # Using America/Los_Angeles handles DST automatically
   schedule_expression          = "cron(0 23 * * ? *)"
   schedule_expression_timezone = "America/Los_Angeles"
+
+  # EventBridge Scheduler CMK for schedule encryption (CKV_AWS_297).
+  kms_key_arn = aws_kms_key.admin_password.arn
 
   target {
     arn      = "arn:aws:scheduler:::aws-sdk:ec2:stopInstances"

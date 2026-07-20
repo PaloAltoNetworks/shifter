@@ -27,3 +27,25 @@ variable "guacamole_client_repository_name" {
   type        = string
   default     = "shifter-guacamole-client"
 }
+
+variable "budget_alert_email" {
+  description = "Email address for AWS Budget S3 cost alerts. Set via gitignored local.auto.tfvars or the TF_VARS_PROD_CORE deploy secret."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.budget_alert_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.budget_alert_email))
+    error_message = "budget_alert_email must be empty or a valid email address."
+  }
+
+  validation {
+    condition = (
+      var.budget_alert_email == "" ||
+      (
+        !strcontains(lower(var.budget_alert_email), "example.com") &&
+        !strcontains(lower(var.budget_alert_email), "your_email")
+      )
+    )
+    error_message = "budget_alert_email must not use example.com or YOUR_EMAIL placeholders."
+  }
+}

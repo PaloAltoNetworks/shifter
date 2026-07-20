@@ -200,6 +200,10 @@ const TWO_PHASE_INFRA_MUTATION_BASES = [
   "terminate_ec2_instance",
   "restart_ecs_service",
   "reconcile_ranges",
+  "build_ami",
+  "promote_ami",
+  "build_gce_image",
+  "promote_gce_image",
 ];
 
 const EXPECTED_DEV_BYPASS_TUNNEL_TOOLS = [

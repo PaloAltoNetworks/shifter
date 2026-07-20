@@ -1,0 +1,275 @@
+name: Packer GCE Image Build
+
+# Builds a Shifter guest image on Google Compute Engine, parallel to the AWS
+# packer.yml flow (issue #505, PLAT-001.10). Runs on a GitHub-hosted runner
+# (the self-hosted pool is AWS-only and cannot reach a GCE builder VM) and
+# authenticates with Workload Identity Federation — no long-lived SA keys.
+#
+# The published image is the contract: each build writes image
+# `${image_prefix}-<type>-<timestamp>` into image family `${image_prefix}-<type>`.
+# Consumers resolve the newest non-deprecated image in the family (the GCP-native
+# analog of the AWS /shifter/ami/* SSM parameter — there is no SSM equivalent).
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_type:
+        description: 'GCE image to build'
+        required: true
+        type: choice
+        options:
+          - ubuntu
+          - brokenbk
+          - kali
+          - windows
+          - dc
+          - polaris-vm
+          - dc-prebaked
+      environment:
+        description: 'GCP environment to build in'
+        required: true
+        type: choice
+        options:
+          - dev
+          - proof
+        default: dev
+      dc_profile:
+        description: 'Pre-promoted DC profile (dc-profiles/<name>.pkrvars.hcl); only used when image_type=dc-prebaked'
+        required: false
+        type: string
+        default: polaris
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.image_type }} GCE image in ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: shifter/packer
+    env:
+      IMAGE_TYPE: ${{ inputs.image_type }}
+      DC_PROFILE: ${{ inputs.dc_profile }}
+    steps:
+      # Build from the dispatched ref (github.sha), which GitHub already gates
+      # by workflow_dispatch permission. No free-form `inputs.ref` is accepted:
+      # a privileged, cloud-credentialed build must not run code from an
+      # arbitrary caller-supplied branch (#505 codex security review).
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run Packer tests
+        run: uv run pytest tests/ -v
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@ce93c3c08a6c2ff2275bf4b54ff0d9a75f6c9789 # v3.4.0
+        with:
+          version: latest
+
+      - name: Ensure GCP build auth is configured
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          if [ -z "${GCP_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
+            echo "::error::GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for GCE image builds. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: ">= 416.0.0"
+
+      - name: Resolve Packer variables from secrets/variables
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
+          GCP_PACKER_NETWORK: ${{ vars.GCP_PACKER_NETWORK || 'default' }}
+          GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK || 'default' }}
+          GCP_PACKER_SERVICE_ACCOUNT: ${{ vars.GCP_PACKER_SERVICE_ACCOUNT }}
+          GCP_PACKER_MACHINE_TYPE: ${{ vars.GCP_PACKER_MACHINE_TYPE || 'e2-standard-2' }}
+          GCP_PACKER_USE_INTERNAL_IP: ${{ vars.GCP_PACKER_USE_INTERNAL_IP || 'false' }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          # GCS bucket holding the polaris compose-stack tarball (polaris-vm build
+          # only). host-setup.sh fetches gs://<bucket>/<POLARIS_STACK_KEY> and
+          # bakes the stack in. The stack is MANDATORY for a promotable polaris-vm
+          # image and is verified against GCP_POLARIS_STACK_SHA256.
+          GCP_POLARIS_STACK_BUCKET: ${{ vars.GCP_POLARIS_STACK_BUCKET }}
+          # Required content digest of the compose-stack tarball; the build fails
+          # on mismatch so a mutable GCS key cannot change what is baked.
+          GCP_POLARIS_STACK_SHA256: ${{ vars.GCP_POLARIS_STACK_SHA256 }}
+          # Optional immutable GCS object generation to pin the exact tarball.
+          GCP_POLARIS_STACK_GENERATION: ${{ vars.GCP_POLARIS_STACK_GENERATION }}
+        run: |
+          if [ -z "${GCP_PROJECT_ID}" ]; then
+            echo "::error::Required secret GCP_PROJECT_ID is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
+          # The builder VM runs as the Packer service account if configured,
+          # otherwise the WIF-impersonated deploy service account.
+          BUILDER_SA="${GCP_PACKER_SERVICE_ACCOUNT:-${GCP_SERVICE_ACCOUNT}}"
+          # Export as PKR_VAR_* so Packer reads them from the environment — never
+          # as -var CLI flags (which would expose values in the process list).
+          {
+            echo "PKR_VAR_project_id=${GCP_PROJECT_ID}"
+            echo "PKR_VAR_zone=${ZONE}"
+            echo "PKR_VAR_network=${GCP_PACKER_NETWORK}"
+            echo "PKR_VAR_subnetwork=${GCP_PACKER_SUBNETWORK}"
+            echo "PKR_VAR_service_account_email=${BUILDER_SA}"
+            echo "PKR_VAR_image_prefix=shifter"
+            echo "PKR_VAR_machine_type=${GCP_PACKER_MACHINE_TYPE}"
+            echo "PKR_VAR_use_internal_ip=${GCP_PACKER_USE_INTERNAL_IP}"
+            echo "PKR_VAR_polaris_stack_bucket=${GCP_POLARIS_STACK_BUCKET}"
+            echo "PKR_VAR_polaris_stack_sha256=${GCP_POLARIS_STACK_SHA256}"
+            echo "PKR_VAR_polaris_stack_generation=${GCP_POLARIS_STACK_GENERATION}"
+          } >> "$GITHUB_ENV"
+          # Kali has no public GCP image; the kali builder instead converts the
+          # debian-12 GCE base into Kali Rolling in its first provisioning script
+          # (no imported base image, so no source-image secret is required).
+
+      - name: Generate WinRM bootstrap secret (Windows/DC only)
+        if: inputs.image_type == 'windows' || inputs.image_type == 'dc' || inputs.image_type == 'dc-prebaked'
+        run: |
+          # Throwaway local-admin password for the build-time WinRM connection.
+          # For the sysprepped windows/dc images the sysprep discards it; the
+          # un-sysprepped dc-prebaked image overwrites it (a2_setup resets the
+          # domain Administrator, then plans/dc_setup.py rotates it per range).
+          # Masked in logs and written via $GITHUB_ENV, never echoed or on argv.
+          WINRM_PW="$(openssl rand -base64 24)"
+          echo "::add-mask::${WINRM_PW}"
+          echo "PKR_VAR_winrm_bootstrap_password=${WINRM_PW}" >> "$GITHUB_ENV"
+
+      - name: Generate DSRM secret (pre-promoted DC only)
+        if: inputs.image_type == 'dc-prebaked'
+        run: |
+          # Build-only DSRM (Directory Services Restore Mode) password for the
+          # baked forest. Generated per build so no shared, source-controlled
+          # DSRM secret ships in the image; promote-bake.ps1 requires it and
+          # cleanup.ps1 strips the build transcript before capture. Masked and
+          # passed via $GITHUB_ENV as a sensitive PKR var, never echoed or argv.
+          DSRM_PW="$(openssl rand -base64 24)"
+          echo "::add-mask::${DSRM_PW}"
+          echo "PKR_VAR_dc_dsrm_password=${DSRM_PW}" >> "$GITHUB_ENV"
+
+      - name: Initialize Packer
+        working-directory: shifter/packer/gcp
+        run: packer init .
+
+      - name: Validate template
+        working-directory: shifter/packer/gcp
+        run: |
+          # dc-prebaked bakes many DC images from one template; the profile
+          # var-file supplies the domain / NetBIOS / content / purpose.
+          VARFILE=""
+          if [ "${IMAGE_TYPE}" = "dc-prebaked" ]; then
+            VARFILE="-var-file=dc-profiles/${DC_PROFILE}.pkrvars.hcl"
+          fi
+          # shellcheck disable=SC2086
+          packer validate -only="googlecompute.${IMAGE_TYPE}" ${VARFILE} .
+
+      - name: Build GCE image
+        working-directory: shifter/packer/gcp
+        run: |
+          VARFILE=""
+          if [ "${IMAGE_TYPE}" = "dc-prebaked" ]; then
+            VARFILE="-var-file=dc-profiles/${DC_PROFILE}.pkrvars.hcl"
+          fi
+          # shellcheck disable=SC2086
+          packer build -color=false -only="googlecompute.${IMAGE_TYPE}" ${VARFILE} .
+          IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' "${IMAGE_TYPE}-manifest.json")
+          IMAGE_FAMILY="${IMAGE_NAME%-*}"
+          {
+            echo "## ${{ inputs.environment }} GCE Image Build Complete"
+            echo "- **Type:** ${IMAGE_TYPE}"
+            echo "- **Environment:** ${{ inputs.environment }}"
+            echo "- **Image:** \`${IMAGE_NAME}\`"
+            echo "- **Family:** \`${IMAGE_FAMILY}\` (consumers resolve newest in family)"
+            echo ""
+            echo "**Next step:** Verify in ${{ inputs.environment }} before promoting to prod."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The packer build publishes a GCE image (the AWS-AMI analog). The GDC VM
+      # Runtime cannot consume a GCE image family directly - it imports a disk
+      # from a gs:// source - so export the built image to the GDC VM image
+      # bucket as a qcow2 the range provisioner references via GDC_*_IMAGE_URL.
+      # GDC VM Runtime consumes an imported qcow2 disk; this exports the built
+      # GCE image for the GDC path. Only Linux guests are hypervisor-portable
+      # (see docs/architecture/gcp-guest-images.md). GCE-built Windows/DC images
+      # do not boot on GDC (firmware/drivers), and their GDC images come from the
+      # native gdc-vm-images build, so skip the export for the Windows family.
+      - name: Export image to GCS for the GDC VM Runtime
+        if: inputs.image_type != 'windows' && inputs.image_type != 'dc' && inputs.image_type != 'dc-prebaked'
+        working-directory: shifter/packer/gcp
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_GDC_VM_IMAGE_BUCKET: ${{ vars.GCP_GDC_VM_IMAGE_BUCKET }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
+          GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK }}
+          GCP_PACKER_SERVICE_ACCOUNT: ${{ vars.GCP_PACKER_SERVICE_ACCOUNT }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "${GCP_GDC_VM_IMAGE_BUCKET}" ]; then
+            echo "::error::Required variable GCP_GDC_VM_IMAGE_BUCKET (the GDC VM Runtime image bucket) is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' "${IMAGE_TYPE}-manifest.json")
+          ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
+          DEST="gs://${GCP_GDC_VM_IMAGE_BUCKET}/${IMAGE_TYPE}.qcow2"
+          # The export runs as a Cloud Build job that spins up a daisy worker VM.
+          # Pin BOTH identities to the build SA: --cloudbuild-service-account so
+          # the build itself runs as our least-priv SA (this project's builds
+          # otherwise default to the Compute Engine default SA, which the build
+          # SA has no actAs on), and --compute-service-account so the worker VM
+          # runs as the same SA. Pin the worker to the internal-IP builder subnet
+          # so it complies with the compute.vmExternalIpAccess org policy.
+          BUILD_SA="${GCP_PACKER_SERVICE_ACCOUNT:-${GCP_SERVICE_ACCOUNT}}"
+          # A user-managed Cloud Build SA can't write to the default
+          # gs://<projnum>.cloudbuild-logs bucket, so --log-location is required
+          # alongside --cloudbuild-service-account. Point it at the image bucket,
+          # where the build SA already holds storage.objectAdmin.
+          gcloud compute images export \
+            --image="${IMAGE_NAME}" \
+            --destination-uri="${DEST}" \
+            --export-format=qcow2 \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${ZONE}" \
+            ${GCP_PACKER_SUBNETWORK:+--subnet="${GCP_PACKER_SUBNETWORK}"} \
+            --cloudbuild-service-account="${BUILD_SA}" \
+            --compute-service-account="${BUILD_SA}" \
+            --log-location="gs://${GCP_GDC_VM_IMAGE_BUCKET}/export-logs"
+          GDC_VAR="GDC_$(echo "${IMAGE_TYPE}" | tr '[:lower:]' '[:upper:]')_IMAGE_URL"
+          {
+            echo "## GDC VM Runtime disk exported"
+            echo "- **Image:** \`${IMAGE_NAME}\`"
+            echo "- **Disk:** \`${DEST}\`"
+            echo "- **Wire as:** \`${GDC_VAR}=${DEST}\` (see docs/architecture/gcp-guest-images.md)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.image_type }}-gce-manifest
+          path: shifter/packer/gcp/${{ inputs.image_type }}-manifest.json

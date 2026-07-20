@@ -29,9 +29,35 @@ output "availability_zones" {
   value       = module.vpc.availability_zones
 }
 
-output "private_route_table_id" {
-  description = "ID of the private route table (for NAT gateway access)"
-  value       = module.vpc.private_route_table_id
+output "private_route_table_ids" {
+  description = "IDs of the per-AZ private route tables, ordered by availability_zones."
+  value       = module.vpc.private_route_table_ids
+}
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection assertion contract (#932)
+# ------------------------------------------------------------------------------
+# Typed, non-secret topology consumed by the post-apply assertion
+# (scripts/assert_portal_inspection). All per-AZ lists are ordered by
+# availability_zones. A future staging environment or enforcement-mode change
+# reuses the same assertion entrypoint with different topology data.
+
+output "portal_inspection_assertion" {
+  description = "Typed contract consumed by scripts/assert_portal_inspection to prove NFW route/endpoint wiring post-apply (#932)."
+  value = {
+    inspection_enabled       = module.vpc.inspection_enabled
+    firewall_arn             = module.vpc.firewall_arn
+    availability_zones       = module.vpc.availability_zones
+    endpoint_ids_by_az       = module.vpc.firewall_endpoint_ids_by_az
+    public_route_table_ids   = module.vpc.public_route_table_ids
+    private_route_table_ids  = module.vpc.private_route_table_ids
+    firewall_route_table_ids = module.vpc.firewall_route_table_ids
+    public_subnet_cidrs      = module.vpc.public_subnet_cidrs
+    private_subnet_cidrs     = module.vpc.private_subnet_cidrs
+    firewall_subnet_cidrs    = module.vpc.firewall_subnet_cidrs
+    nat_gateway_id           = module.vpc.nat_gateway_id
+    nat_gateway_ids          = module.vpc.nat_gateway_ids
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -76,6 +102,11 @@ output "db_resource_id" {
 # ------------------------------------------------------------------------------
 # EC2 / Autoscaling
 # ------------------------------------------------------------------------------
+
+output "enable_autoscaling" {
+  description = "Whether the portal EC2 tier is deployed as an Auto Scaling Group."
+  value       = var.enable_autoscaling
+}
 
 output "ec2_instance_id" {
   description = "ID of the EC2 instance (empty if ASG mode)"
@@ -124,6 +155,16 @@ output "alb_https_listener_arn" {
 output "alb_security_group_id" {
   description = "Security group ID of the ALB"
   value       = module.alb.security_group_id
+}
+
+output "portal_target_group_arn" {
+  description = "ARN of the portal application target group"
+  value       = module.alb.target_group_arn
+}
+
+output "domain_name" {
+  description = "Public portal hostname served by the ALB"
+  value       = var.domain_name
 }
 
 # ------------------------------------------------------------------------------
@@ -233,6 +274,21 @@ output "engine_ecs_task_role_arn" {
 output "guacamole_target_group_arn" {
   description = "ARN of the Guacamole target group"
   value       = module.guacamole.target_group_arn
+}
+
+output "guacamole_ecs_cluster_name" {
+  description = "Name of the Guacamole ECS cluster"
+  value       = module.guacamole.ecs_cluster_name
+}
+
+output "guacd_service_name" {
+  description = "Name of the guacd ECS service"
+  value       = module.guacamole.guacd_service_name
+}
+
+output "guacamole_client_service_name" {
+  description = "Name of the guacamole-client ECS service"
+  value       = module.guacamole.guacamole_client_service_name
 }
 
 output "guacamole_json_auth_secret_arn" {

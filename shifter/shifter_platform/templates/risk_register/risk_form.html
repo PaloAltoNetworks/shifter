@@ -94,10 +94,10 @@
             <h3 class="card-title">
                 {% trans "Threat Modeling" %}
             </h3>
-            <div class="form-group">
-                <label class="form-label">
+            <fieldset class="form-group">
+                <legend class="form-label">
                     {% trans "STRIDE Categories" %}
-                </label>
+                </legend>
                 <div class="checkbox-group">
                     {% for code, name in stride_choices %}
                         <label class="checkbox-label">
@@ -114,7 +114,7 @@
                 <p class="form-hint">
                     {% trans "Select all that apply" %}
                 </p>
-            </div>
+            </fieldset>
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label" for="risk-likelihood-score">

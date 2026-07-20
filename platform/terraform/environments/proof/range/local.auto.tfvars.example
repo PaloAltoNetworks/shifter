@@ -1,0 +1,21 @@
+# Example deployment override for the proof range environment (PLAT-220).
+#
+# Copy this file to `local.auto.tfvars` (gitignored) next to it and edit for
+# your deployment. Terraform auto-loads any `*.auto.tfvars` files in the same
+# directory, so values written here OVERRIDE the committed `terraform.tfvars`.
+#
+# The range egress allowlist (`victim_allowed_cidrs`) is NOT set here. It is
+# rendered from the single authoritative source (`settings.range_egress` in
+# `shifter.yaml`) into its own gitignored `victim_allowed_cidrs.auto.tfvars`,
+# so the configured policy and deployed firewall rules cannot drift (#958):
+#
+#   uv run --project shifter/installation shifter-config render shifter.yaml \
+#     --output victim_allowed_cidrs.auto.tfvars
+#
+# CIDRs are operator configuration, not secrets; the committed baseline ships
+# empty so this repo is OSS-publishable without an operator's allowlist leaking
+# into git. See docs/architecture/range-egress-ip-allowlist.md (which also keeps
+# the PANW Cortex XSIAM/XDR allowlist source reference).
+
+agent_s3_bucket = "shifter-proof-user-storage-<your-account-id>"
+vm_series_ami_id = "ami-xxxxxxxxxxxxxxxxx"

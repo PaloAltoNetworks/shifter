@@ -43,6 +43,25 @@ class TestLoadScenario:
         with pytest.raises(ValueError, match="not found"):
             load_scenario("nonexistent_scenario")
 
+    @pytest.mark.parametrize(
+        "malicious_id",
+        [
+            "../../../etc/passwd",
+            "../secrets",
+            "a/b",
+            "..",
+            "foo.bar",
+            "with space",
+            "",
+        ],
+    )
+    def test_load_rejects_path_traversal(self, malicious_id):
+        """load_scenario rejects ids that aren't a safe slug (path-traversal guard)."""
+        from cms.scenarios.loader import load_scenario
+
+        with pytest.raises(ValueError, match="Invalid scenario id"):
+            load_scenario(malicious_id)
+
     def test_basic_scenario_has_attacker_instance(self):
         """Basic scenario has an attacker instance."""
         from cms.scenarios.loader import load_scenario
@@ -59,22 +78,21 @@ class TestLoadScenario:
         roles = [i.role for i in scenario.instances]
         assert "victim" in roles
 
-    def test_basic_scenario_requires_agent(self):
-        """Basic scenario requires an agent (has xdr_agent instance)."""
+    def test_basic_scenario_does_not_require_xdr_agent(self):
+        """Basic scenario is PANW-free: no instance has xdr_agent=true."""
         from cms.scenarios.loader import load_scenario
 
         scenario = load_scenario("basic")
+        assert scenario.requires_agent() is False
+
+    def test_basic_ngfw_requires_xdr_agent(self):
+        """Basic NGFW variant has xdr_agent=true on the Workstation."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario("basic_ngfw")
         assert scenario.requires_agent() is True
-
-    def test_basic_scenario_has_from_agent(self):
-        """Basic scenario uses from_agent (accepts any OS)."""
-        from cms.scenarios.loader import load_scenario
-
-        scenario = load_scenario("basic")
         reqs = scenario.get_agent_requirements()
         assert reqs["has_from_agent"] is True
-        assert reqs["requires_windows"] is False
-        assert reqs["requires_linux"] is False
 
     def test_ad_attack_lab_has_dc_instance(self):
         """AD attack lab has a domain controller instance."""
@@ -84,14 +102,22 @@ class TestLoadScenario:
         roles = [i.role for i in scenario.instances]
         assert "dc" in roles
 
-    def test_ad_attack_lab_has_from_agent(self):
-        """AD attack lab uses from_agent for victim (user picks OS)."""
+    def test_ad_attack_lab_does_not_require_xdr_agent(self):
+        """AD attack lab is PANW-free: no instance has xdr_agent=true."""
         from cms.scenarios.loader import load_scenario
 
         scenario = load_scenario("ad_attack_lab")
+        assert scenario.requires_agent() is False
+
+    def test_ad_attack_lab_ngfw_requires_xdr_agent(self):
+        """AD attack lab NGFW variant has xdr_agent=true on DC and Workstation."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario("ad_attack_lab_ngfw")
+        assert scenario.requires_agent() is True
         reqs = scenario.get_agent_requirements()
-        # Victim uses from_agent, DC has xdr_agent=false
         assert reqs["has_from_agent"] is True
+        assert reqs["requires_windows"] is True
 
     def test_ad_attack_lab_dc_has_config(self):
         """AD attack lab DC instance has domain configuration."""
@@ -211,3 +237,43 @@ class TestGetAllScenarios:
             assert isinstance(scenario.enabled, bool)
             assert isinstance(scenario.ngfw, bool)
             assert len(scenario.instances) > 0
+
+
+class TestSmokeScenarios:
+    """The post-deploy smoke scenarios must stay agent-independent (#1422)."""
+
+    @pytest.mark.parametrize("scenario_id", ["smoke_linux", "smoke_windows"])
+    def test_smoke_scenario_requires_no_agent(self, scenario_id):
+        """Smoke ranges are built from base AMIs — no XDR agent required."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario(scenario_id)
+        # Hidden from the user catalog, but still launchable (YAML defaults).
+        assert scenario.enabled is False
+        # No `from_agent` instances and no `xdr_agent`, so create_range needs
+        # no agents_by_os entries.
+        for inst in scenario.instances:
+            assert inst.os_type != "from_agent"
+            assert inst.xdr_agent is False
+        assert scenario.get_agent_requirements() == {
+            "requires_windows": False,
+            "requires_linux": False,
+            "has_from_agent": False,
+        }
+
+    def test_smoke_linux_shape(self):
+        """smoke_linux is a Kali attacker + Ubuntu victim on one subnet."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario("smoke_linux")
+        by_role = {i.role: i.os_type for i in scenario.instances}
+        assert by_role == {"attacker": "kali", "victim": "ubuntu"}
+
+    def test_smoke_windows_shape(self):
+        """smoke_windows is a Kali attacker + plain Windows victim (no dc)."""
+        from cms.scenarios.loader import load_scenario
+
+        scenario = load_scenario("smoke_windows")
+        by_role = {i.role: i.os_type for i in scenario.instances}
+        assert by_role == {"attacker": "kali", "victim": "windows"}
+        assert all(not i.domain_controller for i in scenario.instances)

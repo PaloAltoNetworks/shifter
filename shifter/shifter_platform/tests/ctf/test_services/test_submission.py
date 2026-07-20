@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.utils import timezone
 
 from ctf.enums import (
@@ -18,8 +20,11 @@ from ctf.enums import (
     EventStatus,
     ParticipantStatus,
 )
-from ctf.exceptions import CTFRateLimitError, CTFStateError
-from ctf.models import CTFChallenge, CTFEvent, CTFParticipant, CTFSubmission
+from ctf.exceptions import CTFRateLimitError, CTFStateError, CTFValidationError
+from ctf.models import CTFChallenge, CTFEvent, CTFHint, CTFParticipant, CTFSubmission
+from ctf.services.challenge import add_flag
+from ctf.services.hint import use_hint
+from ctf.services.scoring import calculate_score
 from ctf.services.submission import submit_flag
 
 
@@ -184,6 +189,33 @@ class TestSubmissionRateLimit:
         assert datetime.fromisoformat(details["retry_at"])
         assert "retry at" in str(exc_info.value).lower()
         assert details["cooldown_seconds"] == 10
+
+
+@pytest.mark.django_db
+class TestExactFlagSubmissions:
+    """Tests for exact static flag submissions (CTF-104)."""
+
+    def test_static_flag_submit_uses_exact_value_after_service_trim(self, participant, challenge, challenge_b):
+        """Static flags require exact content after submit_flag trims the attempt."""
+        add_flag(
+            challenge.id,
+            {"flag": "FLAG{exact}", "flag_type": "static"},
+            actor_id=challenge.event.created_by_id,
+        )
+        add_flag(
+            challenge_b.id,
+            {"flag": "FLAG{exact}", "flag_type": "static"},
+            actor_id=challenge_b.event.created_by_id,
+        )
+
+        correct = submit_flag(participant.id, challenge.id, "  FLAG{exact}  ")
+        incorrect = submit_flag(participant.id, challenge_b.id, "FLAG{exact}x")
+
+        assert correct.is_correct is True
+        assert correct.points_awarded == challenge.points
+        assert correct.submitted_flag == "  FLAG{exact}  "
+        assert incorrect.is_correct is False
+        assert incorrect.points_awarded == 0
 
 
 # ── Fixtures for attempt limit tests ─────────────────────────────────────
@@ -500,3 +532,162 @@ class TestTimeBoundaryEnforcement:
         """Flag submission succeeds when within the event time window."""
         submission = submit_flag(participant.id, challenge.id, "FLAG{on_time}")
         assert submission is not None
+
+
+# ── Fixtures for hint-penalty scoring tests (CTF-002 / CTF-203 / CTF-206) ─
+
+
+@pytest.fixture
+def hint_event(db, organizer_user):
+    """Active event with no cooldown — clean ground for scoring assertions."""
+    return CTFEvent.objects.create(
+        name="Hint Penalty Scoring Event",
+        created_by=organizer_user,
+        status=EventStatus.ACTIVE.value,
+        event_start=timezone.now() - timedelta(hours=1),
+        event_end=timezone.now() + timedelta(hours=7),
+        scenario_id="basic",
+        submission_cooldown_seconds=0,
+    )
+
+
+@pytest.fixture
+def hint_challenge(db, hint_event):
+    return CTFChallenge.objects.create(
+        event=hint_event,
+        name="Hint Penalty Challenge",
+        description="Test",
+        category=ChallengeCategory.WEB.value,
+        points=100,
+        difficulty=ChallengeDifficulty.EASY.value,
+        flag_hash="$2b$12$placeholder_hint_scoring",
+    )
+
+
+@pytest.fixture
+def hint_participant(db, hint_event, participant_user):
+    return CTFParticipant.objects.create(
+        event=hint_event,
+        user=participant_user,
+        email=participant_user.email,
+        name="Hint Penalty Participant",
+        status=ParticipantStatus.ACTIVE.value,
+        registered_at=timezone.now(),
+    )
+
+
+@pytest.mark.django_db
+class TestSubmitFlagHintPenalty:
+    """Hint penalty is read from the durable CTFHintUsage ledger and baked
+    into CTFSubmission.points_awarded at solve time (CTF-002 / CTF-203 /
+    CTF-206). Cumulative penalty at 100% (or above) awards 0, not the
+    historical 1-point floor.
+    """
+
+    @patch("ctf.services.submission.verify_flag", return_value=True)
+    def test_first_solve_after_hint_applies_penalty(self, mock_verify, hint_participant, hint_challenge):
+        """Unlock a 30% hint, then solve — points_awarded reflects the penalty
+        and calculate_score returns that net value."""
+        hint = CTFHint.objects.create(challenge=hint_challenge, text="Try X", penalty=30, order=0)
+        use_hint(hint_participant.id, hint.id)
+
+        submission = submit_flag(hint_participant.id, hint_challenge.id, "FLAG{ok}")
+
+        assert submission.is_correct
+        assert submission.points_awarded == 70  # 100 - 30%
+        assert calculate_score(hint_participant.id) == 70
+
+    @patch("ctf.services.submission.verify_flag", return_value=False)
+    def test_unsolved_hint_does_not_change_total_score(self, mock_verify, hint_participant, hint_challenge):
+        """Unlocking a hint without a correct solve leaves total score at 0:
+        no penalty is debited from anything because penalties only attach to
+        the points awarded for a correct submission."""
+        hint = CTFHint.objects.create(challenge=hint_challenge, text="Try X", penalty=50, order=0)
+        use_hint(hint_participant.id, hint.id)
+
+        # Wrong-flag submission persists a row with points_awarded=0.
+        submit_flag(hint_participant.id, hint_challenge.id, "FLAG{wrong}")
+
+        assert calculate_score(hint_participant.id) == 0
+        assert not CTFSubmission.objects.filter(participant=hint_participant, points_awarded__gt=0).exists()
+
+    @patch("ctf.services.submission.verify_flag", return_value=True)
+    def test_100_percent_hint_penalty_awards_zero(self, mock_verify, hint_participant, hint_challenge):
+        """A 100% cumulative hint penalty floors net solve points at 0
+        (CTF-203 — net score for a challenge solve shall never go below zero,
+        and the historical floor-at-1 is the bug this issue fixes)."""
+        hint = CTFHint.objects.create(challenge=hint_challenge, text="Full give-away", penalty=100, order=0)
+        use_hint(hint_participant.id, hint.id)
+
+        submission = submit_flag(hint_participant.id, hint_challenge.id, "FLAG{ok}")
+
+        assert submission.is_correct
+        assert submission.points_awarded == 0
+        assert calculate_score(hint_participant.id) == 0
+
+    @patch("ctf.services.submission.verify_flag", return_value=True)
+    def test_cumulative_penalty_over_100_still_zero(self, mock_verify, hint_participant, hint_challenge):
+        """Two hints summing above 100% are capped at 100% and the solve still
+        floors at 0 (no negative awards)."""
+        h1 = CTFHint.objects.create(challenge=hint_challenge, text="H1", penalty=60, order=0)
+        h2 = CTFHint.objects.create(challenge=hint_challenge, text="H2", penalty=60, order=1)
+        use_hint(hint_participant.id, h1.id)
+        use_hint(hint_participant.id, h2.id)
+
+        submission = submit_flag(hint_participant.id, hint_challenge.id, "FLAG{ok}")
+
+        assert submission.points_awarded == 0
+        assert calculate_score(hint_participant.id) == 0
+
+
+@pytest.mark.django_db
+class TestCorrectSubmissionUniqueness:
+    """Regression for #1135 / #1137: a correct submission is unique per
+    (participant, challenge), so concurrent correct submissions cannot
+    double-score and the attempt path cannot be raced past the cap."""
+
+    def test_second_correct_submit_raises_already_solved(self, participant, challenge):
+        # An existing correct submission makes any further submit_flag for the
+        # same challenge raise CTF_ALREADY_SOLVED (the under-lock guard) without
+        # creating a second correct row — no need to mock the flag check.
+        CTFSubmission.objects.create(
+            participant=participant, challenge=challenge, submitted_flag="FLAG{ok}", is_correct=True
+        )
+
+        with pytest.raises(CTFValidationError) as exc_info:
+            submit_flag(participant.id, challenge.id, "FLAG{ok}")
+        assert exc_info.value.code == "CTF_ALREADY_SOLVED"
+
+        # Still exactly one correct row, score counted once.
+        assert CTFSubmission.objects.filter(participant=participant, challenge=challenge, is_correct=True).count() == 1
+
+    def test_db_rejects_a_second_correct_row(self, participant, challenge):
+        # Backstop: even bypassing the service, a second active correct row for
+        # the same (participant, challenge) is rejected by ctf_unique_correct_submission.
+        # A sequential duplicate trips model.full_clean (ValidationError); a true
+        # concurrent insert trips the DB partial unique index (IntegrityError).
+        CTFSubmission.objects.create(participant=participant, challenge=challenge, submitted_flag="a", is_correct=True)
+        with pytest.raises((IntegrityError, ValidationError)):
+            CTFSubmission.objects.create(
+                participant=participant, challenge=challenge, submitted_flag="b", is_correct=True
+            )
+
+    def test_incorrect_rows_are_not_constrained(self, participant, challenge):
+        # The constraint is scoped to is_correct=True; many wrong attempts are fine.
+        for i in range(3):
+            CTFSubmission.objects.create(
+                participant=participant, challenge=challenge, submitted_flag=f"w{i}", is_correct=False
+            )
+        assert CTFSubmission.objects.filter(participant=participant, challenge=challenge).count() == 3
+
+    def test_soft_deleted_correct_row_allows_resolve(self, participant, challenge):
+        # Scoped to deleted_at IS NULL, so a correct submission removed (e.g. on a
+        # disqualification revert) does not permanently block a legitimate re-solve.
+        first = CTFSubmission.objects.create(
+            participant=participant, challenge=challenge, submitted_flag="a", is_correct=True
+        )
+        first.deleted_at = timezone.now()
+        first.save(update_fields=["deleted_at"])
+
+        # No IntegrityError now that the prior correct row is soft-deleted.
+        CTFSubmission.objects.create(participant=participant, challenge=challenge, submitted_flag="b", is_correct=True)

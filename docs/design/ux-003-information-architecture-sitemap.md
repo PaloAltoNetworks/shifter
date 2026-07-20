@@ -32,7 +32,6 @@ Primary source files:
 - `shifter/shifter_platform/ctf/urls.py`
 - `shifter/shifter_platform/mission_control/urls.py`
 - `shifter/shifter_platform/cms/scenario_editor/urls.py`
-- `shifter/shifter_platform/cms/experiments/urls.py`
 - `shifter/shifter_platform/risk_register/urls.py`
 - `shifter/shifter_platform/documentation/urls.py`
 - `shifter/shifter_platform/templates/partials/icon_sidebar.html`
@@ -109,7 +108,7 @@ sidebar, while organizer pages use the shared icon sidebar.
 | Current page | Route | Primary user | Primary purpose |
 | --- | --- | --- | --- |
 | Participant dashboard | `/ctf/` | Participant | Event entry point with current participant state. |
-| Registration | `/ctf/register/` | Participant | Join or register for the active event. |
+| Participant login | `/ctf/login/` | Participant | Sign in with an isolated temporary CTF account. |
 | Event overview | `/ctf/event/` | Participant | Read event rules, timing, and contextual details. |
 | Challenge list | `/ctf/challenges/` | Participant | Browse available challenges and progression. |
 | Challenge detail | `/ctf/challenges/<challenge_id>/` | Participant | Read challenge instructions, hints, files, and submit flags. |
@@ -153,10 +152,8 @@ sidebar, while organizer pages use the shared icon sidebar.
 ### Mission Control
 
 Mission Control is the operational surface for ranges, terminals, assets,
-credentials, scripts, and NGFW resources. It also currently mounts experiments
-under `/mission-control/experiments/`; this design treats experiments as an
-adjacent organizer workflow until a separate product decision promotes it to a
-top-level surface.
+credentials, and NGFW resources. Legacy experiments and their script/file
+surface were removed by ADR-027 / issue #1195.
 
 | Current page | Route | Primary user | Primary purpose |
 | --- | --- | --- | --- |
@@ -173,24 +170,6 @@ top-level surface.
 | Credentials | `/mission-control/credentials/` | Organizer | List reusable credentials. |
 | Add credential | `/mission-control/credentials/add/` | Organizer | Create a credential. |
 | Credential detail | `/mission-control/credentials/<credential_id>/` | Organizer | Inspect one credential. |
-| Files | `/mission-control/files/` | Organizer | List uploaded scripts or files. |
-| Upload file | `/mission-control/files/upload/` | Organizer | Upload a script or file. |
-| Delete file | `/mission-control/files/<script_id>/delete/` | Organizer | Remove an uploaded script or file. |
-
-#### Experiments Mounted Under Mission Control
-
-| Current page | Route | Primary user | Primary purpose |
-| --- | --- | --- | --- |
-| Experiments | `/mission-control/experiments/` | Organizer | List experiments. |
-| Create experiment | `/mission-control/experiments/create/` | Organizer | Create an experiment from a scenario and resources. |
-| Experiment detail | `/mission-control/experiments/<experiment_id>/` | Organizer | Inspect experiment configuration and runs. |
-| Start experiment | `/mission-control/experiments/<experiment_id>/start/` | Organizer | Start an experiment. |
-| Cancel experiment | `/mission-control/experiments/<experiment_id>/cancel/` | Organizer | Cancel a running experiment. |
-| Scripts | `/mission-control/experiments/scripts/` | Organizer | List experiment scripts. |
-| Upload script | `/mission-control/experiments/scripts/upload/` | Organizer | Upload an experiment script. |
-| Delete script | `/mission-control/experiments/scripts/<script_id>/delete/` | Organizer | Remove an experiment script. |
-| Experiment download | `/mission-control/experiments/<experiment_id>/download/` | Organizer | Download experiment outputs. |
-| Run artifact download | `/mission-control/experiments/<experiment_id>/runs/<run_number>/artifacts/<artifact_id>/download/` | Organizer | Download one run artifact. |
 
 ### Scenario Editor
 
@@ -214,7 +193,9 @@ to staff or Threat Research users by the existing shared access policy.
 ### Risk Register
 
 Risk Register is an organizer and self-hosting surface for platform risk,
-exceptions, mitigations, API keys, and audit-oriented status.
+exceptions, mitigations, and audit-oriented status. Programmatic access uses
+the platform `ApiToken` (scoped bearer tokens); the legacy risk-register API
+key and its UI were retired (PLAT-106 / #1124).
 
 | Current page | Route | Primary user | Primary purpose |
 | --- | --- | --- | --- |
@@ -228,9 +209,6 @@ exceptions, mitigations, API keys, and audit-oriented status.
 | Reopen risk | `/risk-register/risks/<risk_id>/reopen/` | Organizer | Reopen a closed risk. |
 | Add comment | `/risk-register/risks/<risk_id>/comments/add/` | Organizer | Add risk discussion or review notes. |
 | Delete comment | `/risk-register/risks/<risk_id>/comments/<comment_id>/delete/` | Organizer | Remove a risk comment. |
-| API keys | `/risk-register/api-keys/` | Organizer | List Risk Register API keys. |
-| Create API key | `/risk-register/api-keys/create/` | Organizer | Create an API key. |
-| Revoke API key | `/risk-register/api-keys/<key_id>/revoke/` | Organizer | Revoke an API key. |
 
 ### Documentation
 
@@ -264,10 +242,8 @@ Shifter
 |   |-- Assets
 |   |   |-- Agents
 |   |   |-- NGFW
-|   |   |-- Credentials
-|   |   `-- Files
+|   |   `-- Credentials
 |   |-- Terminal
-|   |-- Experiments
 |   `-- Settings
 |-- Author
 |   |-- Scenarios
@@ -277,8 +253,11 @@ Shifter
 |-- Govern
 |   |-- Risk Register
 |   |-- Risk Detail
-|   |-- API Keys
 |   `-- Audit / Review Queues
+|-- Administer
+|   |-- Users
+|   |-- Cost
+|   `-- Platform Settings
 `-- Learn
     |-- Role Start
     |   |-- Participant
@@ -335,7 +314,8 @@ Primary navigation:
 1. Operate
 2. Author
 3. Govern
-4. Learn
+4. Administer
+5. Learn
 
 Operate navigation:
 
@@ -346,7 +326,6 @@ Operate navigation:
 - Challenges
 - Assets
 - Terminal
-- Experiments
 - Settings
 
 Author navigation:
@@ -361,8 +340,13 @@ Govern navigation:
 
 - Risks
 - Exceptions and Mitigations
-- API Keys
 - Review Dates
+
+Administer navigation:
+
+- Users
+- Cost
+- Platform Settings
 
 Learn navigation:
 
@@ -410,7 +394,7 @@ Users with both participant and organizer access need an explicit mode switch:
 
 - Participant mode: "Participate" appears as the current mode and routes to the
   active event experience.
-- Organizer mode: "Operate", "Author", "Govern", and "Learn" appear as
+- Organizer mode: "Operate," "Author," "Govern," and "Learn" appear as
   organizer surfaces.
 - Switching modes changes navigation structure and default landing page, but it
   does not grant permissions.
@@ -423,8 +407,8 @@ only organizer access should not be forced through CTF participant pages.
 Use side navigation for durable surfaces that users revisit frequently:
 
 - Participant: Event Home, Challenges, Range, Scoreboard, Team, Help.
-- Organizer: Overview, Ranges, CTF Events, Assets, Terminal, Experiments,
-  Scenarios, Risks, Docs.
+- Organizer: Overview, Ranges, CTF Events, Assets, Terminal, Scenarios, Risks,
+  Docs.
 
 Side navigation items must map to stable route names and permission policies.
 The minimum future contract for a side-nav item is:
@@ -436,6 +420,21 @@ route_name
 permission_policy
 owner_app
 purpose
+```
+
+The SPA cohesive pass (#1368) extends this one contract with presentation
+fields so the shared shell can render navigation, breadcrumbs, contextual
+subnavigation, and mode switching from the same metadata. These additions
+parameterize the single contract; they do not create app-local schemas:
+
+```text
+mode              # participant or operator
+group             # Operate, Author, Govern, Administer, or Participate
+route_path        # SPA path
+icon_key          # lucide icon name
+active_context    # optional: range or event the surface reads or sets
+feature_flag      # optional rollout flag
+children          # optional nested or contextual entries
 ```
 
 ### Top Navigation
@@ -493,7 +492,6 @@ Use full pages for complex creation and editing:
 - Scenario YAML editing.
 - Range provisioning.
 - Risk creation and editing.
-- API key creation.
 
 Overlays must not become hidden routes for privileged functionality. They must
 call the same permission-checked endpoints as full-page flows.
@@ -512,20 +510,22 @@ Use one canonical name per concept.
 | Event | A time-bound CTF or training delivery with participants, teams, challenges, scoring, and communication. | Mission, course, campaign. |
 | Participant | A learner or competitor taking part in an event. | User when event membership matters. |
 | Organizer | A facilitator, trainer, operator, or staff user managing event or platform operations. | Admin except for Django admin. |
+| Administer | The operator surface for platform administration: users, cost, and platform settings. | Admin except when referring to Django admin. |
+| Cost | Platform spend and cost tracking surfaced under Administer. | Billing unless the billing system is specifically meant. |
 | Team | A participant grouping inside an event. | Bracket, cohort. |
 | Bracket | A scoring or grouping partition inside an event. | Team. |
 | Challenge | A CTF task solved by a participant or team for points. | Scenario, mission. |
 | Hint | Assistance attached to a challenge. | Walkthrough. |
 | Scoreboard | Event scoring display. | Leaderboard unless deliberately renamed everywhere. |
 | Range | Provisioned lab infrastructure for a user, team, event, or scenario. | Environment, lab when referring to the managed resource. |
-| Asset | Operational resource used by a range or workflow: agent, NGFW, credential, script, or file. | Scenario resource when it is managed outside the scenario definition. |
+| Asset | Operational resource used by a range or workflow: agent, NGFW, or credential. | Scenario resource when it is managed outside the scenario definition. |
 | Agent | Managed endpoint or automation participant available to Mission Control. | Instance unless the object is an infrastructure instance. |
 | NGFW | Next-generation firewall resource managed by Mission Control. | Firewall when the product object specifically means NGFW. |
 | Credential | Reusable secret or access material managed by Mission Control. | Password, key, secret in UI labels unless the subtype matters. |
-| File | Uploaded script or file managed by Mission Control. | Attachment unless attached to a CTF challenge. |
+| File | CTF challenge attachment. | Attachment when attached to a CTF challenge. |
 | Scenario | Reusable range or exercise definition authored in Scenario Editor. | Challenge, event, mission. |
 | Scenario YAML | Structured source representation for a scenario. | Config blob. |
-| Experiment | Organizer-run execution workflow mounted under Mission Control today, usually combining a scenario, scripts, and artifacts. | Scenario, range, event. |
+| Experiment | Future ACES-backed execution workflow concept; the legacy Mission Control implementation was removed by ADR-027. | Scenario, range, event. |
 | Risk | Tracked security, operational, or governance concern. | Issue unless referring to GitHub issues. |
 | Mitigation | Action or control that reduces a risk. | Fix unless a code fix is specifically meant. |
 | API key | Revocable credential for API access. | Token unless API docs require the protocol term. |
@@ -533,6 +533,31 @@ Use one canonical name per concept.
 | Guide | Task-oriented documentation. | Reference. |
 | Reference | Stable factual documentation for APIs, architecture, or concepts. | Guide. |
 | Walkthrough | Step-by-step event or scenario assistance. | Hint, guide. |
+
+## SPA-Era Cohesive Update (#1368)
+
+The SPA cutover Phase 2 cohesive UX pass (#1368) re-derived the information
+architecture fresh from the personas and the current surfaces, then compared the
+result against this artifact. The companion design doc
+`docs/design/spa-cohesive-ux-1368.md` holds the use-case catalog, the layout and
+pattern system, the rationale, and the Risk Register alignment notes. This
+artifact remains the single maintained IA, sitemap, navigation model, and
+taxonomy source (ADR-013). The shared navigation contract is implemented
+centrally in #1369; the per-surface issues (#1370 through #1374) register their
+entries into it.
+
+The fresh derivation confirmed the participant and operator mode split and the
+Operate, Author, and Govern operator groupings. It departed from the prior
+Django-era model in these ways, which are now folded into the sections above:
+
+- Administer is a first-class operator surface for users, cost, and platform
+  settings, rather than only Django admin.
+- The first authenticated screen is a role-aware operational dashboard, not a
+  public placeholder.
+- The mode switch is explicit in the shell.
+- Learn and Docs are deferred from the SPA navigation for this cutover. The
+  documentation site remains a platform surface in this sitemap and stays out of
+  scope for the SPA work per the #1368 issue.
 
 ## Maintenance Rule
 
@@ -564,3 +589,5 @@ Minimum update checklist for future changes:
 | Issue #1093 | Navigation model covering top nav, side nav, breadcrumbs, and modal or overlay patterns. | Navigation Model. |
 | Issue #1093 | Taxonomy with one name per cross-surface concept. | Taxonomy. |
 | Issue #1093 | Decisions traced to personas and JTBD entries from research output. | Evidence And Inputs, Participant Surface, Organizer Surface. |
+| Issue #1368 | SPA-era cohesive IA re-derived fresh and folded into the maintained artifact. | SPA-Era Cohesive Update (#1368), Proposed Sitemap, Navigation Model, Taxonomy. |
+| Issue #1368 | Use cases, layout and pattern system, rationale, and Risk Register alignment notes. | Companion doc `docs/design/spa-cohesive-ux-1368.md`. |

@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
 
 from ctf.models import CTFBracket, CTFParticipant
+from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def assign_participant_bracket(participant_id: UUID, bracket_id: UUID) -> CTFPar
 
     participant.bracket = bracket
     participant.save(update_fields=["bracket", "updated_at"])
-    logger.info("Assigned participant %s to bracket '%s'", participant_id, bracket.name)
+    logger.info("Assigned participant %s to bracket '%s'", participant_id, safe_log_value(bracket.name))
     return participant
 
 

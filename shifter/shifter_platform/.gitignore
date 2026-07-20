@@ -1,1 +1,14 @@
 db.sqlite3
+
+# SPA (ADR-029 / #1302): built bundle is generated in CI, never committed.
+# The Vite build output is collected into staticfiles/ by collectstatic.
+static/spa/
+
+# Frontend workspace generated artifacts. The committed contract is
+# frontend/src/api/schema.d.ts (regenerate with `npm run gen:api`); the
+# intermediate OpenAPI JSON and test/build outputs are not committed.
+frontend/openapi.json
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/dist/

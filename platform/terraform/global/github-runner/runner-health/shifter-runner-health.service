@@ -1,0 +1,9 @@
+[Unit]
+Description=Shifter GitHub Actions runner host-health monitor (#292)
+
+[Service]
+Type=oneshot
+# Per-runner name for the CloudWatch metric dimension; written by the instance
+# user_data. Optional (-) so a missing file does not fail the unit.
+EnvironmentFile=-/etc/shifter-runner-health.env
+ExecStart=/usr/local/bin/shifter-runner-health.sh

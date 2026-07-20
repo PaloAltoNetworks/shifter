@@ -1,14 +1,20 @@
 """Risk Register models."""
 
-import hashlib
-import secrets
 from typing import Any
 
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+)
 from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
+
+# SonarCloud S1192: extracted duplicated string literals.
+API_KEY_LABEL = "API Key"
 
 
 class Severity(models.TextChoices):
@@ -190,7 +196,18 @@ class Comment(SoftDeleteMixin, models.Model):
 
 
 class APIKey(models.Model):
-    """API key for programmatic access."""
+    """Archival record of a retired risk-register API key.
+
+    .. deprecated:: PLAT-102
+    .. removed:: PLAT-106 (#1124)
+        The legacy ``rr_live_`` ``X-API-Key`` credential is retired: it no
+        longer authenticates, and there is no mint path. Superseded by the
+        platform-wide ``shared.api_tokens.ApiToken`` (scoped bearer tokens).
+        This model and its table are retained **archival-only** because
+        historical ``Comment.author_apikey`` rows and ``AuditLog`` entries
+        reference them; no runtime authentication or key creation happens here.
+        New integrations use ``ApiToken``.
+    """
 
     name = models.CharField(max_length=100, help_text="Human-friendly name for this key")
     prefix = models.CharField(max_length=8, unique=True, help_text="Key prefix for identification")
@@ -209,7 +226,7 @@ class APIKey(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "API Key"
+        verbose_name = API_KEY_LABEL
         verbose_name_plural = "API Keys"
         indexes = [
             models.Index(fields=["prefix"]),
@@ -232,65 +249,6 @@ class APIKey(models.Model):
         """Return prefix with ellipsis for display."""
         return f"{self.prefix}..."
 
-    def revoke(self):
-        """Revoke this API key."""
-        self.revoked_at = timezone.now()
-        self.save(update_fields=["revoked_at"])
-
-    def update_last_used(self):
-        """Update last_used_at to current time."""
-        self.last_used_at = timezone.now()
-        self.save(update_fields=["last_used_at"])
-
-    @classmethod
-    def create_key(cls, name: str, created_by, expires_at=None) -> tuple["APIKey", str]:
-        """
-        Create a new API key.
-
-        Returns:
-            Tuple of (APIKey instance, raw key string).
-            The raw key is only available at creation time.
-        """
-        # Generate random key: rr_live_<32 random chars>
-        random_part = secrets.token_urlsafe(24)[:32]
-        raw_key = f"rr_live_{random_part}"
-        prefix = raw_key[:8]
-
-        # Hash the full key for storage
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-
-        api_key = cls.objects.create(
-            name=name,
-            prefix=prefix,
-            key_hash=key_hash,
-            created_by=created_by,
-            expires_at=expires_at,
-        )
-        return api_key, raw_key
-
-    @classmethod
-    def authenticate(cls, raw_key: str) -> "APIKey | None":
-        """
-        Authenticate an API key.
-
-        Returns:
-            APIKey instance if valid, None otherwise.
-        """
-        if not raw_key or not raw_key.startswith("rr_live_"):
-            return None
-
-        prefix = raw_key[:8]
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-
-        try:
-            api_key = cls.objects.get(prefix=prefix, key_hash=key_hash)
-            if api_key.is_active:
-                return api_key
-        except cls.DoesNotExist:
-            pass
-
-        return None
-
 
 class AuditLog(models.Model):
     """Record of state changes for auditing.
@@ -299,59 +257,15 @@ class AuditLog(models.Model):
     be modified or deleted through the application.
     """
 
-    class Action(models.TextChoices):
-        # Entity lifecycle
-        CREATE = "create", "Create"
-        UPDATE = "update", "Update"
-        DELETE = "delete", "Delete"
-        RESTORE = "restore", "Restore"
-        CLOSE = "close", "Close"
-        REOPEN = "reopen", "Reopen"
-        # Authentication
-        LOGIN = "login", "Login"
-        LOGOUT = "logout", "Logout"
-        LOGIN_FAILED = "login_failed", "Login Failed"
-        ACCESS_DENIED = "access_denied", "Access Denied"
-        # Sessions
-        CONNECT = "connect", "Connect"
-        DISCONNECT = "disconnect", "Disconnect"
-        # Resource lifecycle
-        PROVISION = "provision", "Provision"
-        DEPROVISION = "deprovision", "Deprovision"
-        READY = "ready", "Ready"
-        FAILED = "failed", "Failed"
-        PAUSE = "pause", "Pause"
-        RESUME = "resume", "Resume"
-        CANCEL = "cancel", "Cancel"
-
-    class EntityType(models.TextChoices):
-        # Risk Register entities
-        RISK = "risk", "Risk"
-        COMMENT = "comment", "Comment"
-        APIKEY = "apikey", "API Key"
-        # Platform entities
-        RANGE = "range", "Range"
-        CREDENTIAL = "credential", "Credential"
-        AGENT = "agent", "Agent"
-        USER = "user", "User"
-        SESSION = "session", "Session"
-        NGFW = "ngfw", "NGFW"
-        CONFIG = "config", "Configuration"
-        EXPERIMENT = "experiment", "Experiment"
-        SCENARIO = "scenario", "Scenario"
-        SCRIPT = "script", "Script"
-
-    class ActorType(models.TextChoices):
-        USER = "user", "User"
-        APIKEY = "apikey", "API Key"
-        SYSTEM = "system", "System"
-        COGNITO = "cognito", "Cognito"
-
-    entity_type = models.CharField(max_length=20, choices=EntityType.choices)
+    # The audit vocabulary is owned by ``shared.audit`` (ADR-001, #1523); the
+    # ORM field ``choices`` derive from it so there is one vocabulary and one
+    # event shape. Values/labels are identical to the historical nested enums,
+    # so no data migration is required.
+    entity_type = models.CharField(max_length=20, choices=AuditEntityType.choices)
     entity_id = models.PositiveIntegerField()
-    action = models.CharField(max_length=20, choices=Action.choices)
+    action = models.CharField(max_length=20, choices=AuditAction.choices)
 
-    actor_type = models.CharField(max_length=10, choices=ActorType.choices)
+    actor_type = models.CharField(max_length=10, choices=AuditActorType.choices)
     actor_id = models.PositiveIntegerField(null=True, blank=True)
 
     timestamp = models.DateTimeField(auto_now_add=True)

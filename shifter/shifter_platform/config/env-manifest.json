@@ -1,0 +1,601 @@
+{
+  "generated_from": "config/_env_manifest.py",
+  "schema_version": 1,
+  "variables": [
+    {
+      "default": "'500'",
+      "name": "ACES_OPERATION_RECORD_PRUNE_BATCH_SIZE",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'3600'",
+      "name": "ACES_OPERATION_RECORD_PRUNE_INTERVAL_SECONDS",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'30'",
+      "name": "ACES_OPERATION_RECORD_RETENTION_DAYS",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "False",
+      "name": "ADMINISTER_SPA_ENABLED",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "300",
+      "name": "API_TOKEN_LAST_USED_COALESCE_SECONDS",
+      "source_file": "config/_api_token_settings.py"
+    },
+    {
+      "default": "365",
+      "name": "API_TOKEN_MAX_TTL_DAYS",
+      "source_file": "config/_api_token_settings.py"
+    },
+    {
+      "default": "1",
+      "name": "AUDIT_TRUSTED_PROXY_HOPS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'oidc'",
+      "name": "AUTH_PROVIDER",
+      "source_file": "config/_runtime_env.py"
+    },
+    {
+      "default": "''",
+      "name": "AWS_ENDPOINT_URL",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "AWS_REGION",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "AWS_S3_BUCKET_NAME",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'us-east-2'",
+      "name": "AWS_S3_REGION",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'email.us-east-2.amazonaws.com'",
+      "name": "AWS_SES_REGION_ENDPOINT",
+      "source_file": "config/_email.py"
+    },
+    {
+      "default": "'us-east-2'",
+      "name": "AWS_SES_REGION_NAME",
+      "source_file": "config/_email.py"
+    },
+    {
+      "default": "'report-only'",
+      "name": "BROWSER_CSP_MODE",
+      "source_file": "config/_browser_security.py"
+    },
+    {
+      "default": "'aws'",
+      "name": "CLOUD_PROVIDER",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "CLOUD_REGION",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'https://ctf.shifter.example.com/login'",
+      "name": "CTFD_PLATFORM_URL",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'24'",
+      "name": "CTF_DEFAULT_CLEANUP_DELAY_HOURS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "CTF_DEFAULT_PARTICIPANT_PASSWORD",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'30'",
+      "name": "CTF_DEFAULT_RANGE_SPINUP_MINUTES",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'ctf@example.com'",
+      "name": "CTF_FROM_EMAIL",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'5'",
+      "name": "CTF_LOGIN_RATE_LIMIT_MAX",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'300'",
+      "name": "CTF_LOGIN_RATE_LIMIT_WINDOW_SECONDS",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'24'",
+      "name": "CTF_PARTICIPANT_ACCOUNT_RETENTION_HOURS",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'0.1'",
+      "name": "CTF_REGEX_FLAG_MATCH_TIMEOUT_SECONDS",
+      "source_file": "config/_ctf_regex_settings.py"
+    },
+    {
+      "default": "'255'",
+      "name": "CTF_REGEX_FLAG_MAX_PATTERN_LENGTH",
+      "source_file": "config/_ctf_regex_settings.py"
+    },
+    {
+      "default": "'500'",
+      "name": "CTF_REGEX_FLAG_MAX_SUBMISSION_LENGTH",
+      "source_file": "config/_ctf_regex_settings.py"
+    },
+    {
+      "default": "False",
+      "name": "CTF_WORKSPACE_SPA_ENABLED",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": null,
+      "name": "DB_HOST",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": "'false'",
+      "name": "DB_IAM_AUTH",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": null,
+      "name": "DB_NAME",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": null,
+      "name": "DB_PASSWORD",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": null,
+      "name": "DB_PORT",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": "'require'",
+      "name": "DB_SSLMODE",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "DB_SSL_ROOT_CERT",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": null,
+      "name": "DB_USER",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": "'webmaster@localhost'",
+      "name": "DEFAULT_FROM_EMAIL",
+      "source_file": "config/_email.py"
+    },
+    {
+      "default": null,
+      "name": "DJANGO_ALLOWED_HOSTS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "DJANGO_CSRF_TRUSTED_ORIGINS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'False'",
+      "name": "DJANGO_DEBUG",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "_test_secret_key_default",
+      "name": "DJANGO_SECRET_KEY",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "DJANGO_SECRET_KEY_FALLBACKS",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": "'https://brad-edwards.github.io/shifter/'",
+      "name": "DOCS_SITE_URL",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "EMAIL_API_KEY",
+      "source_file": "config/_email.py"
+    },
+    {
+      "default": null,
+      "name": "EMAIL_BACKEND",
+      "source_file": "config/_email.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_ECS_CLUSTER_ARN",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_ECS_SECURITY_GROUP_ID",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_JOB_LOCATION",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_PRIVATE_SUBNET_IDS",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'0'",
+      "name": "ENGINE_TASK_BACKOFF_LIMIT",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_TASK_CLUSTER",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_TASK_DEFINITION",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_TASK_DEFINITION_ARN",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_TASK_IMAGE",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'IfNotPresent'",
+      "name": "ENGINE_TASK_IMAGE_PULL_POLICY",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_TASK_NAMESPACE",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_TASK_NETWORK_SECURITY_GROUP_ID",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENGINE_TASK_NETWORK_SUBNET_IDS",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "ENGINE_TASK_SERVICE_ACCOUNT_NAME",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'3600'",
+      "name": "ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "ENVIRONMENT",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": null,
+      "name": "FIELD_ENCRYPTION_KEY",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": null,
+      "name": "GCP_PROJECT_ID",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "GCP_REGION",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "GOOGLE_CLOUD_PROJECT",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "GUACAMOLE_API_BASE_URL",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "'/guacamole'",
+      "name": "GUACAMOLE_BASE_URL",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "'False'",
+      "name": "GUACAMOLE_BOOTSTRAP_INLINE",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "'500'",
+      "name": "GUACAMOLE_BOOTSTRAP_PRUNE_BATCH_SIZE",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "'60'",
+      "name": "GUACAMOLE_BOOTSTRAP_PRUNE_INTERVAL_SECONDS",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "'300'",
+      "name": "GUACAMOLE_BOOTSTRAP_TTL_SECONDS",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "'4'",
+      "name": "GUACAMOLE_BOOTSTRAP_WORKERS",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "GUACAMOLE_JSON_AUTH_SECRET",
+      "source_file": "config/_guacamole_settings.py"
+    },
+    {
+      "default": "'3'",
+      "name": "GUACAMOLE_TOKEN_RETRY_ATTEMPTS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'200'",
+      "name": "GUACAMOLE_TOKEN_RETRY_BASE_DELAY_MS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'paloaltonetworks.com'",
+      "name": "IDENTITY_ALLOWED_EMAIL_DOMAIN",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "IDENTITY_PLATFORM_API_KEY",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "IDENTITY_PLATFORM_AUTH_DOMAIN",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'Shifter'",
+      "name": "IDENTITY_PLATFORM_ISSUER",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "IDENTITY_PLATFORM_PROJECT_ID",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'Shifter Authenticator'",
+      "name": "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "LOCAL_PROVISIONER",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'INFO'",
+      "name": "LOG_LEVEL",
+      "source_file": "config/_logging_config.py"
+    },
+    {
+      "default": "''",
+      "name": "MAILGUN_SENDER_DOMAIN",
+      "source_file": "config/_email.py"
+    },
+    {
+      "default": null,
+      "name": "OIDC_AUTH_DOMAIN",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": null,
+      "name": "OIDC_ISSUER_URL",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": null,
+      "name": "OIDC_RP_CLIENT_ID",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": null,
+      "name": "OIDC_RP_CLIENT_SECRET",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'False'",
+      "name": "PORTAL_CAPACITY_METRICS_ENABLED",
+      "source_file": "config/_capacity_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "PORTAL_CAPACITY_NAME_PREFIX",
+      "source_file": "config/_capacity_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "PROVISIONER_PATH",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "PULUMI_ECS_CLUSTER_ARN",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "PULUMI_ECS_SECURITY_GROUP_ID",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "PULUMI_PRIVATE_SUBNET_IDS",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "''",
+      "name": "PULUMI_TASK_DEFINITION_ARN",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "RANGE_EVENTS_TOPIC_ID",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "'100'",
+      "name": "RANGE_RECONCILE_BATCH_SIZE",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'300'",
+      "name": "RANGE_RECONCILE_STALE_SECONDS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "REDIS_HOST",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'6379'",
+      "name": "REDIS_PORT",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "False",
+      "name": "SCENARIO_EDITOR_SPA_ENABLED",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'31536000'",
+      "name": "SECURE_HSTS_SECONDS",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "'268435456'",
+      "name": "SHIFTER_ACES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'aces/content-delivery'",
+      "name": "SHIFTER_ACES_CONTENT_DELIVERY_PREFIX",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'False'",
+      "name": "SHIFTER_ACES_NATIVE_PROVISIONING",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "SHIFTER_ACES_PACKAGE_BUCKET",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'268435456'",
+      "name": "SHIFTER_ACES_PACKAGE_MAX_ARCHIVE_BYTES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'20000'",
+      "name": "SHIFTER_ACES_PACKAGE_MAX_ENTRIES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'1073741824'",
+      "name": "SHIFTER_ACES_PACKAGE_MAX_UNCOMPRESSED_BYTES",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "SHIFTER_ACES_PACKAGE_PREFIX",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "str(_aces_default_package_root)",
+      "name": "SHIFTER_ACES_PACKAGE_ROOT",
+      "source_file": "config/_aces_settings.py"
+    },
+    {
+      "default": "'noreply@shifter.local'",
+      "name": "SHIFTER_SUPPORT_EMAIL",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": null,
+      "name": "SITE_URL",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "SNS_RANGE_EVENTS_ARN",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "STORAGE_BUCKET_NAME",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
+      "name": "TESTING",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "sqlite",
+      "name": "TEST_DB_BACKEND",
+      "source_file": "config/_database_settings.py"
+    },
+    {
+      "default": "str(_UPLOAD_INSPECTION_FLOOR)",
+      "name": "UPLOAD_INSPECTION_MAX_HEADER_BYTES",
+      "source_file": "config/settings.py"
+    }
+  ]
+}

@@ -511,3 +511,17 @@
     text-align: center;
     padding: 32px;
 }
+
+/* Step intro paragraph (extracted inline style, issue #414) */
+.wizard-intro {
+    color: var(--theme-text-secondary);
+    margin: 0 0 20px;
+    font-size: 13px;
+}
+
+/* Success action buttons row (extracted inline style, issue #414) */
+.success-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}

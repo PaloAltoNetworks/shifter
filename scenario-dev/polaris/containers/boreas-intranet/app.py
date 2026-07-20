@@ -66,11 +66,11 @@ def index() -> str:
 
 @app.route("/search")
 def search() -> Response:
-    # Intentional SQL injection: query string concatenated directly.
     q = request.args.get("q", "")
+    pattern = f"%{q}%"
     conn = sqlite3.connect(DB_PATH)
     try:
-        cur = conn.execute(f"SELECT id, name FROM users WHERE name LIKE '%{q}%'")
+        cur = conn.execute("SELECT id, name FROM users WHERE name LIKE ?", (pattern,))
         rows = cur.fetchall()
     finally:
         conn.close()

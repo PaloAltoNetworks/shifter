@@ -8,7 +8,11 @@
 
 [CmdletBinding()]
 param(
-    [string]$AdminPassword = "CortexSavesTheDay!"
+    [string]$AdminPassword = "CortexSavesTheDay!",
+    # DNS forwarder for non-domain lookups. Defaults to the link-local AWS Route
+    # 53 Resolver (the AWS/SSM path relies on it); the GCE pre-bake passes the
+    # GCP internal resolver instead.
+    [string]$DnsForwarder = "169.254.169.253"
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,9 +44,9 @@ for ($i = 0; $i -lt 60; $i++) {
 # the AMI was baked in). When a private SSM VPC endpoint exists in the
 # range VPC with PrivateDnsEnabled=true, the resolver returns the
 # endpoint's private IP automatically.
-Write-Host "Setting DNS forwarder to AWS VPC resolver (169.254.169.253)..."
+Write-Host "Setting DNS forwarder to $DnsForwarder..."
 try {
-    Set-DnsServerForwarder -IPAddress 169.254.169.253 -PassThru -ErrorAction Stop | Out-Null
+    Set-DnsServerForwarder -IPAddress $DnsForwarder -PassThru -ErrorAction Stop | Out-Null
     Write-Host "  forwarder set"
 } catch {
     Write-Host "  forwarder set FAILED: $($_.Exception.Message)"

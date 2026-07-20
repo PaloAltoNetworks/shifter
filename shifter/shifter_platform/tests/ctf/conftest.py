@@ -41,6 +41,24 @@ if TYPE_CHECKING:
 User = get_user_model()
 
 
+# Explicit, clearly synthetic CTF bootstrap credential for tests. Production code
+# fails closed (issue #1665): no repository literal may authenticate an account,
+# so tests configure this value explicitly through the autouse fixture below.
+# Chosen to satisfy the canonical ``AUTH_PASSWORD_VALIDATORS``.
+TEST_CTF_BOOTSTRAP_PASSWORD = "test-ctf-bootstrap-pw"  # nosec B105
+
+
+@pytest.fixture(autouse=True)
+def _ctf_bootstrap_password(settings):
+    """Supply an explicit test-only bootstrap credential for every CTF test.
+
+    Fail-closed tests set ``settings.CTF_DEFAULT_PARTICIPANT_PASSWORD = ""`` in
+    their own body (running after this autouse fixture) to exercise the
+    no-source-configured path.
+    """
+    settings.CTF_DEFAULT_PARTICIPANT_PASSWORD = TEST_CTF_BOOTSTRAP_PASSWORD
+
+
 # -----------------------------------------------------------------------------
 # In-memory model builders (no DB required)
 # -----------------------------------------------------------------------------
@@ -135,8 +153,6 @@ def make_participant(event=None, **overrides) -> CTFParticipant:
         "user_id": 1,
         "status": ParticipantStatus.ACTIVE.value,
         "registered_at": timezone.now(),
-        "invite_token": "test-token-abcdef123456",
-        "invite_token_expires": timezone.now() + timedelta(days=7),
         "last_active_at": None,
     }
     defaults.update(overrides)

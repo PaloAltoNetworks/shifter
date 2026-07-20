@@ -5,31 +5,26 @@
 # network boundaries: every attack path the design says MUST work,
 # works; every path the design says MUST NOT work, fails.
 #
-# Runs from the range host (ctf-range-builder). Uses `docker exec`
-# into each source container and python3 sockets to probe TCP
-# reachability — python3 is present on every relevant container
+# Runs from the range host. Uses `docker exec` into each source container and
+# python3 sockets to probe TCP reachability — python3 is present on every relevant container
 # (alpine, debian, kali) which is not true for bash /dev/tcp.
 #
 # Usage:
-#     bash /home/atomik/range/isolation-smoketest.sh
+#     bash tests/isolation-smoketest.sh
 #
 # Exits 0 on full pass, 1 on any failure.
 
 set -u
 
-# A2 DC IP. Default to the production range-VPC pinned address (`.11` in
-# the polaris /28 carved by `scripts/polaris-aws-range/`), but resolve
-# `dc01.boreas.local` from inside the dns container if available so the
-# test works in any account / VPC layout where the DC isn't pinned to
-# 10.1.100.11. Earlier this was hardcoded to 10.1.100.11 which made the
-# test fail in any non-production VPC bake even when the DC was
-# perfectly healthy.
+# A2 DC IP. Resolve `dc01.boreas.local` from inside the dns container so the
+# test works in any account / VPC layout where the Windows DC is not pinned to
+# a legacy range address.
 A2_DC_IP="${A2_DC_IP:-}"
 if [[ -z "$A2_DC_IP" ]]; then
     A2_DC_IP="$(docker exec dns dig +short @127.0.0.1 dc01.boreas.local 2>/dev/null | head -n1)"
 fi
 if [[ -z "$A2_DC_IP" ]]; then
-    A2_DC_IP="10.1.100.11"  # production fallback
+    A2_DC_IP="10.1.100.11"  # legacy fallback
     echo "[isolation] WARN: dc01.boreas.local did not resolve via dns container — falling back to $A2_DC_IP" >&2
 fi
 echo "[isolation] A2 DC IP: $A2_DC_IP"
@@ -72,13 +67,44 @@ must_not_reach() {
     fi
 }
 
+# Return 0 if src resolves domain, else 1.
+can_resolve() {
+    local src="$1" domain="$2"
+    docker exec "$src" python3 -c "
+import socket, sys
+try:
+    socket.getaddrinfo('$domain', None)
+    sys.exit(0)
+except socket.gaierror:
+    sys.exit(1)
+" >/dev/null 2>&1
+}
+
+must_resolve() {
+    local src="$1" domain="$2" label="$3"
+    if can_resolve "$src" "$domain"; then
+        pass "$src resolves $label ($domain)"
+    else
+        fail "$src did NOT resolve $label ($domain) — in-range DNS must work"
+    fi
+}
+
+must_not_resolve() {
+    local src="$1" domain="$2" label="$3"
+    if can_resolve "$src" "$domain"; then
+        fail "$src resolved $label ($domain) — external/sinkholed DNS must fail"
+    else
+        pass "$src did not resolve $label ($domain) (expected)"
+    fi
+}
+
 echo "NORTHSTORM network isolation smoketest"
-echo "Topology: shared/corporate/scada/lab/bunker-ot bridges + A2 VM at 10.100.0.4"
+echo "Topology: shared/corporate/scada/lab/bunker-ot bridges + A2 VM at $A2_DC_IP"
 
 # =============================================================================
 # A14 Kali (shared + corporate)
-# Design: can reach A0, A1, A3, A4, A7, A2 (GCP VM), DNS. Cannot reach lab,
-# scada, or bunker-ot directly — must pivot through A3.
+# Design: can reach A0, A1, A3, A4, A7, A2, DNS. Cannot reach lab, scada, or
+# bunker-ot directly.
 # =============================================================================
 echo
 echo "=== a14-kali (shared+corporate) ==="
@@ -264,6 +290,51 @@ must_not_reach a13-brain 172.20.0.10  80   "A0 website (shared)"
 must_not_reach a13-brain 172.20.10.40 445  "A4 SMB (corporate)"
 must_not_reach a13-brain 172.20.40.10 502  "A5 SCADA (scada)"
 must_not_reach a13-brain 172.20.30.30 5432 "A8 research DB (lab)"
+
+# =============================================================================
+# DNS egress containment (#1172)
+# Host-level checks exercise Route 53 Resolver DNS Firewall on the range VPC.
+# Container checks exercise the participant DNS path through the scenario dns
+# service once public-recursive upstream egress is removed.
+# =============================================================================
+echo
+echo "=== DNS egress containment ==="
+
+if command -v dig >/dev/null 2>&1; then
+    blocked_answer=$(dig +short @169.254.169.253 example.com 2>/dev/null | head -n1 || true)
+    if [[ -n "$blocked_answer" ]]; then
+        fail "host VPC resolver answered example.com — unlisted external DNS must be blocked"
+    else
+        pass "host VPC resolver blocked example.com (expected)"
+    fi
+
+    allowed_answer=$(dig +short @169.254.169.253 ssm.us-east-2.amazonaws.com 2>/dev/null | head -n1 || true)
+    if [[ -n "$allowed_answer" ]]; then
+        pass "host VPC resolver answered allowed .amazonaws.com bootstrap name"
+    else
+        fail "host VPC resolver did not answer ssm.us-east-2.amazonaws.com — bootstrap DNS must work"
+    fi
+else
+    echo "  [SKIP] dig not available on range host for VPC resolver checks" >&2
+fi
+
+must_not_resolve a14-kali "example.com" "external domain via participant DNS path"
+must_resolve a14-kali "dc01.boreas.local" "in-range DC hostname"
+must_not_reach a14-kali 8.8.8.8 53 "public recursive DNS (8.8.8.8:53)"
+
+# =============================================================================
+# Zero-egress posture (#1171 / ADR-026)
+# When ZERO_EGRESS=1, assert no path to external hosts, including lanes that
+# are allowlisted in allowlist mode (public DNS, NTP, HTTPS).
+# =============================================================================
+if [[ "${ZERO_EGRESS:-0}" == "1" ]]; then
+    echo
+    echo "=== zero-egress external containment ==="
+    must_not_reach a14-kali 1.1.1.1 443 "external HTTPS (Cloudflare)"
+    must_not_reach a14-kali 203.0.113.1 443 "external HTTPS (TEST-NET-3)"
+    must_not_reach a14-kali 129.6.15.28 123 "public NTP (time.nist.gov)"
+    must_not_resolve a14-kali "google.com" "external domain"
+fi
 
 echo
 echo "=================================================="

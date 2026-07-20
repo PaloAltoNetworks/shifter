@@ -13,9 +13,9 @@ Rules enforced (per file, per ingress rule, per CIDR):
     - Literal CIDRs broader than /24 (prefix < 24) are rejected for
       ingress. /24 or narrower is allowed; per-range deployments should
       be using a /28 anyway.
-    - References to known-good variables (currently
-      `var.portal_vpc_cidr`) are allowed regardless of the underlying
-      CIDR width — the portal VPC is the only intentional broad source.
+    - `var.portal_vpc_cidr` is a generally trusted control-plane source.
+      The ADR-039-R10 public VPN source is allowed only on the audited
+      `range/vpn.tf` `vpn_nlb` UDP/1194 ingress tuple.
       Add new entries to ALLOWED_VAR_REFS below if a future trusted
       source needs the same exemption.
     - Egress rules are not checked. Egress 0.0.0.0/0 is the standard
@@ -45,6 +45,8 @@ from pathlib import Path
 ALLOWED_VAR_REFS: set[str] = {
     "var.portal_vpc_cidr",
 }
+_VPN_PUBLIC_CLIENT_REF = "var.vpn_public_client_cidr"
+_VPN_EXCEPTION_PATH = "shifter/engine/provisioner/terraform/modules/range/vpn.tf"
 
 MAX_LITERAL_PREFIX_FOR_INGRESS = 24
 
@@ -54,6 +56,7 @@ _RESOURCE_RE = re.compile(
 _INGRESS_BLOCK_RE = re.compile(r"^\s*ingress\s*\{")
 _TYPE_INGRESS_RE = re.compile(r'^\s*type\s*=\s*"ingress"\s*$')
 _CIDR_BLOCKS_RE = re.compile(r"^\s*cidr_blocks\s*=\s*\[(?P<items>[^\]]*)\]")
+_INGRESS_ATTRIBUTE_RE = re.compile(r'^\s*(from_port|to_port|protocol)\s*=\s*"?([^"\s]+)"?\s*$')
 
 
 @dataclass
@@ -81,9 +84,11 @@ def _parse_cidr_block_items(raw: str) -> list[str]:
     return items
 
 
-def _check_cidr(value: str) -> str | None:
+def _check_cidr(value: str, *, allow_public_vpn: bool = False) -> str | None:
     """Return None if the value is acceptable, else a reason string."""
     if value in ALLOWED_VAR_REFS:
+        return None
+    if value == _VPN_PUBLIC_CLIENT_REF and allow_public_vpn:
         return None
     # Per-range scoped expressions: `each.value.cidr`, `each.key`, etc.
     # These are evaluated inside a for_each block so each iteration gets
@@ -115,14 +120,20 @@ def _check_cidr(value: str) -> str | None:
     return None
 
 
-def _collect_cidr_violations_on_line(path: Path, idx: int, raw: str) -> list[Violation]:
+def _collect_cidr_violations_on_line(
+    path: Path,
+    idx: int,
+    raw: str,
+    *,
+    allow_public_vpn: bool = False,
+) -> list[Violation]:
     """Return any CIDR-block violations found on a single ingress line."""
     out: list[Violation] = []
     m = _CIDR_BLOCKS_RE.match(raw)
     if not m:
         return out
     for item in _parse_cidr_block_items(m.group("items")):
-        reason = _check_cidr(item)
+        reason = _check_cidr(item, allow_public_vpn=allow_public_vpn)
         if reason is not None:
             out.append(Violation(path, idx, item, reason))
     return out
@@ -133,15 +144,21 @@ class _ParserState:
 
     def __init__(self) -> None:
         self.in_resource: str | None = None
+        self.resource_name: str | None = None
         self.resource_brace_depth = 0
         self.in_inline_ingress_block = False
         self.ingress_brace_depth = 0
         self.is_security_group_rule_ingress = False
+        self.inline_ingress_attributes: dict[str, str] = {}
+        self.inline_ingress_cidrs: list[tuple[int, str]] = []
 
     def reset_resource(self) -> None:
         self.in_resource = None
+        self.resource_name = None
         self.in_inline_ingress_block = False
         self.is_security_group_rule_ingress = False
+        self.inline_ingress_attributes = {}
+        self.inline_ingress_cidrs = []
 
 
 def _enter_resource_if_match(state: _ParserState, raw: str) -> bool:
@@ -150,9 +167,36 @@ def _enter_resource_if_match(state: _ParserState, raw: str) -> bool:
     if not m:
         return False
     state.in_resource = m.group(1)
+    state.resource_name = m.group(2)
     state.resource_brace_depth = raw.count("{") - raw.count("}")
     state.is_security_group_rule_ingress = False
     return True
+
+
+def _vpn_tuple_is_audited(path: Path, state: _ParserState) -> bool:
+    """Return whether the current inline rule is the exact ADR-039-R10 edge."""
+    attrs = state.inline_ingress_attributes
+    return (
+        path.as_posix().endswith(_VPN_EXCEPTION_PATH)
+        and state.in_resource == "aws_security_group"
+        and state.resource_name == "vpn_nlb"
+        and attrs.get("protocol") == "udp"
+        and attrs.get("from_port") == "1194"
+        and attrs.get("to_port") == "1194"
+    )
+
+
+def _flush_inline_ingress(path: Path, state: _ParserState) -> list[Violation]:
+    """Evaluate CIDRs after the whole inline rule tuple has been observed."""
+    allow_public_vpn = _vpn_tuple_is_audited(path, state)
+    violations: list[Violation] = []
+    for line, value in state.inline_ingress_cidrs:
+        reason = _check_cidr(value, allow_public_vpn=allow_public_vpn)
+        if reason is not None:
+            violations.append(Violation(path, line, value, reason))
+    state.inline_ingress_attributes = {}
+    state.inline_ingress_cidrs = []
+    return violations
 
 
 def check_file(path: Path) -> list[Violation]:
@@ -181,12 +225,22 @@ def check_file(path: Path) -> list[Violation]:
         if not state.in_inline_ingress_block and _INGRESS_BLOCK_RE.match(raw):
             state.in_inline_ingress_block = True
             state.ingress_brace_depth = raw.count("{") - raw.count("}")
+            state.inline_ingress_attributes = {}
+            state.inline_ingress_cidrs = []
             continue
 
         if state.in_inline_ingress_block:
             state.ingress_brace_depth += raw.count("{") - raw.count("}")
-            violations.extend(_collect_cidr_violations_on_line(path, idx, raw))
+            attribute = _INGRESS_ATTRIBUTE_RE.match(raw)
+            if attribute:
+                state.inline_ingress_attributes[attribute.group(1)] = attribute.group(2)
+            cidrs = _CIDR_BLOCKS_RE.match(raw)
+            if cidrs:
+                state.inline_ingress_cidrs.extend(
+                    (idx, item) for item in _parse_cidr_block_items(cidrs.group("items"))
+                )
             if state.ingress_brace_depth <= 0:
+                violations.extend(_flush_inline_ingress(path, state))
                 state.in_inline_ingress_block = False
 
     return violations

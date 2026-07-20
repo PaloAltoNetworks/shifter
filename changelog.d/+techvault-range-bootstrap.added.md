@@ -1,0 +1,1 @@
+Add the TechVault purple-team scenario: a scenario template plus the range bootstrap that writes the AWS Bedrock credential shard for Claude Code on the host seat and RDPs in as the `ubuntu` seat user (gated on the `techvault` AMI key).

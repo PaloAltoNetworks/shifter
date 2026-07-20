@@ -142,7 +142,6 @@ def create_submission_data(**overrides: Any) -> dict[str, Any]:
         "submitted_flag": "FLAG{test}",
         "is_correct": False,
         "points_awarded": 0,
-        "hint_used": False,
         "attempt_number": 1,
         "ip_address": "192.168.1.1",
     }

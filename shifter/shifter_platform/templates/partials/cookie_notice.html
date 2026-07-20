@@ -1,0 +1,26 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load static i18n %}
+<section id="cookie-notice"
+         class="cookie-notice"
+         aria-label="{% trans 'Browser storage notice' %}"
+         hidden>
+    <p class="cookie-notice__text">
+        {% blocktrans trimmed %}
+        This portal uses strictly necessary browser storage for authentication, session behavior, and remembering that you dismissed this notice.
+        {% endblocktrans %}
+        {% blocktrans trimmed %}
+        It does not use analytics, advertising, or non-essential tracking cookies.
+        {% endblocktrans %}
+        <a id="cookie-notice-privacy-link"
+           class="cookie-notice__link"
+           href="{% url 'privacy_notice' %}">{% trans "Privacy notice" %}</a>
+    </p>
+    <div class="cookie-notice__actions">
+        <button type="button"
+                id="cookie-notice-dismiss"
+                class="cookie-notice__dismiss">{% trans "Dismiss" %}</button>
+    </div>
+</section>
+<link rel="stylesheet" href="{% static 'css/cookie-notice.css' %}">
+<script src="{% static 'js/cookie-notice.js' %}"></script>

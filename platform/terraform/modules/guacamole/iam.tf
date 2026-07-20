@@ -4,7 +4,8 @@
 # Used by ECS to pull container images and write logs
 
 resource "aws_iam_role" "ecs_execution" {
-  name = "${var.name_prefix}-guacamole-ecs-execution"
+  name                 = "${local.iam_name_prefix}-guacamole-ecs-execution"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -73,13 +74,44 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
   })
 }
 
+# Allow execution role to decrypt the portal Secrets Manager CMK. Without
+# this, ECS resolves task-definition `secrets = [...]` using this role
+# before container start; any guacamole secret encrypted with the new CMK
+# (db_credentials, json_auth — see rds.tf:36, rds.tf:73 which set
+# kms_key_id = var.secrets_kms_key_arn) aborts with
+# `AccessDeniedException: Access to KMS is not allowed`. Same class of
+# bug as issue #52; this grant closes the gap for guacamole.
+resource "aws_iam_role_policy" "ecs_execution_kms" {
+  name = "kms-secrets-decrypt"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SecretsManagerKMSAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey"
+      ]
+      Resource = var.secrets_kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role - Guacamole Client
 # ------------------------------------------------------------------------------
 # Used by the Guacamole client container for runtime operations
 
 resource "aws_iam_role" "guacamole_client_task" {
-  name = "${var.name_prefix}-guacamole-client-task"
+  name                 = "${local.iam_name_prefix}-guacamole-client-task"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -114,13 +146,39 @@ resource "aws_iam_role_policy" "guacamole_client_secrets" {
   })
 }
 
+# Same kms:Decrypt grant on the client task role for runtime secret
+# fetches via boto3. See ecs_execution_kms above for the rationale.
+resource "aws_iam_role_policy" "guacamole_client_kms" {
+  name = "kms-secrets-decrypt"
+  role = aws_iam_role.guacamole_client_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SecretsManagerKMSAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey"
+      ]
+      Resource = var.secrets_kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role - Guacd
 # ------------------------------------------------------------------------------
 # Used by the guacd container - minimal permissions needed
 
 resource "aws_iam_role" "guacd_task" {
-  name = "${var.name_prefix}-guacd-task"
+  name                 = "${local.iam_name_prefix}-guacd-task"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

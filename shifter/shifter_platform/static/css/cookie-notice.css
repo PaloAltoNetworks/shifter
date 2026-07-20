@@ -1,0 +1,56 @@
+.cookie-notice {
+    position: fixed;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    max-width: min(42rem, calc(100vw - 2rem));
+    padding: 0.875rem 1rem;
+    background: var(--theme-surface, #151515);
+    border: 1px solid var(--theme-border, #484848);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgb(0, 0, 0, 0.35);
+    color: var(--theme-text, #eaebeb);
+    font-size: 0.875rem;
+    line-height: 1.45;
+}
+
+.cookie-notice[hidden] {
+    display: none !important;
+}
+
+.cookie-notice__text {
+    flex: 1 1 16rem;
+    margin: 0;
+}
+
+.cookie-notice__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
+.cookie-notice__link {
+    color: var(--theme-accent, #94a3b8);
+    text-decoration: underline;
+}
+
+.cookie-notice__dismiss {
+    border: 1px solid var(--theme-border, #484848);
+    border-radius: 4px;
+    background: var(--theme-surface-elevated, #1f1f1f);
+    color: var(--theme-text, #eaebeb);
+    font: inherit;
+    font-size: 0.8125rem;
+    padding: 0.375rem 0.75rem;
+    cursor: pointer;
+}
+
+.cookie-notice__dismiss:hover {
+    border-color: var(--theme-accent, #94a3b8);
+}

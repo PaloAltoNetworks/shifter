@@ -1,7 +1,7 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     {% if editing %}
         Edit Bracket
@@ -10,58 +10,7 @@
     {% endif %}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.bracket-form {
-    max-width: 560px;
-}
-
-.form-help {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-    margin-top: 4px;
-}
-
-.field-error {
-    font-size: 12px;
-    color: #ff4d4f;
-    margin-top: 4px;
-}
-
-.form-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 16px;
-    border-top: 1px solid var(--theme-border);
-    margin-top: 8px;
-}
-
-.btn-cancel {
-    background: transparent;
-    color: var(--theme-text-secondary);
-    border: 1px solid var(--theme-border);
-}
-
-.breadcrumb {
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb .separator {
-    margin: 0 6px;
-    color: var(--theme-text-secondary);
-}
-
-textarea.form-input {
-    resize: vertical;
-    min-height: 60px;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-bracket_form.css' %}">
 {% endblock %}
 {% block content %}
     <div class="page-header">
@@ -92,7 +41,7 @@ textarea.form-input {
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
-                <div class="form-group" style="margin-bottom: 16px;">
+                <div class="form-group mb-lg">
                     <label class="form-label" for="{{ field.id_for_label }}">
                         {{ field.label }}
                     </label>

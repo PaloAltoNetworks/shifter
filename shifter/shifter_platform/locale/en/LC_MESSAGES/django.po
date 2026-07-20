@@ -3531,9 +3531,7 @@ msgid "Loading authentication\\u2026"
 msgstr ""
 
 #: templates/identity_platform_login.html:222
-msgid ""
-"CTF participant access still uses range invitation magic links and does not "
-"go through this page."
+msgid "CTF participants use the dedicated username/password CTF login and cannot use this page."
 msgstr ""
 
 #: templates/identity_platform_login.html:230

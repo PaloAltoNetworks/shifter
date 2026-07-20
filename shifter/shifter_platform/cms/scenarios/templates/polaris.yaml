@@ -25,6 +25,12 @@ instances:
       domain_name: boreas.local
       netbios_name: BOREAS
 
+participant_access:
+  - target: kali
+    channel: ssh
+  - target: kali
+    channel: rdp
+
 subnets:
   - name: polaris
     instances: [kali, dc01]

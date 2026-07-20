@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Unattended install answer file for the GDC-native polaris-dc image.
+
+  This drives an automated Windows Server 2022 install on GDC VM Runtime
+  (KubeVirt/QEMU) the *supported* way (per the GDC bare-metal windows-vm doc):
+  install fresh from the Windows ISO with the virtio-container-disk attached, so
+  the installer writes a correct UEFI/GPT/ESP layout and binds the virtio disk +
+  net drivers by construction (no GCE-export firmware hacks).
+
+  Media layout at install time (attached to the install VM):
+    - boot disk         : empty 100Gi VirtualMachineDisk on the VIRTIO bus (install target)
+    - windows-iso       : cdrom, Windows Server 2022 eval ISO
+    - virtio-driver     : cdrom, quay.io/kubevirt/virtio-container-disk (NetKVM for the bake)
+    - polaris-answer    : cdrom, this autounattend.xml + a $WinPEDriver$ folder + the AD scripts
+
+  Windows Setup auto-reads autounattend.xml from the root of any attached
+  removable drive. The virtio storage (viostor) + net (NetKVM) drivers are
+  auto-loaded during Setup from a $WinPEDriver$ folder at the root of the
+  polaris-answer cdrom. Setup scans every removable drive for $WinPEDriver$ and
+  installs the drivers it finds, with NO drive-letter or DriverPaths guessing.
+  The drivers are the W10\amd64 build (this virtio-win ships no 2k22 dir; WS2022
+  uses W10). viostor becomes boot-critical, so the boot disk is virtio the whole
+  time: build-hardware == range-hardware, so no bus switch and no hardware-change
+  OOBE re-run, and no sysprep (which would break the promoted DC).
+  FirstLogonCommands runs the AD promotion + a2_setup post-install (see bake.ps1).
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+  <settings pass="windowsPE">
+    <!-- WinPE language/locale. REQUIRED for an unattended install: it is what
+         the interactive "Language to install / Time / Keyboard" screen collects.
+         Without it Setup cannot resolve the (language-specific) license terms and
+         fails with "Windows cannot find the Microsoft Software License Terms". -->
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UILanguageFallback>en-US</UILanguageFallback>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <!-- UEFI/GPT layout: EFI System Partition + MSR + Windows. -->
+          <CreatePartitions>
+            <CreatePartition wcm:action="add"><Order>1</Order><Type>EFI</Type><Size>260</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>2</Order><Type>MSR</Type><Size>16</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>3</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>2</PartitionID></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>3</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter></ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+      <ImageInstall>
+        <OSImage>
+          <!-- Windows Server 2022 Standard, Desktop Experience = image index 2
+               in the eval install.wim (1=Standard Core, 2=Standard Desktop,
+               3=Datacenter Core, 4=Datacenter Desktop). Select by INDEX rather
+               than NAME: an unresolved InstallFrom is what Setup reports as
+               "Windows cannot find the Microsoft Software License Terms". -->
+          <InstallFrom>
+            <MetaData wcm:action="add"><Key>/IMAGE/INDEX</Key><Value>2</Value></MetaData>
+          </InstallFrom>
+          <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
+        </OSImage>
+      </ImageInstall>
+      <UserData>
+        <!-- NO <ProductKey>: the edition is chosen by ImageInstall/InstallFrom
+             (index 2 = Standard Desktop Eval). An empty <ProductKey><Key></Key>
+             makes Setup fail edition/license resolution and abort with "Windows
+             cannot find the Microsoft Software License Terms" (bisected via the
+             GDC vnc/screenshot endpoint: license page renders fine without
+             UserData; adding an empty ProductKey is what breaks it). -->
+        <AcceptEula>true</AcceptEula>
+        <FullName>Boreas</FullName>
+        <Organization>Boreas Systems</Organization>
+      </UserData>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <ComputerName>dc01</ComputerName>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+      <UserAccounts>
+        <AdministratorPassword>
+          <!-- The build/admin password. a2_setup.ps1 sets the final CTF
+               Administrator password (CortexSavesTheDay!) during the bake. -->
+          <Value>CortexSavesTheDay!</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+      </UserAccounts>
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>Administrator</Username>
+        <Password><Value>CortexSavesTheDay!</Value><PlainText>true</PlainText></Password>
+        <LogonCount>3</LogonCount>
+      </AutoLogon>
+      <FirstLogonCommands>
+        <!-- Kick off the polaris DC bake. The answer cdrom's drive letter is
+             resolved by the bootstrap script itself (it searches removable
+             drives for polaris\bake.ps1). -->
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "foreach($d in (Get-Volume | ? {$_.DriveLetter}).DriveLetter){ $p = $d + ':\polaris\bake.ps1'; if(Test-Path $p){ Start-Process powershell -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File ' + $p) -Wait; break } }"</CommandLine>
+          <Description>Run polaris DC bake (AD promotion + a2_setup)</Description>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+
+</unattend>

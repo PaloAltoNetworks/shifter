@@ -23,7 +23,7 @@ Kerberoasting → BackupOperator privesc → ntds.dit dump → golden ticket →
 
 **Samba version:** 4.17.12 (Debian 12 bookworm package)
 **Domain:** BOREAS.LOCAL, 2008 R2 functional level
-**Provision:** `samba-tool domain provision` — straightforward, ~8 seconds
+**Provision:** `samba-tool domain provision` - straightforward, ~8 seconds
 
 ### Findings
 
@@ -46,9 +46,9 @@ Kerberoasting → BackupOperator privesc → ntds.dit dump → golden ticket →
 
 | Capability | Status | Notes |
 |---|---|---|
-| Impacket GetUserSPNs (Kerberoasting) | **FAIL** | `KRB_AP_ERR_INAPP_CKSUM` — Samba KDC rejects Impacket's TGS-REQ construction. Known incompatibility. The TGS request is malformed according to Samba's Heimdal KDC. Native kvno works, but Impacket does not. |
+| Impacket GetUserSPNs (Kerberoasting) | **FAIL** | `KRB_AP_ERR_INAPP_CKSUM` - Samba KDC rejects Impacket's TGS-REQ construction. Known incompatibility. The TGS request is malformed according to Samba's Heimdal KDC. Native kvno works, but Impacket does not. |
 | Impacket secretsdump (DRSUAPI) | **FAIL** | `DRSR SessionError: ERROR_SUCCESS` (misleading). Samba's DRSUAPI doesn't support DCSync-style replication for hash extraction. |
-| Impacket secretsdump (-use-vss) | **FAIL** | No NTDS.DIT file exists — Samba uses LDB, not ESE database. VSS shadows don't apply. |
+| Impacket secretsdump (-use-vss) | **FAIL** | No NTDS.DIT file exists - Samba uses LDB, not ESE database. VSS shadows don't apply. |
 | SeBackupPrivilege abuse | **UNTESTED** | Depends on secretsdump working. Likely N/A since the ntds.dit extraction path doesn't exist on Samba. |
 | Golden ticket | **UNTESTED** | krbtgt hash can be extracted locally via samba-tool, but whether a forged ticket works against Samba's KDC is unknown. |
 
@@ -79,8 +79,8 @@ One Windows AD DC shared by all participants, with separate OUs/users per partic
 
 #### Option D: Samba for Basic AD + Simplified Attack Chain
 Use Samba for realistic LDAP/SMB/Kerberos surface, but simplify flag 17 to avoid the broken attack paths:
-- Keep Kerberoasting discovery (SPN enumeration via LDAP works) but have the password hash crackable from an alternative source (e.g., NTLM hash leaked in a share, or AS-REP roasting instead)
-- Replace backup operator → ntds.dit chain with a simpler but still realistic privesc (e.g., writable GPO, LAPS, constrained delegation)
+- Keep Kerberoasting discovery (SPN enumeration via LDAP works) but have the password hash crackable from an alternative source (for example, NTLM hash leaked in a share, or AS-REP roasting instead)
+- Replace backup operator → ntds.dit chain with a simpler but still realistic privesc (for example, writable GPO, LAPS, constrained delegation)
 - **Pro:** Still a container, still feels like AD, attack chain is realistic just different
 - **Con:** Need to verify each alternative attack path against Samba
 
@@ -94,7 +94,7 @@ Use Samba for realistic LDAP/SMB/Kerberos surface, but simplify flag 17 to avoid
 
 ### Verdict: Samba Cannot Support AD Attack Chains
 
-Both Kerberoasting and AS-REP roasting fail at the KDC protocol level. DRSUAPI/secretsdump fails at the replication level. These are not configuration issues — they are fundamental limitations of Samba's AD DC implementation.
+Both Kerberoasting and AS-REP roasting fail at the KDC protocol level. DRSUAPI/secretsdump fails at the replication level. These are not configuration issues - they are fundamental limitations of Samba's AD DC implementation.
 
 **What Samba CAN do:** LDAP enumeration, SMB shares, basic Kerberos auth (TGT/TGS for legitimate use), user/group/OU management, SPN assignment. It looks like AD and talks like AD for legitimate usage.
 
@@ -107,12 +107,12 @@ For the CTF, we have two real options:
 #### Option A: Windows VM (recommended for flag 17 attack chain)
 Use a Windows Server VM running AD DS. All Impacket tools work out of the box. The full Kerberoasting → backup operator → ntds.dit → golden ticket chain is a well-documented, realistic attack path.
 
-**Cost concern:** 110 Windows VMs is too expensive. But A2 could be one of the shared assets (like A0/A5/A7). All participants share one AD DC. The attack chain is the same for everyone — whoever gets DA first just gets there first. No state isolation needed because AD enumeration/Kerberoasting doesn't modify the domain.
+**Cost concern:** 110 Windows VMs is too expensive. But A2 could be one of the shared assets (like A0/A5/A7). All participants share one AD DC. The attack chain is the same for everyone - whoever gets DA first just gets there first. No state isolation needed because AD enumeration/Kerberoasting doesn't modify the domain.
 
 **Risk:** Golden ticket creation is destructive (could theoretically affect other participants). Mitigated by: (a) the flag is just reading a file on a share, not actually using a golden ticket in production; (b) each participant's flag submission is independent.
 
 #### Option B: Samba + Redesigned Attack Chain
-Keep Samba but completely redesign flag 17 to avoid broken tools. Replace Kerberoasting with password-in-a-share. Replace ntds.dit with direct credential discovery. This would work but isn't a real AD attack chain — experienced participants will find it artificial.
+Keep Samba but completely redesign flag 17 to avoid broken tools. Replace Kerberoasting with password-in-a-share. Replace ntds.dit with direct credential discovery. This would work but isn't a real AD attack chain - experienced participants will find it artificial.
 
 ### Windows VM Testing (2026-04-10)
 
@@ -128,7 +128,7 @@ Keep Samba but completely redesign flag 17 to avoid broken tools. Replace Kerber
 
 2. **Boot-to-ready time is ~4-5 minutes** (boot → guest agent → startup script → AD DS service start → NetLogon ready). Not suitable for on-demand per-participant provisioning.
 
-3. **The right approach is a pre-baked custom image.** Promote the DC once, snapshot it, create a custom image. All future boots start with AD DS already configured — no startup script needed for promotion, just for CTF-specific setup (users, groups, flags).
+3. **The right approach is a pre-baked custom image.** Promote the DC once, snapshot it, create a custom image. All future boots start with AD DS already configured - no startup script needed for promotion, just for CTF-specific setup (users, groups, flags).
 
 4. **SMB/LDAP connectivity works** once AD services are up and Windows Firewall is disabled. Impacket wmiexec connects, smbclient connects.
 
@@ -143,7 +143,7 @@ Keep Samba but completely redesign flag 17 to avoid broken tools. Replace Kerber
    - If attack chain is non-destructive (just enumeration + hash extraction): shared is fine
    - If golden ticket creation could disrupt other participants: need isolation
 
-### Windows AD Attack Chain — CONFIRMED WORKING (2026-04-10)
+### Windows AD Attack Chain - CONFIRMED WORKING (2026-04-10)
 
 **Windows Server 2022 Core on GCE e2-medium, BOREAS.LOCAL domain**
 
@@ -165,19 +165,19 @@ Keep Samba but completely redesign flag 17 to avoid broken tools. Replace Kerber
 ### Architecture Decision: Shared Windows DC
 
 A2 should be a **shared** Windows VM (not per-participant) because:
-1. The attack chain (Kerberoast → DCSync) is **read-only** — it doesn't modify domain state
+1. The attack chain (Kerberoast → DCSync) is **read-only** - it doesn't modify domain state
 2. One Windows VM vs 110 saves massive cost and complexity
 3. All participants enumerate the same domain, find the same SPNs, crack the same hashes
-4. The flag is static — whoever finds it first just gets first-place credit on CTFd
+4. The flag is static - whoever finds it first just gets first-place credit on CTFd
 
-**Risk:** Golden ticket creation is technically a write operation (forged ticket). But the ticket is used client-side — it doesn't modify the DC. Safe for shared use.
+**Risk:** Golden ticket creation is technically a write operation (forged ticket). But the ticket is used client-side - it doesn't modify the DC. Safe for shared use.
 
 ### Image Strategy
 
 1. Complete the DC setup: all users, groups, OUs, SPNs, badge log shares, flag files
 2. Snapshot the boot disk → create a GCP custom image
 3. At CTF event time: launch from custom image, takes ~2 min to boot vs ~5 min for fresh promotion
-4. Startup script only needs to: disable firewall, set Administrator password — no promotion
+4. Startup script only needs to: disable firewall, set Administrator password - no promotion
 
 ### Next Steps
 1. Test the backup operator → secretsdump path specifically (non-DA)
@@ -189,8 +189,8 @@ A2 should be a **shared** Windows VM (not per-participant) because:
 
 **Result: Backup Operators CANNOT DCSync out of the box.**
 
-- `secretsdump.py -just-dc-user krbtgt` as svc-backup (Backup Operators member): `ERROR_DS_DRA_BAD_DN` — DRSUAPI requires `Replicating Directory Changes` ACL, which Backup Operators don't have.
-- `secretsdump.py -use-vss` as svc-backup: `rpc_s_access_denied` — can't create remote services for VSS shadow copy.
+- `secretsdump.py -just-dc-user krbtgt` as svc-backup (Backup Operators member): `ERROR_DS_DRA_BAD_DN` - DRSUAPI requires `Replicating Directory Changes` ACL, which Backup Operators don't have.
+- `secretsdump.py -use-vss` as svc-backup: `rpc_s_access_denied` - can't create remote services for VSS shadow copy.
 - svc-backup CAN read ADMIN$ and C$ shares (SeBackupPrivilege grants this), but can't execute commands remotely (no smbexec, no wmiexec).
 
 **Revised flag 17 attack chain:**
@@ -214,7 +214,7 @@ Would require participants to: get a shell on the DC → run diskshadow.exe → 
 
 2. **GCE guest agent vs domain admin.** The GCE guest agent runs `reset-windows-password` which on a DC modifies the domain Administrator account. It can disable/re-enable the account. After promotion, always explicitly enable Administrator and set a known password in the startup script.
 
-3. **Impacket wmiexec hangs on PowerShell.** On Server Core 2022, `wmiexec.py ... "powershell.exe -File script.ps1"` connects but never returns output. Use `atexec.py` instead, but it needs the `ADMIN$\Temp\` directory to exist. Even then, output retrieval is flaky. Best to avoid interactive command execution via Impacket — use startup scripts for setup, and reserve Impacket for attack testing.
+3. **Impacket wmiexec hangs on PowerShell.** On Server Core 2022, `wmiexec.py ... "powershell.exe -File script.ps1"` connects but never returns output. Use `atexec.py` instead, but it needs the `ADMIN$\Temp\` directory to exist. Even then, output retrieval is flaky. Best to avoid interactive command execution via Impacket - use startup scripts for setup, and reserve Impacket for attack testing.
 
 4. **Impacket dacledit.py + OpenSSL 3.x.** `dacledit.py` fails with "unsupported hash type MD4" on systems with OpenSSL 3.x (Debian 12). Workaround: set ACLs via PowerShell instead, or use an older system / `OPENSSL_CONF` override.
 
@@ -222,11 +222,11 @@ Would require participants to: get a shell on the DC → run diskshadow.exe → 
 
 6. **Windows firewall blocks everything.** Even with GCE firewall rules open, Windows' own firewall blocks all inbound by default. The startup script MUST run `Set-NetFirewallProfile -Enabled False` before any network-based testing works.
 
-7. **Multiple AD promotions.** If the startup script doesn't correctly detect an existing DC, it will try to promote on every boot. `Install-ADDSForest` on an already-promoted DC doesn't always fail cleanly — it may corrupt the domain. Always check for NTDS service before attempting promotion.
+7. **Multiple AD promotions.** If the startup script doesn't correctly detect an existing DC, it will try to promote on every boot. `Install-ADDSForest` on an already-promoted DC doesn't always fail cleanly - it may corrupt the domain. Always check for NTDS service before attempting promotion.
 
 8. **Samba's LDAP requires `ldap server require strong auth = no`.** Without this, simple LDAP binds fail. Real Windows AD allows simple binds by default (unless GPO enforces channel binding). For a CTF environment targeting participants with basic LDAP tools, the Samba default is too restrictive.
 
-### Full Attack Chain — END-TO-END VERIFIED (2026-04-10)
+### Full Attack Chain - END-TO-END VERIFIED (2026-04-10)
 
 Tested from attacker VM (10.100.0.3) against Windows DC (10.100.0.4):
 
@@ -257,7 +257,7 @@ The final working startup script pattern for a Windows AD DC on GCE:
 4. If not DC: install AD DS feature, promote with Install-ADDSForest (auto-reboots)
 5. Critical: Enable-ADAccount Administrator + set known password (GCE agent may disable it)
 
-The script appends to `C:\setup-log.txt` via Start-Transcript — readable via `smbclient //host/C$ -c "get setup-log.txt"` for debugging.
+The script appends to `C:\setup-log.txt` via Start-Transcript - readable via `smbclient //host/C$ -c "get setup-log.txt"` for debugging.
 
 ### Remaining Work for A2
 
@@ -292,11 +292,11 @@ Contains:
 
 The A2 spec calls for `extensionAttribute1` on the Project-L group. This attribute only exists if the Exchange schema extensions have been installed. On a bare Windows AD without Exchange, it's not available.
 
-**Fix:** Use the `info` attribute instead. It's a standard AD attribute on all objects, not shown by default in most enumeration tools — participants still need to explicitly query it. Updated the flag 14 spec accordingly.
+**Fix:** Use the `info` attribute instead. It's a standard AD attribute on all objects, not shown by default in most enumeration tools - participants still need to explicitly query it. Updated the flag 14 spec accordingly.
 
 ### Gotcha: Kerberoast returned svc-scada hash instead of svc-backup
 
-When running `GetUserSPNs` authenticating as svc-backup, it returned the svc-scada TGS hash (because it enumerates ALL SPNs and svc-backup can't request its own TGS). In the CTF, participants will authenticate as a non-SPN account (e.g., discovered from A3 config or A0 employee directory) and get hashes for BOTH svc-backup and svc-scada. Both are crackable. This is actually better for the CTF — participants get two paths.
+When running `GetUserSPNs` authenticating as svc-backup, it returned the svc-scada TGS hash (because it enumerates ALL SPNs and svc-backup can't request its own TGS). In the CTF, participants will authenticate as a non-SPN account (for example, discovered from A3 config or A0 employee directory) and get hashes for BOTH svc-backup and svc-scada. Both are crackable. This is actually better for the CTF - participants get two paths.
 
 ### Cost Estimate
 - 1x e2-medium Windows VM: ~$0.067/hr + $0.023/hr (Windows license) = ~$0.09/hr
@@ -307,7 +307,7 @@ When running `GetUserSPNs` authenticating as svc-backup, it returned the svc-sca
 ### Test Environment Resources (TO CLEAN UP)
 - VPC: `ctf-test-lab`
 - Subnet: `ctf-test-subnet` (us-east4, 10.100.0.0/24)
-- Firewall rules: all external access locked to 173.181.31.170/32 (2026-04-11)
+- Firewall rules: all external access locked to 203.0.113.10/32 (2026-04-11)
   - ctf-test-allow-ssh: TCP:22 from our IP only
   - ctf-test-allow-rdp: TCP:3389 from our IP only
   - ctf-test-allow-winrm: TCP:5985-5986 from our IP only

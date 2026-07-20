@@ -7,6 +7,14 @@ plugin "google" {
   enabled = true
   version = "0.31.0"
   source  = "github.com/terraform-linters/tflint-ruleset-google"
+
+  # Verify the plugin via its PGP signature instead of GitHub artifact
+  # attestations. A GitHub-side change to attestation bundles makes tflint's
+  # attestation verifier nil-panic during `tflint --init` (sigstore-go
+  # bundle.TlogEntries), which reddens terraform-lint repo-wide. This is the
+  # maintainer-recommended interim workaround; remove once tflint ships the
+  # fix. Upstream: terraform-linters/tflint#2591 (fix PR #2593). Issue #1691.
+  signature = "pgp"
 }
 
 # Start with rules that are actionable in the current tree. The repo has

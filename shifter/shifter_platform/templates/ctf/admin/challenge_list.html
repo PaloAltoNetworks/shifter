@@ -1,52 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load static i18n %}
 {% block title %}
     Challenges - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.breadcrumb {
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb .separator {
-    margin: 0 6px;
-    color: var(--theme-text-secondary);
-}
-
-.category-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.category-count {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-}
-
-.difficulty-easy { color: #22c55e; }
-.difficulty-medium { color: #faad14; }
-.difficulty-hard { color: #ff4d4f; }
-.difficulty-expert { color: #b8b8b8; }
-
-.hint-indicator {
-    font-size: 11px;
-    color: var(--theme-text-secondary);
-    border: 1px solid var(--theme-border);
-    border-radius: 3px;
-    padding: 1px 6px;
-    margin-left: 8px;
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-challenge_list.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -76,10 +36,10 @@
     <!-- Challenges by Category -->
     {% if challenges %}
         {% for category, category_challenges in challenges_by_category.items %}
-            <div class="card" style="padding: 0;">
-                <div style="padding: 16px;">
+            <div class="card p-0">
+                <div class="p-lg">
                     <div class="category-header">
-                        <div class="card-title" style="margin-bottom: 0;">
+                        <div class="card-title mb-0">
                             {{ category|title }}
                         </div>
                         <span class="category-count">
@@ -154,12 +114,15 @@
                                 <td>
                                     <div class="flex-row gap-sm">
                                         <a href="{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}"
-                                           class="btn btn-secondary"
-                                           title='{% trans "View" %}'>{% trans "View" %}</a>
+                                           class="btn btn-secondary">
+                                            {% trans "View" %}<span class="visually-hidden"> {{ challenge.name }}</span>
+                                        </a>
                                         {% if event.is_modifiable %}
                                             <a href="{% url 'ctf:admin_challenge_edit' challenge_id=challenge.pk %}"
-                                               class="btn btn-secondary"
-                                               title='{% trans "Edit" %}'>{% trans "Edit" %}</a>
+                                               class="btn btn-secondary">
+                                                {% trans "Edit" %}
+                                                <span class="visually-hidden"> {{ challenge.name }}</span>
+                                            </a>
                                         {% endif %}
                                     </div>
                                 </td>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC
 from unittest.mock import MagicMock, Mock, patch
 from uuid import uuid4
@@ -40,7 +41,6 @@ def ctf_participant():
     p.pk = uuid4()
     p.email = "participant@test.com"
     p.name = "Test Participant"
-    p.invite_token = "test-invite-token"
     p.invited_at = None
     p.range_status = "pending"
     p.registered_at = "2025-01-01T00:00:00Z"
@@ -54,432 +54,397 @@ def ctf_participant_invited():
     p.pk = uuid4()
     p.email = "invited@test.com"
     p.name = "Invited Participant"
-    p.invite_token = "invited-token"
     p.invited_at = "2025-01-01T00:00:00Z"
     p.range_status = "pending"
     return p
 
 
-class TestSendInvitations:
-    """Tests for send_invitations."""
+@pytest.fixture
+def blocking_smtp():
+    """A blocking, eventually-raising stand-in for ``EmailMultiAlternatives``.
 
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_not_found(self, mock_event_cls, mock_part_cls):
-        """Raises CTFNotFoundError for nonexistent event."""
-        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
+    Lets tests prove async dispatch (PLAT-103 clause 3) is non-blocking and
+    delivery-failure-safe (clause 4) by driving the *real*
+    ``shared.email.send_email_async`` background-thread pipeline, rather than
+    mocking the first-party ``shared.email`` module (ADR-019-R1: mock the
+    external SMTP boundary, not internal seams). ``send()`` blocks on
+    ``release`` and raises after signalling ``delivered``, so a test can
+    assert the caller returned *before* ``release`` was set.
+
+    Returns:
+        Tuple of ``(message_cls, release_event, delivered_event)``.
+    """
+    release = threading.Event()
+    delivered = threading.Event()
+
+    class BlockingMessage:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def attach_alternative(self, *args, **kwargs):
+            pass
+
+        def send(self):
+            release.wait(timeout=2)
+            delivered.set()
+            raise RuntimeError("SMTP exploded")
+
+    return BlockingMessage, release, delivered
+
+
+@pytest.mark.django_db
+class TestSendInvitationsAsyncDispatchEndToEnd:
+    """Integration coverage for PLAT-103 clause 3 in the invitation send loop.
+
+    Drives ``send_invitations`` against real DB objects and the real render
+    pipeline (per ADR-019-R1: no additional first-party mocking; only the
+    external SMTP boundary is patched), proving the whole production path
+    dispatches asynchronously without waiting on delivery.
+    """
+
+    def test_not_found(self):
+        uuid4_2 = uuid4()
         with pytest.raises(CTFNotFoundError):
-            notification.send_invitations(uuid4())
+            notification.send_invitations(uuid4_2)
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_sends_to_uninvited(
-        self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant_invited
-    ):
-        """Sends invitations and updates invited_at."""
-        ctf_participant_invited.invited_at = None
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant_invited]
+    @pytest.fixture
+    def invited_event_participant(self):
+        from datetime import timedelta
+
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+
+        from ctf.enums import EventStatus
+        from ctf.models import CTFEvent
+        from ctf.services.participant import invite_participant
+
+        creator = get_user_model().objects.create_user(
+            username="async-dispatch-organizer@test.com",
+            email="async-dispatch-organizer@test.com",
+        )
+        event = CTFEvent.objects.create(
+            name="Async Dispatch Event",
+            description="Event for PLAT-103 clause 3 async dispatch coverage",
+            created_by=creator,
+            status=EventStatus.REGISTRATION.value,
+            event_start=timezone.now() + timedelta(days=1),
+            event_end=timezone.now() + timedelta(days=1, hours=8),
+            scenario_id="basic",
+        )
+        participant = invite_participant(
+            event_id=event.pk,
+            email="async-dispatch-participant@test.com",
+            name="Async Dispatch Participant",
+        )
+        return event, participant
+
+    def test_dispatch_is_fire_and_forget(self, invited_event_participant, blocking_smtp):
+        """The real send_invitations pipeline (real ORM, real templates)
+        dispatches through the async choke point and returns without waiting
+        for delivery — a raising SMTP layer inside the background thread does
+        not block the loop or surface as a failure."""
+        from django.test import override_settings
+
+        event, participant = invited_event_participant
+        message_cls, release, delivered = blocking_smtp
 
         with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
         ):
-            result = notification.send_invitations(ctf_event.pk)
+            result = notification.send_invitations(event.pk)
+            # The loop already returned; the background send has not run yet.
+            assert not delivered.is_set()
+            release.set()
+            assert delivered.wait(timeout=2), "background send never ran"
 
         assert result["sent"] == 1
-        ctf_participant_invited.save.assert_called()
+        assert result["failed"] == 0
+        participant.refresh_from_db()
+        assert participant.invited_at is not None
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_sends_to_already_invited(
-        self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant_invited
-    ):
-        """Sends to all participants including already-invited ones."""
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant_invited]
+
+@pytest.fixture
+def db_event(django_user_model):
+    """Real organizer + REGISTRATION event for behavioral notification tests."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from ctf.enums import EventStatus
+    from ctf.models import CTFEvent
+
+    organizer = django_user_model.objects.create_user(
+        username="notification-organizer@test.com",
+        email="notification-organizer@test.com",
+    )
+    return CTFEvent.objects.create(
+        name="Notification Event",
+        description="Event for behavioral notification tests",
+        created_by=organizer,
+        status=EventStatus.REGISTRATION.value,
+        event_start=timezone.now() + timedelta(days=1),
+        event_end=timezone.now() + timedelta(days=1, hours=8),
+        scenario_id="basic",
+    )
+
+
+@pytest.fixture
+def db_participant(db_event):
+    """Real invited + registered participant for db_event."""
+    from django.utils import timezone
+
+    from ctf.services.participant import invite_participant
+
+    participant = invite_participant(
+        event_id=db_event.pk,
+        email="notification-participant@test.com",
+        name="Notification Participant",
+    )
+    participant.registered_at = timezone.now()
+    participant.save(update_fields=["registered_at", "updated_at"])
+    return participant
+
+
+@pytest.fixture
+def recorded_email():
+    """Record messages at the external SMTP boundary (ADR-019-R1).
+
+    Replaces ``EmailMultiAlternatives`` with a recording double whose
+    ``send()`` signals ``delivered``, so tests can wait deterministically on
+    the real ``shared.email.send_email_async`` background dispatch and then
+    assert on what crossed the boundary.
+    """
+    delivered = threading.Event()
+    messages = []
+
+    class RecordingMessage:
+        def __init__(self, subject=None, body=None, from_email=None, to=None, **kwargs):
+            self.subject = subject
+            self.body = body
+            self.from_email = from_email
+            self.to = to
+            messages.append(self)
+
+        def attach_alternative(self, *args, **kwargs):
+            pass
+
+        def send(self):
+            delivered.set()
+
+    return RecordingMessage, delivered, messages
+
+
+@pytest.mark.django_db
+class TestSendCredentials:
+    """Behavioral tests for send_credentials (real ORM + SMTP boundary)."""
+
+    def test_not_found(self):
+        missing_id = uuid4()
+        with pytest.raises(CTFNotFoundError):
+            notification.send_credentials(missing_id)
+
+    def test_sends_to_ready_ranges(self, db_event, db_participant, recorded_email):
+        """Dispatches credentials to participants with ready ranges."""
+        from django.test import override_settings
+
+        from ctf.models import CTFNotification
+
+        db_participant.range_status = "ready"
+        db_participant.save(update_fields=["range_status", "updated_at"])
+        message_cls, delivered, messages = recorded_email
 
         with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
         ):
-            result = notification.send_invitations(ctf_event.pk)
+            result = notification.send_credentials(db_event.pk)
+            assert delivered.wait(timeout=2), "background send never ran"
 
         assert result["sent"] == 1
+        assert result["failed"] == 0
+        assert messages[0].to == [db_participant.email]
+        record = CTFNotification.objects.get(event=db_event, notification_type=NotificationType.CREDENTIALS.value)
+        assert record.sent_count == 1
+        assert record.status == NotificationStatus.SENT.value
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_tracks_failures(self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant_invited):
-        """Tracks failed sends."""
-        ctf_participant_invited.invited_at = None
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant_invited]
+    def test_skips_non_ready(self, db_event, db_participant):
+        """Skips participants without ready ranges."""
+        result = notification.send_credentials(db_event.pk)
+        assert result["total"] == 0
 
-        with (
-            patch.object(notification, "_send_email", return_value=False),
-            patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
-        ):
-            result = notification.send_invitations(ctf_event.pk)
+    def test_render_failure_counted_as_failed(self, db_event, db_participant):
+        """A synchronous rendering failure is counted in ``failed``; no
+        dispatch occurs. Uses real DB objects and the real render pipeline;
+        only the external template-loader boundary is patched (ADR-019-R1
+        - no additional first-party mocking)."""
+        db_participant.range_status = "ready"
+        db_participant.save(update_fields=["range_status", "updated_at"])
+
+        with patch("django.template.loader.render_to_string", side_effect=Exception("template error")):
+            result = notification.send_credentials(db_event.pk)
 
         assert result["failed"] == 1
         assert result["sent"] == 0
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_creates_notification_record(
-        self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant_invited
-    ):
-        """Creates CTFNotification record on success."""
-        ctf_participant_invited.invited_at = None
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant_invited]
 
-        with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
-        ):
-            notification.send_invitations(ctf_event.pk)
-
-        mock_notif_cls.objects.create.assert_called_once()
-        call_kwargs = mock_notif_cls.objects.create.call_args.kwargs
-        assert call_kwargs["event"] == ctf_event
-        assert call_kwargs["notification_type"] == NotificationType.INVITE.value
-        assert call_kwargs["status"] == NotificationStatus.SENT.value
-
-
-class TestSendCredentials:
-    """Tests for send_credentials."""
-
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_not_found(self, mock_event_cls, mock_part_cls):
-        """Raises CTFNotFoundError for nonexistent event."""
-        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
-        with pytest.raises(CTFNotFoundError):
-            notification.send_credentials(uuid4())
-
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_sends_to_ready_ranges(self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant):
-        """Sends credentials to participants with ready ranges."""
-        ctf_participant.range_status = "ready"
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant]
-
-        with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
-            patch("django.urls.reverse", return_value="/ctf/range/"),
-        ):
-            result = notification.send_credentials(ctf_event.pk)
-
-        assert result["sent"] == 1
-
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_skips_non_ready(self, mock_event_cls, mock_part_cls, ctf_event):
-        """Skips participants without ready ranges."""
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        # filter for range_status="ready" returns empty
-        mock_part_cls.objects.filter.return_value = []
-
-        result = notification.send_credentials(ctf_event.pk)
-        assert result["total"] == 0
-
-
+@pytest.mark.django_db
 class TestSendReminder:
-    """Tests for send_reminder."""
+    """Behavioral tests for send_reminder (real ORM + SMTP boundary)."""
 
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_not_found(self, mock_event_cls, mock_part_cls):
-        """Raises CTFNotFoundError for nonexistent event."""
-        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
-        with pytest.raises(CTFNotFoundError):
-            notification.send_reminder(uuid4())
+    def _send_with_captured_templates(self, db_event, hours_before=None):
+        """Run send_reminder with the template loader captured; return (result, contexts)."""
+        from django.test import override_settings
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_sends_to_registered(self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant):
-        """Sends reminders to registered participants."""
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant]
+        contexts = []
 
+        def capture(template_name, context=None, *args, **kwargs):
+            contexts.append(context or {})
+            return "rendered"
+
+        kwargs = {} if hours_before is None else {"hours_before": hours_before}
         with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.template.loader.render_to_string", side_effect=capture),
         ):
-            result = notification.send_reminder(ctf_event.pk)
+            result = notification.send_reminder(db_event.pk, **kwargs)
+        return result, contexts
+
+    def test_not_found(self):
+        missing_id = uuid4()
+        with pytest.raises(CTFNotFoundError):
+            notification.send_reminder(missing_id)
+
+    def test_sends_to_registered(self, db_event, db_participant, recorded_email):
+        """Sends reminders to registered participants and records the batch."""
+        from django.test import override_settings
+
+        from ctf.models import CTFNotification
+
+        message_cls, delivered, messages = recorded_email
+        with (
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
+        ):
+            result = notification.send_reminder(db_event.pk)
+            assert delivered.wait(timeout=2), "background send never ran"
 
         assert result["sent"] == 1
+        assert messages[0].to == [db_participant.email]
+        record = CTFNotification.objects.get(event=db_event, notification_type=NotificationType.REMINDER.value)
+        assert record.sent_count == 1
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_passes_access_url_and_timezone_to_template(
-        self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant
-    ):
+    def test_passes_access_url_and_timezone_to_template(self, db_event, db_participant):
         """Template context includes access_url, event_start_local, and event_timezone."""
         from datetime import datetime
 
-        ctf_event.event_start = datetime(2026, 6, 15, 14, 0, tzinfo=UTC)
-        ctf_event.event_timezone = "America/New_York"
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant]
+        db_event.event_start = datetime(2026, 6, 15, 14, 0, tzinfo=UTC)
+        db_event.event_timezone = "America/New_York"
+        db_event.save(update_fields=["event_start", "event_timezone", "updated_at"])
 
-        render_calls = []
+        result, contexts = self._send_with_captured_templates(db_event)
 
-        def capture_render(template_name, context, event=None):
-            render_calls.append(context)
-            return "<html>", "text", ""
-
-        with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", side_effect=capture_render),
-            patch("django.urls.reverse", return_value="/ctf/event/"),
-        ):
-            notification.send_reminder(ctf_event.pk)
-
-        assert len(render_calls) == 1
-        ctx = render_calls[0]
+        assert result["sent"] == 1
+        ctx = contexts[0]
         assert "access_url" in ctx
-        assert "/ctf/event/" in ctx["access_url"]
+        assert ctx["access_url"].startswith("https://example.com/")
         assert "event_start_local" in ctx
         assert ctx["event_timezone"] == "America/New_York"
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_custom_hours_before(self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant):
+    def test_custom_hours_before(self, db_event, db_participant):
         """Accepts custom hours_before parameter."""
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant]
-
-        with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
-        ):
-            result = notification.send_reminder(ctf_event.pk, hours_before=1)
-
+        result, _contexts = self._send_with_captured_templates(db_event, hours_before=1)
         assert result["hours_before"] == 1
         assert result["sent"] == 1
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_fallback_timezone_on_invalid(
-        self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant
-    ):
+    def test_fallback_timezone_on_invalid(self, db_event, db_participant):
         """Falls back to UTC on invalid event_timezone."""
         from datetime import datetime
 
-        ctf_event.event_start = datetime(2026, 6, 15, 14, 0, tzinfo=UTC)
-        ctf_event.event_timezone = "Invalid/Timezone"
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant]
+        db_event.event_start = datetime(2026, 6, 15, 14, 0, tzinfo=UTC)
+        db_event.event_timezone = "Invalid/Timezone"
+        db_event.save(update_fields=["event_start", "event_timezone", "updated_at"])
 
-        render_calls = []
-
-        def capture_render(template_name, context, event=None):
-            render_calls.append(context)
-            return "<html>", "text", ""
-
-        with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", side_effect=capture_render),
-            patch("django.urls.reverse", return_value="/ctf/event/"),
-        ):
-            result = notification.send_reminder(ctf_event.pk)
+        result, contexts = self._send_with_captured_templates(db_event)
 
         assert result["sent"] == 1
-        assert render_calls[0]["event_timezone"] == "UTC"
+        assert contexts[0]["event_timezone"] == "UTC"
 
 
+@pytest.mark.django_db
 class TestSendAnnouncement:
-    """Tests for send_announcement."""
+    """Behavioral tests for send_announcement (real ORM)."""
 
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_not_found(self, mock_event_cls, mock_notif_cls, mock_part_cls):
-        """Raises CTFNotFoundError for nonexistent event."""
-        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
-        user = Mock(pk=1)
+    def test_not_found(self, django_user_model):
+        user = django_user_model.objects.create_user(
+            username="announcement-nf@test.com", email="announcement-nf@test.com"
+        )
+        missing_id = uuid4()
         with pytest.raises(CTFNotFoundError):
-            notification.send_announcement(uuid4(), "Test", "Body", user)
+            notification.send_announcement(missing_id, "Test", "Body", user)
 
-    @patch("ctf.services.notification.CTFParticipant")
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_creates_and_sends(
-        self,
-        mock_event_cls,
-        mock_notif_cls,
-        mock_part_cls,
-        ctf_event,
-        organizer_user,
-        ctf_participant,
-    ):
-        """Creates notification record and sends to participants."""
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
-        mock_part_cls.objects.filter.return_value = [ctf_participant]
+    def test_creates_and_sends(self, db_event, db_participant, recorded_email):
+        """Creates the notification record and sends to participants."""
+        from django.test import override_settings
 
-        # Build a mock notification that send_announcement will mutate
-        mock_notif = MagicMock()
-        mock_notif.status = NotificationStatus.SENDING.value
-        mock_notif.sent_count = 0
-        mock_notif.sent_at = None
-        mock_notif_cls.objects.create.return_value = mock_notif
-
+        message_cls, delivered, messages = recorded_email
         with (
-            patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
         ):
             result = notification.send_announcement(
-                ctf_event.pk,
+                db_event.pk,
                 "Announcement",
                 "Hello everyone",
-                organizer_user,
+                db_event.created_by,
             )
+            assert delivered.wait(timeout=2), "background send never ran"
 
-        assert result is mock_notif
+        result.refresh_from_db()
         assert result.sent_count == 1
         assert result.status == NotificationStatus.SENT.value
         assert result.sent_at is not None
-        mock_notif.save.assert_called_once()
+        assert messages[0].to == [db_participant.email]
 
 
+@pytest.mark.django_db
 class TestScheduleNotification:
-    """Tests for schedule_notification."""
+    """Behavioral tests for schedule_notification (real ORM)."""
 
-    @patch("ctf.services.notification.CTFNotification")
-    def test_not_found(self, mock_notif_cls):
-        """Raises CTFNotFoundError for nonexistent notification."""
-        mock_notif_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_notif_cls.objects.get.side_effect = mock_notif_cls.DoesNotExist
+    def test_not_found(self):
         from django.utils import timezone
 
+        missing_id = uuid4()
+        now = timezone.now()
         with pytest.raises(CTFNotFoundError):
-            notification.schedule_notification(uuid4(), timezone.now())
+            notification.schedule_notification(missing_id, now)
 
-    @patch("ctf.models.CTFScheduledTask")
-    @patch("ctf.services.notification.CTFNotification")
-    def test_schedules_notification(self, mock_notif_cls, mock_task_cls, ctf_event):
-        """Sets SCHEDULED status and creates scheduled task."""
+    def test_schedules_notification(self, db_event):
+        """Sets SCHEDULED status and creates the scheduled task row."""
         import datetime
 
         from django.utils import timezone
 
-        mock_notif = MagicMock()
-        mock_notif.pk = uuid4()
-        mock_notif.event = ctf_event
-        mock_notif.status = NotificationStatus.DRAFT.value
-        mock_notif_cls.objects.get.return_value = mock_notif
-        mock_notif_cls.DoesNotExist = Exception
+        from ctf.models import CTFNotification, CTFScheduledTask
 
+        record = CTFNotification.objects.create(
+            event=db_event,
+            notification_type=NotificationType.ANNOUNCEMENT.value,
+            subject="Scheduled announcement",
+            body="Later",
+            status=NotificationStatus.DRAFT.value,
+            recipient_filter="participants",
+            created_by=db_event.created_by,
+        )
         scheduled_time = timezone.now() + datetime.timedelta(hours=2)
-        result = notification.schedule_notification(mock_notif.pk, scheduled_time)
+
+        result = notification.schedule_notification(record.pk, scheduled_time)
 
         assert result.status == NotificationStatus.SCHEDULED.value
         assert result.scheduled_at == scheduled_time
-        mock_notif.save.assert_called_once()
-        mock_task_cls.objects.create.assert_called_once()
-        task_kwargs = mock_task_cls.objects.create.call_args.kwargs
-        assert task_kwargs["event"] == ctf_event
-        assert task_kwargs["scheduled_for"] == scheduled_time
-
-
-class TestRenderEmail:
-    """Tests for _render_email helper."""
-
-    @patch("django.template.loader.render_to_string")
-    def test_renders_templates(self, mock_render, ctf_event, ctf_participant):
-        """Renders both HTML and text templates."""
-        registration_url = "https://example.com/ctf/register/?token=test-token"
-
-        mock_render.side_effect = [
-            f"<html>{ctf_event.name} {registration_url}</html>",
-            f"{ctf_event.name} {registration_url}",
-        ]
-
-        html, text, custom_subject = notification._render_email(
-            "invitation",
-            {
-                "event": ctf_event,
-                "participant": ctf_participant,
-                "invite_token": "test-token",
-                "registration_url": registration_url,
-            },
-        )
-
-        assert ctf_event.name in html
-        assert ctf_event.name in text
-        assert registration_url in html
-        assert registration_url in text
-        assert custom_subject == ""
-        assert mock_render.call_count == 2
-
-
-class TestInvitedAtNotSetAtCreation:
-    """Verify invite_participant and bulk_import don't set invited_at."""
-
-    @patch("ctf.services.participant.invite_participant")
-    def test_invite_participant_does_not_set_invited_at(self, mock_invite, ctf_event):
-        """invite_participant() should not set invited_at (send_invitations does)."""
-        mock_p = MagicMock()
-        mock_p.invited_at = None
-        mock_invite.return_value = mock_p
-
-        from ctf.services import participant as participant_service
-
-        p = participant_service.invite_participant(
-            event_id=ctf_event.pk,
-            email="newinvite@test.com",
-            name="New Invite",
-        )
-        assert p.invited_at is None
-
-    @patch("ctf.services.participant.bulk_import_participants")
-    def test_bulk_import_does_not_set_invited_at(self, mock_bulk, ctf_event):
-        """bulk_import_participants() should not set invited_at."""
-        mock_p1 = MagicMock()
-        mock_p1.invited_at = None
-        mock_p2 = MagicMock()
-        mock_p2.invited_at = None
-        mock_bulk.return_value = [mock_p1, mock_p2]
-
-        from ctf.services import participant as participant_service
-
-        csv_content = "Alice,alice@test.com\nBob,bob@test.com"
-        created = participant_service.bulk_import_participants(ctf_event.pk, csv_content)
-        assert len(created) == 2
-        for p in created:
-            assert p.invited_at is None
+        task = CTFScheduledTask.objects.get(event=db_event)
+        assert task.scheduled_for == scheduled_time
+        assert task.metadata == {"notification_id": str(record.pk)}
 
 
 # ---------------------------------------------------------------------------
@@ -487,102 +452,88 @@ class TestInvitedAtNotSetAtCreation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.django_db
 class TestNotifyOrganizerEventStart:
-    """Tests for notify_organizer_event_start."""
+    """Behavioral tests for notify_organizer_event_start (real ORM + SMTP boundary)."""
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_sends_email_and_records_notification(self, mock_event_cls, mock_notif_cls, ctf_event):
-        """Sends email to organizer and creates notification record."""
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
+    def test_sends_email_and_records_notification(self, db_event, recorded_email):
+        """Sends email to the organizer and creates the notification record."""
+        from django.test import override_settings
 
+        from ctf.models import CTFNotification
+
+        message_cls, delivered, messages = recorded_email
         with (
-            patch.object(notification, "_send_email", return_value=True) as mock_send,
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")) as mock_render,
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
         ):
-            notification.notify_organizer_event_start(ctf_event.pk)
+            notification.notify_organizer_event_start(db_event.pk)
+            assert delivered.wait(timeout=2), "background send never ran"
 
-        mock_render.assert_called_once_with("event_start", {"event": ctf_event}, event=ctf_event)
-        mock_send.assert_called_once_with(
-            recipient=ctf_event.created_by.email,
-            subject=f"Event started: {ctf_event.name}",
-            html_content="<html>",
-            text_content="text",
-        )
-        mock_notif_cls.objects.create.assert_called_once()
-        call_kwargs = mock_notif_cls.objects.create.call_args.kwargs
-        assert call_kwargs["notification_type"] == NotificationType.EVENT_START.value
-        assert call_kwargs["recipient_filter"] == "organizers"
+        assert messages[0].to == [db_event.created_by.email]
+        assert messages[0].subject == f"Event started: {db_event.name}"
+        record = CTFNotification.objects.get(event=db_event, notification_type=NotificationType.EVENT_START.value)
+        assert record.recipient_filter == "organizers"
 
-    @patch("ctf.services.notification.CTFEvent")
-    def test_event_not_found(self, mock_event_cls):
+    def test_event_not_found(self):
         """Returns gracefully if event does not exist."""
-        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
-
         notification.notify_organizer_event_start(uuid4())
 
-    @patch("ctf.services.notification.CTFEvent")
-    def test_no_organizer_email(self, mock_event_cls, ctf_event):
-        """Returns gracefully if organizer has no email."""
-        ctf_event.created_by.email = None
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
+    def test_no_organizer_email(self, db_event):
+        """Returns gracefully, sending nothing, if the organizer has no email."""
+        from ctf.models import CTFNotification
 
-        with patch.object(notification, "_send_email") as mock_send:
-            notification.notify_organizer_event_start(ctf_event.pk)
+        organizer = db_event.created_by
+        organizer.email = ""
+        organizer.save(update_fields=["email"])
 
-        mock_send.assert_not_called()
+        notification.notify_organizer_event_start(db_event.pk)
+
+        assert not CTFNotification.objects.filter(
+            event=db_event, notification_type=NotificationType.EVENT_START.value
+        ).exists()
 
 
+@pytest.mark.django_db
 class TestNotifyOrganizerEventEnd:
-    """Tests for notify_organizer_event_end."""
+    """Behavioral tests for notify_organizer_event_end (real ORM + SMTP boundary)."""
 
-    @patch("ctf.services.notification.CTFNotification")
-    @patch("ctf.services.notification.CTFEvent")
-    def test_sends_email_and_records_notification(self, mock_event_cls, mock_notif_cls, ctf_event):
-        """Sends email to organizer and creates notification record."""
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
+    def test_sends_email_and_records_notification(self, db_event, recorded_email):
+        """Sends email to the organizer and creates the notification record."""
+        from django.test import override_settings
 
+        from ctf.models import CTFNotification
+
+        message_cls, delivered, messages = recorded_email
         with (
-            patch.object(notification, "_send_email", return_value=True) as mock_send,
-            patch.object(notification, "_render_email", return_value=("<html>", "text", "")) as mock_render,
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
         ):
-            notification.notify_organizer_event_end(ctf_event.pk)
+            notification.notify_organizer_event_end(db_event.pk)
+            assert delivered.wait(timeout=2), "background send never ran"
 
-        mock_render.assert_called_once_with("event_end", {"event": ctf_event}, event=ctf_event)
-        mock_send.assert_called_once_with(
-            recipient=ctf_event.created_by.email,
-            subject=f"Event ended: {ctf_event.name}",
-            html_content="<html>",
-            text_content="text",
-        )
-        mock_notif_cls.objects.create.assert_called_once()
-        call_kwargs = mock_notif_cls.objects.create.call_args.kwargs
-        assert call_kwargs["notification_type"] == NotificationType.EVENT_END.value
-        assert call_kwargs["recipient_filter"] == "organizers"
+        assert messages[0].to == [db_event.created_by.email]
+        assert messages[0].subject == f"Event ended: {db_event.name}"
+        record = CTFNotification.objects.get(event=db_event, notification_type=NotificationType.EVENT_END.value)
+        assert record.recipient_filter == "organizers"
 
-    @patch("ctf.services.notification.CTFEvent")
-    def test_event_not_found(self, mock_event_cls):
+    def test_event_not_found(self):
         """Returns gracefully if event does not exist."""
-        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
-
         notification.notify_organizer_event_end(uuid4())
 
-    @patch("ctf.services.notification.CTFEvent")
-    def test_no_organizer_email(self, mock_event_cls, ctf_event):
-        """Returns gracefully if organizer has no email."""
-        ctf_event.created_by.email = None
-        mock_event_cls.objects.get.return_value = ctf_event
-        mock_event_cls.DoesNotExist = Exception
+    def test_no_organizer_email(self, db_event):
+        """Returns gracefully, sending nothing, if the organizer has no email."""
+        from ctf.models import CTFNotification
 
-        with patch.object(notification, "_send_email") as mock_send:
-            notification.notify_organizer_event_end(ctf_event.pk)
+        organizer = db_event.created_by
+        organizer.email = ""
+        organizer.save(update_fields=["email"])
 
-        mock_send.assert_not_called()
+        notification.notify_organizer_event_end(db_event.pk)
+
+        assert not CTFNotification.objects.filter(
+            event=db_event, notification_type=NotificationType.EVENT_END.value
+        ).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -613,16 +564,19 @@ class TestRenderEmailWithCustomTemplate:
         assert mock_render.call_count == 2
 
     def test_uses_custom_template_when_present(self):
-        """Renders from DB template instead of filesystem when custom exists."""
+        """Renders from DB template via safe placeholder substitution."""
 
         class _SimpleEvent:
             name = "My Custom Event"
+            description = ""
+            event_start = None
+            event_end = None
 
         event = _SimpleEvent()
 
         mock_template = MagicMock()
-        mock_template.html_body = "<html>Hello {{ event.name }}</html>"
-        mock_template.text_body = "Hello {{ event.name }}"
+        mock_template.html_body = "<html>Hello {{ event_name }}</html>"
+        mock_template.text_body = "Hello {{ event_name }}"
         mock_template.subject = "Custom Subject"
 
         with patch("ctf.models.CTFEmailTemplate.objects") as mock_qs:

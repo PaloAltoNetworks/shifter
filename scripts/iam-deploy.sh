@@ -46,8 +46,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate environment
-if [[ "$ENV" != "dev" && "$ENV" != "prod" && "$ENV" != "all" ]]; then
-    echo "Error: Environment must be 'dev', 'prod', or 'all'" >&2
+if [[ "$ENV" != "dev" && "$ENV" != "prod" && "$ENV" != "proof" && "$ENV" != "all" ]]; then
+    echo "Error: Environment must be 'dev', 'prod', 'proof', or 'all'" >&2
     exit 1
 fi
 
@@ -70,12 +70,24 @@ if [[ "$ENV" == "all" ]]; then
     exit 0
 fi
 
-# Set AWS profile based on environment
-if [[ "$ENV" == "dev" ]]; then
-    AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:?PANW_SHIFTER_DEV_PROFILE not set. Check .env file.}"
-else
-    AWS_PROFILE="${PANW_SHIFTER_PROD_PROFILE:?PANW_SHIFTER_PROD_PROFILE not set. Check .env file.}"
-fi
+# Set AWS profile and Terraform state bucket based on environment. The bucket
+# mirrors the CI deploy secrets (TF_INFRA_STATE_BUCKET_DEV / _PROOF, and
+# TF_INFRA_STATE_BUCKET for prod) so this script and the deploy pipeline resolve
+# the backend from the same source of truth.
+case "$ENV" in
+    dev)
+        AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:?PANW_SHIFTER_DEV_PROFILE not set. Check .env file.}"
+        STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV:?TF_INFRA_STATE_BUCKET_DEV not set. Check .env file.}"
+        ;;
+    proof)
+        AWS_PROFILE="${PANW_SHIFTER_PROOF_PROFILE:?PANW_SHIFTER_PROOF_PROFILE not set. Check .env file.}"
+        STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF:?TF_INFRA_STATE_BUCKET_PROOF not set. Check .env file.}"
+        ;;
+    prod)
+        AWS_PROFILE="${PANW_SHIFTER_PROD_PROFILE:?PANW_SHIFTER_PROD_PROFILE not set. Check .env file.}"
+        STATE_BUCKET="${TF_INFRA_STATE_BUCKET:?TF_INFRA_STATE_BUCKET not set. Check .env file.}"
+        ;;
+esac
 
 echo "=========================================="
 echo "IAM Deploy: $ENV environment"
@@ -88,9 +100,27 @@ cd "$(dirname "$0")/../platform/terraform/global/iam"
 # Clean and reinitialize for the target environment
 rm -rf .terraform .terraform.lock.hcl
 
+# Render the backend config from the real state bucket. The committed
+# <env>.s3.tfbackend files carry a REPLACE_AT_BOOTSTRAP placeholder so
+# `terraform validate` works standalone; render_aws_backend_configs.py resolves
+# the real bucket/key the same way the CI deploy pipeline does, so this script
+# works for any environment without per-run backend edits.
+echo ""
+echo "Rendering backend config..."
+BACKEND_CONFIG_PATH="$(
+    AWS_REGION="${AWS_REGION:-us-east-2}" \
+        python3 "$REPO_ROOT/scripts/terraform/render_aws_backend_configs.py" \
+        --env "$ENV" --bucket "$STATE_BUCKET" --stack global/iam \
+        | sed -n 's/^SHIFTER_BACKEND_CONFIG_PATH=//p'
+)"
+if [[ -z "$BACKEND_CONFIG_PATH" || ! -f "$BACKEND_CONFIG_PATH" ]]; then
+    echo "Error: failed to render backend config for $ENV" >&2
+    exit 1
+fi
+
 echo ""
 echo "Initializing terraform..."
-AWS_PROFILE="$AWS_PROFILE" terraform init -backend-config="${ENV}.s3.tfbackend"
+AWS_PROFILE="$AWS_PROFILE" terraform init -backend-config="$BACKEND_CONFIG_PATH"
 
 echo ""
 case "$ACTION" in

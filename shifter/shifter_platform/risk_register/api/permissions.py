@@ -1,11 +1,24 @@
 """Permission classes for Risk Register API."""
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 from rest_framework import permissions
+from rest_framework.request import Request
 
-from risk_register.models import APIKey, AuditLog
-from risk_register.services import audit_log_from_request
+from risk_register.access import principal_has_risk_register_access
+from shared.api_tokens.models import ApiToken
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+    audit_log_from_request,
+)
+
+if TYPE_CHECKING:
+    from rest_framework.request import Request
+    from rest_framework.views import APIView
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +30,7 @@ class AuditedPermissionMixin:
         """Log access denied event to audit log."""
         try:
             # Determine entity type from view
-            entity_type = AuditLog.EntityType.CONFIG  # Default
+            entity_type = AuditEntityType.CONFIG  # Default
             entity_id = 0
 
             # Try to get entity info from view
@@ -25,9 +38,9 @@ class AuditedPermissionMixin:
             if hasattr(view, "basename"):
                 basename = view.basename
                 if basename == "risk":
-                    entity_type = AuditLog.EntityType.RISK
+                    entity_type = AuditEntityType.RISK
                 elif basename == "auditlog":
-                    entity_type = AuditLog.EntityType.CONFIG
+                    entity_type = AuditEntityType.CONFIG
 
             # Get entity_id from URL kwargs if available
             if hasattr(view, "kwargs") and view.kwargs:
@@ -41,7 +54,7 @@ class AuditedPermissionMixin:
                 request,
                 entity_type=entity_type,
                 entity_id=entity_id,
-                action=AuditLog.Action.ACCESS_DENIED,
+                action=AuditAction.ACCESS_DENIED,
                 context=context,
             )
         except Exception:
@@ -49,37 +62,25 @@ class AuditedPermissionMixin:
             logger.exception("Failed to log permission denied event")
 
 
-class IsAuthenticatedOrAPIKey(AuditedPermissionMixin, permissions.BasePermission):
-    """
-    Allow access if user is authenticated OR valid API key is provided.
-    """
+class HasRiskRegisterCognitoGroup(AuditedPermissionMixin, permissions.BasePermission):
+    """Require membership in a configured Cognito group for risk register access."""
 
-    def has_permission(self, request, view):
-        # Check for authenticated user
-        if request.user and request.user.is_authenticated:
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        if principal_has_risk_register_access(request):
             return True
-
-        # Check for API key authentication
-        if isinstance(request.auth, APIKey):
-            return True
-
-        # Log access denied
-        self._log_permission_denied(request, view, "No valid authentication")
+        self._log_permission_denied(request, view, "Not in allowed Cognito group")
         return False
 
 
 class IsAdminUser(AuditedPermissionMixin, permissions.BasePermission):
     """
     Allow access only to admin users (staff or superuser).
-    API keys cannot access admin-only endpoints.
+
+    Platform API tokens carry no Django user and so are not admins; they are
+    denied here without a special case.
     """
 
     def has_permission(self, request, view):
-        # API keys cannot access admin endpoints
-        if isinstance(request.auth, APIKey):
-            self._log_permission_denied(request, view, "API key not allowed for admin endpoint")
-            return False
-
         # Must be authenticated user with staff/superuser status
         has_permission = bool(
             request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
@@ -89,27 +90,51 @@ class IsAdminUser(AuditedPermissionMixin, permissions.BasePermission):
         return has_permission
 
 
+class IsStaffSessionOrToken(AuditedPermissionMixin, permissions.BasePermission):
+    """Allow a platform API token (its scope is its authorization, checked by a
+    sibling ``RequireScope`` permission) OR a staff/superuser session.
+
+    Anonymous requests and non-admin sessions are denied. Compose with
+    ``shared.api_tokens.permissions.RequireScope`` so token requests still must
+    carry the required scope.
+    """
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        # A scoped platform ApiToken is admitted here; the sibling require_scope
+        # permission enforces the specific scope.
+        if isinstance(request.auth, ApiToken):
+            return True
+
+        has_permission = bool(
+            request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
+        )
+        if not has_permission:
+            self._log_permission_denied(request, view, "Not an admin session or scoped token")
+        return has_permission
+
+
 class IsOwnerOrAdmin(AuditedPermissionMixin, permissions.BasePermission):
     """
     Allow access if user owns the object or is an admin.
-    For API keys, allow access to objects they created.
     """
 
+    @staticmethod
+    def _is_admin(request: Request) -> bool:
+        return bool(
+            request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
+        )
+
+    @staticmethod
+    def _owns_via_user(request: Request, obj: object) -> bool:
+        if not (request.user and request.user.is_authenticated):
+            return False
+        if getattr(obj, "author_user", None) == request.user:
+            return True
+        return getattr(obj, "created_by", None) == request.user
+
     def has_object_permission(self, request, view, obj):
-        # Admins can access anything
-        if request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser):
+        if self._is_admin(request) or self._owns_via_user(request, obj):
             return True
-
-        # Check ownership for API keys
-        if isinstance(request.auth, APIKey) and hasattr(obj, "author_apikey") and obj.author_apikey == request.auth:
-            return True
-
-        # Check ownership for users
-        if request.user and request.user.is_authenticated:
-            if hasattr(obj, "author_user") and obj.author_user == request.user:
-                return True
-            if hasattr(obj, "created_by") and obj.created_by == request.user:
-                return True
 
         # Log access denied
         obj_name = type(obj).__name__

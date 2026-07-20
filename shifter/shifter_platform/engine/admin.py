@@ -2,7 +2,8 @@
 
 from django.contrib import admin
 
-from engine.models import Range, SubnetAllocation
+from engine.models import CapacityDeclaration, Range, SubnetAllocation
+from shared.schemas.persistence import unwrap_persisted_spec
 
 
 @admin.register(Range)
@@ -15,7 +16,7 @@ class RangeAdmin(admin.ModelAdmin):
     @admin.display(description="Scenario")
     def scenario_id(self, obj):
         if obj.range_config:
-            return obj.range_config.get("scenario_id", "—")
+            return unwrap_persisted_spec(obj.range_config).get("scenario_id", "—")
         return "—"
 
 
@@ -33,3 +34,20 @@ class SubnetAllocationAdmin(admin.ModelAdmin):
     list_filter = ("vpc_id", "subnet_size")
     search_fields = ("cidr", "request_id", "vpc_id")
     readonly_fields = ("created_at",)
+
+
+@admin.register(CapacityDeclaration)
+class CapacityDeclarationAdmin(admin.ModelAdmin):
+    """Operator visibility for declared event capacity (CTF-908)."""
+
+    list_display = (
+        "event_name",
+        "event_ref",
+        "expected_concurrent_ranges",
+        "cohort_size",
+        "window_start",
+        "declared_at",
+    )
+    list_filter = ("source", "declared_at")
+    search_fields = ("event_name", "event_ref")
+    readonly_fields = [f.name for f in CapacityDeclaration._meta.fields]

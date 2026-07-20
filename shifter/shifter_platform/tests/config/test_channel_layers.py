@@ -3,13 +3,24 @@
 Covers the Redis AUTH/TLS contract from ADR-008-R6 (#963): the helper picks
 the right backend for local dev, plaintext-Redis, and TLS-with-password
 postures, and fails closed when TLS is enabled without a password.
+
+Also covers the explicit channel-layer backend posture from ADR-018 (#849):
+``CHANNEL_LAYER_BACKEND`` selects the backend independently of the portal
+``enable_autoscaling`` topology, fails closed when ``redis`` is requested
+without ``REDIS_HOST``, and exposes a non-secret startup posture for logging.
 """
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
+from config._channels import (
+    describe_channel_layer_posture,
+    log_channel_layer_posture,
+)
 from config.settings import _build_channel_layers
 
 
@@ -109,6 +120,94 @@ def test_returns_rediss_with_ssl_ca_data_when_ca_present():
     }
 
 
+def test_returns_rediss_without_ca_data_in_system_trust_mode():
+    """AWS ElastiCache secure-posture happy path (#938): REDIS_TLS=true,
+    REDIS_PASSWORD, and REDIS_CA_MODE=system produce a dict-form channels_redis
+    host carrying address + ssl_cert_reqs=required and NO ssl_ca_data.
+
+    ElastiCache's server cert chains to a public Amazon CA already in the OS
+    trust store, so no custom CA is supplied — but certificate verification
+    stays required (ssl_cert_reqs), so this is not an unverified-TLS downgrade."""
+    layers = _build_channel_layers(
+        {
+            "REDIS_HOST": "10.0.0.20",
+            "REDIS_PORT": "6379",
+            "REDIS_TLS": "true",
+            "REDIS_CA_MODE": "system",
+            "REDIS_PASSWORD": "test-auth-token",  # NOSONAR - test fixture, not a real credential
+            # REDIS_CA_PEM deliberately absent — system trust does not need it
+        }
+    )
+
+    host_entry = layers["default"]["CONFIG"]["hosts"][0]
+    assert host_entry == {
+        "address": "rediss://:test-auth-token@10.0.0.20:6379/0",
+        "ssl_cert_reqs": "required",
+        "ssl_check_hostname": True,
+    }
+    # System trust must NOT bundle a CA, and MUST verify the hostname so a
+    # publicly-trusted cert for a different name cannot MITM the connection.
+    assert "ssl_ca_data" not in host_entry
+
+
+def test_system_trust_mode_is_case_insensitive():
+    """REDIS_CA_MODE parsing matches the rest of the env contract:
+    case-insensitive, surrounding whitespace stripped."""
+    layers = _build_channel_layers(
+        {
+            "REDIS_HOST": "10.0.0.20",
+            "REDIS_TLS": "true",
+            "REDIS_CA_MODE": "  SYSTEM  ",
+            "REDIS_PASSWORD": "tok",
+        }
+    )
+
+    host_entry = layers["default"]["CONFIG"]["hosts"][0]
+    assert "ssl_ca_data" not in host_entry
+    assert host_entry["ssl_check_hostname"] is True
+
+
+def test_system_trust_mode_still_fails_closed_without_password():
+    """System trust removes the CA requirement, not the AUTH requirement:
+    REDIS_TLS=true + REDIS_CA_MODE=system without a password must still raise."""
+    with pytest.raises(ImproperlyConfigured, match="REDIS_PASSWORD"):
+        _build_channel_layers(
+            {
+                "REDIS_HOST": "10.0.0.20",
+                "REDIS_TLS": "true",
+                "REDIS_CA_MODE": "system",
+            }
+        )
+
+
+def test_explicit_pem_mode_still_requires_ca():
+    """REDIS_CA_MODE=pem is the explicit form of the default and keeps the
+    #963 GCP fail-closed: TLS without REDIS_CA_PEM must raise."""
+    with pytest.raises(ImproperlyConfigured, match="REDIS_CA_PEM"):
+        _build_channel_layers(
+            {
+                "REDIS_HOST": "10.0.0.20",
+                "REDIS_TLS": "true",
+                "REDIS_CA_MODE": "pem",
+                "REDIS_PASSWORD": "test-auth-token",  # NOSONAR - test fixture, not a real credential
+            }
+        )
+
+
+def test_unknown_ca_mode_fails_closed():
+    """An unrecognised REDIS_CA_MODE is a configuration error, not a silent
+    fall-through to either trust mode."""
+    with pytest.raises(ImproperlyConfigured, match="REDIS_CA_MODE"):
+        _build_channel_layers(
+            {
+                "REDIS_HOST": "10.0.0.20",
+                "REDIS_TLS": "true",
+                "REDIS_CA_MODE": "insecure",
+                "REDIS_PASSWORD": "test-auth-token",  # NOSONAR - test fixture, not a real credential
+            }
+        )
+
+
 def test_password_is_not_embedded_when_tls_disabled():
     """Defense in depth: even if REDIS_PASSWORD is set, when REDIS_TLS is
     not 'true' we MUST NOT silently embed the password in a plaintext URL.
@@ -199,3 +298,175 @@ def test_tls_flag_anything_else_is_disabled(tls_value):
     )
 
     assert layers["default"]["CONFIG"]["hosts"] == [("10.0.0.20", 6379)]
+
+
+# ---------------------------------------------------------------------------
+# Explicit channel-layer backend posture (ADR-018, #849)
+#
+# CHANNEL_LAYER_BACKEND decouples the runtime backend from the portal
+# enable_autoscaling topology. A deployed `redis` posture fails closed when
+# REDIS_HOST is absent instead of silently degrading to InMemoryChannelLayer.
+# ---------------------------------------------------------------------------
+
+
+def test_explicit_redis_backend_builds_redis_layer():
+    """CHANNEL_LAYER_BACKEND=redis with REDIS_HOST set builds the Redis layer
+    (same tuple form as the host-presence heuristic)."""
+    layers = _build_channel_layers(
+        {
+            "CHANNEL_LAYER_BACKEND": "redis",
+            "REDIS_HOST": "10.0.0.20",
+            "REDIS_PORT": "6379",
+        }
+    )
+
+    assert layers == {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [("10.0.0.20", 6379)]},
+        },
+    }
+
+
+def test_explicit_redis_backend_fails_closed_without_host():
+    """The failure mode #849 exists to close: a deployed `redis` posture with
+    no REDIS_HOST must raise, never fall back to InMemoryChannelLayer."""
+    with pytest.raises(ImproperlyConfigured, match="REDIS_HOST"):
+        _build_channel_layers({"CHANNEL_LAYER_BACKEND": "redis"})
+
+
+def test_explicit_redis_backend_fails_closed_with_blank_host():
+    """Blank REDIS_HOST is the same failure mode as missing."""
+    with pytest.raises(ImproperlyConfigured, match="REDIS_HOST"):
+        _build_channel_layers({"CHANNEL_LAYER_BACKEND": "redis", "REDIS_HOST": "  "})
+
+
+def test_explicit_in_memory_backend_ignores_present_redis_host():
+    """CHANNEL_LAYER_BACKEND=in_memory forces the in-memory layer even when a
+    stray REDIS_HOST is present (deliberate cost-saving / non-event posture).
+    The drift stays observable via the startup posture, not via behavior."""
+    layers = _build_channel_layers(
+        {
+            "CHANNEL_LAYER_BACKEND": "in_memory",
+            "REDIS_HOST": "10.0.0.20",
+        }
+    )
+
+    assert layers == {
+        "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
+    }
+
+
+@pytest.mark.parametrize("backend_value", ["REDIS", "Redis", "in_memory", "IN_MEMORY", "In_Memory"])
+def test_backend_value_is_case_insensitive(backend_value):
+    """CHANNEL_LAYER_BACKEND parsing matches the rest of the env contract:
+    case-insensitive, surrounding whitespace stripped."""
+    layers = _build_channel_layers(
+        {
+            "CHANNEL_LAYER_BACKEND": f"  {backend_value}  ",
+            "REDIS_HOST": "10.0.0.20",
+        }
+    )
+
+    if backend_value.lower() == "redis":
+        assert layers["default"]["BACKEND"] == "channels_redis.core.RedisChannelLayer"
+    else:
+        assert layers["default"]["BACKEND"] == "channels.layers.InMemoryChannelLayer"
+
+
+def test_unknown_backend_value_fails_closed():
+    """An unrecognised CHANNEL_LAYER_BACKEND is a configuration error, not a
+    silent fall-through to a default backend."""
+    with pytest.raises(ImproperlyConfigured, match="CHANNEL_LAYER_BACKEND"):
+        _build_channel_layers({"CHANNEL_LAYER_BACKEND": "memcached", "REDIS_HOST": "10.0.0.20"})
+
+
+def test_unset_backend_preserves_host_presence_heuristic():
+    """When CHANNEL_LAYER_BACKEND is unset (local dev / pytest), the legacy
+    REDIS_HOST-presence heuristic still decides — no behavior change for
+    environments that do not opt into the explicit posture."""
+    assert _build_channel_layers({})["default"]["BACKEND"] == "channels.layers.InMemoryChannelLayer"
+    assert (
+        _build_channel_layers({"REDIS_HOST": "10.0.0.20"})["default"]["BACKEND"]
+        == "channels_redis.core.RedisChannelLayer"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Startup posture observability (#849 AC2)
+# ---------------------------------------------------------------------------
+
+
+def test_describe_posture_reports_explicit_redis_fields():
+    posture = describe_channel_layer_posture(
+        {
+            "CHANNEL_LAYER_BACKEND": "redis",
+            "REDIS_HOST": "10.0.0.20",
+            "REDIS_PORT": "6380",
+            "REDIS_TLS": "true",
+            "REDIS_CA_MODE": "system",
+        }
+    )
+
+    assert posture == {
+        "backend": "redis",
+        "explicit_backend": "redis",
+        "redis_host_present": True,
+        "redis_port": 6380,
+        "redis_tls": True,
+        "redis_ca_mode": "system",
+    }
+
+
+def test_describe_posture_reports_unset_in_memory_fields():
+    posture = describe_channel_layer_posture({})
+
+    assert posture == {
+        "backend": "in_memory",
+        "explicit_backend": None,
+        "redis_host_present": False,
+        "redis_port": None,
+        "redis_tls": False,
+        "redis_ca_mode": None,
+    }
+
+
+def test_describe_posture_surfaces_in_memory_over_present_host_drift():
+    """in_memory backend with a present REDIS_HOST is the deliberate-but-must-
+    not-be-silent case: the posture reports both so the drift is visible."""
+    posture = describe_channel_layer_posture({"CHANNEL_LAYER_BACKEND": "in_memory", "REDIS_HOST": "10.0.0.20"})
+
+    assert posture["backend"] == "in_memory"
+    assert posture["redis_host_present"] is True
+
+
+def test_log_posture_emits_single_non_secret_record(caplog):
+    """The startup posture log makes the active backend observable in deployed
+    environments without leaking the password, CA, or even the hostname.
+
+    A propagating test logger is injected because the production ``config``
+    logger sets ``propagate: False`` (see ``config/_logging_config.py``), which
+    pytest's root-attached ``caplog`` handler cannot observe."""
+    test_logger = logging.getLogger("tests.channel_layer_posture")
+    with caplog.at_level(logging.INFO, logger=test_logger.name):
+        log_channel_layer_posture(
+            {
+                "CHANNEL_LAYER_BACKEND": "redis",
+                "REDIS_HOST": "10.0.0.20",
+                "REDIS_PORT": "6380",
+                "REDIS_TLS": "true",
+                "REDIS_PASSWORD": "supersecretauthtoken",  # NOSONAR - test fixture, not a real credential
+                "REDIS_CA_PEM": "-----BEGIN CERTIFICATE-----\nMIIBfake==\n-----END CERTIFICATE-----\n",
+            },
+            logger=test_logger,
+        )
+
+    records = [r for r in caplog.records if "channel-layer" in r.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "backend=redis" in message
+    assert "redis_tls=True" in message
+    # No secrets / sensitive topology in the emitted line.
+    assert "supersecretauthtoken" not in message
+    assert "BEGIN CERTIFICATE" not in message
+    assert "10.0.0.20" not in message

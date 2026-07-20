@@ -2,14 +2,12 @@
 
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from risk_register.api.permissions import IsAdminUser
+from risk_register.api.permissions import HasRiskRegisterCognitoGroup, IsAdminUser, IsStaffSessionOrToken
 from risk_register.api.serializers import (
-    APIKeyCreatedSerializer,
-    APIKeyCreateSerializer,
-    APIKeySerializer,
     AuditLogSerializer,
     CommentCreateSerializer,
     CommentSerializer,
@@ -17,15 +15,33 @@ from risk_register.api.serializers import (
     RiskSerializer,
     RiskUpdateSerializer,
 )
-from risk_register.models import APIKey, AuditLog, Comment, Risk
+from risk_register.models import (
+    AuditLog,
+    Comment,
+    Risk,
+)
+from shared.api.errors import api_error_response
+from shared.api_tokens import scopes
+from shared.api_tokens.authentication import ApiTokenAuthentication
+from shared.api_tokens.models import ApiToken
+from shared.api_tokens.permissions import require_scope
+from shared.audit import (
+    AuditAction,
+    AuditActorType,
+    AuditEntityType,
+    AuditEvent,
+    audit_log,
+)
 
 
 def get_actor_info(request):
     """Extract actor type and ID from request for audit logging."""
-    if isinstance(request.auth, APIKey):
-        return AuditLog.ActorType.APIKEY, request.auth.id
+    # A platform ApiToken authenticates without a Django user; attribute the
+    # audit row to the token.
+    if isinstance(request.auth, ApiToken):
+        return AuditActorType.APIKEY, request.auth.id
     elif request.user and request.user.is_authenticated:
-        return AuditLog.ActorType.USER, request.user.id
+        return AuditActorType.USER, request.user.id
     return None, None
 
 
@@ -49,9 +65,18 @@ def risk_to_dict(risk: Risk) -> dict:
 
 
 class RiskViewSet(viewsets.ModelViewSet):
-    """ViewSet for Risk CRUD operations. Admin only."""
+    """ViewSet for Risk CRUD operations.
 
-    permission_classes = [IsAdminUser]
+    Accepts a staff/superuser session or a platform API token scoped
+    ``risk:read`` (safe methods) / ``risk:write`` (mutations).
+    """
+
+    authentication_classes = [ApiTokenAuthentication, SessionAuthentication]
+    permission_classes = [
+        HasRiskRegisterCognitoGroup,
+        IsStaffSessionOrToken,
+        require_scope(scopes.RISK_READ, scopes.RISK_WRITE),
+    ]
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -92,13 +117,15 @@ class RiskViewSet(viewsets.ModelViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=risk.id,
-                action=AuditLog.Action.CREATE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                new_state=risk_to_dict(risk),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=risk.id,
+                    action=AuditAction.CREATE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    new_state=risk_to_dict(risk),
+                )
             )
 
         output_serializer = RiskSerializer(risk)
@@ -121,23 +148,25 @@ class RiskViewSet(viewsets.ModelViewSet):
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
             # Determine action type
-            action_type = AuditLog.Action.UPDATE
+            action_type = AuditAction.UPDATE
             old_status = previous_state.get("status")
             new_status = instance.status
 
             if old_status != "closed" and new_status == "closed":
-                action_type = AuditLog.Action.CLOSE
+                action_type = AuditAction.CLOSE
             elif old_status == "closed" and new_status != "closed":
-                action_type = AuditLog.Action.REOPEN
+                action_type = AuditAction.REOPEN
 
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=instance.id,
-                action=action_type,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                previous_state=previous_state,
-                new_state=risk_to_dict(instance),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=instance.id,
+                    action=action_type,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    previous_state=previous_state,
+                    new_state=risk_to_dict(instance),
+                )
             )
 
         output_serializer = RiskSerializer(instance)
@@ -153,14 +182,16 @@ class RiskViewSet(viewsets.ModelViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=instance.id,
-                action=AuditLog.Action.DELETE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                previous_state=previous_state,
-                new_state=risk_to_dict(instance),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=instance.id,
+                    action=AuditAction.DELETE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    previous_state=previous_state,
+                    new_state=risk_to_dict(instance),
+                )
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -180,9 +211,11 @@ class RiskViewSet(viewsets.ModelViewSet):
         self.check_object_permissions(request, instance)
 
         if not instance.is_deleted:
-            return Response(
-                {"error": "bad_request", "message": "Risk is not deleted"},
-                status=status.HTTP_400_BAD_REQUEST,
+            return api_error_response(
+                code="bad_request",
+                message="Risk is not deleted",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                request=request,
             )
 
         previous_state = risk_to_dict(instance)
@@ -191,14 +224,16 @@ class RiskViewSet(viewsets.ModelViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.RISK,
-                entity_id=instance.id,
-                action=AuditLog.Action.RESTORE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                previous_state=previous_state,
-                new_state=risk_to_dict(instance),
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.RISK,
+                    entity_id=instance.id,
+                    action=AuditAction.RESTORE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    previous_state=previous_state,
+                    new_state=risk_to_dict(instance),
+                )
             )
 
         serializer = RiskSerializer(instance)
@@ -206,9 +241,19 @@ class RiskViewSet(viewsets.ModelViewSet):
 
 
 class CommentViewSet(viewsets.ViewSet):
-    """ViewSet for Comment operations (nested under risks). Admin only."""
+    """ViewSet for Comment operations (nested under risks).
 
-    permission_classes = [IsAdminUser]
+    Accepts a staff/superuser session or a platform API token scoped
+    ``risk:read`` (safe methods) / ``risk:write`` (mutations).
+    """
+
+    authentication_classes = [ApiTokenAuthentication, SessionAuthentication]
+    serializer_class = CommentSerializer
+    permission_classes = [
+        HasRiskRegisterCognitoGroup,
+        IsStaffSessionOrToken,
+        require_scope(scopes.RISK_READ, scopes.RISK_WRITE),
+    ]
 
     def list(self, request, risk_pk=None):
         """List comments for a risk.
@@ -235,35 +280,34 @@ class CommentViewSet(viewsets.ViewSet):
         serializer = CommentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Determine author
+        # Determine author. Session users are attributed; platform-token
+        # requests have no Django user and are left author-less (the audit log
+        # below records the token actor).
         author_user = None
-        author_apikey = None
-
-        if isinstance(request.auth, APIKey):
-            author_apikey = request.auth
-        elif request.user and request.user.is_authenticated:
+        if request.user and request.user.is_authenticated:
             author_user = request.user
 
         comment = Comment.objects.create(
             risk=risk,
             content=serializer.validated_data["content"],
             author_user=author_user,
-            author_apikey=author_apikey,
         )
 
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.COMMENT,
-                entity_id=comment.id,
-                action=AuditLog.Action.CREATE,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                new_state={
-                    "risk_id": risk.id,
-                    "content": comment.content,
-                },
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.COMMENT,
+                    entity_id=comment.id,
+                    action=AuditAction.CREATE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    new_state={
+                        "risk_id": risk.id,
+                        "content": comment.content,
+                    },
+                )
             )
 
         output_serializer = CommentSerializer(comment)
@@ -278,92 +322,17 @@ class CommentViewSet(viewsets.ViewSet):
         # Audit log
         actor_type, actor_id = get_actor_info(request)
         if actor_type and actor_id:
-            AuditLog.log(
-                entity_type=AuditLog.EntityType.COMMENT,
-                entity_id=comment.id,
-                action=AuditLog.Action.DELETE,
-                actor_type=actor_type,
-                actor_id=actor_id,
+            audit_log(
+                AuditEvent(
+                    entity_type=AuditEntityType.COMMENT,
+                    entity_id=comment.id,
+                    action=AuditAction.DELETE,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class APIKeyViewSet(viewsets.ViewSet):
-    """ViewSet for API key management."""
-
-    permission_classes = [IsAdminUser]
-
-    def list(self, request):
-        """List all API keys."""
-        keys = APIKey.objects.all()
-        serializer = APIKeySerializer(keys, many=True)
-        return Response(serializer.data)
-
-    def retrieve(self, request, pk=None):
-        """Get a single API key."""
-        key = get_object_or_404(APIKey, pk=pk)
-        serializer = APIKeySerializer(key)
-        return Response(serializer.data)
-
-    def create(self, request):
-        """Create a new API key."""
-        serializer = APIKeyCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        api_key, raw_key = APIKey.create_key(
-            name=serializer.validated_data["name"],
-            created_by=request.user,
-            expires_at=serializer.validated_data.get("expires_at"),
-        )
-
-        # Audit log
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=api_key.id,
-            action=AuditLog.Action.CREATE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
-            new_state={
-                "name": api_key.name,
-                "prefix": api_key.prefix,
-            },
-        )
-
-        output = APIKeyCreatedSerializer(
-            {
-                "id": api_key.id,
-                "name": api_key.name,
-                "key": raw_key,
-                "prefix": api_key.prefix,
-            }
-        )
-        return Response(output.data, status=status.HTTP_201_CREATED)
-
-    @action(detail=True, methods=["post"])
-    def revoke(self, request, pk=None):
-        """Revoke an API key."""
-        api_key = get_object_or_404(APIKey, pk=pk)
-
-        if not api_key.is_active:
-            return Response(
-                {"error": "bad_request", "message": "API key is already revoked"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        api_key.revoke()
-
-        # Audit log
-        AuditLog.log(
-            entity_type=AuditLog.EntityType.APIKEY,
-            entity_id=api_key.id,
-            action=AuditLog.Action.DELETE,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
-        )
-
-        serializer = APIKeySerializer(api_key)
-        return Response(serializer.data)
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
@@ -375,7 +344,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [HasRiskRegisterCognitoGroup, IsAdminUser]
 
     def get_queryset(self):
         """Return audit logs with optional filtering."""

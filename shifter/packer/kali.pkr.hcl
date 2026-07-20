@@ -54,8 +54,10 @@ build {
   provisioner "shell" {
     scripts = [
       "scripts/kali/base.sh",
+      "scripts/aws/linux-resolved-dns.sh",
       "scripts/kali/tools.sh",
       "scripts/kali/caldera.sh",
+      "scripts/common/claude-autostart-install.sh",
       "scripts/kali/claude-code.sh",
       "scripts/common/cleanup.sh"
     ]

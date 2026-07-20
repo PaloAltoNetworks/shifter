@@ -22,9 +22,13 @@ Required context:
             {% endif %}
         </td>
         <td>
-            <strong>{{ entry.name }}</strong>
             {% if not team_mode and entry.participant_id == participant_id %}
+                <a href="{% url 'ctf:participant_solve_history' participant_id=entry.participant_id %}">
+                    <strong>{{ entry.name }}</strong>
+                </a>
                 <span class="badge bg-primary ms-1">{% trans "You" %}</span>
+            {% else %}
+                <strong>{{ entry.name }}</strong>
             {% endif %}
         </td>
         {% if team_mode %}

@@ -1,0 +1,10 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{{ event.name }}: your range is ready
+
+Hi {{ participant.name }},
+
+Your range for {{ event.name }} is provisioned and ready. Log in and open
+the Range page to connect: {{ access_url }}
+
+-- {{ event.name }} Organizers

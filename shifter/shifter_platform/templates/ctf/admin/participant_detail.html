@@ -6,158 +6,7 @@
     {{ participant.name }} - {{ event.name }}
 {% endblock %}
 {% block extra_css %}
-    <style>
-.detail-layout {
-    display: grid;
-    grid-template-columns: 360px 1fr;
-    gap: 16px;
-    align-items: start;
-}
-
-.breadcrumb {
-    display: flex;
-    gap: 4px;
-    font-size: 13px;
-    color: var(--theme-text-secondary);
-    margin-bottom: 8px;
-    list-style: none;
-    padding: 0;
-    margin-top: 0;
-}
-
-.breadcrumb a {
-    color: #94a3b8;
-}
-
-.breadcrumb li + li::before {
-    content: "/";
-    margin-right: 4px;
-    color: var(--theme-text-secondary);
-}
-
-.header-actions {
-    display: flex;
-    gap: 8px;
-}
-
-.btn-danger {
-    background: transparent;
-    color: #ff4d4f;
-    border: 1px solid #ff4d4f;
-}
-
-.detail-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    font-size: 13px;
-}
-
-.detail-row + .detail-row {
-    border-top: 1px solid var(--theme-border);
-}
-
-.detail-label {
-    color: var(--theme-text-secondary);
-}
-
-.detail-value {
-    font-weight: 600;
-    color: var(--theme-text);
-}
-
-.badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 10px;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.badge-invited {
-    background: rgba(250, 173, 20, 0.15);
-    color: #faad14;
-}
-
-.badge-registered {
-    background: rgba(148, 163, 184, 0.15);
-    color: #94a3b8;
-}
-
-.badge-active {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.badge-completed {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.badge-disqualified {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
-}
-
-.badge-correct {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.badge-incorrect {
-    background: rgba(255, 77, 79, 0.15);
-    color: #ff4d4f;
-}
-
-.badge-warning {
-    background: rgba(250, 173, 20, 0.15);
-    color: #faad14;
-}
-
-.badge-secondary {
-    background: rgba(184, 184, 184, 0.15);
-    color: #b8b8b8;
-}
-
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    text-align: center;
-}
-
-.stat-value {
-    font-size: 24px;
-    font-weight: 700;
-    color: var(--theme-text);
-    line-height: 1;
-}
-
-.stat-value.stat-score { color: #94a3b8; }
-.stat-value.stat-solved { color: #22c55e; }
-.stat-value.stat-attempts { color: var(--theme-text-secondary); }
-
-.stat-label {
-    font-size: 12px;
-    color: var(--theme-text-secondary);
-    margin-top: 4px;
-}
-
-.empty-message {
-    padding: 24px;
-    text-align: center;
-    color: var(--theme-text-secondary);
-    font-size: 13px;
-}
-
-@media (max-width: 960px) {
-    .detail-layout {
-        grid-template-columns: 1fr;
-    }
-}
-    </style>
+    <link rel="stylesheet" href="{% static 'css/ctf-admin-participant_detail.css' %}">
 {% endblock %}
 {% block content %}
     <!-- Header -->
@@ -186,7 +35,7 @@
                 {% if participant.status == 'invited' %}
                     <button type="button"
                             class="btn btn-secondary"
-                            onclick="resendInvite('{{ participant.pk }}')">
+                            onclick="resendInvite('{{ participant.pk }}', globalThis.__participantCsrfToken)">
                         {% trans "Resend Invite" %}
                     </button>
                 {% endif %}
@@ -212,6 +61,42 @@
                     <span class="detail-label">{% trans "Email" %}</span>
                     <span class="detail-value">{{ participant.email }}</span>
                 </div>
+                <form method="post" action="{% url 'ctf:admin_participant_email' participant_id=participant.pk %}">
+                    {% csrf_token %}
+                    <label for="participant-email">{% trans "Credential delivery email (optional)" %}</label>
+                    <input id="participant-email" name="email" type="email" value="{{ participant.email }}">
+                    <button type="submit" class="btn btn-secondary">{% trans "Update email" %}</button>
+                </form>
+                {% if participant.user %}
+                    <div class="detail-row">
+                        <span class="detail-label">{% trans "Username" %}</span>
+                        <span class="detail-value">{{ participant.user.username }}</span>
+                    </div>
+                    {% if bootstrap_password %}
+                        <details>
+                            <summary>{% trans "Reveal current event bootstrap password" %}</summary>
+                            <code>{{ bootstrap_password }}</code>
+                        </details>
+                    {% else %}
+                        <p class="detail-value">
+                            {% blocktrans trimmed %}
+                                No secure bootstrap password is configured for this event.
+                                Set a participant password override on the event, or configure
+                                CTF_DEFAULT_PARTICIPANT_PASSWORD, before provisioning accounts.
+                            {% endblocktrans %}
+                        </p>
+                    {% endif %}
+                    <form method="post" action="{% url 'ctf:admin_participant_rename' participant_id=participant.pk %}">
+                        {% csrf_token %}
+                        <label for="participant-username">{% trans "Rename username" %}</label>
+                        <input id="participant-username"
+                               name="username"
+                               value="{{ participant.user.username }}"
+                               maxlength="49"
+                               required>
+                        <button type="submit" class="btn btn-secondary">{% trans "Rename" %}</button>
+                    </form>
+                {% endif %}
                 <div class="detail-row">
                     <span class="detail-label">{% trans "Status" %}</span>
                     <span class="detail-value">
@@ -307,13 +192,11 @@
         <!-- Right Column: Timeline & Submission History -->
         <div>
             <!-- Score Timeline Chart -->
-            <div class="card" style="margin-bottom: 16px;">
+            <div class="card card--gap">
                 <div class="card-title">
                     {% trans "Score Timeline" %}
                 </div>
-                <div style="position: relative;
-                            height: 250px;
-                            padding: 0 16px 16px">
+                <div class="score-timeline-canvas-wrap">
                     <canvas id="score-timeline-chart"></canvas>
                 </div>
             </div>
@@ -350,20 +233,13 @@
                                         <a href="{{ challenge_url }}">
                                             {{ submission.challenge.name }}
                                         </a>
-                                        <span class="badge badge-secondary" style="margin-left: 4px;">
+                                        <span class="badge badge-secondary badge-secondary--inline">
                                         {{ submission.challenge.category }}
                                         </span>
                                     </td>
                                     <td>
                                         {% if submission.is_correct %}
                                             <span class="badge badge-correct">{% trans "Correct" %}</span>
-                                            {% if submission.hint_used %}
-<span class="badge badge-warning" style="margin-left: 4px;">
-    {% blocktrans trimmed %}
-        Hint Used
-    {% endblocktrans %}
-</span>
-                                            {% endif %}
                                         {% else %}
                                             <span class="badge badge-incorrect">{% trans "Incorrect" %}</span>
                                         {% endif %}
@@ -397,47 +273,19 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
-            integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
-            crossorigin="anonymous"></script>
-<script
-src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
-integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
-crossorigin="anonymous"></script>
+    <script src="{% static 'js/vendor/chart.umd.min.js' %}"></script>
+    <script src="{% static 'js/vendor/chartjs-adapter-date-fns.bundle.min.js' %}"></script>
     <script src="{% static 'js/score-timeline.js' %}"></script>
+    <script src="{% static 'js/admin-participant-detail.js' %}"></script>
+    <script id="admin-participant-detail-bootstrap" type="application/json">{
+        "participant_id": "{{ participant.pk }}",
+        "csrf_token": "{{ csrf_token }}"
+    }</script>
     <script>
-initScoreTimeline('score-timeline-chart', '/ctf/api/participants/{{ participant.pk }}/score-timeline/');
-    </script>
-    <script>
-function resendInvite(participantId) {
-    if (!confirm('Resend invitation email to this participant?')) return;
-
-    fetch('/ctf/api/participants/' + participantId + '/resend-invite/', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-        if (data.success) {
-            alert('Invitation resent successfully.');
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Failed to resend invite'));
-        }
-    })
-    .catch(function(err) {
-        alert('Error resending invite: ' + err.message);
-    });
-}
-
-function disqualifyParticipant(participantId) {
-    if (!confirm('Are you sure you want to disqualify this participant? This action cannot be undone.')) return;
-
-    // This would call a disqualify API endpoint (to be implemented)
-    alert('Disqualify functionality not yet implemented via API.');
-}
+        (function () {
+            var cfg = JSON.parse(document.getElementById('admin-participant-detail-bootstrap').textContent);
+            globalThis.initParticipantTimeline(cfg.participant_id);
+            globalThis.__participantCsrfToken = cfg.csrf_token;
+        }());
     </script>
 {% endblock %}

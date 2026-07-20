@@ -9,13 +9,21 @@ Tests cover:
 
 from __future__ import annotations
 
-from datetime import timedelta
-
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from ctf.enums import ParticipantStatus
 from ctf.models import CTFParticipant
+
+from .conftest import TEST_CTF_BOOTSTRAP_PASSWORD
+
+# The team_join error path renders a template that uses {% static %}; force the
+# non-manifest static storage so the render does not require a built manifest.
+_SIMPLE_STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 
 
 class TestAdminParticipantListView:
@@ -196,10 +204,13 @@ class TestAdminParticipantImportView:
 
         # Should stay on page with errors
         assert response.status_code == 200
-        assert "errors" in response.context or "error" in response.content.decode().lower()
+        assert response.context["errors"] == [
+            "Line 1: Expected name,email format",
+            "Line 2: Expected name,email format",
+        ]
 
-    def test_rejects_duplicate_emails_in_csv(self, authenticated_organizer_client, ctf_event):
-        """POST with duplicate emails in CSV shows error."""
+    def test_dedupes_delivery_emails_in_csv(self, authenticated_organizer_client, ctf_event):
+        """CTF-601: one delivery email per event; the duplicate row is skipped."""
         url = reverse("ctf:admin_participant_import", kwargs={"event_id": ctf_event.id})
 
         csv_content = "Alice,alice@example.com\nAlice Copy,alice@example.com"
@@ -214,12 +225,11 @@ class TestAdminParticipantImportView:
 
         response = authenticated_organizer_client.post(url, {"csv_file": csv_file})
 
-        assert response.status_code == 200
-        # No participants should be created
-        assert not CTFParticipant.objects.filter(event=ctf_event, email="alice@example.com").exists()
+        assert response.status_code == 302
+        assert CTFParticipant.objects.filter(event=ctf_event, email="alice@example.com").count() == 1
 
-    def test_rejects_existing_participant_email(self, authenticated_organizer_client, ctf_event):
-        """POST with email of existing participant shows error."""
+    def test_skips_existing_delivery_email(self, authenticated_organizer_client, ctf_event):
+        """CTF-601: an already-registered email is a per-row skip, not a failure."""
         # Create existing participant
         CTFParticipant.objects.create(
             event=ctf_event,
@@ -243,9 +253,9 @@ class TestAdminParticipantImportView:
 
         response = authenticated_organizer_client.post(url, {"csv_file": csv_file})
 
-        assert response.status_code == 200
-        # New user should not be created either (atomic failure)
-        assert not CTFParticipant.objects.filter(event=ctf_event, email="new@example.com").exists()
+        assert response.status_code == 302
+        assert CTFParticipant.objects.filter(event=ctf_event, email="existing@example.com").count() == 1
+        assert CTFParticipant.objects.filter(event=ctf_event, email="new@example.com").count() == 1
 
     def test_denies_access_to_other_organizer_event(self, client, ctf_event, second_organizer_user):
         """View denies access to events owned by other organizers."""
@@ -366,8 +376,8 @@ class TestAdminParticipantAddView:
         assert participant.status == ParticipantStatus.REGISTERED.value
         assert participant.user is not None
 
-    def test_rejects_duplicate_email(self, authenticated_organizer_client, ctf_event):
-        """POST with duplicate email shows error."""
+    def test_rejects_duplicate_delivery_email(self, authenticated_organizer_client, ctf_event):
+        """CTF-601: single-add refuses an email already registered for the event."""
         # Create existing participant
         CTFParticipant.objects.create(
             event=ctf_event,
@@ -388,7 +398,7 @@ class TestAdminParticipantAddView:
         )
 
         assert response.status_code == 200
-        assert "error" in response.content.decode().lower() or response.context.get("form").errors
+        assert CTFParticipant.objects.filter(event=ctf_event, email="existing@example.com").count() == 1
 
 
 class TestAPIParticipantList:
@@ -404,7 +414,7 @@ class TestAPIParticipantList:
             invited_at=timezone.now(),
         )
 
-        url = reverse("ctf:api_participant_list", kwargs={"event_id": ctf_event.id})
+        url = reverse("v1:ctf:api_participant_list", kwargs={"event_id": ctf_event.id})
         response = authenticated_organizer_client.get(url)
 
         assert response.status_code == 200
@@ -415,7 +425,7 @@ class TestAPIParticipantList:
 
     def test_post_creates_participant(self, authenticated_organizer_client, ctf_event):
         """POST creates a new participant."""
-        url = reverse("ctf:api_participant_list", kwargs={"event_id": ctf_event.id})
+        url = reverse("v1:ctf:api_participant_list", kwargs={"event_id": ctf_event.id})
 
         import json
 
@@ -439,7 +449,7 @@ class TestAPIParticipantDetail:
     def test_get_returns_participant_json(self, authenticated_organizer_client, ctf_participant):
         """GET returns participant details as JSON."""
         url = reverse(
-            "ctf:api_participant_detail",
+            "v1:ctf:api_participant_detail",
             kwargs={"participant_id": ctf_participant.id},
         )
         response = authenticated_organizer_client.get(url)
@@ -460,7 +470,7 @@ class TestAPIParticipantDetail:
         )
 
         url = reverse(
-            "ctf:api_participant_detail",
+            "v1:ctf:api_participant_detail",
             kwargs={"participant_id": participant.id},
         )
         response = authenticated_organizer_client.delete(url)
@@ -478,7 +488,7 @@ class TestAPIParticipantImport:
 
     def test_imports_from_json_array(self, authenticated_organizer_client, ctf_event):
         """POST imports participants from JSON array."""
-        url = reverse("ctf:api_participant_import", kwargs={"event_id": ctf_event.id})
+        url = reverse("v1:ctf:api_participant_import", kwargs={"event_id": ctf_event.id})
 
         import json
 
@@ -503,41 +513,124 @@ class TestAPIParticipantImport:
         assert CTFParticipant.objects.filter(event=ctf_event, email="one@example.com").exists()
         assert CTFParticipant.objects.filter(event=ctf_event, email="two@example.com").exists()
 
+    def test_non_object_elements_are_per_item_errors_not_500(self, authenticated_organizer_client, ctf_event):
+        """#1149: non-object array elements yield per-item errors, never a 500."""
+        url = reverse("v1:ctf:api_participant_import", kwargs={"event_id": ctf_event.id})
+
+        import json
+
+        response = authenticated_organizer_client.post(
+            url,
+            data=json.dumps({"participants": ["notadict", 1, None]}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["imported"] == 0
+        assert len(data["errors"]) == 3
+        assert all("object" in e["error"] for e in data["errors"])
+
 
 class TestAPIParticipantResendInvite:
-    """Tests for resending participant invites."""
+    """Tests for resetting and delivering participant credentials."""
 
-    def test_resend_regenerates_token(self, authenticated_organizer_client, ctf_event):
-        """Resend invite generates new token and updates expiry."""
-        participant = CTFParticipant.objects.create(
-            event=ctf_event,
+    def test_resend_resets_password(self, authenticated_organizer_client, ctf_event, monkeypatch):
+        """The compatibility endpoint performs an explicit credential reset."""
+        from ctf.services.participant.accounts import create_participant_accounts
+
+        monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
+        monkeypatch.setattr("ctf.services.notification._send_email", lambda **_kw: None)
+        participant = create_participant_accounts(
+            ctf_event.id,
+            count=1,
             email="resend@example.com",
-            name="Resend User",
-            status=ParticipantStatus.INVITED.value,
-            invited_at=timezone.now() - timedelta(days=5),
-        )
-        old_token = participant.invite_token
+        )[0]
+        participant.user.set_password("ChangedPassword-42")
+        participant.user.save(update_fields=["password"])
 
         url = reverse(
-            "ctf:api_participant_resend_invite",
+            "v1:ctf:api_participant_resend_invite",
             kwargs={"participant_id": participant.id},
         )
         response = authenticated_organizer_client.post(url)
 
         assert response.status_code == 200
+        participant.user.refresh_from_db()
+        assert participant.user.check_password(TEST_CTF_BOOTSTRAP_PASSWORD)
 
-        participant.refresh_from_db()
-        assert participant.invite_token != old_token
+    def test_resend_works_for_registered_participant(self, authenticated_organizer_client, ctf_event, monkeypatch):
+        """Reset works for an already registered isolated account."""
+        from ctf.services.participant.accounts import create_participant_accounts
 
-    def test_resend_works_for_registered_participant(self, authenticated_organizer_client, ctf_participant):
-        """Resend works for registered participants (sends magic link)."""
-        # ctf_participant fixture has user linked (registered)
+        monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
+        monkeypatch.setattr("ctf.services.notification._send_email", lambda **_kw: None)
+        participant = create_participant_accounts(ctf_event.id, count=1)[0]
+        participant.user.set_password("PreviouslyChangedPassword-42")
+        participant.user.save(update_fields=["password"])
         url = reverse(
-            "ctf:api_participant_resend_invite",
-            kwargs={"participant_id": ctf_participant.id},
+            "v1:ctf:api_participant_resend_invite",
+            kwargs={"participant_id": participant.id},
         )
         response = authenticated_organizer_client.post(url)
 
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
+        participant.user.refresh_from_db()
+        assert participant.user.check_password(TEST_CTF_BOOTSTRAP_PASSWORD)
+        assert participant.user.profile.must_change_password is True
+
+
+class TestTeamJoinCapacityGuard:
+    """#1140: team_join enforces team_size_limit under a team row lock — a full
+    team is rejected and the joining participant is not added."""
+
+    def _active_joiner(self, user, event):
+        from management.services import set_active_ctf_event
+
+        joiner = CTFParticipant.objects.create(
+            event=event,
+            user=user,
+            email=user.email,
+            name="Joiner",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+        set_active_ctf_event(user, event.pk)
+        return joiner
+
+    @override_settings(STORAGES=_SIMPLE_STORAGES)
+    def test_rejects_join_when_team_full(self, authenticated_participant_client, participant_user, ctf_event_team):
+        from ctf.models import CTFTeam
+
+        team = CTFTeam.objects.create(event=ctf_event_team, name="Full Team", invite_code="FULL01")
+        for i in range(ctf_event_team.team_size_limit):
+            CTFParticipant.objects.create(
+                event=ctf_event_team,
+                email=f"member{i}@test.com",
+                name=f"Member {i}",
+                team=team,
+                status=ParticipantStatus.ACTIVE.value,
+                registered_at=timezone.now(),
+            )
+        joiner = self._active_joiner(participant_user, ctf_event_team)
+
+        response = authenticated_participant_client.post(reverse("ctf:team_join"), {"invite_code": "FULL01"})
+
+        assert response.status_code == 200
+        assert "This team is full" in response.content.decode()
+        joiner.refresh_from_db()
+        assert joiner.team_id is None
+
+    def test_allows_join_when_not_full(self, authenticated_participant_client, participant_user, ctf_event_team):
+        from ctf.models import CTFTeam
+
+        team = CTFTeam.objects.create(event=ctf_event_team, name="Open Team", invite_code="OPEN01")
+        joiner = self._active_joiner(participant_user, ctf_event_team)
+
+        response = authenticated_participant_client.post(reverse("ctf:team_join"), {"invite_code": "OPEN01"})
+
+        assert response.status_code == 302
+        joiner.refresh_from_db()
+        assert joiner.team_id == team.id

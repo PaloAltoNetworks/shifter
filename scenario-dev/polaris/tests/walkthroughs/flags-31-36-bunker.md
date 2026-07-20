@@ -10,8 +10,9 @@ From Kali, SSH into A9:
 
 ```
 ssh root@splice-relay
-# password: splice2025
 ```
+
+The Kali home directory carries a per-range private key at `~/.ssh/splice_relay` (mode `0600`); `~/.ssh/config` aliases `splice-relay` to that IdentityFile, so the bare `ssh root@splice-relay` form Just Works. A9 has `PasswordAuthentication no` — the key is the only path in. If `ls -la ~/.ssh/` doesn't show `splice_relay`, the range bootstrap didn't run; rerun `bash $RANGE_DIR/tests/setup.sh` (dev) or re-trigger the provisioner bootstrap (EC2).
 
 A14 is **not** on the Bunker OT network itself. A9 is the only host with a route to the four controllers, so all work for flags 31–36 runs from inside the A9 shell:
 

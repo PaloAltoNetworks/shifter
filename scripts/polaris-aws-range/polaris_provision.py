@@ -110,7 +110,7 @@ for r in stale_engine:
     r.destroyed_at = datetime.now(tz=timezone.utc)
     r.save(update_fields=["status", "destroyed_at", "updated_at"])
 
-stale_cms = RangeInstance.active.filter(user_id=user.id)
+stale_cms = RangeInstance.objects.filter(user_id=user.id)
 for ri in stale_cms:
     print(f"  soft-destroying stale cms.RangeInstance id={ri.id} status={ri.status}")
     ri.status = "destroyed"

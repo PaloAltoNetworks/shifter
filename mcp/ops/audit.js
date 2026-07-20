@@ -10,12 +10,11 @@
 // the original tool response is preserved.
 
 import {
-  chmodSync,
   closeSync,
-  existsSync,
+  fchmodSync,
+  fstatSync,
   mkdirSync,
   openSync,
-  statSync,
   writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -176,25 +175,20 @@ export function appendAuditRecord(policy, record) {
 
   try {
     mkdirSync(dirname(path), { recursive: true, mode: AUDIT_DIR_MODE });
-    // openSync(..., 'a', 0o600) creates the file owner-only when it
-    // doesn't already exist, but ignores the mode for an existing
-    // file. If a previous process created the file with a looser
-    // mode, tighten it here so the contents become owner-only on
-    // first append from this version. statSync isolates the legacy-
-    // perms branch so the chmod call only runs when needed.
-    if (existsSync(path)) {
-      try {
-        const mode = statSync(path).mode & 0o777;
-        if (mode !== AUDIT_FILE_MODE) {
-          chmodSync(path, AUDIT_FILE_MODE);
-        }
-      } catch {
-        // Permission tightening is best-effort; fall through to the
-        // open + write below, which will surface real failures.
-      }
-    }
+    // Open first, then operate only on the file descriptor — never re-resolve
+    // the path between a check and a use, which would be a TOCTOU race
+    // (CodeQL js/file-system-race: the path could be swapped between stat and
+    // open). openSync(..., "a", 0o600) creates the file owner-only when it
+    // doesn't already exist but ignores the mode for an existing file, so if a
+    // previous process left a looser mode, tighten it through the fd
+    // (fchmodSync) — which refers to the actual opened file, not a re-resolved
+    // path.
     const fd = openSync(path, "a", AUDIT_FILE_MODE);
     try {
+      const mode = fstatSync(fd).mode & 0o777;
+      if (mode !== AUDIT_FILE_MODE) {
+        fchmodSync(fd, AUDIT_FILE_MODE);
+      }
       writeSync(fd, JSON.stringify(emit) + "\n");
     } finally {
       closeSync(fd);

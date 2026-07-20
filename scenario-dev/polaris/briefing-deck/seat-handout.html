@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>JTF POLARIS — Seat Handout</title>
+  <style>
+    :root {
+      --fg: #111;
+      --fg-dim: #555;
+      --amber: #b56b00;
+      --cyan: #00557a;
+      --line: #999;
+      --bg-tint: #fff7e6;
+      --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background: #ddd;
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* On-screen preview wrapper — invisible at print time. */
+    .preview {
+      max-width: 720px;
+      margin: 24px auto;
+      background: #fff;
+      padding: 18mm 16mm;
+      border: 1px solid var(--line);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+    }
+
+    .handout__classification {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      text-align: center;
+      color: var(--amber);
+      border: 1px solid var(--amber);
+      padding: 4px 0;
+      margin-bottom: 14px;
+    }
+
+    .handout__header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      border-bottom: 2px solid var(--fg);
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+    }
+
+    .handout__title {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+
+    .handout__op {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      color: var(--fg-dim);
+    }
+
+    .handout__section-title {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      color: var(--cyan);
+      text-transform: uppercase;
+      margin: 14px 0 6px;
+    }
+
+    .handout__cta {
+      background: var(--bg-tint);
+      border: 1px solid var(--amber);
+      border-left-width: 4px;
+      padding: 10px 14px;
+      margin: 0 0 14px;
+    }
+
+    .handout__cta-h {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--amber);
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+
+    .handout__steps {
+      list-style: none;
+      counter-reset: step;
+      margin: 0;
+      padding: 0;
+    }
+
+    .handout__steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 4px 0 4px 24px;
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+
+    .handout__steps li::before {
+      content: counter(step, decimal-leading-zero);
+      position: absolute;
+      left: 0;
+      top: 4px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--amber);
+      letter-spacing: 0.1em;
+    }
+
+    .handout__steps strong { color: var(--cyan); }
+
+    .handout__card {
+      border: 1px solid var(--line);
+      padding: 10px 14px;
+      margin-bottom: 10px;
+    }
+
+    .handout__row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 1em;
+      padding: 3px 0;
+      align-items: baseline;
+    }
+
+    .handout__row dt {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--cyan);
+      text-transform: uppercase;
+    }
+
+    .handout__row dd {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    .handout__hint {
+      font-size: 11.5px;
+      color: var(--fg-dim);
+      font-style: italic;
+      padding: 6px 0 0;
+    }
+
+    .handout__footer {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--fg-dim);
+      text-align: center;
+    }
+
+    /* Print rules: one A5-portrait card per page, no preview chrome.
+       A5 portrait (148mm x 210mm) with 8mm page margin and 6mm preview
+       padding leaves enough usable height for the classification banner,
+       header, five-step CTA, three labeled cards, hints, and footer at
+       the declared font sizes. A6 (the earlier target) is too small for
+       this content density. */
+    @media print {
+      html, body { background: #fff; }
+      .preview {
+        max-width: none;
+        margin: 0;
+        padding: 6mm 8mm;
+        border: none;
+        box-shadow: none;
+      }
+      @page { size: A5 portrait; margin: 8mm; }
+    }
+  </style>
+</head>
+<body>
+  <article class="preview">
+
+    <div class="handout__classification">SECRET // POLARIS EYES ONLY · for participants</div>
+
+    <header class="handout__header">
+      <div class="handout__title">JTF POLARIS</div>
+      <div class="handout__op">OPERATION NORTHSTORM</div>
+    </header>
+
+    <div class="handout__cta">
+      <div class="handout__cta-h">▶ FIRST CLICKS — YOUR FIRST FIVE MINUTES</div>
+      <ol class="handout__steps">
+        <li>Keep <strong>polaris.keplerops.com</strong> open. This is CTFd, where flags are submitted.</li>
+        <li>Open your <strong>magic-link email</strong>. It lands on <strong>Mission Control</strong>.</li>
+        <li>Pick <strong>POLARIS</strong> → click <strong>ENTER RANGE</strong>. ~5 min to provision.</li>
+        <li>On Kali, read <strong>/home/kali/START_HERE.txt</strong>, then <strong>/home/kali/.polaris/welcome.txt</strong>.</li>
+        <li>Back on CTFd → <strong>Challenges</strong> → solve <strong>Start Here — Kali Warm-Up</strong>.</li>
+        <li>First flag on the board. Start <strong>Mission 1 — Boreas</strong>.</li>
+      </ol>
+    </div>
+
+    <div class="handout__section-title">Board access</div>
+    <div class="handout__card">
+      <dl>
+        <div class="handout__row"><dt>URL</dt><dd>polaris.keplerops.com</dd></div>
+        <div class="handout__row"><dt>Username</dt><dd>your registered email</dd></div>
+        <div class="handout__row"><dt>Password</dt><dd>vancity</dd></div>
+      </dl>
+      <div class="handout__hint">Same password for everyone. Submit flags from your laptop browser — your Kali box can't reach CTFd.</div>
+    </div>
+
+    <div class="handout__section-title">Range access</div>
+    <div class="handout__card">
+      <dl>
+        <div class="handout__row"><dt>URL</dt><dd>dev.shifter.keplerops.com</dd></div>
+        <div class="handout__row"><dt>Entry</dt><dd>your magic-link email</dd></div>
+      </dl>
+      <div class="handout__hint">Pick POLARIS, click ENTER RANGE, wait ~5 min, your Kali desktop opens in-browser.</div>
+    </div>
+
+    <div class="handout__section-title">If you get stuck on the warm-up</div>
+    <div class="handout__card">
+      <div class="handout__hint">Run <strong>cat /home/kali/START_HERE.txt</strong>, then <strong>cat /home/kali/.polaris/welcome.txt</strong>. The warm-up flag is printed inline in the note. Submit it in CTFd, not from Kali.</div>
+    </div>
+
+    <div class="handout__footer">FLAG FORMAT · FLAG{hex} · 4-HOUR CLOCK · GOOD HUNTING</div>
+
+  </article>
+</body>
+</html>

@@ -99,12 +99,12 @@ if command -v packer &> /dev/null; then
     cd "$PACKER_DIR"
 
     # Initialize if needed
-    if [ ! -d ".packer.d" ] && [ ! -d "$HOME/.packer.d" ]; then
+    if [[ ! -d ".packer.d" ]] && [[ ! -d "$HOME/.packer.d" ]]; then
         packer init . 2>/dev/null || true
     fi
 
     for template in "$PACKER_DIR"/*.pkr.hcl; do
-        [ -f "$template" ] || continue
+        [[ -f "$template" ]] || continue
         template_name=$(basename "$template")
 
         # Skip variables file
@@ -130,7 +130,7 @@ echo "--- Execution Permissions ---"
 for script in "$PACKER_DIR"/scripts/**/*.sh; do
     # Scripts don't need +x since packer runs them with bash explicitly
     # But they should be readable
-    if [ -r "$script" ]; then
+    if [[ -r "$script" ]]; then
         log_pass "$(basename "$script") is readable"
     else
         log_fail "$(basename "$script") is not readable"
@@ -175,7 +175,7 @@ echo -e "Passed: ${GREEN}$PASSED${NC}"
 echo -e "Failed: ${RED}$FAILED${NC}"
 echo ""
 
-if [ "$FAILED" -gt 0 ]; then
+if [[ "$FAILED" -gt 0 ]]; then
     echo -e "${RED}Tests failed!${NC}"
     exit 1
 else

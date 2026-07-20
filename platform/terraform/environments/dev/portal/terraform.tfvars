@@ -2,7 +2,7 @@
 # This file IS `terraform.tfvars` (committed). Deployment-specific overrides go in
 # a sibling `local.auto.tfvars` (gitignored) — Terraform auto-loads
 # `*.auto.tfvars` and the local values win. CI deploys render the overrides
-# from GitHub secrets/repository variables; see docs/dev/deploy-secrets.md.
+# from GitHub secrets; see docs/dev/deploy-secrets.md.
 
 
 # ------------------------------------------------------------------------------
@@ -11,7 +11,7 @@
 
 environment        = "dev"
 aws_region         = "us-east-2"
-log_retention_days = 30
+log_retention_days = 365
 
 tags = {
   Project     = "shifter"
@@ -34,11 +34,11 @@ enable_nat_gateway = true
 db_name                  = "shifter"
 db_username              = "shifter_admin"
 db_engine_version        = "16"
-db_instance_class        = "db.m5.large"
+db_instance_class        = "db.t3.large"
 db_allocated_storage     = 20
-db_max_allocated_storage = 50
-db_multi_az              = true
-db_backup_retention_days = 1
+db_max_allocated_storage = 100
+db_multi_az              = false
+db_backup_retention_days = 7
 db_deletion_protection   = false
 db_skip_final_snapshot   = true
 db_apply_immediately     = true
@@ -48,13 +48,24 @@ db_apply_immediately     = true
 # ------------------------------------------------------------------------------
 
 # Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
-ec2_ami_id           = "ami-00e428798e77d38d9"
-ec2_instance_type    = "m5.xlarge"
-ec2_root_volume_size = 30
+ec2_ami_id           = "ami-xxxxxxxxxxxxxxxxx"
+ec2_instance_type    = "t3.large"
+ec2_root_volume_size = 50
+
+# Portal runtime capacity tunables (#930). t3.large has 2 vCPUs, so size the
+# Gunicorn/Uvicorn pool to 2 workers (the image default of 4 oversubscribes a
+# 2-vCPU host). Terminal caps are process-local; per-instance terminal ceiling =
+# portal_web_workers * terminal_max_sessions = 2 * 200 = 400 sessions.
+portal_web_workers             = 2
+terminal_max_sessions          = 200
+terminal_max_sessions_per_user = 10
+terminal_idle_timeout_seconds  = 1800
+terminal_max_session_seconds   = 28800
+terminal_read_poll_seconds     = 30
 
 # Standalone CTFd host in the portal VPC
 enable_ctfd                 = true
-ctfd_ami_id                 = "ami-0b0b78dcacbab728f"
+ctfd_ami_id                 = "ami-xxxxxxxxxxxxxxxxx"
 ctfd_instance_type          = "t3.xlarge"
 ctfd_root_volume_size       = 50
 ctfd_root_volume_type       = "gp3"
@@ -115,20 +126,40 @@ kali_instance_type   = "t3.large"
 # Autoscaling
 # ------------------------------------------------------------------------------
 
-enable_autoscaling   = true
-asg_min_size         = 6
-asg_max_size         = 8
-asg_desired_capacity = 6
-scale_up_threshold   = 70
-scale_down_threshold = 30
+enable_autoscaling     = false
+asg_min_size           = 1
+asg_max_size           = 2
+asg_desired_capacity   = 1
+asg_warm_pool_min_size = 0
+asg_warm_pool_state    = "Stopped"
+scale_up_threshold     = 70 # CPU guardrail notification only (#940)
+
+# Portal app-saturation autoscaling + observability (#940). dev runs a single
+# instance (enable_autoscaling = false), so the ASG-scoped scaling policies and
+# the PortalCapacity/CPU alarms + dashboard are not created; the ALB latency/5xx/
+# rejected/unhealthy observability alarms still are. The app emitter is enabled
+# in ASG-mode environments where the capacity alarms exist, so it stays off here.
+enable_portal_capacity_alarms                = true
+portal_capacity_metrics_enabled              = false
+portal_worker_soft_concurrency               = 6
+scale_target_requests_per_target             = 1000
+scale_target_response_time_seconds           = 0.5
+worker_busy_ratio_scale_out_threshold        = 0.8
+target_response_time_alarm_threshold_seconds = 1.0
+
+# Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
+# The committed OSS baseline is single-instance and uses the in-memory channel
+# layer. Event-sized deployments override this to true in local.auto.tfvars.
+enable_redis = false
 
 # ------------------------------------------------------------------------------
 # Redis
 # ------------------------------------------------------------------------------
 
-redis_node_type          = "cache.m6g.large"
+redis_node_type          = "cache.t3.micro"
 redis_engine_version     = "7.1"
-redis_enable_replication = true
+redis_enable_replication = false
+redis_apply_immediately  = true
 
 # ------------------------------------------------------------------------------
 # Logging
@@ -140,8 +171,9 @@ log_level = "DEBUG"
 # Log Aggregation
 # ------------------------------------------------------------------------------
 
-# Disabled for initial deployment - enable when ready for XDR integration
-enable_log_aggregation = false
+# Enabled so portal Network Firewall FLOW / ALERT logs reach the existing
+# CloudWatch -> Firehose -> S3 / SQS pipeline (#122 fail-closed contract).
+enable_log_aggregation = true
 
 # ------------------------------------------------------------------------------
 # Phase 5: Additional Log Sources
@@ -151,6 +183,22 @@ enable_alb_access_logs = true
 enable_vpc_flow_logs   = true
 enable_rds_log_exports = true
 enable_waf_logging     = true
+
+# ------------------------------------------------------------------------------
+# Portal east-west inspection (#122)
+# ------------------------------------------------------------------------------
+
+# Default-off baseline (#932). Enabling inspection removes the direct
+# private->NAT default route, so a misconfigured firewall endpoint blackholes
+# egress. A deploy opts in via the TF_VARS_*_PORTAL secret (local.auto.tfvars);
+# the post-apply assertion (scripts/assert_portal_inspection) then fails the
+# deploy if the route/endpoint wiring is unhealthy instead of shipping a
+# blackhole.
+enable_portal_inspection    = false
+firewall_log_retention_days = 365
+
+# dev: allow intentional teardown; apply once with this false before destroying
+portal_inspection_delete_protection = false
 
 # ------------------------------------------------------------------------------
 # Engine Provisioner
@@ -171,19 +219,19 @@ dc_domain_name = "internal.shifter"
 # Guacamole
 # ------------------------------------------------------------------------------
 
-guacd_image_tag                = "1.5.5"
-guacamole_client_image_tag     = "1.5.5"
-guacd_cpu                      = 1024
-guacd_memory                   = 2048
-guacamole_client_cpu           = 1024
-guacamole_client_memory        = 2048
-guacd_desired_count            = 4
-guacamole_client_desired_count = 3
+guacd_image_tag                = "1.5.5-r1"
+guacamole_client_image_tag     = "1.5.5-r1"
+guacd_cpu                      = 512
+guacd_memory                   = 1024
+guacamole_client_cpu           = 512
+guacamole_client_memory        = 1024
+guacd_desired_count            = 1
+guacamole_client_desired_count = 1
 
 # Database
-guacamole_db_instance_class        = "db.m5.xlarge"
+guacamole_db_instance_class        = "db.t3.small"
 guacamole_db_allocated_storage     = 20
-guacamole_db_max_allocated_storage = 50
+guacamole_db_max_allocated_storage = 100
 guacamole_db_engine_version        = "16"
 guacamole_db_multi_az              = false
 guacamole_db_backup_retention_days = 7
@@ -191,10 +239,10 @@ guacamole_db_deletion_protection   = false
 guacamole_db_skip_final_snapshot   = true
 guacamole_db_apply_immediately     = true
 
-# Autoscaling (disabled for initial testing)
+# Autoscaling
 guacamole_enable_autoscaling       = false
 guacamole_autoscaling_min_capacity = 1
-guacamole_autoscaling_max_capacity = 4
+guacamole_autoscaling_max_capacity = 2
 guacamole_autoscaling_cpu_target   = 70
 
 # Secrets

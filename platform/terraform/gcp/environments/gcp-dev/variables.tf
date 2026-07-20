@@ -200,3 +200,167 @@ variable "identity_allowed_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_identity_blocking_function" {
+  description = <<-EOT
+    Deploy the gen1 beforeCreate blocking function enforcing the sign-up domain
+    allowlist at the Identity Platform layer. It requires an `allUsers` Cloud
+    Functions invoker binding, which a Domain Restricted Sharing org policy
+    forbids; set to false in such projects (the portal app still enforces the
+    allowlist fail-closed at login).
+  EOT
+  type        = bool
+  # gcp-dev runs under a Domain Restricted Sharing org policy that forbids the
+  # required `allUsers` invoker binding, so the blocking function is disabled
+  # here; the portal enforces the same allowlist fail-closed at session creation.
+  default = false
+}
+
+# Transactional email (PLAT-002, #671). Optional: leave email_backend empty for
+# the console fallback. When set, an unseeded ESP API-key Secret Manager secret
+# is created for the operator to populate (never committed). See gcp/README.md.
+variable "email_backend" {
+  description = "Django EMAIL_BACKEND for GCP; empty = console fallback (no email secret created)."
+  type        = string
+  default     = ""
+}
+
+variable "email_from_address" {
+  description = "DEFAULT_FROM_EMAIL for outbound mail when email_backend is set."
+  type        = string
+  default     = ""
+}
+
+variable "email_sender_domain" {
+  description = "Mailgun sender domain (MAILGUN_SENDER_DOMAIN); ignored for SendGrid."
+  type        = string
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
+# Range Egress (PLAT-220)
+# ------------------------------------------------------------------------------
+
+variable "range_egress_mode" {
+  description = "Range egress policy mode (bridge for shifter.yaml settings.range_egress.mode). One of status-quo, deny-all, allowlist."
+  type        = string
+  default     = "status-quo"
+
+  validation {
+    condition     = contains(["status-quo", "deny-all", "allowlist"], var.range_egress_mode)
+    error_message = "range_egress_mode must be one of: status-quo, deny-all, allowlist."
+  }
+}
+
+variable "range_egress_allowed_cidrs" {
+  description = "IP CIDR allowlist for range egress (bridge for shifter.yaml settings.range_egress.allowed_cidrs)."
+  type        = list(string)
+  default     = []
+}
+
+variable "aces_package_bucket_name" {
+  description = "Optional GCS bucket holding object-backed ACES package archives (#1567). Grants the portal read-only access; set it (with SHIFTER_ACES_PACKAGE_BUCKET on the app) to enable object-backed ACES packages. Empty disables the binding."
+  type        = string
+  default     = ""
+}
+
+variable "enable_cicd_github_oidc" {
+  description = "Create the GitHub Actions -> GCP Workload Identity federation (pool, provider, packer build SA). Default true. Set false for tenants whose org blocks the GitHub OIDC issuer (constraints on iam.workloadIdentityPoolProviders) or that do not use GitHub Actions CI; the platform itself does not depend on it (#1723)."
+  type        = bool
+  default     = true
+}
+
+variable "github_org" {
+  description = "GitHub organization allowed to federate into the packer build service account."
+  type        = string
+  default     = "Brad-Edwards"
+}
+
+variable "github_repo" {
+  description = "GitHub repository allowed to federate into the packer build service account."
+  type        = string
+  default     = "shifter"
+}
+
+# ------------------------------------------------------------------------------
+# Messaging DLQ / Retry / Alerting
+# ------------------------------------------------------------------------------
+
+variable "messaging_enable_dlq" {
+  description = "Enable dead-letter topic and policy for platform event subscriptions."
+  type        = bool
+  default     = true
+}
+
+variable "messaging_max_delivery_attempts" {
+  description = "Max delivery attempts before a message moves to the dead-letter topic (GCP minimum 5)."
+  type        = number
+  default     = 5
+}
+
+variable "messaging_dlq_retention" {
+  description = "Message retention duration for the dead-letter subscription (e.g. '1209600s' = 14 days)."
+  type        = string
+  default     = "1209600s"
+}
+
+variable "messaging_retry_min_backoff" {
+  description = "Minimum backoff for the subscription retry policy (e.g. '10s')."
+  type        = string
+  default     = "10s"
+}
+
+variable "messaging_retry_max_backoff" {
+  description = "Maximum backoff for the subscription retry policy (e.g. '600s')."
+  type        = string
+  default     = "600s"
+}
+
+variable "messaging_enable_alarms" {
+  description = "Enable Cloud Monitoring alert policies for event subscription monitoring."
+  type        = bool
+  default     = false
+}
+
+variable "messaging_alarm_queue_depth_threshold" {
+  description = "Alert threshold for num_undelivered_messages on source subscriptions."
+  type        = number
+  default     = 100
+}
+
+variable "messaging_alarm_message_age_threshold" {
+  description = "Alert threshold in seconds for oldest_unacked_message_age on source subscriptions."
+  type        = number
+  default     = 300
+}
+
+variable "messaging_alarm_dlq_threshold" {
+  description = "Alert threshold for messages visible in the dead-letter subscription."
+  type        = number
+  default     = 1
+}
+
+variable "messaging_notification_channels" {
+  description = "Cloud Monitoring notification channel resource IDs for messaging alerts."
+  type        = list(string)
+  default     = []
+}
+
+# First Identity Platform operator credentials (issue #1570). These are NOT
+# consumed by any Terraform resource -- the operator is created by the bootstrap
+# script (scripts/bootstrap/gcp_control_plane.py), which reads these keys from
+# the gitignored local.auto.tfvars overlay as the authoritative source. They are
+# declared here only so Terraform does not warn about undeclared variables when
+# it auto-loads the overlay. Rendered from GitHub secrets by _gcp-dev.yml.
+variable "gcp_bootstrap_admin_email" {
+  description = "Email of the first Identity Platform operator; consumed by the bootstrap script, not Terraform."
+  type        = string
+  default     = ""
+}
+
+variable "gcp_bootstrap_admin_password" {
+  description = "Password of the first Identity Platform operator; consumed by the bootstrap script, not Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

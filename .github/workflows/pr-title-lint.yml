@@ -17,7 +17,7 @@ permissions:
 jobs:
   lint-title:
     name: Lint PR title
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Skip conventional title on dev PRs
         if: github.base_ref == 'dev' || github.head_ref == 'dev'

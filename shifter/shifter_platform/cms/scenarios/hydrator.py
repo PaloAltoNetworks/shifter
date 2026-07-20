@@ -12,15 +12,34 @@ from __future__ import annotations
 
 import logging
 import uuid as uuid_module
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from cms.exceptions import CMSError
-from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec, SubnetSpec
+from cms.scenarios.schema import CTFScenarioTemplate, ScenarioTemplate
+from shared.log_sanitize import safe_log_value
+from shared.schemas import CTFRangeSpec, InstanceSpec, NGFWAppSpec, RangeAccessBinding, RangeSpec, SubnetSpec
 
 from .registry import load_scenario_template as load_scenario
 
 if TYPE_CHECKING:
     from cms.models import AgentConfig, App, Credential, Instance, Request
+
+
+@dataclass(frozen=True)
+class NGFWRegistration:
+    """Deployment-profile and registration/credential inputs for an NGFW create.
+
+    Groups the registration-method-specific credential inputs so ``hydrate_ngfw``
+    takes a single cohesive object instead of a long positional parameter list.
+    """
+
+    deployment_profile: Credential
+    registration_method: Literal["pin", "otp"]
+    scm_credential: Credential | None = None
+    otp_value: str | None = None
+    otp_folder: str | None = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +68,11 @@ def hydrate_scenario(
     except ValueError as e:
         logger.error("Scenario not found: scenario_id=%s", scenario_id)
         raise CMSError(f"Scenario '{scenario_id}' not found") from e
+
+    if isinstance(template, CTFScenarioTemplate):
+        raise CMSError(f"Scenario '{scenario_id}' is a CTF scenario; use hydrate_ctf()")
+
+    assert isinstance(template, ScenarioTemplate)
 
     # Validate agents if required by scenario
     if template.requires_agent() and not agents:
@@ -109,6 +133,52 @@ def hydrate_scenario(
         user_id=user_id,
         subnets=subnets,
         ngfw=template.ngfw,
+        participant_access=[
+            RangeAccessBinding(
+                target_ref=str(instances_by_name[binding.target].uuid),
+                channel=binding.channel,
+            )
+            for binding in template.participant_access
+        ],
+    )
+
+
+def hydrate_ctf(scenario_id: str, user_id: int) -> CTFRangeSpec:
+    """Hydrate a CTF scenario template into a CTFRangeSpec for Engine consumption."""
+    try:
+        template = load_scenario(scenario_id)
+    except ValueError as e:
+        logger.error("Scenario not found: scenario_id=%s", scenario_id)
+        raise CMSError(f"Scenario '{scenario_id}' not found") from e
+
+    if not isinstance(template, CTFScenarioTemplate):
+        raise CMSError(f"Scenario '{scenario_id}' is not a CTF scenario")
+
+    range_uuid = str(uuid_module.uuid4())
+
+    logger.debug(
+        "Hydrated CTF scenario: scenario_id=%s, user_id=%s, zones=%d, assets=%d, uuid=%s",
+        scenario_id,
+        user_id,
+        len(template.zones),
+        len(template.assets),
+        range_uuid,
+    )
+
+    return CTFRangeSpec(
+        uuid=range_uuid,
+        scenario_id=scenario_id,
+        user_id=user_id,
+        subnets=[],
+        zones=template.zones,
+        networks=template.networks,
+        forests=template.forests,
+        services=template.services,
+        assets=template.assets,
+        flags=template.flags,
+        data_seeds=template.data_seeds,
+        detection=template.detection,
+        participant_access=template.participant_access,
     )
 
 
@@ -116,11 +186,7 @@ def hydrate_ngfw(
     instance: Instance,
     app: App,
     request: Request,
-    deployment_profile: Credential,
-    registration_method: Literal["pin", "otp"],
-    scm_credential: Credential | None = None,
-    otp_value: str | None = None,
-    otp_folder: str | None = None,
+    registration: NGFWRegistration,
 ) -> InstanceSpec:
     """Hydrate NGFW with credential data for Engine provisioning.
 
@@ -131,11 +197,8 @@ def hydrate_ngfw(
         instance: CMS Instance model (provides UUID for event correlation).
         app: CMS App model (provides UUID for event correlation).
         request: CMS Request model (provides user context).
-        deployment_profile: Deployment profile credential with authcode.
-        registration_method: Either "pin" or "otp".
-        scm_credential: SCM credential (required if registration_method="pin").
-        otp_value: OTP value (required if registration_method="otp").
-        otp_folder: OTP folder (required if registration_method="otp").
+        registration: Deployment-profile and registration-method credential
+            inputs (see :class:`NGFWRegistration`).
 
     Returns:
         InstanceSpec with hydrated NGFWAppSpec for Engine consumption.
@@ -143,6 +206,12 @@ def hydrate_ngfw(
     Raises:
         CMSError: If required credentials are missing or invalid.
     """
+    deployment_profile = registration.deployment_profile
+    registration_method = registration.registration_method
+    scm_credential = registration.scm_credential
+    otp_value = registration.otp_value
+    otp_folder = registration.otp_folder
+
     # Validate deployment profile has authcode
     authcode = deployment_profile.data.get("authcode")
     if not authcode:
@@ -184,7 +253,7 @@ def hydrate_ngfw(
         "hydrate_ngfw: instance_id=%s, app_id=%s, method=%s",
         instance.id,
         app.id,
-        registration_method,
+        safe_log_value(registration_method),
     )
 
     # Create hydrated NGFWAppSpec with actual credential values

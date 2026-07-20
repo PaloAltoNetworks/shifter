@@ -5,6 +5,7 @@ resources:
   - namespaces.yaml
   - serviceaccounts.yaml
   - rbac-job-launcher.yaml
+  - validatingadmissionpolicy-provisioner-jobs.yaml
   - networkpolicies.yaml
   - web-service.yaml
   - web-deployment.yaml
@@ -15,4 +16,9 @@ resources:
   - worker-cms-deployment.yaml
   - worker-engine-deployment.yaml
   - worker-mc-deployment.yaml
+  - worker-outbox-drainer-deployment.yaml
+  - worker-provisioner-launcher-deployment.yaml
+  - worker-reconciler-deployment.yaml
   - ctf-scheduler-deployment.yaml
+  - guacamole-bootstrap-prune-deployment.yaml
+  - aces-operation-record-prune-deployment.yaml

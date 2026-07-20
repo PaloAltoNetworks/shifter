@@ -1,7 +1,10 @@
 """SSH connection service using asyncssh."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
+from types import TracebackType
 
 import asyncssh
 
@@ -33,7 +36,7 @@ class SSHConnection:
         term_type: str = "xterm-256color",
         term_size: tuple[int, int] = (80, 24),
         session_id: str | None = None,
-    ):
+    ) -> None:
         """
         Initialize SSH connection parameters.
 
@@ -87,12 +90,14 @@ class SSHConnection:
                 command = f"tmux new-session -A -s {safe_session_id}"
                 logger.debug("Using tmux session: %s", safe_session_id)
 
-            # Start interactive shell with PTY
+            # Start interactive shell with PTY.
+            # command: None = default shell, or the tmux command built above.
+            # encoding=None keeps binary mode for raw terminal data.
             self._process = await self._conn.create_process(
-                command,  # None = default shell, or tmux command
+                command,
                 term_type=self.term_type,
                 term_size=self.term_size,
-                encoding=None,  # Binary mode for raw terminal data
+                encoding=None,
             )
 
             logger.info("SSH connection established to %s@%s:%d", self.username, self.host, self.port)
@@ -179,11 +184,27 @@ class SSHConnection:
         """Return True if connection is active."""
         return self._conn is not None and not self._conn.is_closed()
 
-    async def __aenter__(self) -> "SSHConnection":
+    def at_eof(self) -> bool:
+        """Return True once the remote shell has closed its output stream.
+
+        Distinguishes a finished session (the user ran ``exit``, or the remote
+        process died) from a merely idle one. The SSH transport can stay open
+        briefly after the shell exits, so ``is_connected`` alone is not enough:
+        the read loop checks this to stop promptly on EOF instead of looping on
+        empty reads. Returns ``False`` when there is no process yet.
+        """
+        return self._process is not None and self._process.stdout.at_eof()
+
+    async def __aenter__(self) -> SSHConnection:
         """Async context manager entry."""
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.disconnect()

@@ -13,7 +13,7 @@
 #
 # Environment overrides (same as a2_cold_bootstrap.sh):
 #
-#   AWS_PROFILE (default: panw-shifter-dev-workstation)
+#   AWS_PROFILE (default: aws-dev)
 #   AWS_REGION  (default: us-east-2)
 #   POLARIS_BOOTSTRAP_LOG_DIR (default: /tmp/polaris-bootstrap-<epoch>)
 #
@@ -28,7 +28,7 @@
 
 set -uo pipefail
 
-AWS_PROFILE="${AWS_PROFILE:-panw-shifter-dev-workstation}"
+AWS_PROFILE="${AWS_PROFILE:-aws-dev}"
 AWS_REGION="${AWS_REGION:-us-east-2}"
 export AWS_PROFILE AWS_REGION
 

@@ -5,6 +5,8 @@ This is the only reliable method for PAN-OS CLI interaction — paramiko's
 exec_command() and invoke_shell() fail during boot and intermittently after.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import subprocess
@@ -12,6 +14,7 @@ import tempfile
 import time
 
 from executors.base import CommandResult, ExecutorConnectionError, ExecutorError, ExecutorTimeoutError
+from log_redact import safe_log_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,8 @@ class NGFWExecutor:
         username: str = DEFAULT_USERNAME,
         port: int = DEFAULT_SSH_PORT,
         poll_interval_seconds: int = 30,
-    ):
+    ) -> None:
+        """Persist the PEM key to a 0o600 temp file used by the ssh CLI."""
         self._username = username
         self._port = port
         self._poll_interval = poll_interval_seconds
@@ -55,18 +59,20 @@ class NGFWExecutor:
         finally:
             os.close(fd)
 
-    def close(self):
+    def close(self) -> None:
         """Remove temp key file."""
         if hasattr(self, "_key_path") and os.path.exists(self._key_path):
             os.unlink(self._key_path)
 
-    def __enter__(self):
+    def __enter__(self) -> NGFWExecutor:
+        """Return self so the executor can be used as a context manager."""
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
+        """Tear down the temp PEM key on context exit."""
         self.close()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Fallback cleanup if close() was not called."""
         self.close()
 
@@ -89,7 +95,8 @@ class NGFWExecutor:
             f"{self._username}@{host}",
         ]
 
-    def _build_command_input(self, script: str, stdin_input: str | None) -> str:
+    @staticmethod
+    def _build_command_input(script: str, stdin_input: str | None) -> str:
         """Build the full command string to pipe via stdin."""
         parts = []
         if script:
@@ -98,7 +105,8 @@ class NGFWExecutor:
             parts.append(stdin_input.rstrip("\n"))
         return "\n".join(parts) + "\n"
 
-    def _is_system_info_ready(self, output: str) -> bool:
+    @staticmethod
+    def _is_system_info_ready(output: str) -> bool:
         """Check if show system info output indicates PAN-OS is ready."""
         return all(field in output for field in ("hostname", "ip-address", "netmask"))
 
@@ -127,7 +135,12 @@ class NGFWExecutor:
         command_input = self._build_command_input(script, stdin_input)
         ssh_args = self._build_ssh_args(host)
 
-        logger.info("Piping command to %s: %s", host, command_input[:100])
+        # Do NOT log command_input itself — PAN-OS commands the provisioner
+        # constructs can include passwords (set mgt-config users / api-key,
+        # request password-hash password ..., set rulebase ... password-profile
+        # secret, etc.). Logging just the byte count keeps operator visibility
+        # for "did we send anything?" without leaking sensitive material.
+        logger.info("Piping command to host_fp=%s (%d bytes)", safe_log_fingerprint(host), len(command_input))
 
         try:
             result = subprocess.run(  # noqa: S603  # NOSONAR — trusted ssh binary with controlled args
@@ -194,14 +207,14 @@ class NGFWExecutor:
                     timeout_seconds=15,
                 )
                 if result.success and self._is_system_info_ready(result.stdout):
-                    logger.info("NGFW ready at %s after %.1fs", host, elapsed)
+                    logger.info("NGFW ready at host_fp=%s after %.1fs", safe_log_fingerprint(host), elapsed)
                     return True
             except (NGFWTimeoutError, NGFWConnectionError):
                 pass
 
             logger.info(
-                "Waiting for NGFW at %s... (%.1fs / %ds)",
-                host,
+                "Waiting for NGFW at host_fp=%s... (%.1fs / %ds)",
+                safe_log_fingerprint(host),
                 elapsed,
                 timeout_seconds,
             )

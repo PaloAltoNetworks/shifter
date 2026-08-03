@@ -5,14 +5,14 @@ requires-python = ">=3.12"
 dependencies = [
     "Arpeggio>=2.0.3",
     "attrs>=25.4.0",
-    "asgiref>=3.11.1",
-    "boto3>=1.43.8",
+    "asgiref>=3.12.1",
+    "boto3>=1.43.62",
     "botocore>=1.43.8",
-    "cffi>=2.0.0",
+    "cffi>=2.1.0",
     "cryptography>=48.0.1",
-    "debugpy>=1.8.20",
+    "debugpy>=1.8.21",
     "dill>=0.4.1",
-    "grpcio>=1.80.0",
+    "grpcio>=1.83.0",
     "Jinja2>=3.1.6",
     "jmespath>=1.1.0",
     # Transitive requirement of the installation package (installation/__init__ ->
@@ -24,7 +24,7 @@ dependencies = [
     "paramiko>=4.0.0",
     "MarkupSafe>=3.0.3",
     "parver>=0.5",
-    "protobuf>=7.34.1",
+    "protobuf>=7.35.1",
     "psycopg>=3.3.4",
     "psycopg-binary>=3.3.4",
 "pycparser>=3.0",
@@ -35,7 +35,7 @@ dependencies = [
     "s3transfer>=0.17.0",
     "semver>=3.0.4",
     "six>=1.17.0",
-    "typing_extensions>=4.15.0",
+    "typing_extensions>=4.16.0",
     "urllib3>=2.6.3",
 ]
 

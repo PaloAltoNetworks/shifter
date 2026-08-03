@@ -1,5 +1,5 @@
 # base image: python:3.11-slim
-FROM python@sha256:e031123e3d85762b141ad1cbc56452ba69c6e722ebf2f042cc0dc86c47c0d8b3
+FROM python@sha256:5f1cdbcab9a50594a79502dd73e885456d2a2fc31f1a1fa18484815b37ee9152
 
 WORKDIR /srv/brain
 COPY server.py /srv/brain/server.py

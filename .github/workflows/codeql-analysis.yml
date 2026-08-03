@@ -42,7 +42,7 @@ jobs:
 
       - name: Initialize CodeQL
         # github/codeql-action v4.35.4
-        uses: github/codeql-action/init@68bde559dea0fdcac2102bfdf6230c5f70eb485e
+        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38
         with:
           languages: ${{ matrix.language }}
           # security-extended adds higher-confidence security queries on top of
@@ -53,11 +53,11 @@ jobs:
 
       - name: Autobuild
         # github/codeql-action v4.35.4
-        uses: github/codeql-action/autobuild@68bde559dea0fdcac2102bfdf6230c5f70eb485e
+        uses: github/codeql-action/autobuild@f205ea1c3313d32999d8d6a48b4f6530d4437b38
 
       - name: Perform CodeQL Analysis
         # github/codeql-action v4.35.4
-        uses: github/codeql-action/analyze@68bde559dea0fdcac2102bfdf6230c5f70eb485e
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38
         # Advisory mode: the upload to the Security tab requires Code
         # Scanning to be enabled on the repo (Settings → Code security
         # → Code scanning). Until that's flipped on, the analysis runs

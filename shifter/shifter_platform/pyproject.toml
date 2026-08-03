@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "Self-service cyber range platform"
 requires-python = ">=3.12"
 dependencies = [
-    "asyncssh>=2.23.0",
+    "asyncssh>=2.24.0",
     "bleach>=6.4.0",
     "boto3",
     "channels",
     "channels-redis",
     "daphne",
-    "django>=6.0.6",
+    "django>=6.0.7",
     # GCP transactional-email backends (SendGrid / Mailgun) for PLAT-002 parity;
     # AWS continues to use django-ses. See config/_email.py.
     "django-anymail",
@@ -18,8 +18,8 @@ dependencies = [
     "django-health-check<5.0",
     "django-ses",
     "djangorestframework",
-    "drf-spectacular>=0.29.0",
-    "drf-spectacular-sidecar>=2026.6.1",
+    "drf-spectacular>=0.30.0",
+    "drf-spectacular-sidecar>=2026.7.1",
     "firebase-admin",
     # GCP Cloud Monitoring publisher for the portal capacity emitter (PLAT-002);
     # AWS uses boto3/CloudWatch. Lazy-imported so AWS flows never load it.
@@ -29,14 +29,14 @@ dependencies = [
     "mozilla-django-oidc",
     "paramiko",
     "psycopg[binary]",
-    "pycurl>=7.45.7",
+    "pycurl>=7.47.0",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     # Promoted from a transitive dep (via channels-redis) to a direct dep so the
     # built-in Django RedisCache backend for launch-endpoint rate limiting (#322)
     # does not rely on another package's transitive pin.
     "redis>=5.0",
-    "regex>=2026.6.28",
+    "regex>=2026.7.19",
     "requests",
     # ACES contract/profile/conformance tooling + RuntimeTarget runtime (issue
     # #1262). shared.aces.runtime_target imports the manifest builder and the
@@ -71,20 +71,20 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "import-linter>=2.7.0",
+    "import-linter>=2.13",
     "pytest-cov>=7.0.0",
-    "pytest>=9.0.3",
+    "pytest>=9.1.1",
     "pytest-django>=4.11.1",
-    "ruff>=0.15.13",
+    "ruff>=0.16.1",
     "bandit>=1.9.2",
-    "pre-commit>=4.5.0",
-    "pytest-asyncio>=1.3.0",
+    "pre-commit>=4.6.1",
+    "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.5.0",
     "freezegun>=1.5.5",
-    "mypy>=2.1.0",
-    "django-stubs>=6.0.4",
+    "mypy>=2.3.0",
+    "django-stubs>=6.0.7",
     "types-requests>=2.33.0.20260513",
-    "types-bleach>=6.3.0.20260508",
+    "types-bleach>=6.4.0.20260728",
     "types-Markdown>=3.7.0",
     "cel-python>=0.5.0",
 ]

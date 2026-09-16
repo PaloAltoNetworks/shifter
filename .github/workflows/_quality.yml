@@ -213,7 +213,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: devops-actions/actionlint@467e2ce19b2310e93c9ffa0b50fe31f86b5a7f23 # v0.1.10
+      - uses: devops-actions/actionlint@ec02b36684b2f574f1d219ad0a43b082e46bf3e4 # v0.1.13
 
   terraform-lint:
     permissions:
@@ -1987,7 +1987,7 @@ jobs:
         # pre-commit hook consume the same policy boundary. Accepted-risk
         # waivers are documented in docs/adr/exceptions.yaml with owner,
         # reason, expires_on, and affected paths.
-        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        uses: bridgecrewio/checkov-action@a8664e3a0549367977f0cda990a34311835c87c0 # v12
         with:
           directory: platform/terraform/
           config_file: platform/terraform/.checkov.yaml
@@ -2018,7 +2018,7 @@ jobs:
             ${{ runner.os }}-checkov-k8s-
 
       - name: Checkov k8s Security
-        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        uses: bridgecrewio/checkov-action@a8664e3a0549367977f0cda990a34311835c87c0 # v12
         with:
           directory: platform/k8s/
           framework: kubernetes
@@ -2309,7 +2309,7 @@ jobs:
           java-version: '21'
 
       - name: SonarQube Cloud scan
-        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
